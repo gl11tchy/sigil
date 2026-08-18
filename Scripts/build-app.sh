@@ -98,8 +98,22 @@ if grep -q '__VERSION__\|__BUILD__' "$CONTENTS/Info.plist"; then
   exit 1
 fi
 
-echo "==> ad-hoc codesign"
-codesign --force --deep --sign - "$APP"
+# macOS ties folder permissions to the code signature. An ad-hoc signature changes
+# on every build, so every build looks like a new app and the grants are thrown
+# away — you get asked for Desktop, Documents and Downloads again each time.
+# Signing with a real identity keeps the signature stable, so the grants stick.
+#
+# The identity is named by SHA-1 hash, never by its subject name. Override with
+# SIGIL_CODESIGN_IDENTITY, or leave it unset on a machine that lacks the
+# certificate and the build falls back to ad-hoc.
+IDENTITY="${SIGIL_CODESIGN_IDENTITY:-B1AE0BA1FA81B8D532ADDF25FA38F59F2DB3078A}"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "$IDENTITY"; then
+  echo "==> codesign (stable identity)"
+  codesign --force --deep --sign "$IDENTITY" "$APP"
+else
+  echo "==> ad-hoc codesign (no stable identity found; folder prompts will repeat)"
+  codesign --force --deep --sign - "$APP"
+fi
 echo "==> codesign --verify --deep --strict"
 if ! codesign --verify --deep --strict "$APP"; then
   echo "error: codesign verification failed for $APP" >&2
