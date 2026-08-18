@@ -3,25 +3,20 @@ import Darwin
 import Foundation
 import SwiftTerm
 
-/// `LocalProcessTerminalView` that reports child output so activity can be coalesced.
+/// `LocalProcessTerminalView` that reports child output, so the controller can
+/// coalesce it into an "is the agent working" signal.
 ///
-/// Uses SwiftTerm's PTY when the host allows `forkpty`. When the sandbox
-/// refuses a PTY slave, falls back to a session-leader pipe host so tests and
-/// headless environments still see real child I/O.
+/// The CLI is a full-screen terminal program: it needs a real pseudo-terminal,
+/// not pipes. If `forkpty` ever fails there is nothing useful to fall back to —
+/// the view reports the failure and stays empty rather than running the CLI in a
+/// mode where its interface would not work.
 final class GrokProcessTerminalView: LocalProcessTerminalView {
     /// Invoked on the main queue when the child writes output.
     var onChildOutput: (() -> Void)?
 
-    private var fallback: HostedProcess?
+    var isProcessRunning: Bool { process.running }
 
-    var isProcessRunning: Bool {
-        process.running || (fallback?.isRunning ?? false)
-    }
-
-    var hostedPid: pid_t {
-        if process.running { return process.shellPid }
-        return fallback?.pid ?? 0
-    }
+    var hostedPid: pid_t { process.running ? process.shellPid : 0 }
 
     func startHosted(
         executable: String,
@@ -36,31 +31,10 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
             environment: environment,
             currentDirectory: currentDirectory
         )
-        if process.running { return }
-        let host = HostedProcess()
-        host.windowSize = { [weak self] in
-            self?.getWindowSize() ?? winsize()
+        guard process.running else {
+            processDelegate?.processTerminated(source: self, exitCode: nil)
+            return
         }
-        host.onData = { [weak self] bytes in
-            MainActor.assumeIsolated {
-                self?.feed(byteArray: bytes[...])
-                self?.onChildOutput?()
-            }
-        }
-        host.onExit = { [weak self] code in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.fallback = nil
-                self.processDelegate?.processTerminated(source: self, exitCode: code)
-            }
-        }
-        fallback = host
-        host.start(
-            executable: executable,
-            args: args,
-            environment: environment,
-            currentDirectory: currentDirectory
-        )
     }
 
     func terminateHosted() {
@@ -72,15 +46,6 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
             kill(pid, SIGTERM)
         }
         process.terminate()
-        fallback?.terminate()
-    }
-
-    override func send(source: TerminalView, data: ArraySlice<UInt8>) {
-        if process.running {
-            super.send(source: source, data: data)
-        } else {
-            fallback?.send(data)
-        }
     }
 
     override func dataReceived(slice: ArraySlice<UInt8>) {

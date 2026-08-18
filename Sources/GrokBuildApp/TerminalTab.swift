@@ -92,4 +92,11 @@ final class TerminalTab: Identifiable {
         controller.terminate()
     }
 
+    /// Used when the app is quitting: returns only once the child is gone.
+    func terminateAndWait() {
+        idleTask?.cancel()
+        idleTask = nil
+        controller.terminateAndWait()
+    }
+
 }

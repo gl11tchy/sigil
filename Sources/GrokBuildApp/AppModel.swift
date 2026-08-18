@@ -162,6 +162,14 @@ final class AppModel {
         selectedTabID = nil
     }
 
+    /// Quit path: no `grok` process may outlive the app, and there is no run loop
+    /// left to finish an asynchronous kill.
+    func closeAllTabsAndWait() {
+        tabs.forEach { $0.terminateAndWait() }
+        tabs.removeAll()
+        selectedTabID = nil
+    }
+
     // MARK: - Appearance
 
     func adjustFontSize(by delta: CGFloat) {

@@ -25,7 +25,9 @@ public final class TerminalController {
     private let childPid = OSAllocatedUnfairLock(initialState: pid_t(0))
     private var lastActivityFire: ContinuousClock.Instant?
     private var activityFlushTask: Task<Void, Never>?
+    private var escalationTask: Task<Void, Never>?
     private var reportsActivity = true
+    private var didReportExit = false
 
     public init(theme: TerminalTheme = .grokNight, fontSize: CGFloat = 13) {
         let terminal = GrokProcessTerminalView(
@@ -43,17 +45,20 @@ public final class TerminalController {
     }
 
     deinit {
-        Self.signalProcessGroup(pid: childPid.withLock { pid in
+        let pid = childPid.withLock { pid in
             let current = pid
             pid = 0
             return current
-        })
+        }
+        Self.signal(SIGTERM, to: pid)
+        Self.signal(SIGKILL, to: pid)
     }
 
     /// Spawns `grok` with `spec`. Does nothing if already running.
     public func start(_ spec: GrokLaunchSpec) {
         if isRunning || terminalView.isProcessRunning { return }
         reportsActivity = true
+        didReportExit = false
         lastActivityFire = nil
         activityFlushTask?.cancel()
         activityFlushTask = nil
@@ -70,7 +75,12 @@ public final class TerminalController {
         childPid.withLock { $0 = pid }
     }
 
-    /// Sends SIGTERM to the child and stops rendering.
+    /// Stops the child: SIGTERM first, then SIGKILL if it is still there.
+    ///
+    /// A single immediate signal is not enough. `forkpty` returns the child's pid
+    /// before the child has run `setsid` and `exec`, and a signal delivered inside
+    /// that window can be lost — leaving an orphaned `grok` behind. So the signal
+    /// is repeated, then escalated.
     public func terminate() {
         reportsActivity = false
         activityFlushTask?.cancel()
@@ -80,9 +90,64 @@ public final class TerminalController {
             pid = 0
             return current
         }
-        Self.signalProcessGroup(pid: pid)
+        Self.signal(SIGTERM, to: pid)
         terminalView.terminateHosted()
         isRunning = false
+
+        // Only replace a running escalation when there is a new child to chase;
+        // a second terminate() must not cancel the first one's escalation.
+        // Only replace a running escalation when there is a new child to chase;
+        // a second terminate() must not cancel the first one's escalation.
+        guard pid > 0 else { return }
+        escalationTask?.cancel()
+        escalationTask = Task { [weak self] in
+            for delay in Self.escalationDelays {
+                try? await Task.sleep(for: delay)
+                if Task.isCancelled { return }
+                if Self.reap(pid) { self?.reportExitIfSilent(); return }
+                Self.signal(SIGTERM, to: pid)
+            }
+            try? await Task.sleep(for: Self.killGrace)
+            if Task.isCancelled { return }
+            if Self.reap(pid) { self?.reportExitIfSilent(); return }
+            Self.signal(SIGKILL, to: pid)
+            try? await Task.sleep(for: Self.killGrace)
+            _ = Self.reap(pid)
+            self?.reportExitIfSilent()
+        }
+    }
+
+    /// Stops the child without returning until it is gone. Used when the app is
+    /// quitting, where there is no run loop left to finish an async escalation.
+    public func terminateAndWait(timeout: Duration = .milliseconds(1500)) {
+        let pid = childPid.withLock { pid in
+            let current = pid
+            pid = 0
+            return current
+        }
+        reportsActivity = false
+        activityFlushTask?.cancel()
+        activityFlushTask = nil
+        escalationTask?.cancel()
+        escalationTask = nil
+        Self.signal(SIGTERM, to: pid)
+        terminalView.terminateHosted()
+        isRunning = false
+        guard pid > 0 else { return }
+
+        let deadline = ContinuousClock.now + timeout
+        let escalateAt = ContinuousClock.now + timeout / 2
+        var escalated = false
+        while ContinuousClock.now < deadline {
+            if Self.reap(pid) { return }
+            if !escalated, ContinuousClock.now >= escalateAt {
+                Self.signal(SIGKILL, to: pid)
+                escalated = true
+            }
+            usleep(20_000)
+        }
+        Self.signal(SIGKILL, to: pid)
+        Self.reap(pid)
     }
 
     /// Writes `text` to the child's stdin, as if typed.
@@ -160,15 +225,50 @@ extension TerminalController {
         )
     }
 
-    /// SIGTERM the child's process group when it is a group leader, then the pid.
-    /// `forkpty`/`login_tty` makes the child a session leader, so grandchildren
-    /// (e.g. `sh -c 'sleep 30'`) share that group.
-    nonisolated private static func signalProcessGroup(pid: pid_t) {
+    private static let escalationDelays: [Duration] = [.milliseconds(100), .milliseconds(300)]
+    private static let killGrace: Duration = .milliseconds(600)
+
+    /// Signals the child and, when it leads its own process group, that whole
+    /// group — so grandchildren the CLI spawned go too.
+    ///
+    /// The group is read with `getpgid` rather than assumed to equal the pid:
+    /// between `forkpty` and the child's `setsid`, the child still sits in *our*
+    /// group, and signalling that would kill the app itself.
+    nonisolated private static func signal(_ sig: Int32, to pid: pid_t) {
         guard pid > 0 else { return }
-        if getpgid(pid) == pid {
-            kill(-pid, SIGTERM)
+        let group = getpgid(pid)
+        if group > 0, group != getpgid(getpid()) {
+            kill(-group, sig)
         }
-        kill(pid, SIGTERM)
+        kill(pid, sig)
+    }
+
+    /// Whether the child is gone, reaping it if it is waiting to be collected.
+    ///
+    /// `kill(pid, 0)` cannot answer this: a child that has died but not been
+    /// waited on is a zombie, and still answers "alive". Killing our own child
+    /// without reaping it is exactly how an orphan-looking process survives a
+    /// SIGKILL that in fact already worked.
+    @discardableResult
+    nonisolated private static func reap(_ pid: pid_t) -> Bool {
+        guard pid > 0 else { return true }
+        var status: Int32 = 0
+        let result = waitpid(pid, &status, WNOHANG)
+        if result == pid { return true }
+        // ECHILD: already collected, by SwiftTerm's own watcher or a earlier pass.
+        if result < 0 && errno == ECHILD { return kill(pid, 0) != 0 }
+        return false
+    }
+
+    nonisolated private static func isAlive(_ pid: pid_t) -> Bool {
+        pid > 0 && kill(pid, 0) == 0
+    }
+
+    /// Reports an exit the terminal view never told us about, so a tab whose
+    /// child had to be killed still leaves "running" state.
+    private func reportExitIfSilent() {
+        guard !didReportExit else { return }
+        handleProcessExit(nil)
     }
 
     private func noteActivity() {
@@ -196,7 +296,11 @@ extension TerminalController {
     }
 
     private func handleProcessExit(_ rawStatus: Int32?) {
+        guard !didReportExit else { return }
+        didReportExit = true
         isRunning = false
+        escalationTask?.cancel()
+        escalationTask = nil
         childPid.withLock { $0 = 0 }
         reportsActivity = false
         activityFlushTask?.cancel()
