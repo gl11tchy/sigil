@@ -11,7 +11,7 @@ struct RootView: View {
                 .navigationSplitViewColumnWidth(min: 200, ideal: 260, max: 420)
         } detail: {
             detail
-                .navigationTitle(model.selectedTab?.title ?? "GrokBuild")
+                .navigationTitle(model.selectedTab.map { model.title(for: $0) } ?? "GrokBuild")
                 .navigationSubtitle(model.selectedTab?.workingDirectory.abbreviatedPath ?? "")
         }
         .toolbar {

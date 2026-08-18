@@ -10,6 +10,7 @@ struct TabStripView: View {
                 ForEach(model.tabs) { tab in
                     TabChip(
                         tab: tab,
+                        label: model.title(for: tab),
                         isSelected: tab.id == model.selectedTab?.id,
                         select: { model.select(tab.id) },
                         close: { model.closeTab(tab.id) }
@@ -28,6 +29,7 @@ struct TabStripView: View {
 
 private struct TabChip: View {
     let tab: TerminalTab
+    let label: String
     let isSelected: Bool
     let select: () -> Void
     let close: () -> Void
@@ -37,7 +39,7 @@ private struct TabChip: View {
     var body: some View {
         HStack(spacing: 6) {
             StatusDot(activity: tab.activity)
-            Text(tab.title)
+            Text(label)
                 .font(.system(size: 11.5))
                 .lineLimit(1)
                 .foregroundStyle(isSelected ? .primary : .secondary)
@@ -47,7 +49,7 @@ private struct TabChip: View {
             }
             .buttonStyle(.plain)
             .opacity(isHovering ? 0.7 : 0)
-            .accessibilityLabel("Close \(tab.title)")
+            .accessibilityLabel("Close \(label)")
         }
         .padding(.horizontal, 9)
         .frame(height: 22)

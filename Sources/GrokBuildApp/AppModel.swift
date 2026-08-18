@@ -68,6 +68,18 @@ final class AppModel {
         Set(tabs.compactMap(\.sessionID))
     }
 
+    /// A tab's label. New sessions start out named after their folder; once the CLI
+    /// writes a summary for them, the store supplies the real conversation name.
+    func title(for tab: TerminalTab) -> String {
+        if let id = tab.sessionID,
+            let session = store.sessions.first(where: { $0.id == id }),
+            !session.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            return session.title
+        }
+        return tab.title
+    }
+
     // MARK: - Tabs
 
     @discardableResult
