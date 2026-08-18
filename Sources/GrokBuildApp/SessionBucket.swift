@@ -56,3 +56,14 @@ struct SessionBucket: Identifiable {
         return ("4-\(date.formatted(.iso8601.year().month()))", month)
     }
 }
+
+extension Date {
+    /// Relative time for the sidebar. Clock skew between the CLI and the app can
+    /// make a just-written timestamp look like the future, so anything inside a
+    /// minute reads as "now".
+    var shortRelative: String {
+        let seconds = Date().timeIntervalSince(self)
+        if seconds < 60 { return "now" }
+        return formatted(.relative(presentation: .numeric))
+    }
+}

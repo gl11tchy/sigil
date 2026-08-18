@@ -123,7 +123,7 @@ private struct SessionRow: View {
                         .lineLimit(1)
                         .layoutPriority(1)
                     Text("·")
-                    Text(session.updatedAt.formatted(.relative(presentation: .numeric)))
+                    Text(session.updatedAt.shortRelative)
                         .lineLimit(1)
                     Text("·")
                     Text("\(session.messageCount)")
