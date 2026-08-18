@@ -47,18 +47,19 @@ extension TerminalTheme {
         }
     }
 
-    /// Near-black background, cool grey-blue foreground, saturated but not neon accents.
+    /// Neutral black ground and grey foreground. The syntax hues stay saturated;
+    /// nothing else in the theme carries a tint, so the app reads as black.
     fileprivate static let nightPalette = HexPalette(
         ansi: [
-            0x161B24, 0xD16B6B, 0x4FA87A, 0xC9A14A,
-            0x5B8FD9, 0xB07CC6, 0x4FA8B8, 0xC5D0DE,
-            0x5C6575, 0xE08A8A, 0x6FC49A, 0xDCC07A,
-            0x82A8E8, 0xC79BDB, 0x73C4D0, 0xE8EEF5,
+            0x1A1A1A, 0xD16B6B, 0x4FA87A, 0xC9A14A,
+            0x5B8FD9, 0xB07CC6, 0x4FA8B8, 0xD2D2D2,
+            0x6A6A6A, 0xE08A8A, 0x6FC49A, 0xDCC07A,
+            0x82A8E8, 0xC79BDB, 0x73C4D0, 0xF0F0F0,
         ],
-        background: 0x0C1017,
-        foreground: 0xC5D0DE,
-        cursor: 0x7AA2F7,
-        selection: 0x2A3A55
+        background: 0x0A0A0A,
+        foreground: 0xD2D2D2,
+        cursor: 0xE8E8E8,
+        selection: 0x2E2E2E
     )
 
     /// Light, high-contrast counterpart that keeps the same hues.
@@ -96,4 +97,13 @@ extension TerminalTheme {
             blue8: UInt16(hex & 0xFF)
         )
     }
+}
+
+extension TerminalTheme {
+    /// Raw `0xRRGGBB` values. The app chrome derives its colours from these so the
+    /// window reads as one surface instead of a sidebar bolted onto a terminal.
+    public var backgroundHex: UInt32 { resolved.background }
+    public var foregroundHex: UInt32 { resolved.foreground }
+    public var cursorHex: UInt32 { resolved.cursor }
+    public var selectionHex: UInt32 { resolved.selection }
 }

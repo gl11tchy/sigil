@@ -3,13 +3,15 @@ import SwiftUI
 /// The per-tab state light: working, idle, or exited.
 struct StatusDot: View {
     let activity: TerminalTab.Activity
+
+    @Environment(\.palette) private var palette
     @State private var pulse = false
 
     var body: some View {
         Circle()
             .fill(color)
-            .frame(width: 7, height: 7)
-            .opacity(isWorking && pulse ? 0.35 : 1)
+            .frame(width: 6, height: 6)
+            .opacity(isWorking && pulse ? 0.3 : 1)
             .animation(
                 isWorking
                     ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true)
@@ -25,9 +27,9 @@ struct StatusDot: View {
 
     private var color: Color {
         switch activity {
-        case .working: return .green
-        case .idle, .starting: return .secondary.opacity(0.5)
-        case let .exited(code): return (code ?? 1) == 0 ? .secondary.opacity(0.3) : .red
+        case .working: return palette.accent
+        case .idle, .starting: return palette.textFaint
+        case let .exited(code): return (code ?? 1) == 0 ? palette.textFaint.opacity(0.5) : .red
         }
     }
 

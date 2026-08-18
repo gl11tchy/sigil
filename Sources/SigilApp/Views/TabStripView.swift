@@ -1,12 +1,13 @@
 import SwiftUI
 
-/// The slim tab strip above the terminal. Hidden while only one session is open.
+/// The tab strip, which lives inside the top bar and replaces the session label
+/// once a second session is open.
 struct TabStripView: View {
     @Bindable var model: AppModel
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 1) {
+            HStack(spacing: 2) {
                 ForEach(model.tabs) { tab in
                     TabChip(
                         tab: tab,
@@ -17,13 +18,9 @@ struct TabStripView: View {
                     )
                 }
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 6)
         }
-        .frame(height: 30)
-        .background(.bar)
-        .overlay(alignment: .bottom) {
-            Divider()
-        }
+        .scrollContentBackground(.hidden)
     }
 }
 
@@ -34,6 +31,7 @@ private struct TabChip: View {
     let select: () -> Void
     let close: () -> Void
 
+    @Environment(\.palette) private var palette
     @State private var isHovering = false
 
     var body: some View {
@@ -42,25 +40,26 @@ private struct TabChip: View {
             Text(label)
                 .font(.system(size: 11.5))
                 .lineLimit(1)
-                .foregroundStyle(isSelected ? .primary : .secondary)
-            Button(action: close) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(isSelected ? palette.text : palette.textDim)
+            if isHovering {
+                Button(action: close) {
+                    Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(palette.textDim)
+                .accessibilityLabel("Close \(label)")
             }
-            .buttonStyle(.plain)
-            .opacity(isHovering ? 0.7 : 0)
-            .accessibilityLabel("Close \(label)")
         }
-        .padding(.horizontal, 9)
-        .frame(height: 22)
-        .frame(maxWidth: 180)
+        .padding(.horizontal, 8)
+        .frame(height: 24)
+        .frame(maxWidth: 170)
         .background(
-            RoundedRectangle(cornerRadius: 5)
-                .fill(isSelected ? AnyShapeStyle(.selection.opacity(0.5)) : AnyShapeStyle(.clear))
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isSelected ? palette.raised : (isHovering ? palette.raised.opacity(0.5) : Color.clear))
         )
         .overlay(alignment: .topTrailing) {
             if tab.hasUnseenActivity && !isSelected {
-                Circle().fill(.tint).frame(width: 5, height: 5).offset(x: -2, y: 2)
+                Circle().fill(palette.accent).frame(width: 4, height: 4).offset(x: -3, y: 3)
             }
         }
         .contentShape(Rectangle())

@@ -15,6 +15,8 @@ final class AppModel {
     var selectedTabID: TerminalTab.ID?
     var searchText: String = ""
     var isShowingNewSessionSheet = false
+    /// The thread viewer can be collapsed for a full-width terminal.
+    var isSidebarVisible = true
 
     init(settings: AppSettings = AppSettings(), store: SessionStore = SessionStore()) {
         self.settings = settings

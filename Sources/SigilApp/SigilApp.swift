@@ -13,7 +13,7 @@ struct SigilApp: App {
                 .frame(minWidth: 760, minHeight: 460)
                 .onAppear { delegate.model = model }
         }
-        .windowToolbarStyle(.unified)
+        .windowStyle(.hiddenTitleBar)
         .commands { GrokCommands(model: model) }
 
         Settings {
@@ -70,6 +70,11 @@ struct GrokCommands: Commands {
         }
 
         CommandGroup(after: .toolbar) {
+            Button(model.isSidebarVisible ? "Hide Sidebar" : "Show Sidebar") {
+                model.isSidebarVisible.toggle()
+            }
+            .keyboardShortcut("b", modifiers: .command)
+            Divider()
             Button("Increase Font Size") { model.adjustFontSize(by: 1) }
                 .keyboardShortcut("+", modifiers: .command)
             Button("Decrease Font Size") { model.adjustFontSize(by: -1) }
