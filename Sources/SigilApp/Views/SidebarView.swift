@@ -77,7 +77,7 @@ struct SidebarView: View {
     @ViewBuilder
     private func list(buckets: [SessionBucket], isEmpty: Bool) -> some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+            LazyVStack(alignment: .leading, spacing: 1, pinnedViews: [.sectionHeaders]) {
                 ForEach(buckets) { bucket in
                     Section {
                         ForEach(bucket.sessions) { session in
@@ -219,35 +219,37 @@ private struct SessionRow: View {
     @SwiftUI.State private var isHovering = false
 
     var body: some View {
+        // One line per row. The folder a conversation ran in is nearly identical
+        // between neighbouring rows, so putting it on screen made every row look
+        // like every other one; it lives in the tooltip and in the folder filter.
         HStack(spacing: 8) {
             RoundedRectangle(cornerRadius: 1)
                 .fill(marker)
-                .frame(width: 2, height: 20)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(session.title)
-                    .font(.system(size: 12, weight: state == .active ? .medium : .regular))
-                    .foregroundStyle(state == .closed ? palette.textDim : palette.text)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                // Machine-written metadata is set in mono, so it reads as metadata
-                // and not as a title that failed.
-                Text("\(session.projectName) · \(session.updatedAt.shortRelative)")
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundStyle(palette.textFaint)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            Spacer(minLength: 0)
+                .frame(width: 2, height: 14)
+            Text(session.title)
+                .font(.system(size: 12, weight: state == .active ? .medium : .regular))
+                .foregroundStyle(state == .closed ? palette.textDim : palette.text)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 6)
+            Text(session.updatedAt.compactRelative)
+                .font(.system(size: 9.5, design: .monospaced))
+                .foregroundStyle(palette.textFaint)
+                .lineLimit(1)
+                .layoutPriority(1)
         }
         .padding(.leading, 7)
         .padding(.trailing, 10)
-        .padding(.vertical, 3.5)
+        .padding(.vertical, 5)
         .background(RoundedRectangle(cornerRadius: 6).fill(fill))
         .padding(.horizontal, 6)
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .onTapGesture(perform: open)
-        .help("\(session.displayPath)\n\(session.messageCount) messages · \(session.id)")
+        .help(
+            "\(session.title)\n\(session.displayPath)\n"
+                + "\(session.messageCount) messages · \(session.updatedAt.shortRelative)"
+        )
     }
 
     private var marker: Color {

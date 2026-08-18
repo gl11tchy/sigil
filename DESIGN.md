@@ -43,8 +43,21 @@ DPI; clamped headings serve nothing here.
 
 ## Density
 
-The list is the product. A row is a title line plus a metadata line in 32pt. Section
-headers cost 20pt. Nothing in the chrome is allowed to grow at the list's expense.
+The list is the product. **A row is one line.** Title on the left, a compact
+relative time on the right, 26pt tall. Two lines per row was tried and failed: the
+folder slug is near-identical between neighbouring rows, so a second line made every
+row look like every other one. What distinguishes a conversation is its title, and
+the title gets every point the time does not. The folder lives in the tooltip and in
+the folder filter.
+
+Section headers cost 20pt. Nothing in the chrome is allowed to grow at the list's
+expense.
+
+## Type ramp and the contrast floor
+
+`textDim` and `textFaint` are floored by WCAG AA against the *selected* row, not
+chosen by eye. Below that floor, hierarchy is carried by size and by the switch to
+mono — never by more grey.
 
 ## State vocabulary
 
