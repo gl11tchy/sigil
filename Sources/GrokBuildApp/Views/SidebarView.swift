@@ -1,25 +1,25 @@
 import GrokBuildKit
 import SwiftUI
 
-/// The thread viewer: every Grok Build conversation on this machine, grouped by project.
+/// The thread viewer: every Grok Build conversation on this machine, newest first.
 struct SidebarView: View {
     @Bindable var model: AppModel
 
-    /// Rendering every project at once is wasteful once the history grows into the
-    /// hundreds; search reaches the rest.
-    private static let groupLimit = 80
-
-    @State private var expanded: Set<String> = []
-    @State private var didSeedExpansion = false
+    /// The history runs to thousands of rows; the sidebar shows the newest slice
+    /// and search reaches the rest.
+    private static let rowLimit = 400
 
     var body: some View {
-        let groups = model.sidebarGroups
-        let shown = Array(groups.prefix(Self.groupLimit))
+        let sessions = model.sidebarSessions
+        let shown = Array(sessions.prefix(Self.rowLimit))
+        let buckets = SessionBucket.bucket(shown)
 
         List {
-            ForEach(shown, id: \.cwd) { group in
-                Section(isExpanded: expansion(for: group.cwd)) {
-                    ForEach(group.sessions) { session in
+            scopePicker
+
+            ForEach(buckets) { bucket in
+                Section(bucket.title) {
+                    ForEach(bucket.sessions) { session in
                         SessionRow(
                             session: session,
                             isOpen: model.openSessionIDs.contains(session.id)
@@ -29,41 +29,58 @@ struct SidebarView: View {
                         .contextMenu {
                             Button("Open in New Tab") { model.open(session) }
                             Divider()
+                            Button("New Session in This Folder") {
+                                model.newTab(in: URL(fileURLWithPath: session.cwd))
+                            }
                             Button("Reveal Folder in Finder") { model.revealInFinder(session) }
                             Button("Copy Session ID") { model.copySessionID(session) }
                             Button("Export Transcript…") { model.exportTranscript(session) }
                         }
                     }
-                } header: {
-                    ProjectHeader(cwd: group.cwd, count: group.sessions.count)
                 }
             }
 
-            if groups.count > shown.count {
-                Text("\(groups.count - shown.count) more projects — search to find them")
+            if sessions.count > shown.count {
+                Text("\(sessions.count - shown.count) older conversations — search to find them")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
+                    .listRowSeparator(.hidden)
                     .padding(.vertical, 4)
             }
 
-            if groups.isEmpty {
-                ContentUnavailableView(
-                    model.searchText.isEmpty ? "No sessions yet" : "No matches",
-                    systemImage: model.searchText.isEmpty ? "bubble.left.and.bubble.right" : "magnifyingglass",
-                    description: Text(
-                        model.searchText.isEmpty
-                            ? "Conversations you start will show up here."
-                            : "No conversation matches “\(model.searchText)”."
-                    )
-                )
-                .listRowSeparator(.hidden)
-            }
+            if sessions.isEmpty { emptyState }
         }
         .listStyle(.sidebar)
         .searchable(text: $model.searchText, placement: .sidebar, prompt: "Search conversations")
-        .task { seedExpansion(shown.map(\.cwd)) }
-        .onChange(of: shown.map(\.cwd)) { _, cwds in seedExpansion(cwds) }
         .safeAreaInset(edge: .bottom) { footer }
+    }
+
+    @ViewBuilder
+    private var scopePicker: some View {
+        Picker("Scope", selection: $model.scopeToCurrentFolder) {
+            Text("All").tag(false)
+            Text("This folder").tag(true)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .listRowSeparator(.hidden)
+        .padding(.vertical, 2)
+    }
+
+    private var emptyState: some View {
+        ContentUnavailableView(
+            model.searchText.isEmpty ? "No conversations" : "No matches",
+            systemImage: model.searchText.isEmpty
+                ? "bubble.left.and.bubble.right" : "magnifyingglass",
+            description: Text(
+                model.searchText.isEmpty
+                    ? (model.scopeToCurrentFolder
+                        ? "Nothing started in this folder yet."
+                        : "Conversations you start will show up here.")
+                    : "Nothing matches “\(model.searchText)”."
+            )
+        )
+        .listRowSeparator(.hidden)
     }
 
     private var footer: some View {
@@ -71,47 +88,18 @@ struct SidebarView: View {
             if model.store.isLoading {
                 ProgressView().controlSize(.small)
             }
-            Text(model.store.loadError ?? "\(model.store.sessions.count) conversations")
+            Text(model.store.loadError ?? "\(model.sidebarSessions.count) conversations")
                 .font(.caption)
-                .foregroundStyle(model.store.loadError == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.red))
+                .foregroundStyle(
+                    model.store.loadError == nil
+                        ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.red)
+                )
+                .lineLimit(1)
             Spacer()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(.bar)
-    }
-
-    /// Opens the most recent few projects, once, so the sidebar is not a wall of headers.
-    private func seedExpansion(_ cwds: [String]) {
-        guard !didSeedExpansion, !cwds.isEmpty else { return }
-        didSeedExpansion = true
-        expanded = Set(cwds.prefix(3))
-    }
-
-    private func expansion(for cwd: String) -> Binding<Bool> {
-        Binding(
-            get: { expanded.contains(cwd) },
-            set: { isOn in
-                if isOn { expanded.insert(cwd) } else { expanded.remove(cwd) }
-            }
-        )
-    }
-}
-
-private struct ProjectHeader: View {
-    let cwd: String
-    let count: Int
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Text(URL(fileURLWithPath: cwd).lastPathComponent)
-                .lineLimit(1)
-            Text("\(count)")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .monospacedDigit()
-        }
-        .help(cwd)
     }
 }
 
@@ -129,22 +117,23 @@ private struct SessionRow: View {
                 Text(session.title)
                     .font(.system(size: 12))
                     .lineLimit(2)
-                HStack(spacing: 5) {
+                HStack(spacing: 4) {
+                    Text(session.projectName)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                    Text("·")
                     Text(session.updatedAt.formatted(.relative(presentation: .numeric)))
+                        .lineLimit(1)
                     Text("·")
                     Text("\(session.messageCount)")
                         .monospacedDigit()
-                    if let model = session.modelID, !model.isEmpty {
-                        Text("·")
-                        Text(model)
-                    }
                 }
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
-                .lineLimit(1)
             }
         }
         .padding(.vertical, 2)
-        .help(session.displayPath)
+        .help("\(session.displayPath)\n\(session.id)")
     }
 }

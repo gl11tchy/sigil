@@ -40,13 +40,21 @@ final class AppModel {
 
     // MARK: - Sidebar
 
-    /// Sessions for the sidebar, grouped by project, with one-shot noise filtered out.
-    var sidebarGroups: [(cwd: String, sessions: [GrokSession])] {
-        store.groupedByProject(matching: searchText)
-            .compactMap { group in
-                let kept = settings.showEmptySessions ? group.sessions : group.sessions.filter(isReal)
-                return kept.isEmpty ? nil : (cwd: group.cwd, sessions: kept)
-            }
+    /// Restrict the sidebar to conversations started in the current tab's folder.
+    var scopeToCurrentFolder = false
+
+    /// Conversations for the sidebar: newest first, one-shot noise filtered out,
+    /// optionally scoped to the folder the current tab is working in.
+    var sidebarSessions: [GrokSession] {
+        var result = store.search(searchText)
+        if !settings.showEmptySessions {
+            result = result.filter(isReal)
+        }
+        if scopeToCurrentFolder {
+            let folder = currentDirectory.resolvingSymlinksInPath().path
+            result = result.filter { $0.cwd == folder }
+        }
+        return result
     }
 
     /// A session worth listing: it has a summary, or more than the opening exchange.
