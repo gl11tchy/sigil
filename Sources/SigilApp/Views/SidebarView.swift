@@ -2,9 +2,14 @@ import SigilKit
 import SwiftUI
 
 /// The thread viewer: every Grok Build conversation on this machine, newest first.
+///
+/// This list is the product. It is built for someone who keeps nine hundred
+/// conversations and is looking for one they half-remember the name of, so density
+/// and legible state beat everything else competing for the space.
 struct SidebarView: View {
     @Bindable var model: AppModel
     @Environment(\.palette) private var palette
+    @FocusState private var isSearchFocused: Bool
 
     /// The history runs to thousands of rows; the sidebar shows the newest slice
     /// and search reaches the rest.
@@ -16,7 +21,7 @@ struct SidebarView: View {
 
         VStack(spacing: 0) {
             // The traffic lights live here. Nothing else may.
-            Color.clear.frame(height: 38)
+            Color.clear.frame(height: 36)
             searchRow
             list(buckets: SessionBucket.bucket(shown), isEmpty: sessions.isEmpty)
             footer(hidden: sessions.count - shown.count)
@@ -28,15 +33,16 @@ struct SidebarView: View {
     // MARK: - Search
 
     private var searchRow: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 5) {
             HStack(spacing: 5) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(palette.textFaint)
+                    .foregroundStyle(isSearchFocused ? palette.textDim : palette.textFaint)
                 TextField("Search", text: $model.searchText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 11.5))
                     .foregroundStyle(palette.text)
+                    .focused($isSearchFocused)
                 if !model.searchText.isEmpty {
                     Button { model.searchText = "" } label: {
                         Image(systemName: "xmark.circle.fill").font(.system(size: 10))
@@ -46,13 +52,24 @@ struct SidebarView: View {
                 }
             }
             .padding(.horizontal, 7)
-            .frame(height: 24)
-            .background(RoundedRectangle(cornerRadius: 6).fill(palette.raised))
+            .frame(height: 26)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(palette.raised)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(
+                                isSearchFocused ? palette.accent.opacity(0.45) : Color.clear,
+                                lineWidth: 1
+                            )
+                    )
+            )
+            .animation(.easeOut(duration: 0.12), value: isSearchFocused)
 
             ScopeToggle(isOn: $model.scopeToCurrentFolder, folder: model.currentDirectory)
         }
         .padding(.horizontal, 8)
-        .padding(.bottom, 4)
+        .padding(.bottom, 2)
     }
 
     // MARK: - List
@@ -66,7 +83,7 @@ struct SidebarView: View {
                         ForEach(bucket.sessions) { session in
                             SessionRow(
                                 session: session,
-                                isOpen: model.openSessionIDs.contains(session.id),
+                                state: state(of: session),
                                 open: { model.open(session) }
                             )
                             .contextMenu {
@@ -82,8 +99,8 @@ struct SidebarView: View {
                         }
                     } header: {
                         Text(bucket.title.uppercased())
-                            .font(.system(size: 9.5, weight: .semibold))
-                            .tracking(0.6)
+                            .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                            .tracking(0.5)
                             .foregroundStyle(palette.textFaint)
                             .padding(.horizontal, 14)
                             .padding(.top, 9)
@@ -99,23 +116,31 @@ struct SidebarView: View {
         .scrollContentBackground(.hidden)
     }
 
+    private func state(of session: GrokSession) -> SessionRow.State {
+        if session.id == model.activeSessionID { return .active }
+        if model.openSessionIDs.contains(session.id) { return .open }
+        return .closed
+    }
+
+    /// Empty states teach the interface rather than announcing the obvious.
     private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(model.searchText.isEmpty ? "No conversations" : "No matches")
+        VStack(alignment: .leading, spacing: 5) {
+            Text(model.searchText.isEmpty ? "No conversations yet" : "No matches")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(palette.textDim)
-            Text(
-                model.searchText.isEmpty
-                    ? (model.scopeToCurrentFolder
-                        ? "Nothing started in this folder yet."
-                        : "Conversations you start show up here.")
-                    : "Nothing matches “\(model.searchText)”."
-            )
-            .font(.system(size: 11))
-            .foregroundStyle(palette.textFaint)
+            Text(hint)
+                .font(.system(size: 11))
+                .foregroundStyle(palette.textFaint)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 14)
-        .padding(.top, 16)
+        .padding(.top, 18)
+    }
+
+    private var hint: String {
+        if !model.searchText.isEmpty { return "Nothing matches “\(model.searchText)”." }
+        if model.scopeToCurrentFolder { return "Turn off the folder filter to see the rest." }
+        return "Press ⌘T to start one. It shows up here as soon as it has a name."
     }
 
     // MARK: - Footer
@@ -129,7 +154,7 @@ struct SidebarView: View {
                     .frame(width: 10, height: 10)
             }
             Text(statusText(hidden: hidden))
-                .font(.system(size: 10))
+                .font(.system(size: 9.5, design: .monospaced))
                 .foregroundStyle(
                     model.store.loadError == nil
                         ? AnyShapeStyle(palette.textFaint) : AnyShapeStyle(Color.red.opacity(0.85))
@@ -145,8 +170,8 @@ struct SidebarView: View {
     private func statusText(hidden: Int) -> String {
         if let error = model.store.loadError { return error }
         let total = model.sidebarSessions.count
-        if hidden > 0 { return "\(total) conversations · \(hidden) older" }
-        return "\(total) conversations"
+        if hidden > 0 { return "\(total) threads · \(hidden) older" }
+        return "\(total) threads"
     }
 }
 
@@ -160,69 +185,81 @@ private struct ScopeToggle: View {
 
     var body: some View {
         Button { isOn.toggle() } label: {
-            Image(systemName: "folder")
+            Image(systemName: isOn ? "folder.fill" : "folder")
                 .font(.system(size: 10.5, weight: .medium))
-                .frame(width: 24, height: 24)
+                .frame(width: 26, height: 26)
                 .background(
                     RoundedRectangle(cornerRadius: 6)
-                        .fill(isOn ? palette.accent.opacity(0.16) : (isHovering ? palette.raised : Color.clear))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .strokeBorder(isOn ? palette.accent.opacity(0.4) : Color.clear, lineWidth: 1)
-                        )
+                        .fill(isOn ? palette.accent.opacity(0.14) : (isHovering ? palette.raised : Color.clear))
                 )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(isOn ? palette.accent : palette.textDim)
+        .foregroundStyle(isOn ? palette.accent : (isHovering ? palette.textDim : palette.textFaint))
         .onHover { isHovering = $0 }
         .help(isOn ? "Showing only \(folder.abbreviatedPath)" : "Show only \(folder.abbreviatedPath)")
     }
 }
 
 private struct SessionRow: View {
+    enum State {
+        /// Not open in any tab.
+        case closed
+        /// Open in a background tab.
+        case open
+        /// The conversation on screen.
+        case active
+    }
+
     let session: GrokSession
-    let isOpen: Bool
+    let state: State
     let open: () -> Void
 
     @Environment(\.palette) private var palette
-    @State private var isHovering = false
+    @SwiftUI.State private var isHovering = false
 
     var body: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 8) {
             RoundedRectangle(cornerRadius: 1)
-                .fill(isOpen ? palette.accent : Color.clear)
-                .frame(width: 2, height: 18)
+                .fill(marker)
+                .frame(width: 2, height: 20)
             VStack(alignment: .leading, spacing: 1) {
                 Text(session.title)
-                    .font(.system(size: 12))
-                    .foregroundStyle(isOpen ? palette.text : palette.text.opacity(0.85))
+                    .font(.system(size: 12, weight: state == .active ? .medium : .regular))
+                    .foregroundStyle(state == .closed ? palette.textDim : palette.text)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                HStack(spacing: 4) {
-                    Text(session.projectName)
-                        .lineLimit(1)
-                        .layoutPriority(1)
-                    Text("·")
-                    Text(session.updatedAt.shortRelative)
-                        .lineLimit(1)
-                }
-                .font(.system(size: 10))
-                .foregroundStyle(palette.textFaint)
+                // Machine-written metadata is set in mono, so it reads as metadata
+                // and not as a title that failed.
+                Text("\(session.projectName) · \(session.updatedAt.shortRelative)")
+                    .font(.system(size: 9.5, design: .monospaced))
+                    .foregroundStyle(palette.textFaint)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
             Spacer(minLength: 0)
         }
         .padding(.leading, 7)
         .padding(.trailing, 10)
-        .padding(.vertical, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isHovering ? palette.raised : Color.clear)
-        )
+        .padding(.vertical, 3.5)
+        .background(RoundedRectangle(cornerRadius: 6).fill(fill))
         .padding(.horizontal, 6)
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .onTapGesture(perform: open)
         .help("\(session.displayPath)\n\(session.messageCount) messages · \(session.id)")
+    }
+
+    private var marker: Color {
+        switch state {
+        case .active: return palette.accent
+        case .open: return palette.accent.opacity(0.35)
+        case .closed: return .clear
+        }
+    }
+
+    private var fill: Color {
+        if state == .active { return palette.selected }
+        return isHovering ? palette.raised : .clear
     }
 }

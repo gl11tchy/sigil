@@ -50,7 +50,11 @@ final class AppModel {
     var sidebarSessions: [GrokSession] {
         var result = store.search(searchText)
         if !settings.showEmptySessions {
-            result = result.filter(isReal)
+            // A session you have open is always worth listing, even before the CLI
+            // has written a summary for it. Otherwise the row marking the
+            // conversation on screen is the one row the list refuses to show.
+            let open = openSessionIDs
+            result = result.filter { isReal($0) || open.contains($0.id) }
         }
         if scopeToCurrentFolder {
             let folder = currentDirectory.resolvingSymlinksInPath().path
@@ -69,6 +73,10 @@ final class AppModel {
     var openSessionIDs: Set<String> {
         Set(tabs.compactMap(\.sessionID))
     }
+
+    /// The conversation on screen right now. The sidebar marks this one differently
+    /// from the ones that are merely open in a background tab.
+    var activeSessionID: String? { selectedTab?.sessionID }
 
     /// A tab's label. New sessions start out named after their folder; once the CLI
     /// writes a summary for them, the store supplies the real conversation name.

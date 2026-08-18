@@ -23,6 +23,11 @@ struct TerminalPane: NSViewRepresentable {
             terminal.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
             terminal.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -4),
         ])
+        // SwiftTerm's scroller draws a pale track against a black ground. The
+        // list on the left is the navigation surface; the terminal scrolls itself.
+        for scroller in terminal.subviews.compactMap({ $0 as? NSScroller }) {
+            scroller.isHidden = true
+        }
         return container
     }
 

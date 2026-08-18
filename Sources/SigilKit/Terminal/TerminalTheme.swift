@@ -106,4 +106,9 @@ extension TerminalTheme {
     public var foregroundHex: UInt32 { resolved.foreground }
     public var cursorHex: UInt32 { resolved.cursor }
     public var selectionHex: UInt32 { resolved.selection }
+
+    /// The one accent the app chrome is allowed. It comes off the sigil mark, and
+    /// marks state only: the open conversation, a session doing work, a focused
+    /// field. The terminal itself never uses it.
+    public var accentHex: UInt32 { isDark ? 0xE8934A : 0xB4601C }
 }

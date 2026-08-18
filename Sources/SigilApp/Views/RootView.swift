@@ -3,7 +3,7 @@ import SwiftUI
 
 struct RootView: View {
     @Bindable var model: AppModel
-    @AppStorage("window.sidebarWidth") private var sidebarWidth: Double = 244
+    @AppStorage("window.sidebarWidth") private var sidebarWidth: Double = 272
 
     private var palette: Palette { Palette(theme: model.settings.theme) }
 
@@ -106,7 +106,7 @@ private struct TopBar: View {
             .foregroundStyle(palette.textDim)
             .padding(.trailing, 10)
         }
-        .frame(height: 38)
+        .frame(height: 36)
         .background(palette.ground)
     }
 
@@ -120,7 +120,7 @@ private struct TopBar: View {
                     .foregroundStyle(palette.text)
                     .lineLimit(1)
                 Text(tab.workingDirectory.abbreviatedPath)
-                    .font(.system(size: 11))
+                    .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(palette.textFaint)
                     .lineLimit(1)
                     .truncationMode(.head)
@@ -179,7 +179,7 @@ private struct SplitDivider: View {
                             .onChanged { value in
                                 let base = widthAtDragStart ?? width
                                 widthAtDragStart = base
-                                width = min(420, max(186, base + value.translation.width))
+                                width = min(430, max(200, base + value.translation.width))
                             }
                             .onEnded { _ in widthAtDragStart = nil }
                     )
