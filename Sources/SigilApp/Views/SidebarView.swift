@@ -69,7 +69,7 @@ struct SidebarView: View {
             ScopeToggle(isOn: $model.scopeToCurrentFolder, folder: model.currentDirectory)
         }
         .padding(.horizontal, 8)
-        .padding(.bottom, 2)
+        .padding(.bottom, 8)
     }
 
     // MARK: - List
@@ -77,13 +77,16 @@ struct SidebarView: View {
     @ViewBuilder
     private func list(buckets: [SessionBucket], isEmpty: Bool) -> some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 1, pinnedViews: [.sectionHeaders]) {
+            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                 ForEach(buckets) { bucket in
                     Section {
-                        ForEach(bucket.sessions) { session in
+                        ForEach(Array(bucket.sessions.enumerated()), id: \.element.id) { index, session in
                             SessionRow(
                                 session: session,
                                 state: state(of: session),
+                                // The last row in a bucket runs into a section
+                                // header, which is its own separation.
+                                showsDivider: index < bucket.sessions.count - 1,
                                 open: { model.open(session) }
                             )
                             .contextMenu {
@@ -103,8 +106,8 @@ struct SidebarView: View {
                             .tracking(0.5)
                             .foregroundStyle(palette.textFaint)
                             .padding(.horizontal, 14)
-                            .padding(.top, 9)
-                            .padding(.bottom, 3)
+                            .padding(.top, 16)
+                            .padding(.bottom, 6)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(palette.sidebar)
                     }
@@ -213,35 +216,47 @@ private struct SessionRow: View {
 
     let session: GrokSession
     let state: State
+    let showsDivider: Bool
     let open: () -> Void
 
     @Environment(\.palette) private var palette
     @SwiftUI.State private var isHovering = false
 
     var body: some View {
-        // One line per row. The folder a conversation ran in is nearly identical
-        // between neighbouring rows, so putting it on screen made every row look
-        // like every other one; it lives in the tooltip and in the folder filter.
-        HStack(spacing: 8) {
-            RoundedRectangle(cornerRadius: 1)
-                .fill(marker)
-                .frame(width: 2, height: 14)
-            Text(session.title)
-                .font(.system(size: 12, weight: state == .active ? .medium : .regular))
-                .foregroundStyle(state == .closed ? palette.textDim : palette.text)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Spacer(minLength: 6)
-            Text(session.updatedAt.compactRelative)
-                .font(.system(size: 9.5, design: .monospaced))
-                .foregroundStyle(palette.textFaint)
-                .lineLimit(1)
-                .layoutPriority(1)
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(marker)
+                    .frame(width: 2, height: 26)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(session.title)
+                        .font(.system(size: 12, weight: state == .active ? .medium : .regular))
+                        .foregroundStyle(state == .closed ? palette.textDim : palette.text)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    // Machine-written metadata is set in mono, so it reads as
+                    // metadata and not as a title that failed.
+                    Text("\(session.projectName) · \(session.updatedAt.shortRelative)")
+                        .font(.system(size: 9.5, design: .monospaced))
+                        .foregroundStyle(palette.textFaint)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 7)
+            .padding(.trailing, 10)
+            .padding(.vertical, 10)
+            .background(RoundedRectangle(cornerRadius: 6).fill(fill))
+
+            // A rule between items, so neighbouring rows are separate things
+            // rather than one block of text.
+            Rectangle()
+                .fill(showsDivider ? palette.hairline : Color.clear)
+                .frame(height: 1)
+                .padding(.leading, 17)
+                .padding(.trailing, 10)
         }
-        .padding(.leading, 7)
-        .padding(.trailing, 10)
-        .padding(.vertical, 5)
-        .background(RoundedRectangle(cornerRadius: 6).fill(fill))
         .padding(.horizontal, 6)
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }

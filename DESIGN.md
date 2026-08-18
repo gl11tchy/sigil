@@ -16,11 +16,11 @@ Dark ramp (Grok Night), in the order they stack:
 
 | Role       | Value     | Used for                                    |
 |------------|-----------|---------------------------------------------|
-| `ground`   | `#0A0A0A` | Window and terminal. The floor.             |
-| `sidebar`  | `#0E0E0E` | The thread viewer panel.                    |
+| `sidebar`  | `#000000` | The rail. True black, and the darkest surface.|
+| `ground`   | `#0A0A0A` | Window and terminal, sitting above the rail.|
 | `raised`   | `#1A1A1A` | Hover, search field, selected tab.          |
-| `selected` | `#232323` | The row whose conversation is on screen.    |
-| `hairline` | `#282828` | Every border in the app. There are no others.|
+| `selected` | `#262626` | The row whose conversation is on screen.    |
+| `hairline` | `#2B2B2B` | Every border and every row rule.            |
 | `text`     | `#EDEDED` | Titles, active labels.                      |
 | `textDim`  | `#9A9A9A` | Inactive labels, secondary controls.        |
 | `textFaint`| `#6B6B6B` | Metadata, section headers, counts.          |
@@ -43,15 +43,18 @@ DPI; clamped headings serve nothing here.
 
 ## Density
 
-The list is the product. **A row is one line.** Title on the left, a compact
-relative time on the right, 26pt tall. Two lines per row was tried and failed: the
-folder slug is near-identical between neighbouring rows, so a second line made every
-row look like every other one. What distinguishes a conversation is its title, and
-the title gets every point the time does not. The folder lives in the tooltip and in
-the folder filter.
+The list is the product, and it is read at a glance, not scanned for maximum count.
+A row is two lines — title, then folder and time in mono — with 10pt above and below
+and a hairline rule between rows. About 50pt in total.
 
-Section headers cost 20pt. Nothing in the chrome is allowed to grow at the list's
-expense.
+Packing more rows in was tried twice and failed both times. Rows at 32pt with no rule
+read as one continuous block of text; collapsing to a single line made that worse,
+not better, because the eye had nothing to break on. **The rule between rows is what
+separates them, not tightness.** Vertical room is cheap here: the user is looking for
+one conversation they half-remember, not counting how many fit on screen.
+
+Section headers take 16pt above and 6pt below, because they separate days and that
+break should be the largest one in the list.
 
 ## Type ramp and the contrast floor
 

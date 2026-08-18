@@ -67,14 +67,4 @@ extension Date {
         return formatted(.relative(presentation: .numeric))
     }
 
-    /// The same thing in a few characters, for the sidebar's right-hand column.
-    /// A row has one line, and the title gets every point the time does not.
-    var compactRelative: String {
-        let seconds = Date().timeIntervalSince(self)
-        if seconds < 60 { return "now" }
-        if seconds < 3600 { return "\(Int(seconds / 60))m" }
-        if seconds < 86_400 { return "\(Int(seconds / 3600))h" }
-        if seconds < 604_800 { return "\(Int(seconds / 86_400))d" }
-        return formatted(.dateTime.month(.abbreviated).day())
-    }
 }

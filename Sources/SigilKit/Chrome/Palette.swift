@@ -18,7 +18,8 @@ import SwiftUI
 public struct Palette: Equatable, Sendable {
     /// The terminal's own background: the detail column and the window itself.
     public let groundHex: UInt32
-    /// One step off the ground, for the sidebar.
+    /// The rail on the left. On a dark theme this is true black, so the list reads
+    /// as a separate surface from the terminal rather than a lighter copy of it.
     public let sidebarHex: UInt32
     /// Hover fills, the search field, the selected tab.
     public let raisedHex: UInt32
@@ -45,10 +46,16 @@ public struct Palette: Equatable, Sendable {
         let neutral = Self.desaturated(background)
 
         groundHex = background
-        sidebarHex = Self.mix(neutral, step, isDark ? 0.030 : 0.026)
-        raisedHex = Self.mix(neutral, step, isDark ? 0.085 : 0.065)
-        selectedHex = Self.mix(neutral, step, isDark ? 0.125 : 0.095)
-        hairlineHex = Self.mix(neutral, step, isDark ? 0.145 : 0.120)
+        // The rail is the darkest surface, and every panel steps up off the rail —
+        // not off the terminal ground, which sits above it.
+        // A light theme cannot take the same step: its panels darken away from the
+        // ground, and text that dims toward white loses AA on them fast. These
+        // numbers are the darkest the light rail can go and still pass.
+        let rail = isDark ? 0x000000 : Self.mix(neutral, 0x000000, 0.04)
+        sidebarHex = rail
+        raisedHex = Self.mix(rail, step, isDark ? 0.10 : 0.035)
+        selectedHex = Self.mix(rail, step, isDark ? 0.15 : 0.060)
+        hairlineHex = Self.mix(rail, step, isDark ? 0.17 : 0.090)
         textHex = Self.mix(foreground, step, isDark ? 0.22 : 0.0)
         // These two are floored by contrast, not by taste: dimming them further
         // fails AA on the selected row. Hierarchy below this point is carried by
