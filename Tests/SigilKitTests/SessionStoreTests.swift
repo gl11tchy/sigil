@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import GrokBuildKit
+@testable import SigilKit
 
 @Suite
 @MainActor
@@ -165,7 +165,7 @@ struct SessionStoreTests {
 
     @Test func missingRootSetsLoadErrorAndLeavesSessionsEmpty() async {
         let missing = FileManager.default.temporaryDirectory
-            .appendingPathComponent("GrokBuild-missing-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("Sigil-missing-\(UUID().uuidString)", isDirectory: true)
         let store = SessionStore(root: missing)
         await store.scan(ignoringCache: false)
         #expect(store.sessions.isEmpty)
@@ -334,7 +334,7 @@ private struct FixtureHarness {
 
     init() throws {
         root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("GrokBuild-SessionStore-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("Sigil-SessionStore-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         store = SessionStore(root: root)
     }

@@ -4,7 +4,8 @@ import CoreGraphics
 import Foundation
 import UniformTypeIdentifiers
 
-// Draws a dark rounded-square mark with a terminal prompt (`>` + block cursor).
+// Draws a dark rounded-square mark with a thin ember ring framing a
+// terminal prompt (`>` + block cursor) read as an occult glyph.
 // Pixel sizes are written directly so 16pt stays a few hard-edged shapes.
 
 let args = CommandLine.arguments
@@ -42,6 +43,171 @@ func roundedRect(_ rect: CGRect, radius: CGFloat) -> CGPath {
     CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
 }
 
+// Ember: hot orange #FF7A2F at the top, deep crimson #C21F2E at the bottom.
+let emberTop = color(1.0, 0.478, 0.184)
+let emberBot = color(0.761, 0.122, 0.180)
+
+func emberGradient() -> CGGradient? {
+    CGGradient(
+        colorsSpace: CGColorSpaceCreateDeviceRGB(),
+        colors: [emberTop, emberBot] as CFArray,
+        locations: [0, 1]
+    )
+}
+
+func fillEmber(_ ctx: CGContext, size: Int) {
+    let s = CGFloat(size)
+    if let gradient = emberGradient() {
+        ctx.drawLinearGradient(
+            gradient,
+            start: CGPoint(x: 0, y: s),
+            end: CGPoint(x: 0, y: 0),
+            options: []
+        )
+    } else {
+        ctx.setFillColor(emberTop)
+        ctx.fill(CGRect(x: 0, y: 0, width: s, height: s))
+    }
+}
+
+struct Mark {
+    var ringCenter: CGPoint
+    var ringRadius: CGFloat
+    var ringStroke: CGFloat
+    var lineW: CGFloat
+    var p0: CGPoint
+    var p1: CGPoint
+    var p2: CGPoint
+    var cursor: CGRect
+}
+
+func mark(for size: Int) -> Mark {
+    let s = CGFloat(size)
+    let c = CGPoint(x: (s / 2).rounded(), y: (s / 2).rounded())
+
+    if size <= 16 {
+        // 16pt is drawn as discrete pixels in `drawMark16` — this is unused.
+        return Mark(
+            ringCenter: CGPoint(x: 8, y: 8),
+            ringRadius: 5.5,
+            ringStroke: 2,
+            lineW: 2,
+            p0: CGPoint(x: 6, y: 10),
+            p1: CGPoint(x: 9, y: 8),
+            p2: CGPoint(x: 6, y: 6),
+            cursor: .null
+        )
+    }
+
+    if size <= 32 {
+        return Mark(
+            ringCenter: CGPoint(x: 16, y: 16),
+            ringRadius: 12,
+            ringStroke: 3,
+            lineW: 3,
+            p0: CGPoint(x: 10, y: 21),
+            p1: CGPoint(x: 16, y: 16),
+            p2: CGPoint(x: 10, y: 11),
+            cursor: CGRect(x: 19, y: 12, width: 3, height: 8)
+        )
+    }
+
+    let ringRadius = (s * 0.37).rounded()
+    let ringStroke = max(3, (s * 0.048).rounded())
+    let inner = ringRadius - ringStroke / 2
+    let usable = inner * 0.78
+    let lineW = max(3, (s * 0.072).rounded())
+    let p0 = CGPoint(
+        x: (c.x - usable * 0.42).rounded() + 0.5,
+        y: (c.y + usable * 0.52).rounded()
+    )
+    let p1 = CGPoint(
+        x: (c.x + usable * 0.06).rounded(),
+        y: c.y.rounded()
+    )
+    let p2 = CGPoint(
+        x: (c.x - usable * 0.42).rounded() + 0.5,
+        y: (c.y - usable * 0.52).rounded()
+    )
+    let cursorW = lineW
+    let cursorH = max(lineW * 2, (usable * 0.84).rounded())
+    let cursor = CGRect(
+        x: (c.x + usable * 0.32).rounded(),
+        y: ((c.y - cursorH / 2).rounded()),
+        width: cursorW,
+        height: cursorH
+    )
+    return Mark(
+        ringCenter: c,
+        ringRadius: ringRadius,
+        ringStroke: ringStroke,
+        lineW: lineW,
+        p0: p0,
+        p1: p1,
+        p2: p2,
+        cursor: cursor
+    )
+}
+
+func lerpColor(_ a: CGColor, _ b: CGColor, _ t: CGFloat) -> CGColor {
+    let ac = a.components ?? [0, 0, 0, 1]
+    let bc = b.components ?? [0, 0, 0, 1]
+    return color(
+        ac[0] + (bc[0] - ac[0]) * t,
+        ac[1] + (bc[1] - ac[1]) * t,
+        ac[2] + (bc[2] - ac[2]) * t,
+        1
+    )
+}
+
+/// Hard-edged 16pt mark: a 2px ring and a 2px `>` with a 1–2px dark gap.
+/// Antialiased strokes smear both shapes into one blob at this size.
+func drawMark16(_ ctx: CGContext) {
+    func isRing(_ x: Int, _ y: Int) -> Bool {
+        let dx = Double(x) + 0.5 - 8
+        let dy = Double(y) + 0.5 - 8
+        let d = (dx * dx + dy * dy).squareRoot()
+        return d >= 4.7 && d < 6.7
+    }
+    // 2px-wide `>` inset from the ring. No cursor — it would merge.
+    func isChevron(_ x: Int, _ y: Int) -> Bool {
+        switch y {
+        case 11: return x == 6
+        case 10: return x == 6 || x == 7
+        case 9: return x == 7 || x == 8
+        case 8: return x == 8 || x == 9
+        case 7: return x == 7 || x == 8
+        case 6: return x == 6 || x == 7
+        case 5: return x == 6
+        default: return false
+        }
+    }
+    for y in 0..<16 {
+        let t = 1 - CGFloat(y) / 15
+        ctx.setFillColor(lerpColor(emberTop, emberBot, t))
+        for x in 0..<16 where isRing(x, y) || isChevron(x, y) {
+            ctx.fill(CGRect(x: x, y: y, width: 1, height: 1))
+        }
+    }
+}
+
+func addChevron(_ path: CGMutablePath, _ m: Mark) {
+    path.move(to: m.p0)
+    path.addLine(to: m.p1)
+    path.addLine(to: m.p2)
+}
+
+func strokedChevron(_ m: Mark) -> CGPath {
+    let path = CGMutablePath()
+    addChevron(path, m)
+    return path.copy(
+        strokingWithWidth: m.lineW,
+        lineCap: .butt,
+        lineJoin: .miter,
+        miterLimit: 8
+    )
+}
+
 func drawIcon(in ctx: CGContext, size: Int) {
     let s = CGFloat(size)
     ctx.clear(CGRect(x: 0, y: 0, width: s, height: s))
@@ -57,10 +223,10 @@ func drawIcon(in ctx: CGContext, size: Int) {
     ctx.addPath(plate)
     ctx.clip()
 
-    let top = color(0.12, 0.13, 0.16)
-    let bot = color(0.07, 0.08, 0.10)
+    let top = color(0.08, 0.07, 0.07)
+    let bot = color(0.03, 0.025, 0.025)
     if size <= 32 {
-        ctx.setFillColor(color(0.09, 0.10, 0.13))
+        ctx.setFillColor(color(0.05, 0.04, 0.04))
         ctx.fill(CGRect(x: 0, y: 0, width: s, height: s))
     } else if let gradient = CGGradient(
         colorsSpace: CGColorSpaceCreateDeviceRGB(),
@@ -89,59 +255,76 @@ func drawIcon(in ctx: CGContext, size: Int) {
         ctx.strokePath()
     }
 
-    let accent = color(0.43, 0.91, 0.67)
-    ctx.setStrokeColor(accent)
-    ctx.setFillColor(accent)
-    ctx.setLineCap(.butt)
-    ctx.setLineJoin(.miter)
-    ctx.setMiterLimit(8)
-
-    let lineW: CGFloat
-    let p0: CGPoint
-    let p1: CGPoint
-    let p2: CGPoint
-    let cursor: CGRect
-
     if size <= 16 {
-        // 16pt: a 2px `>` only — a cursor would merge into the chevron.
-        lineW = 2
-        p0 = CGPoint(x: 5, y: 11)
-        p1 = CGPoint(x: 10, y: 8)
-        p2 = CGPoint(x: 5, y: 5)
-        cursor = .null
-    } else if size <= 32 {
-        lineW = 2
-        p0 = CGPoint(x: 8, y: 22)
-        p1 = CGPoint(x: 15, y: 16)
-        p2 = CGPoint(x: 8, y: 10)
-        cursor = CGRect(x: 20, y: 12, width: 2, height: 8)
-    } else {
-        lineW = max(2, (s * 0.075).rounded())
-        p0 = CGPoint(x: (0.28 * s).rounded() + 0.5, y: (0.68 * s).rounded())
-        p1 = CGPoint(x: (0.50 * s).rounded(), y: (0.50 * s).rounded())
-        p2 = CGPoint(x: (0.28 * s).rounded() + 0.5, y: (0.32 * s).rounded())
-        let cw = max(2, (s * 0.07).rounded())
-        let ch = max(5, (s * 0.26).rounded())
-        let cx = (0.62 * s).rounded()
-        let cy = ((s - ch) / 2).rounded()
-        cursor = CGRect(x: cx, y: cy, width: cw, height: ch)
+        drawMark16(ctx)
+        return
     }
 
-    ctx.setLineWidth(lineW)
-    ctx.move(to: p0)
-    ctx.addLine(to: p1)
-    ctx.addLine(to: p2)
-    ctx.strokePath()
+    let m = mark(for: size)
 
-    if !cursor.isNull, !cursor.isEmpty {
-        let cursorRadius = size >= 64 ? max(1, cursor.width * 0.25) : 0
-        if cursorRadius > 0 {
-            ctx.addPath(roundedRect(cursor, radius: cursorRadius))
-            ctx.fillPath()
-        } else {
-            ctx.fill(cursor)
+    if size >= 32 {
+        let glyphMid = CGPoint(
+            x: (m.p1.x + (m.cursor.isNull ? m.p1.x : m.cursor.midX)) / 2,
+            y: m.p1.y
+        )
+        let glowR = max(m.lineW * 3, m.ringRadius * 0.42)
+        let glowA: CGFloat = size <= 32 ? 0.14 : 0.28
+        if let glow = CGGradient(
+            colorsSpace: CGColorSpaceCreateDeviceRGB(),
+            colors: [
+                color(1.0, 0.478, 0.184, glowA),
+                color(0.761, 0.122, 0.180, 0),
+            ] as CFArray,
+            locations: [0, 1]
+        ) {
+            ctx.saveGState()
+            ctx.addPath(plate)
+            ctx.clip()
+            ctx.drawRadialGradient(
+                glow,
+                startCenter: glyphMid,
+                startRadius: 0,
+                endCenter: glyphMid,
+                endRadius: glowR,
+                options: []
+            )
+            ctx.restoreGState()
         }
     }
+
+    ctx.saveGState()
+    let ringRect = CGRect(
+        x: m.ringCenter.x - m.ringRadius,
+        y: m.ringCenter.y - m.ringRadius,
+        width: m.ringRadius * 2,
+        height: m.ringRadius * 2
+    )
+    let ring = CGMutablePath()
+    ring.addEllipse(in: ringRect)
+    let stroked = ring.copy(
+        strokingWithWidth: m.ringStroke,
+        lineCap: .butt,
+        lineJoin: .miter,
+        miterLimit: 8
+    )
+    ctx.addPath(stroked)
+    ctx.clip()
+    fillEmber(ctx, size: size)
+    ctx.restoreGState()
+
+    ctx.saveGState()
+    ctx.addPath(strokedChevron(m))
+    if !m.cursor.isNull, !m.cursor.isEmpty {
+        let cursorRadius = size >= 64 ? max(1, m.cursor.width * 0.25) : 0
+        if cursorRadius > 0 {
+            ctx.addPath(roundedRect(m.cursor, radius: cursorRadius))
+        } else {
+            ctx.addRect(m.cursor)
+        }
+    }
+    ctx.clip()
+    fillEmber(ctx, size: size)
+    ctx.restoreGState()
 }
 
 func writePNG(_ image: CGImage, to url: URL) throws {

@@ -1,4 +1,4 @@
-# GrokBuild
+# Sigil
 
 A native macOS app around the `grok` command line tool. It runs the real Grok Build
 terminal interface in a pseudo-terminal, so the tool behaves exactly as it does in a
@@ -46,7 +46,7 @@ that process needs the same access to your files and network that it has in a te
 Scripts/build-app.sh
 ```
 
-Writes `dist/GrokBuild.app`. Double-click it, or `open dist/GrokBuild.app`.
+Writes `dist/Sigil.app`. Double-click it, or `open dist/Sigil.app`.
 
 Debug build that stays attached to the terminal:
 

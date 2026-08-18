@@ -1,9 +1,9 @@
 import AppKit
-import GrokBuildKit
+import SigilKit
 import SwiftUI
 
 @main
-struct GrokBuildApp: App {
+struct SigilApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var model = AppModel()
 

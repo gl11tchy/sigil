@@ -5,6 +5,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-GROKBUILD_CONFIG=debug "$SCRIPT_DIR/build-app.sh"
-echo "==> launching $ROOT/dist/GrokBuild.app (Ctrl-C to quit)"
-exec "$ROOT/dist/GrokBuild.app/Contents/MacOS/GrokBuild"
+SIGIL_CONFIG=debug "$SCRIPT_DIR/build-app.sh"
+echo "==> launching $ROOT/dist/Sigil.app (Ctrl-C to quit)"
+exec "$ROOT/dist/Sigil.app/Contents/MacOS/Sigil"

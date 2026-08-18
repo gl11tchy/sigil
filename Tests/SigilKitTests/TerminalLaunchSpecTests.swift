@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import GrokBuildKit
+@testable import SigilKit
 
 struct TerminalLaunchSpecTests {
 

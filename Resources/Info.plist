@@ -5,17 +5,17 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>GrokBuild</string>
+	<string>Sigil</string>
 	<key>CFBundleExecutable</key>
-	<string>GrokBuild</string>
+	<string>Sigil</string>
 	<key>CFBundleIconFile</key>
-	<string>GrokBuild</string>
+	<string>Sigil</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.gl11tchy.grokbuild</string>
+	<string>com.gl11tchy.sigil</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>GrokBuild</string>
+	<string>Sigil</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

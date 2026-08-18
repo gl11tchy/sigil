@@ -2,27 +2,27 @@
 import PackageDescription
 
 let package = Package(
-    name: "GrokBuild",
+    name: "Sigil",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "GrokBuild", targets: ["GrokBuildApp"]),
-        .library(name: "GrokBuildKit", targets: ["GrokBuildKit"]),
+        .executable(name: "Sigil", targets: ["SigilApp"]),
+        .library(name: "SigilKit", targets: ["SigilKit"]),
     ],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.18.0"),
     ],
     targets: [
         .target(
-            name: "GrokBuildKit",
+            name: "SigilKit",
             dependencies: [.product(name: "SwiftTerm", package: "SwiftTerm")]
         ),
         .executableTarget(
-            name: "GrokBuildApp",
-            dependencies: ["GrokBuildKit"]
+            name: "SigilApp",
+            dependencies: ["SigilKit"]
         ),
         .testTarget(
-            name: "GrokBuildKitTests",
-            dependencies: ["GrokBuildKit"]
+            name: "SigilKitTests",
+            dependencies: ["SigilKit"]
         ),
     ]
 )

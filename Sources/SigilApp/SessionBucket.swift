@@ -1,5 +1,5 @@
 import Foundation
-import GrokBuildKit
+import SigilKit
 
 /// Recency buckets for the sidebar, the way a thread list is normally read:
 /// today first, then a few relative windows, then by month.

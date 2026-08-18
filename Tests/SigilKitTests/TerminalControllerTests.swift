@@ -4,7 +4,7 @@ import Foundation
 import SwiftTerm
 import Testing
 
-@testable import GrokBuildKit
+@testable import SigilKit
 
 @Suite("TerminalController", .serialized)
 @MainActor

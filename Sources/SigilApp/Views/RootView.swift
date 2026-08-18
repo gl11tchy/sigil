@@ -1,4 +1,4 @@
-import GrokBuildKit
+import SigilKit
 import SwiftUI
 
 struct RootView: View {
@@ -11,7 +11,7 @@ struct RootView: View {
                 .navigationSplitViewColumnWidth(min: 200, ideal: 260, max: 420)
         } detail: {
             detail
-                .navigationTitle(model.selectedTab.map { model.title(for: $0) } ?? "GrokBuild")
+                .navigationTitle(model.selectedTab.map { model.title(for: $0) } ?? "Sigil")
                 .navigationSubtitle(model.selectedTab?.workingDirectory.abbreviatedPath ?? "")
         }
         .toolbar {
@@ -78,7 +78,7 @@ private struct MissingCLIView: View {
         ContentUnavailableView {
             Label("Grok Build CLI not found", systemImage: "exclamationmark.triangle")
         } description: {
-            Text("GrokBuild runs the `grok` command line tool. It is not at:\n\(path)")
+            Text("Sigil runs the `grok` command line tool. It is not at:\n\(path)")
                 .monospaced()
         } actions: {
             SettingsLink { Text("Set the path in Settings…") }

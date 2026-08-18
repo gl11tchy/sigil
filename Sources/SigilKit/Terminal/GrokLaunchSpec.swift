@@ -77,7 +77,7 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
         env["LANG"] = env["LANG"] ?? "en_US.UTF-8"
-        env["GROK_WRAPPER"] = "GrokBuild.app"
+        env["GROK_WRAPPER"] = "Sigil.app"
         // The app bundle inherits a bare PATH; put the CLI's own bin dir on it.
         let grokBin = GrokPaths.home.appendingPathComponent("bin").path
         let existing = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"

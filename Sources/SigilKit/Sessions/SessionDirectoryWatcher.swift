@@ -59,7 +59,7 @@ final class SessionDirectoryWatcher: Sendable {
 
         FSEventStreamSetDispatchQueue(
             stream,
-            DispatchQueue(label: "GrokBuild.SessionStore.FSEvents")
+            DispatchQueue(label: "Sigil.SessionStore.FSEvents")
         )
         guard FSEventStreamStart(stream) else {
             FSEventStreamInvalidate(stream)

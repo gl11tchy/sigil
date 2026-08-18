@@ -1,6 +1,6 @@
 import AppKit
 import Foundation
-import GrokBuildKit
+import SigilKit
 import Observation
 
 /// One terminal tab: a `grok` process, its view, and the state the UI shows about it.

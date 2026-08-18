@@ -1,4 +1,4 @@
-import GrokBuildKit
+import SigilKit
 import SwiftUI
 
 /// The thread viewer: every Grok Build conversation on this machine, newest first.

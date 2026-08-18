@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 import Testing
 
-@testable import GrokBuildKit
+@testable import SigilKit
 
 enum TerminalTestSupport {
     @MainActor
@@ -28,7 +28,7 @@ enum TerminalTestSupport {
     /// then execs the remaining command. Lives under the process temp directory.
     static func makeFlagStrippingHelper() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("grokbuild-term-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("sigil-term-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent("run")
         let script = """

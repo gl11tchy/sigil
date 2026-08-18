@@ -1,6 +1,6 @@
 import AppKit
 import Foundation
-import GrokBuildKit
+import SigilKit
 import Observation
 
 /// Window-level state: the open tabs, the session sidebar, and the actions the menus call.

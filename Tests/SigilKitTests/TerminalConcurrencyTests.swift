@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import Testing
 
-@testable import GrokBuildKit
+@testable import SigilKit
 
 /// Tabs are independent `TerminalController`s. These cover the invariant the tab
 /// strip relies on: two sessions run at once without touching each other.

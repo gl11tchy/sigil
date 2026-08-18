@@ -6,8 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT" || exit 1
 
-APP="$ROOT/dist/GrokBuild.app"
-BIN="$APP/Contents/MacOS/GrokBuild"
+APP="$ROOT/dist/Sigil.app"
+BIN="$APP/Contents/MacOS/Sigil"
 FORMAT_STATUS=""
 SMOKE_PID=""
 
@@ -53,7 +53,7 @@ if [[ ! -x "$BIN" ]]; then
 fi
 
 echo "==> launch smoke check"
-SMOKE_LOG="$(mktemp "${TMPDIR:-/tmp}/grokbuild-smoke.XXXXXX")"
+SMOKE_LOG="$(mktemp "${TMPDIR:-/tmp}/sigil-smoke.XXXXXX")"
 "$BIN" >"$SMOKE_LOG" 2>&1 &
 SMOKE_PID=$!
 sleep 3
@@ -62,7 +62,7 @@ if ! kill -0 "$SMOKE_PID" 2>/dev/null; then
   cat "$SMOKE_LOG" >&2 || true
   rm -f "$SMOKE_LOG"
   SMOKE_PID=""
-  fail "GrokBuild exited during the smoke check"
+  fail "Sigil exited during the smoke check"
 fi
 kill "$SMOKE_PID" 2>/dev/null || true
 wait "$SMOKE_PID" 2>/dev/null || true

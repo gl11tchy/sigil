@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Build dist/GrokBuild.app from the SwiftPM GrokBuild executable.
+# Build dist/Sigil.app from the SwiftPM Sigil executable.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-APP="$ROOT/dist/GrokBuild.app"
+APP="$ROOT/dist/Sigil.app"
 CONTENTS="$APP/Contents"
-CONFIG="${GROKBUILD_CONFIG:-release}"
+CONFIG="${SIGIL_CONFIG:-release}"
 
 cd "$ROOT" || exit 1
 
@@ -27,14 +27,14 @@ elif [[ "$CONFIG" == "debug" ]]; then
   echo "==> swift build (debug)"
   swift build
 else
-  echo "error: GROKBUILD_CONFIG must be release or debug (got: $CONFIG)" >&2
+  echo "error: SIGIL_CONFIG must be release or debug (got: $CONFIG)" >&2
   exit 1
 fi
 
 BINARY=""
 for candidate in \
-  "$ROOT/.build/apple/Products/${apple_products}/GrokBuild" \
-  "$ROOT/.build/${config_dir}/GrokBuild"; do
+  "$ROOT/.build/apple/Products/${apple_products}/Sigil" \
+  "$ROOT/.build/${config_dir}/Sigil"; do
   if [[ -f "$candidate" && -x "$candidate" ]]; then
     BINARY="$candidate"
     break
@@ -42,10 +42,10 @@ for candidate in \
 done
 
 if [[ -z "$BINARY" ]]; then
-  echo "error: could not find the GrokBuild executable after the build" >&2
+  echo "error: could not find the Sigil executable after the build" >&2
   echo "looked in:" >&2
-  echo "  $ROOT/.build/apple/Products/${apple_products}/GrokBuild" >&2
-  echo "  $ROOT/.build/${config_dir}/GrokBuild" >&2
+  echo "  $ROOT/.build/apple/Products/${apple_products}/Sigil" >&2
+  echo "  $ROOT/.build/${config_dir}/Sigil" >&2
   exit 1
 fi
 
@@ -54,9 +54,9 @@ if command -v lipo >/dev/null 2>&1; then
   lipo -info "$BINARY" || true
 fi
 
-ICNS="$ROOT/Resources/GrokBuild.icns"
+ICNS="$ROOT/Resources/Sigil.icns"
 if [[ ! -s "$ICNS" ]]; then
-  echo "==> Resources/GrokBuild.icns missing; running Scripts/make-icon.sh"
+  echo "==> Resources/Sigil.icns missing; running Scripts/make-icon.sh"
   "$SCRIPT_DIR/make-icon.sh"
 fi
 if [[ ! -s "$ICNS" ]]; then
@@ -70,9 +70,9 @@ if [[ ! -f "$PLIST_TEMPLATE" ]]; then
   exit 1
 fi
 
-version="${GROKBUILD_VERSION:-0.1.0}"
-if [[ -n "${GROKBUILD_BUILD:-}" ]]; then
-  build="$GROKBUILD_BUILD"
+version="${SIGIL_VERSION:-0.1.0}"
+if [[ -n "${SIGIL_BUILD:-}" ]]; then
+  build="$SIGIL_BUILD"
 elif git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   build="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 1)"
 else
@@ -83,9 +83,9 @@ echo "==> assembling $APP (version $version build $build)"
 rm -rf "$APP"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 
-cp "$BINARY" "$CONTENTS/MacOS/GrokBuild"
-chmod +x "$CONTENTS/MacOS/GrokBuild"
-cp "$ICNS" "$CONTENTS/Resources/GrokBuild.icns"
+cp "$BINARY" "$CONTENTS/MacOS/Sigil"
+chmod +x "$CONTENTS/MacOS/Sigil"
+cp "$ICNS" "$CONTENTS/Resources/Sigil.icns"
 printf 'APPL????' >"$CONTENTS/PkgInfo"
 
 sed \

@@ -1,5 +1,5 @@
 import AppKit
-import GrokBuildKit
+import SigilKit
 import SwiftUI
 
 /// Hosts one tab's live terminal view. The view is owned by the controller and

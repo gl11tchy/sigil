@@ -2,7 +2,7 @@ import Foundation
 import SwiftTerm
 import Testing
 
-@testable import GrokBuildKit
+@testable import SigilKit
 
 struct TerminalThemeTests {
 
