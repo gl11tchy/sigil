@@ -45,7 +45,7 @@ struct RootView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             VStack(spacing: 0) {
-                ZStack {
+                ZStack(alignment: .topTrailing) {
                     ForEach(model.tabs) { tab in
                         let isSelected = tab.id == model.selectedTab?.id
                         TerminalPane(tab: tab, background: palette.groundNSColor)
@@ -53,6 +53,20 @@ struct RootView: View {
                             .allowsHitTesting(isSelected)
                             .accessibilityHidden(!isSelected)
                     }
+                    if model.isFindBarVisible, model.selectedTab != nil {
+                        TerminalFindBar(
+                            query: Bindable(model).findQuery,
+                            matchIndex: model.findMatchIndex,
+                            matchCount: model.findMatchCount,
+                            findNext: { model.findNextInTerminal() },
+                            findPrevious: { model.findPreviousInTerminal() },
+                            dismiss: { model.dismissFindBar() }
+                        )
+                        .padding(8)
+                    }
+                }
+                .onChange(of: model.findQuery) { _, _ in
+                    model.applyFindQuery()
                 }
                 if let tab = model.selectedTab, case .exited = tab.activity {
                     ExitedBanner(
@@ -123,11 +137,12 @@ private struct TopBar: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(palette.text)
                     .lineLimit(1)
-                Text(tab.workingDirectory.abbreviatedPath)
+                Text(tab.workingDirectory.breadcrumbPath)
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(palette.textFaint)
                     .lineLimit(1)
-                    .truncationMode(.head)
+                    .truncationMode(.middle)
+                    .help(tab.workingDirectory.abbreviatedPath)
             }
             .padding(.leading, 10)
         }
@@ -297,5 +312,14 @@ extension URL {
         if path == home { return "~" }
         if path.hasPrefix(home + "/") { return "~" + path.dropFirst(home.count) }
         return path
+    }
+
+    /// Last two path components, e.g. `scratchpad/wt-pr-a`. The home folder
+    /// keeps its `~`, which is shorter than its own two components.
+    var breadcrumbPath: String {
+        if path == FileManager.default.homeDirectoryForCurrentUser.path { return "~" }
+        let names = pathComponents.filter { $0 != "/" }
+        guard names.count >= 2 else { return abbreviatedPath }
+        return names.suffix(2).joined(separator: "/")
     }
 }

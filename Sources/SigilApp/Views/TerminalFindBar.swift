@@ -2,10 +2,7 @@ import AppKit
 import SigilKit
 import SwiftUI
 
-/// Compact find bar meant to float at the top-right of a terminal pane.
-///
-/// Not attached to the shell yet. A later change overlays it; this view
-/// compiles unused so that integration can stay a layout change.
+/// Compact find bar that floats at the top-right of a terminal pane.
 struct TerminalFindBar: View {
     @Binding var query: String
     /// One-based index of the current hit, or `0` when there are none.
@@ -56,6 +53,7 @@ struct TerminalFindBar: View {
                 )
         )
         .onExitCommand(perform: dismiss)
+        .onAppear { isFieldFocused = true }
     }
 
     private var counter: String {

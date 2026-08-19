@@ -6,21 +6,21 @@ struct TabStripView: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 2) {
-                ForEach(model.tabs) { tab in
-                    TabChip(
-                        tab: tab,
-                        label: model.title(for: tab),
-                        isSelected: tab.id == model.selectedTab?.id,
-                        select: { model.select(tab.id) },
-                        close: { model.requestCloseTab(tab.id) }
-                    )
-                }
+        HStack(spacing: 2) {
+            ForEach(model.tabs) { tab in
+                TabChip(
+                    tab: tab,
+                    label: model.title(for: tab),
+                    isSelected: tab.id == model.selectedTab?.id,
+                    select: { model.select(tab.id) },
+                    close: { model.requestCloseTab(tab.id) }
+                )
+                .frame(minWidth: 56, maxWidth: 170)
+                .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 6)
         }
-        .scrollContentBackground(.hidden)
+        .padding(.horizontal, 6)
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -40,6 +40,8 @@ private struct TabChip: View {
             Text(label)
                 .font(.system(size: 11.5))
                 .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 .foregroundStyle(isSelected ? palette.text : palette.textDim)
             if isHovering {
                 Button(action: close) {
@@ -51,8 +53,7 @@ private struct TabChip: View {
             }
         }
         .padding(.horizontal, 8)
-        .frame(height: 24)
-        .frame(maxWidth: 170)
+        .frame(maxWidth: .infinity, minHeight: 24, maxHeight: 24)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(isSelected ? palette.raised : (isHovering ? palette.raised.opacity(0.5) : Color.clear))

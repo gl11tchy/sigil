@@ -13,9 +13,20 @@ final class AppModel {
     let store: SessionStore
 
     private(set) var tabs: [TerminalTab] = []
-    var selectedTabID: TerminalTab.ID?
+    var selectedTabID: TerminalTab.ID? {
+        didSet {
+            if oldValue != selectedTabID {
+                hideFindBarOnTabSwitch(previousID: oldValue)
+            }
+        }
+    }
     var searchText: String = ""
     var isShowingNewSessionSheet = false
+    /// Find-in-terminal bar for the selected tab.
+    var isFindBarVisible = false
+    var findQuery = ""
+    var findMatchIndex = 0
+    var findMatchCount = 0
     /// The thread viewer can be collapsed for a full-width terminal.
     var isSidebarVisible = true
     /// Bumped by Find Conversations so the search field takes focus even when
@@ -262,6 +273,59 @@ final class AppModel {
     func focusSidebarSearch() {
         if !isSidebarVisible { isSidebarVisible = true }
         searchFocusToken += 1
+    }
+
+    // MARK: - Find
+
+    func toggleFindBar() {
+        if isFindBarVisible {
+            dismissFindBar()
+        } else {
+            guard selectedTab != nil else { return }
+            isFindBarVisible = true
+        }
+    }
+
+    func dismissFindBar() {
+        selectedTab?.controller.clearFind()
+        selectedTab?.controller.focus()
+        isFindBarVisible = false
+        findQuery = ""
+        findMatchIndex = 0
+        findMatchCount = 0
+    }
+
+    func applyFindQuery() {
+        guard isFindBarVisible else { return }
+        selectedTab?.controller.setFindQuery(findQuery)
+        refreshFindCounts()
+    }
+
+    func findNextInTerminal() {
+        selectedTab?.controller.findNext()
+        refreshFindCounts()
+    }
+
+    func findPreviousInTerminal() {
+        selectedTab?.controller.findPrevious()
+        refreshFindCounts()
+    }
+
+    private func refreshFindCounts() {
+        findMatchIndex = selectedTab?.controller.findMatchIndex ?? 0
+        findMatchCount = selectedTab?.controller.findMatchCount ?? 0
+    }
+
+    /// Switching tabs hides the bar and clears find on the tab that had it.
+    private func hideFindBarOnTabSwitch(previousID: TerminalTab.ID?) {
+        guard isFindBarVisible else { return }
+        if let previousID, let tab = tabs.first(where: { $0.id == previousID }) {
+            tab.controller.clearFind()
+        }
+        isFindBarVisible = false
+        findQuery = ""
+        findMatchIndex = 0
+        findMatchCount = 0
     }
 
     /// Closes any tab showing `session`, then moves its directory to the Trash.

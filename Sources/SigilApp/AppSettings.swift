@@ -86,5 +86,6 @@ final class AppSettings {
     }
 
     static let effortOptions = ["", "low", "medium", "high", "xhigh"]
+    /// Suggestion names for the free-text model field. Empty is not offered.
     static let modelOptions = ["", "grok-4.6", "grok-4.5"]
 }

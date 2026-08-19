@@ -70,7 +70,7 @@ if [[ ! -f "$PLIST_TEMPLATE" ]]; then
   exit 1
 fi
 
-version="${SIGIL_VERSION:-0.1.0}"
+version="${SIGIL_VERSION:-1.0.0}"
 if [[ -n "${SIGIL_BUILD:-}" ]]; then
   build="$SIGIL_BUILD"
 elif git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then

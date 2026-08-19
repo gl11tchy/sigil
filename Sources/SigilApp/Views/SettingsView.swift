@@ -1,3 +1,4 @@
+import AppKit
 import SigilKit
 import SwiftUI
 
@@ -43,9 +44,12 @@ struct SettingsView: View {
         Form {
             LabeledContent("Grok CLI") {
                 VStack(alignment: .leading, spacing: 4) {
-                    TextField("Path", text: Bindable(model.settings).executablePath)
-                        .textFieldStyle(.roundedBorder)
-                        .monospaced()
+                    HStack(spacing: 8) {
+                        TextField("Path", text: Bindable(model.settings).executablePath)
+                            .textFieldStyle(.roundedBorder)
+                            .monospaced()
+                        Button("Choose…") { pickExecutable() }
+                    }
                     Label(
                         model.settings.executableExists ? "Found" : "Not found",
                         systemImage: model.settings.executableExists
@@ -56,10 +60,8 @@ struct SettingsView: View {
                 }
             }
 
-            Picker("Default model", selection: Bindable(model.settings).model) {
-                ForEach(AppSettings.modelOptions, id: \.self) { option in
-                    Text(option.isEmpty ? "CLI default" : option).tag(option)
-                }
+            LabeledContent("Default model") {
+                ModelNameField(text: Bindable(model.settings).model)
             }
 
             Picker("Default effort", selection: Bindable(model.settings).effort) {
@@ -74,5 +76,42 @@ struct SettingsView: View {
             )
         }
         .formStyle(.grouped)
+    }
+
+    private func pickExecutable() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: model.settings.executablePath)
+            .deletingLastPathComponent()
+        panel.prompt = "Choose"
+        if panel.runModal() == .OK, let url = panel.url {
+            model.settings.executablePath = url.path
+        }
+    }
+}
+
+/// Free-text model name with the known CLI names as fill-in suggestions.
+struct ModelNameField: View {
+    @Binding var text: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            TextField("CLI default", text: $text)
+                .textFieldStyle(.roundedBorder)
+            Menu {
+                ForEach(AppSettings.modelOptions.filter { !$0.isEmpty }, id: \.self) { option in
+                    Button(option) { text = option }
+                }
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: 20)
+            .help("Suggested models")
+        }
     }
 }

@@ -47,10 +47,8 @@ struct NewSessionSheet: View {
                     }
                 }
 
-                Picker("Model", selection: $model_) {
-                    ForEach(AppSettings.modelOptions, id: \.self) { option in
-                        Text(option.isEmpty ? "Default" : option).tag(option)
-                    }
+                LabeledContent("Model") {
+                    ModelNameField(text: $model_)
                 }
 
                 Picker("Effort", selection: $effort) {
