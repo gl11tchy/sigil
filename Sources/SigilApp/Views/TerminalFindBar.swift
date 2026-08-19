@@ -53,7 +53,13 @@ struct TerminalFindBar: View {
                 )
         )
         .onExitCommand(perform: dismiss)
-        .onAppear { isFieldFocused = true }
+        .task {
+            // Focus set in the same transaction that inserts the bar loses to
+            // whichever field already had it (the sidebar search). Yield once
+            // so the bar exists before it asks.
+            await Task.yield()
+            isFieldFocused = true
+        }
     }
 
     private var counter: String {
