@@ -99,6 +99,11 @@ struct GrokCommands: Commands {
             .keyboardShortcut("a", modifiers: .command)
         }
 
+        CommandGroup(after: .pasteboard) {
+            Button("Find Conversations") { model.focusSidebarSearch() }
+                .keyboardShortcut("f", modifiers: .command)
+        }
+
         CommandGroup(after: .toolbar) {
             Button(model.isSidebarVisible ? "Hide Sidebar" : "Show Sidebar") {
                 model.isSidebarVisible.toggle()

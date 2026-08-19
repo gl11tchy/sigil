@@ -18,6 +18,9 @@ final class AppModel {
     var isShowingNewSessionSheet = false
     /// The thread viewer can be collapsed for a full-width terminal.
     var isSidebarVisible = true
+    /// Bumped by Find Conversations so the search field takes focus even when
+    /// the sidebar just became visible, or already had it.
+    private(set) var searchFocusToken = 0
 
     init(settings: AppSettings = AppSettings(), store: SessionStore = SessionStore()) {
         self.settings = settings
@@ -253,6 +256,27 @@ final class AppModel {
     func copySessionID(_ session: GrokSession) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(session.id, forType: .string)
+    }
+
+    /// Shows the thread list if it is hidden, then asks the search field for focus.
+    func focusSidebarSearch() {
+        if !isSidebarVisible { isSidebarVisible = true }
+        searchFocusToken += 1
+    }
+
+    /// Closes any tab showing `session`, then moves its directory to the Trash.
+    /// A permanent delete would be unrecoverable from here.
+    func deleteConversation(_ session: GrokSession) {
+        let openIDs = tabs.compactMap { tab -> TerminalTab.ID? in
+            tab.sessionID == session.id ? tab.id : nil
+        }
+        for id in openIDs { closeTab(id) }
+        do {
+            try FileManager.default.trashItem(at: session.directory, resultingItemURL: nil)
+            Task { await store.reload() }
+        } catch {
+            NSAlert(error: error).runModal()
+        }
     }
 
     /// Writes `grok export <id>` to a file the user picks.

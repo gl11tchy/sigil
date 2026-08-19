@@ -158,6 +158,7 @@ struct IconButton: View {
         .foregroundStyle(isHovering ? palette.text : palette.textDim)
         .onHover { isHovering = $0 }
         .help(help)
+        .accessibilityLabel(help)
     }
 }
 
