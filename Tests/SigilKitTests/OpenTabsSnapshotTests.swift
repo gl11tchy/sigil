@@ -1,0 +1,31 @@
+import Foundation
+import Testing
+
+@testable import SigilKit
+
+struct OpenTabsSnapshotTests {
+
+    @Test func encodeDecodeRoundTrips() throws {
+        let snapshot = OpenTabsSnapshot(
+            tabs: [
+                .init(sessionID: "019f780a-34d7-7993-aadc-f23a46c40a73", cwd: "/Users/exec/proj"),
+                .init(sessionID: "019ffeab-c76b-7fe1-be40-508369febd51", cwd: "/tmp/work"),
+            ],
+            selectedSessionID: "019ffeab-c76b-7fe1-be40-508369febd51"
+        )
+        let data = try #require(snapshot.encode())
+        let decoded = try #require(OpenTabsSnapshot.decode(data))
+        #expect(decoded == snapshot)
+    }
+
+    @Test func encodeDecodeRoundTripsEmptySelection() throws {
+        let snapshot = OpenTabsSnapshot(tabs: [], selectedSessionID: nil)
+        let data = try #require(snapshot.encode())
+        let decoded = try #require(OpenTabsSnapshot.decode(data))
+        #expect(decoded == snapshot)
+    }
+
+    @Test func decodeRejectsGarbage() {
+        #expect(OpenTabsSnapshot.decode(Data("not-json".utf8)) == nil)
+    }
+}

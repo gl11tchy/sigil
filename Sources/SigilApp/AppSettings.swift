@@ -13,6 +13,7 @@ final class AppSettings {
         static let executablePath = "grok.executablePath"
         static let showEmptySessions = "sidebar.showEmptySessions"
         static let defaultDirectory = "session.defaultDirectory"
+        static let openTabs = "session.openTabs"
         static let model = "session.model"
         static let effort = "session.effort"
     }
@@ -35,6 +36,21 @@ final class AppSettings {
     }
     var defaultDirectory: String {
         didSet { defaults.set(defaultDirectory, forKey: Key.defaultDirectory) }
+    }
+    var openTabs: OpenTabsSnapshot {
+        get {
+            guard let data = defaults.data(forKey: Key.openTabs),
+                let decoded = OpenTabsSnapshot.decode(data)
+            else {
+                return OpenTabsSnapshot(tabs: [], selectedSessionID: nil)
+            }
+            return decoded
+        }
+        set {
+            if let data = newValue.encode() {
+                defaults.set(data, forKey: Key.openTabs)
+            }
+        }
     }
     /// Empty means "let the CLI use its own default".
     var model: String {

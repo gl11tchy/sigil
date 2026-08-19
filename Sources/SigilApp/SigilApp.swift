@@ -28,6 +28,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        MainActor.assumeIsolated {
+            guard let model else { return .terminateNow }
+            let working = model.tabs.filter { $0.activity == .working }.count
+            guard working > 0 else { return .terminateNow }
+            let alert = NSAlert()
+            alert.messageText =
+                working == 1
+                ? "A session is still working. Quit anyway?"
+                : "\(working) sessions are still working. Quit anyway?"
+            alert.addButton(withTitle: "Quit")
+            alert.addButton(withTitle: "Cancel")
+            return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated { model?.closeAllTabsAndWait() }
     }
@@ -61,12 +77,26 @@ struct GrokCommands: Commands {
         }
 
         CommandGroup(replacing: .pasteboard) {
-            Button("Copy") { model.selectedTab?.controller.copySelection() }
-                .keyboardShortcut("c", modifiers: .command)
-            Button("Paste") { model.selectedTab?.controller.paste() }
-                .keyboardShortcut("v", modifiers: .command)
-            Button("Select All") { model.selectedTab?.controller.selectAll() }
-                .keyboardShortcut("a", modifiers: .command)
+            Button("Cut") { Self.performTextAction(#selector(NSText.cut(_:))) }
+                .keyboardShortcut("x", modifiers: .command)
+            Button("Copy") {
+                if !Self.performTextAction(#selector(NSText.copy(_:))) {
+                    model.selectedTab?.controller.copySelection()
+                }
+            }
+            .keyboardShortcut("c", modifiers: .command)
+            Button("Paste") {
+                if !Self.performTextAction(#selector(NSText.paste(_:))) {
+                    model.selectedTab?.controller.paste()
+                }
+            }
+            .keyboardShortcut("v", modifiers: .command)
+            Button("Select All") {
+                if !Self.performTextAction(#selector(NSText.selectAll(_:))) {
+                    model.selectedTab?.controller.selectAll()
+                }
+            }
+            .keyboardShortcut("a", modifiers: .command)
         }
 
         CommandGroup(after: .toolbar) {
@@ -99,5 +129,13 @@ struct GrokCommands: Commands {
                     .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: .command)
             }
         }
+    }
+
+    /// The field editor of a focused text field is an `NSTextView`. Forward to
+    /// it so these shortcuts do not steal from search, sheets, or Settings.
+    @discardableResult
+    private static func performTextAction(_ selector: Selector) -> Bool {
+        guard let text = NSApp.keyWindow?.firstResponder as? NSTextView else { return false }
+        return text.tryToPerform(selector, with: nil)
     }
 }

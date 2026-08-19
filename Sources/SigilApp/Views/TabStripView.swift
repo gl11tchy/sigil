@@ -14,7 +14,7 @@ struct TabStripView: View {
                         label: model.title(for: tab),
                         isSelected: tab.id == model.selectedTab?.id,
                         select: { model.select(tab.id) },
-                        close: { model.closeTab(tab.id) }
+                        close: { model.requestCloseTab(tab.id) }
                     )
                 }
             }

@@ -54,8 +54,12 @@ struct RootView: View {
                             .accessibilityHidden(!isSelected)
                     }
                 }
-                if let tab = model.selectedTab, case let .exited(code) = tab.activity {
-                    ExitedBanner(code: code) { model.closeTab(tab.id) }
+                if let tab = model.selectedTab, case .exited = tab.activity {
+                    ExitedBanner(
+                        activity: tab.activity,
+                        close: { model.closeTab(tab.id) },
+                        restart: { model.restartTab(id: tab.id) }
+                    )
                 }
             }
         }
@@ -250,23 +254,31 @@ private struct EmptyDetailView: View {
 }
 
 private struct ExitedBanner: View {
-    let code: Int32?
+    let activity: TerminalTab.Activity
     let close: () -> Void
+    let restart: () -> Void
     @Environment(\.palette) private var palette
+
+    private var code: Int32? {
+        if case let .exited(code) = activity { return code }
+        return nil
+    }
 
     var body: some View {
         HStack(spacing: 7) {
             Circle()
-                .fill((code ?? 0) == 0 ? palette.textFaint : Color.red.opacity(0.8))
+                .fill(activity.endedInFailure ? Color.red.opacity(0.8) : palette.textFaint)
                 .frame(width: 6, height: 6)
             Text(
-                (code ?? 0) == 0
-                    ? "Session ended."
-                    : "Session ended with code \(code.map(String.init) ?? "unknown")."
+                activity.endedInFailure
+                    ? "Session ended with code \(code.map(String.init) ?? "unknown")."
+                    : "Session ended."
             )
             .font(.system(size: 11))
             .foregroundStyle(palette.textDim)
             Spacer()
+            Button("Restart", action: restart)
+                .controlSize(.small)
             Button("Close Tab", action: close)
                 .controlSize(.small)
         }

@@ -14,6 +14,12 @@ final class TerminalTab: Identifiable {
         case working
         case idle
         case exited(code: Int32?)
+
+        /// True only for a known nonzero exit code. A missing code is not a failure.
+        var endedInFailure: Bool {
+            guard case let .exited(code?) = self else { return false }
+            return code != 0
+        }
     }
 
     let id = UUID()

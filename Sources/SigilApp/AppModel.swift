@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import SigilKit
 import Observation
+import UniformTypeIdentifiers
 
 /// Window-level state: the open tabs, the session sidebar, and the actions the menus call.
 @MainActor
@@ -25,9 +26,7 @@ final class AppModel {
 
     func onAppear() {
         store.start()
-        if tabs.isEmpty, settings.executableExists {
-            newTab(in: URL(fileURLWithPath: settings.defaultDirectory))
-        }
+        restoreOpenTabs()
     }
 
     var selectedTab: TerminalTab? {
@@ -37,7 +36,12 @@ final class AppModel {
 
     /// The directory a new tab should open in: the current tab's, else the remembered one.
     var currentDirectory: URL {
-        selectedTab?.workingDirectory ?? URL(fileURLWithPath: settings.defaultDirectory)
+        if let directory = selectedTab?.workingDirectory { return directory }
+        let stored = settings.defaultDirectory
+        if FileManager.default.fileExists(atPath: stored) {
+            return URL(fileURLWithPath: stored)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
     }
 
     // MARK: - Sidebar
@@ -126,10 +130,34 @@ final class AppModel {
         let tab = TerminalTab(spec: spec, settings: settings)
         tabs.append(tab)
         selectedTabID = tab.id
-        settings.defaultDirectory = spec.workingDirectory.path
+        rememberDefaultDirectory(spec.workingDirectory)
         let id = tab.id
         tab.start(isSelected: { [weak self] in self?.selectedTabID == id })
+        persistOpenTabs()
         return tab
+    }
+
+    /// Reopens the same conversation in place so the tab does not jump or lose selection.
+    func restartTab(id: TerminalTab.ID) {
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let old = tabs[index]
+        // `.new` tabs already have a UUID the CLI wrote a session directory for.
+        guard let sessionID = old.sessionID else { return }
+        old.terminate()
+        let spec = GrokLaunchSpec(
+            executable: settings.executableURL,
+            workingDirectory: old.workingDirectory,
+            mode: .resume(sessionID: sessionID),
+            model: settings.model.nilIfEmpty,
+            reasoningEffort: settings.effort.nilIfEmpty
+        )
+        let tab = TerminalTab(spec: spec, settings: settings)
+        tab.sessionTitle = old.sessionTitle
+        tabs[index] = tab
+        selectedTabID = tab.id
+        let newID = tab.id
+        tab.start(isSelected: { [weak self] in self?.selectedTabID == newID })
+        persistOpenTabs()
     }
 
     func closeTab(_ id: TerminalTab.ID) {
@@ -140,15 +168,30 @@ final class AppModel {
             let next = min(index, tabs.count - 1)
             selectedTabID = tabs.indices.contains(next) ? tabs[next].id : nil
         }
+        persistOpenTabs()
+    }
+
+    /// User-facing close: warn when the agent is mid-turn so a click does not kill work.
+    func requestCloseTab(_ id: TerminalTab.ID) {
+        guard let tab = tabs.first(where: { $0.id == id }) else { return }
+        if tab.activity == .working {
+            let alert = NSAlert()
+            alert.messageText = "This session is still working."
+            alert.addButton(withTitle: "Close Tab")
+            alert.addButton(withTitle: "Cancel")
+            if alert.runModal() != .alertFirstButtonReturn { return }
+        }
+        closeTab(id)
     }
 
     func closeSelectedTab() {
-        if let selectedTabID { closeTab(selectedTabID) }
+        if let selectedTabID { requestCloseTab(selectedTabID) }
     }
 
     func select(_ id: TerminalTab.ID) {
         selectedTabID = id
         tabs.first { $0.id == id }?.hasUnseenActivity = false
+        persistOpenTabs()
         DispatchQueue.main.async { [weak self] in
             self?.tabs.first { $0.id == id }?.controller.focus()
         }
@@ -170,10 +213,12 @@ final class AppModel {
         tabs.forEach { $0.terminate() }
         tabs.removeAll()
         selectedTabID = nil
+        persistOpenTabs()
     }
 
     /// Quit path: no `grok` process may outlive the app, and there is no run loop
-    /// left to finish an asynchronous kill.
+    /// left to finish an asynchronous kill. Does not persist — the last user
+    /// mutation already wrote the tabs that should come back next launch.
     func closeAllTabsAndWait() {
         tabs.forEach { $0.terminateAndWait() }
         tabs.removeAll()
@@ -211,20 +256,83 @@ final class AppModel {
     }
 
     /// Writes `grok export <id>` to a file the user picks.
+    ///
+    /// The save panel stays on the main thread; the CLI itself runs off it so a
+    /// long export cannot freeze the window.
     func exportTranscript(_ session: GrokSession) {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "\(session.title).md"
-        panel.allowedContentTypes = [.plainText]
+        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        let process = Process()
-        process.executableURL = settings.executableURL
-        process.arguments = ["export", session.id, url.path]
-        do {
+        let executable = settings.executableURL
+        let sessionID = session.id
+        Task {
+            do {
+                try await Self.runTranscriptExport(
+                    executable: executable, sessionID: sessionID, output: url)
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            } catch {
+                NSAlert(error: error).runModal()
+            }
+        }
+    }
+
+    private static func runTranscriptExport(
+        executable: URL, sessionID: String, output: URL
+    ) async throws {
+        try await Task.detached(priority: .userInitiated) {
+            let process = Process()
+            process.executableURL = executable
+            process.arguments = ["export", sessionID, output.path]
             try process.run()
             process.waitUntilExit()
-        } catch {
-            NSAlert(error: error).runModal()
+            guard process.terminationStatus == 0 else {
+                throw TranscriptExportError(status: process.terminationStatus)
+            }
+        }.value
+    }
+
+    // MARK: - Persistence
+
+    /// Reopen saved tabs whose session directories still exist. Never starts a
+    /// `.new` session: a launch must not create junk conversations on disk.
+    private func restoreOpenTabs() {
+        guard tabs.isEmpty, settings.executableExists else { return }
+        let snapshot = settings.openTabs
+        var restoredSelection: TerminalTab.ID?
+        for entry in snapshot.tabs {
+            let directory = GrokPaths.sessionDirectory(cwd: entry.cwd, sessionID: entry.sessionID)
+            guard FileManager.default.fileExists(atPath: directory.path) else { continue }
+            let spec = GrokLaunchSpec(
+                executable: settings.executableURL,
+                workingDirectory: URL(fileURLWithPath: entry.cwd),
+                mode: .resume(sessionID: entry.sessionID),
+                model: settings.model.nilIfEmpty,
+                reasoningEffort: settings.effort.nilIfEmpty
+            )
+            let tab = add(spec)
+            if entry.sessionID == snapshot.selectedSessionID {
+                restoredSelection = tab.id
+            }
         }
+        if let restoredSelection {
+            select(restoredSelection)
+        }
+        persistOpenTabs()
+    }
+
+    private func persistOpenTabs() {
+        let entries = tabs.compactMap { tab -> OpenTabsSnapshot.Entry? in
+            guard let sessionID = tab.sessionID else { return nil }
+            return OpenTabsSnapshot.Entry(sessionID: sessionID, cwd: tab.workingDirectory.path)
+        }
+        settings.openTabs = OpenTabsSnapshot(
+            tabs: entries, selectedSessionID: selectedTab?.sessionID)
+    }
+
+    private func rememberDefaultDirectory(_ directory: URL) {
+        if isEphemeral(path: directory.path) { return }
+        settings.defaultDirectory = directory.path
     }
 
     func pickDirectory() -> URL? {
@@ -240,4 +348,9 @@ final class AppModel {
 
 extension String {
     var nilIfEmpty: String? { isEmpty ? nil : self }
+}
+
+private struct TranscriptExportError: Error, LocalizedError, Sendable {
+    let status: Int32
+    var errorDescription: String? { "Export failed with exit code \(status)." }
 }

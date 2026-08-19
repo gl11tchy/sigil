@@ -29,7 +29,7 @@ struct StatusDot: View {
         switch activity {
         case .working: return palette.accent
         case .idle, .starting: return palette.textFaint
-        case let .exited(code): return (code ?? 1) == 0 ? palette.textFaint.opacity(0.5) : .red
+        case .exited: return activity.endedInFailure ? .red : palette.textFaint.opacity(0.5)
         }
     }
 
