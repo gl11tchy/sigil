@@ -193,6 +193,87 @@ public final class TerminalController {
         view.window?.makeFirstResponder(view)
     }
 
+    // MARK: - Find
+
+    private var search = ScrollbackSearch()
+
+    /// Number of hits for the current find query.
+    public var findMatchCount: Int { search.matchCount }
+
+    /// One-based index of the current hit, or `0` when there are none.
+    public var findMatchIndex: Int { search.current.map { $0 + 1 } ?? 0 }
+
+    /// Sets a plain-text query and selects the first hit, if any.
+    public func setFindQuery(_ query: String) {
+        search.setQuery(query, in: findBufferLines())
+        applyFindSelection()
+    }
+
+    /// Drops the query, the hits, and the selection used to show them.
+    public func clearFind() {
+        search.clear()
+        terminalView.selectNone()
+    }
+
+    /// Advances to the next hit, wrapping to the first.
+    public func findNext() {
+        search.updateLines(findBufferLines())
+        search.findNext()
+        applyFindSelection()
+    }
+
+    /// Moves to the previous hit, wrapping to the last.
+    public func findPrevious() {
+        search.updateLines(findBufferLines())
+        search.findPrevious()
+        applyFindSelection()
+    }
+
+    /// One string per buffer row, using `bufferLine(atRow:)` so row indices
+    /// match `SelectionService` / `scrollTo`.
+    private func findBufferLines() -> [String] {
+        let terminal = terminalView.getTerminal()
+        var lines: [String] = []
+        var row = 0
+        while let line = terminal.bufferLine(atRow: row) {
+            // Default translate emits one character per cell, so match columns
+            // line up with `Position.col` without a separate width map.
+            lines.append(line.translateToString(trimRight: true))
+            row += 1
+        }
+        return lines
+    }
+
+    private func applyFindSelection() {
+        guard let match = search.currentMatch else {
+            terminalView.selectNone()
+            return
+        }
+        let cols = terminalView.getTerminal().cols
+        let start = Position(col: match.columns.lowerBound, row: match.line)
+        // `setSelection` clamps `col` to `cols-1`. A hit that ends on the last
+        // cell would lose that cell, so park the exclusive end on the next row.
+        let end: Position
+        if match.columns.upperBound >= cols {
+            end = Position(col: 0, row: match.line + 1)
+        } else {
+            end = Position(col: match.columns.upperBound, row: match.line)
+        }
+        terminalView.selection.setSelection(start: start, end: end)
+        revealFindMatch(row: match.line)
+    }
+
+    /// `scrollTo(row:)` sets `yDisp` (the top of the viewport), not the match.
+    private func revealFindMatch(row: Int) {
+        let terminal = terminalView.getTerminal()
+        let viewport = terminal.rows
+        guard viewport > 0 else { return }
+        let top = terminal.buffer.yDisp
+        let bottom = top + viewport - 1
+        if row >= top && row <= bottom { return }
+        terminalView.scrollTo(row: max(0, row - viewport / 2))
+    }
+
     var processID: pid_t { terminalView.hostedPid }
 
     func bufferText() -> String {
