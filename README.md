@@ -3,6 +3,7 @@
 ![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-000000)
 ![Swift](https://img.shields.io/badge/Swift-6-F05138)
 ![Tests](https://img.shields.io/badge/tests-44%20passing-4FA87A)
+![License](https://img.shields.io/badge/license-MIT-6A6A6A)
 
 A native macOS app around the `grok` command line tool. It runs the real Grok Build
 terminal interface in a pseudo-terminal, so the tool behaves exactly as it does in a
@@ -84,6 +85,14 @@ Scripts/verify.sh
 
 Runs the build, the tests, an optional format lint, the app bundling, and a launch
 smoke check.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+Sigil bundles [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) (MIT) and
+[swift-argument-parser](https://github.com/apple/swift-argument-parser) (Apache 2.0).
+It wraps the Grok Build CLI but does not include it.
 
 ## Where the conversations come from
 
