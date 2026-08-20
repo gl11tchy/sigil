@@ -1,10 +1,18 @@
 # Sigil
 
+![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-000000)
+![Swift](https://img.shields.io/badge/Swift-6-F05138)
+![Tests](https://img.shields.io/badge/tests-44%20passing-4FA87A)
+
 A native macOS app around the `grok` command line tool. It runs the real Grok Build
 terminal interface in a pseudo-terminal, so the tool behaves exactly as it does in a
 terminal — and adds a window, tabs, and a searchable list of every conversation.
 
 By gl11tchy.
+
+![Sigil, showing the thread list beside a running session](docs/screenshot.png)
+
+*Demo data. The conversations shown are invented; the session on the right is real.*
 
 ## What it adds
 
@@ -18,6 +26,9 @@ By gl11tchy.
   Dock icon when a background tab finishes a turn.
 - **Themes and font size**, applied live to running sessions.
 - **Transcript export**, through `grok export`.
+- **Delete**, from the row's context menu. The conversation folder goes to the Trash.
+- **Tab restore.** The sessions you had open come back on the next launch. Starting the
+  app never creates a new conversation.
 
 ## Keyboard
 
@@ -25,12 +36,17 @@ By gl11tchy.
 | --- | --- |
 | `⌘T` | New session in the current folder |
 | `⌘⇧N` | New session in another folder |
-| `⌘W` | Close tab |
+| `⌘W` | Close tab (warns while the agent is working) |
 | `⌘⇧]` / `⌘⇧[` | Next / previous tab |
 | `⌘1`…`⌘9` | Go to tab |
+| `⌘F` | Find in the terminal |
+| `⌘⇧F` | Find conversations |
+| `⌘B` | Hide or show the thread list |
 | `⌘+` / `⌘-` / `⌘0` | Font size |
 | `⌘R` | Reload the conversation list |
 | `⌘,` | Settings |
+
+In the thread list, `↑` and `↓` move the selection and `Return` opens it.
 
 ## Requirements
 
