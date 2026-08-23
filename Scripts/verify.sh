@@ -47,9 +47,6 @@ fail() {
   exit 1
 }
 
-echo "==> swift build"
-swift build || fail "swift build"
-
 echo "==> swift test"
 swift test || fail "swift test"
 
@@ -130,7 +127,6 @@ SMOKE_LOG=""
 
 echo
 echo "==== verify: PASS ===="
-echo "  swift build"
 echo "  swift test"
 echo "  $FORMAT_STATUS"
 echo "  Scripts/build-app.sh (debug bundle)"

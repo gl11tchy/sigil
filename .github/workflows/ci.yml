@@ -26,6 +26,16 @@ jobs:
       - name: Show Swift toolchain
         run: swift --version
 
+      - name: Restore Swift build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Caches/org.swift.swiftpm
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.resolved') }}-${{ hashFiles('Package.swift') }}
+          restore-keys: |
+            swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.resolved') }}-
+
       - name: Install shellcheck
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
@@ -38,4 +48,5 @@ jobs:
         run: Scripts/verify.sh
 
       - name: Build universal release bundle
+        if: github.event_name != 'pull_request'
         run: Scripts/build-app.sh
