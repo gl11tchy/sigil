@@ -242,3 +242,15 @@ struct BridgePromptFramingTests {
         #expect(prompt.contains("one two three four five"))
     }
 }
+
+@Suite("BridgePrompt idempotence")
+struct BridgePromptIdempotenceTests {
+
+    /// Live testing caught this: the delivery path sanitised the finished
+    /// prompt a second time, which stripped the marker the prompt opens with.
+    @Test func sanitizingAFinishedPromptWouldEatItsOwnMarker() {
+        let prompt = BridgePrompt.send(fromTitle: "A", fromTabID: "t1", message: "hello")
+        #expect(prompt.hasPrefix(BridgePrompt.marker))
+        #expect(!BridgePrompt.sanitize(prompt).hasPrefix(BridgePrompt.marker))
+    }
+}

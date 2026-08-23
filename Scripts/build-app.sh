@@ -49,7 +49,28 @@ if [[ -z "$BINARY" ]]; then
   exit 1
 fi
 
+# The tab-messaging helper ships beside the app binary; the Settings switch
+# looks for it there, and stays disabled when it is missing.
+MCP_BINARY=""
+for candidate in \
+  "$ROOT/.build/apple/Products/${apple_products}/sigil-mcp" \
+  "$ROOT/.build/${config_dir}/sigil-mcp"; do
+  if [[ -f "$candidate" && -x "$candidate" ]]; then
+    MCP_BINARY="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$MCP_BINARY" ]]; then
+  echo "error: could not find the sigil-mcp helper after the build" >&2
+  echo "looked in:" >&2
+  echo "  $ROOT/.build/apple/Products/${apple_products}/sigil-mcp" >&2
+  echo "  $ROOT/.build/${config_dir}/sigil-mcp" >&2
+  exit 1
+fi
+
 echo "==> using $BINARY"
+echo "==> using $MCP_BINARY"
 if command -v lipo >/dev/null 2>&1; then
   lipo -info "$BINARY" || true
 fi
@@ -85,6 +106,8 @@ mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 
 cp "$BINARY" "$CONTENTS/MacOS/Sigil"
 chmod +x "$CONTENTS/MacOS/Sigil"
+cp "$MCP_BINARY" "$CONTENTS/MacOS/sigil-mcp"
+chmod +x "$CONTENTS/MacOS/sigil-mcp"
 cp "$ICNS" "$CONTENTS/Resources/Sigil.icns"
 printf 'APPL????' >"$CONTENTS/PkgInfo"
 

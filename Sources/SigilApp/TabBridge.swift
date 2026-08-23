@@ -164,9 +164,10 @@ final class TabBridge: BridgeServerDelegate {
             let title = model?.title(for: tab) ?? dest.title
             return .failure("tab \"\(title)\" (\(tab.id.uuidString)) is not running")
         }
-        let body = BridgePrompt.sanitize(prompt)
-        guard !body.isEmpty else { return .failure("message is empty") }
-        tab.controller.send(text: body + "\r")
+        // Already one sanitised line: `BridgePrompt` cleaned the untrusted body
+        // and the title. Sanitising again would strip our own marker.
+        guard !prompt.isEmpty else { return .failure("message is empty") }
+        tab.controller.send(text: prompt + "\r")
         return BridgeResponse(ok: true, note: "delivered to \(dest.title)")
     }
 
