@@ -29,8 +29,8 @@ jobs:
           HOMEBREW_NO_AUTO_UPDATE: "1"
         run: brew install shellcheck
 
-      - name: Install Metal toolchain
-        run: xcodebuild -downloadComponent MetalToolchain
+      - name: Check Metal toolchain
+        run: xcrun --sdk macosx metal --version
 
       - name: Verify
         run: Scripts/verify.sh
