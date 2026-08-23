@@ -22,7 +22,7 @@ final class TerminalTab: Identifiable {
         }
     }
 
-    let id = UUID()
+    let id: UUID
     let spec: GrokLaunchSpec
     let controller: TerminalController
 
@@ -35,7 +35,8 @@ final class TerminalTab: Identifiable {
 
     private var idleTask: Task<Void, Never>?
 
-    init(spec: GrokLaunchSpec, settings: AppSettings) {
+    init(id: UUID = UUID(), spec: GrokLaunchSpec, settings: AppSettings) {
+        self.id = id
         self.spec = spec
         self.controller = TerminalController(theme: settings.theme, fontSize: settings.fontSize)
     }

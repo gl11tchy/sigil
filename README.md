@@ -2,7 +2,7 @@
 
 ![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-000000)
 ![Swift](https://img.shields.io/badge/Swift-6-F05138)
-![Tests](https://img.shields.io/badge/tests-44%20passing-4FA87A)
+![Tests](https://img.shields.io/badge/tests-111%20passing-4FA87A)
 ![License](https://img.shields.io/badge/license-MIT-6A6A6A)
 
 A native macOS app around the `grok` command line tool. It runs the real Grok Build
@@ -30,6 +30,26 @@ By gl11tchy.
 - **Delete**, from the row's context menu. The conversation folder goes to the Trash.
 - **Tab restore.** The sessions you had open come back on the next launch. Starting the
   app never creates a new conversation.
+- **Tab messaging.** Off by default. Turn it on in Settings, and each session gets four
+  tools: `list_tabs`, `send_to_tab`, `ask_tab` and `reply_to`. A tab can hand work to
+  another tab, or ask it a question and wait for the answer. See below.
+
+## Tab messaging
+
+Grok Build has no channel between sessions. Sigil supplies one: it owns every tab, so it
+carries the messages itself.
+
+Turning the switch on registers a `sigil` MCP server in `~/.grok/config.toml`, pointing at
+a small helper inside the app bundle. Turning it off removes that entry again. Tabs you
+open afterwards can message each other; tabs already open cannot.
+
+A message arrives in the other tab exactly as if you had typed it, on one line, marked
+with the sending tab's name. An `ask` waits until the other tab calls `reply_to`, or until
+the timeout runs out (5 minutes by default, 15 at most).
+
+The socket lives at `~/Library/Application Support/Sigil/bridge.sock` and is readable only
+by you. Any process running as you can talk to it, which is the same trust level as the
+terminal itself.
 
 ## Keyboard
 

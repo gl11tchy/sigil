@@ -4,6 +4,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Bindable var model: AppModel
+    @State private var tabMessagingError: String?
 
     var body: some View {
         TabView {
@@ -74,8 +75,74 @@ struct SettingsView: View {
                 "Show one-message sessions in the sidebar",
                 isOn: Bindable(model.settings).showEmptySessions
             )
+
+            Section {
+                Toggle(
+                    "Let tabs message each other",
+                    isOn: tabMessagingIsOn
+                )
+                .disabled(BridgeRegistration.bundledMCPBinary == nil)
+            } footer: {
+                Text(tabMessagingFooter)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
+        .alert(
+            "Could not update tab messaging",
+            isPresented: Binding(
+                get: { tabMessagingError != nil },
+                set: { if !$0 { tabMessagingError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(tabMessagingError ?? "")
+        }
+    }
+
+    private var tabMessagingIsOn: Binding<Bool> {
+        Binding(
+            get: { model.settings.isTabMessagingEnabled },
+            set: { applyTabMessaging(enabled: $0) }
+        )
+    }
+
+    private var tabMessagingFooter: String {
+        if BridgeRegistration.bundledMCPBinary == nil {
+            return "Unavailable: this build has no sigil-mcp helper."
+        }
+        return """
+            Each session gets tools to list the other tabs, send one a message, \
+            and ask one a question. This adds a sigil entry to ~/.grok/config.toml. \
+            Tabs you open afterwards can message each other; tabs already open cannot.
+            """
+    }
+
+    private func applyTabMessaging(enabled: Bool) {
+        let previous = model.settings.isTabMessagingEnabled
+        guard enabled != previous else { return }
+        guard let binary = BridgeRegistration.bundledMCPBinary else { return }
+        model.settings.isTabMessagingEnabled = enabled
+        let executable = model.settings.executableURL
+        Task.detached(priority: .userInitiated) {
+            let registration = BridgeRegistration(executable: executable)
+            do {
+                if enabled {
+                    try registration.install(mcpBinary: binary)
+                } else {
+                    try registration.remove()
+                }
+                await MainActor.run { model.setTabMessaging(enabled: enabled) }
+            } catch {
+                let text = error.localizedDescription
+                await MainActor.run {
+                    model.settings.isTabMessagingEnabled = previous
+                    tabMessagingError = text
+                }
+            }
+        }
     }
 
     private func pickExecutable() {

@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .executable(name: "Sigil", targets: ["SigilApp"]),
         .library(name: "SigilKit", targets: ["SigilKit"]),
+        .executable(name: "sigil-mcp", targets: ["SigilMCP"]),
     ],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.18.0"),
@@ -18,6 +19,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "SigilApp",
+            dependencies: ["SigilKit"]
+        ),
+        .executableTarget(
+            name: "SigilMCP",
             dependencies: ["SigilKit"]
         ),
         .testTarget(
