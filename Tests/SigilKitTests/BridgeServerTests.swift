@@ -36,9 +36,11 @@ final class BridgeServerTests: XCTestCase {
             BridgeRequest(method: .sendToTab, from: peer, target: "tab-2", text: "hello there")
         )
 
-        XCTAssertEqual(env.delegate.sent, [
-            .init(peer: peer, target: "tab-2", message: "hello there")
-        ])
+        XCTAssertEqual(
+            env.delegate.sent,
+            [
+                .init(peer: peer, target: "tab-2", message: "hello there")
+            ])
         XCTAssertEqual(response.ok, true)
         XCTAssertEqual(response.note, "delivered")
     }
@@ -53,9 +55,11 @@ final class BridgeServerTests: XCTestCase {
                 method: .askTab, from: peer, target: "tab-2", text: "why?", timeoutSeconds: 42)
         )
 
-        XCTAssertEqual(env.delegate.asked, [
-            .init(peer: peer, target: "tab-2", question: "why?", timeout: 42)
-        ])
+        XCTAssertEqual(
+            env.delegate.asked,
+            [
+                .init(peer: peer, target: "tab-2", question: "why?", timeout: 42)
+            ])
         XCTAssertEqual(response.ok, true)
         XCTAssertEqual(response.answer, "because")
         XCTAssertEqual(response.requestID, "q-1")
@@ -70,9 +74,11 @@ final class BridgeServerTests: XCTestCase {
             BridgeRequest(method: .replyTo, from: peer, text: "the answer", requestID: "req-9")
         )
 
-        XCTAssertEqual(env.delegate.replies, [
-            .init(peer: peer, requestID: "req-9", answer: "the answer")
-        ])
+        XCTAssertEqual(
+            env.delegate.replies,
+            [
+                .init(peer: peer, requestID: "req-9", answer: "the answer")
+            ])
         XCTAssertEqual(response.ok, true)
         XCTAssertEqual(response.note, "accepted")
     }
@@ -260,7 +266,7 @@ final class BridgeServerTests: XCTestCase {
             Case(method: .askTab, field: "question", target: "tab-2", requestID: nil),
             Case(method: .replyTo, field: "answer", target: nil, requestID: "req-1"),
         ]
-        let texts: [String?] = [nil, "", "   \n\t  "]
+        let texts: [String?] = [nil, "", "   \n\t  ", "\u{0000}\u{0007}\u{007F}"]
 
         let env = try TestEnv()
         defer { env.tearDown() }
@@ -293,40 +299,47 @@ final class BridgeServerTests: XCTestCase {
     func testOverlongTextIsTruncatedBeforeDelegate() async throws {
         let env = try TestEnv()
         defer { env.tearDown() }
-        let original = String(repeating: "x", count: BridgeLimits.maxMessageCharacters + 80)
+        let original = String(repeating: "x", count: BridgeLimits.maxMessageBytes + 80)
         let expected = try XCTUnwrap(BridgeLimits.clampedMessage(original))
         XCTAssertNotEqual(expected, original)
         XCTAssertTrue(
             expected.contains(
-                "[truncated by Sigil at \(BridgeLimits.maxMessageCharacters) characters]"),
+                "[truncated by Sigil at \(BridgeLimits.maxMessageBytes) bytes]"),
             expected)
+        XCTAssertLessThanOrEqual(expected.utf8.count, BridgeLimits.maxMessageBytes)
 
         let send = try await env.roundTrip(
             BridgeRequest(method: .sendToTab, from: peer, target: "tab-2", text: original)
         )
         XCTAssertEqual(send.ok, true)
-        XCTAssertEqual(env.delegate.sent, [
-            .init(peer: peer, target: "tab-2", message: expected)
-        ])
+        XCTAssertEqual(
+            env.delegate.sent,
+            [
+                .init(peer: peer, target: "tab-2", message: expected)
+            ])
 
         let ask = try await env.roundTrip(
             BridgeRequest(
                 method: .askTab, from: peer, target: "tab-2", text: original, timeoutSeconds: 30)
         )
         XCTAssertEqual(ask.ok, true)
-        XCTAssertEqual(env.delegate.asked, [
-            .init(
-                peer: peer, target: "tab-2", question: expected,
-                timeout: BridgeLimits.clampedAskSeconds(30))
-        ])
+        XCTAssertEqual(
+            env.delegate.asked,
+            [
+                .init(
+                    peer: peer, target: "tab-2", question: expected,
+                    timeout: BridgeLimits.clampedAskSeconds(30))
+            ])
 
         let reply = try await env.roundTrip(
             BridgeRequest(method: .replyTo, from: peer, text: original, requestID: "req-1")
         )
         XCTAssertEqual(reply.ok, true)
-        XCTAssertEqual(env.delegate.replies, [
-            .init(peer: peer, requestID: "req-1", answer: expected)
-        ])
+        XCTAssertEqual(
+            env.delegate.replies,
+            [
+                .init(peer: peer, requestID: "req-1", answer: expected)
+            ])
     }
 
     func testAskTimeoutIsClampedToBridgeLimits() async throws {
@@ -418,6 +431,87 @@ final class BridgeServerTests: XCTestCase {
         XCTAssertEqual(response.answer, "late")
         XCTAssertEqual(env.delegate.asked.count, 1)
     }
+
+    func testClientDisconnectCancelsPendingAsk() async throws {
+        let env = try TestEnv()
+        defer { env.tearDown() }
+        env.delegate.askSleep = .seconds(5)
+        let request = BridgeRequest(
+            method: .askTab, from: peer, target: "tab-2", text: "still there?",
+            timeoutSeconds: 30)
+        let socketURL = env.socketURL
+        let fd = try await Task.detached { () throws -> Int32 in
+            let fd = try RawBridgeClient.connect(to: socketURL)
+            try RawBridgeClient.writeAll(try BridgeFraming.frame(request), to: fd)
+            return fd
+        }.value
+
+        let reachedAsk = await waitUntil { env.delegate.asked.count == 1 }
+        XCTAssertTrue(reachedAsk)
+        Darwin.shutdown(fd, SHUT_RDWR)
+        Darwin.close(fd)
+        let cancelledAsk = await waitUntil { env.delegate.askCancellationCount == 1 }
+        XCTAssertTrue(cancelledAsk)
+    }
+
+    func testConcurrentClientLimitRejectsExcessAndRecovers() async throws {
+        let env = try TestEnv(maxConcurrentClients: 1)
+        defer { env.tearDown() }
+        let first = try RawBridgeClient.connect(to: env.socketURL)
+        try await Task.sleep(for: .milliseconds(50))
+
+        let second = try RawBridgeClient.connect(to: env.socketURL)
+        let rejected = try? RawBridgeClient.readLine(from: second)
+        Darwin.close(second)
+        XCTAssertTrue(rejected == nil || rejected?.isEmpty == true)
+
+        Darwin.shutdown(first, SHUT_RDWR)
+        Darwin.close(first)
+        try await Task.sleep(for: .milliseconds(100))
+        let recovered = try await env.roundTrip(BridgeRequest(method: .listTabs, from: peer))
+        XCTAssertTrue(recovered.ok)
+    }
+
+    func testClientThatStopsReadingReleasesItsSlotAfterWriteDeadline() async throws {
+        let env = try TestEnv(
+            frameWriteDeadline: .milliseconds(100),
+            maxConcurrentClients: 1
+        )
+        defer { env.tearDown() }
+        env.delegate.tabs = [
+            BridgeTab(
+                tabID: "tab-2",
+                title: String(repeating: "x", count: 900_000),
+                directory: "/tmp",
+                status: "idle",
+                isSelf: false
+            )
+        ]
+
+        let stalled = try RawBridgeClient.connect(to: env.socketURL)
+        defer { Darwin.close(stalled) }
+        var receiveBuffer: Int32 = 1_024
+        _ = Darwin.setsockopt(
+            stalled,
+            SOL_SOCKET,
+            SO_RCVBUF,
+            &receiveBuffer,
+            socklen_t(MemoryLayout<Int32>.size)
+        )
+        try RawBridgeClient.writeAll(
+            try BridgeFraming.frame(BridgeRequest(method: .listTabs, from: peer)),
+            to: stalled
+        )
+
+        let firstRequestArrived = await waitUntil { env.delegate.listedPeers.count == 1 }
+        XCTAssertTrue(firstRequestArrived)
+        try await Task.sleep(for: .milliseconds(250))
+        env.delegate.tabs = []
+
+        let recovered = try await env.roundTrip(BridgeRequest(method: .listTabs, from: peer))
+        XCTAssertTrue(recovered.ok)
+        XCTAssertEqual(env.delegate.listedPeers.count, 2)
+    }
 }
 
 @MainActor
@@ -427,15 +521,24 @@ private final class TestEnv {
     let delegate: RecordingDelegate
 
     init(
-        start: Bool = true, attachDelegate: Bool = true, frameReadDeadline: Duration? = nil
+        start: Bool = true,
+        attachDelegate: Bool = true,
+        frameReadDeadline: Duration? = nil,
+        frameWriteDeadline: Duration? = nil,
+        maxConcurrentClients: Int? = nil
     ) throws {
         let short = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(8))
         socketURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(short).s")
         XCTAssertLessThan(
             socketURL.path.count, 100, "unix bind path is \(socketURL.path.count) chars")
         delegate = RecordingDelegate()
-        if let frameReadDeadline {
-            server = BridgeServer(socketURL: socketURL, frameReadDeadline: frameReadDeadline)
+        if frameReadDeadline != nil || frameWriteDeadline != nil || maxConcurrentClients != nil {
+            server = BridgeServer(
+                socketURL: socketURL,
+                frameReadDeadline: frameReadDeadline ?? .seconds(30),
+                frameWriteDeadline: frameWriteDeadline ?? .seconds(30),
+                maxConcurrentClients: maxConcurrentClients ?? BridgeServer.maxConcurrentClients
+            )
         } else {
             server = BridgeServer(socketURL: socketURL)
         }
@@ -498,6 +601,7 @@ private final class RecordingDelegate: BridgeServerDelegate {
     var askResponse = BridgeResponse(ok: true, answer: "pong")
     var replyResponse = BridgeResponse(ok: true)
     var askSleep: Duration = .zero
+    var askCancellationCount = 0
 
     var didReceiveWork: Bool {
         !listedPeers.isEmpty || !sent.isEmpty || !asked.isEmpty || !replies.isEmpty
@@ -525,7 +629,14 @@ private final class RecordingDelegate: BridgeServerDelegate {
     ) async -> BridgeResponse {
         asked.append(.init(peer: peer, target: target, question: question, timeout: timeout))
         if askSleep > .zero {
-            try? await Task.sleep(for: askSleep)
+            do {
+                try await Task.sleep(for: askSleep)
+            } catch is CancellationError {
+                askCancellationCount += 1
+                return .failure("cancelled")
+            } catch {
+                return .failure("interrupted")
+            }
         }
         return askResponse
     }

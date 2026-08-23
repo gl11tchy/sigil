@@ -7,19 +7,22 @@ struct NewSessionSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var directory: URL = FileManager.default.homeDirectoryForCurrentUser
-    @State private var model_ = ""
+    @State private var modelName = ""
     @State private var effort = ""
 
     /// Folders the user has recently worked in, newest first.
     private var recents: [URL] {
         var seen = Set<String>()
         return model.store.sessions.compactMap { session in
-            guard seen.insert(session.cwd).inserted else { return nil }
-            return URL(fileURLWithPath: session.cwd)
+            let url = URL(fileURLWithPath: GrokPaths.canonicalPath(session.cwd))
+            guard seen.insert(url.path).inserted else { return nil }
+            return isDirectory(url) ? url : nil
         }
         .prefix(8)
         .map { $0 }
     }
+
+    private var directoryIsAvailable: Bool { isDirectory(directory) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -28,13 +31,22 @@ struct NewSessionSheet: View {
 
             Form {
                 LabeledContent("Folder") {
-                    HStack(spacing: 8) {
-                        Text(directory.abbreviatedPath)
-                            .lineLimit(1)
-                            .truncationMode(.head)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Button("Choose…") {
-                            if let picked = model.pickDirectory() { directory = picked }
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Text(directory.abbreviatedPath)
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Button("Choose…") {
+                                if let picked = model.pickDirectory(startingAt: directory) {
+                                    directory = picked
+                                }
+                            }
+                        }
+                        if !directoryIsAvailable {
+                            Text("Folder unavailable.")
+                                .font(.caption)
+                                .foregroundStyle(.red)
                         }
                     }
                 }
@@ -48,7 +60,7 @@ struct NewSessionSheet: View {
                 }
 
                 LabeledContent("Model") {
-                    ModelNameField(text: $model_)
+                    ModelNameField(text: $modelName)
                 }
 
                 Picker("Effort", selection: $effort) {
@@ -64,19 +76,27 @@ struct NewSessionSheet: View {
                 Button("Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button("Start") {
-                    model.newTab(in: directory, model: model_, effort: effort)
-                    dismiss()
+                    if model.newTab(in: directory, model: modelName, effort: effort) != nil {
+                        dismiss()
+                    }
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
+                .disabled(!directoryIsAvailable || !model.settings.executableExists)
             }
         }
         .padding(20)
         .frame(width: 460)
         .onAppear {
             directory = model.currentDirectory
-            model_ = model.settings.model
+            modelName = model.settings.model
             effort = model.settings.effort
         }
+    }
+
+    private func isDirectory(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+            && isDirectory.boolValue
     }
 }

@@ -1,22 +1,46 @@
 import Foundation
 
-/// Locates plain-text matches in an array of terminal buffer lines.
-///
-/// Matches stay inside a single row so a selection is one contiguous cell
-/// range. Folding is case- and diacritic-insensitive; there is no regex.
+/// Locates plain-text matches in terminal rows while preserving cell positions.
 struct ScrollbackSearch: Equatable, Sendable {
+    struct Row: Equatable, Sendable {
+        let text: String
+        /// One terminal-column boundary for every Character boundary in `text`.
+        let cellColumns: [Int]
+        /// True when this row is a soft continuation of the previous row.
+        let isWrapped: Bool
+
+        init(text: String, cellColumns: [Int]? = nil, isWrapped: Bool = false) {
+            self.text = text
+            self.cellColumns = cellColumns ?? Array(0...text.count)
+            self.isWrapped = isWrapped
+        }
+    }
+
     struct Match: Equatable, Sendable {
-        /// Zero-based buffer row.
+        /// Zero-based start buffer row.
         let line: Int
-        /// Half-open column range in that row, matching `Position.col`.
+        /// Start-row cell range for compatibility with same-row callers.
         let columns: Range<Int>
+        /// Exclusive end position, which can be on a later soft-wrapped row.
+        let endLine: Int
+        let endColumn: Int
+    }
+
+    private struct CellPosition: Equatable, Sendable {
+        let row: Int
+        let column: Int
+    }
+
+    private struct LogicalLine: Sendable {
+        var text = ""
+        /// Boundary at each Character offset, including the exclusive end.
+        var positions: [CellPosition] = []
     }
 
     private static let fold: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
 
     private(set) var query: String = ""
     private(set) var matches: [Match] = []
-    /// Zero-based index into `matches`, or `nil` when there are none.
     private(set) var current: Int?
 
     var matchCount: Int { matches.count }
@@ -27,24 +51,30 @@ struct ScrollbackSearch: Equatable, Sendable {
     }
 
     mutating func setQuery(_ query: String, in lines: [String]) {
+        setQuery(query, in: lines.map { Row(text: $0) })
+    }
+
+    mutating func setQuery(_ query: String, in rows: [Row]) {
         if query.isEmpty {
             clear()
             return
         }
         self.query = query
-        matches = Self.locate(query, in: lines)
+        matches = Self.locate(query, in: rows)
         current = matches.isEmpty ? nil : 0
     }
 
-    /// Rematches the current query against `lines`, keeping the current hit
-    /// when that exact range is still present.
     mutating func updateLines(_ lines: [String]) {
+        updateRows(lines.map { Row(text: $0) })
+    }
+
+    mutating func updateRows(_ rows: [Row]) {
         guard !query.isEmpty else {
             clear()
             return
         }
         let previous = currentMatch
-        matches = Self.locate(query, in: lines)
+        matches = Self.locate(query, in: rows)
         if let previous, let index = matches.firstIndex(of: previous) {
             current = index
         } else if matches.isEmpty {
@@ -82,17 +112,57 @@ struct ScrollbackSearch: Equatable, Sendable {
         return currentMatch
     }
 
-    private static func locate(_ query: String, in lines: [String]) -> [Match] {
-        var found: [Match] = []
-        for (lineIndex, line) in lines.enumerated() {
-            var searchRange = line.startIndex..<line.endIndex
-            while let hit = line.range(of: query, options: fold, range: searchRange) {
-                let start = line.distance(from: line.startIndex, to: hit.lowerBound)
-                let end = line.distance(from: line.startIndex, to: hit.upperBound)
-                found.append(Match(line: lineIndex, columns: start..<end))
-                searchRange = hit.upperBound..<line.endIndex
+    private static func locate(_ query: String, in rows: [Row]) -> [Match] {
+        logicalLines(rows).flatMap { logical in
+            var found: [Match] = []
+            var searchRange = logical.text.startIndex..<logical.text.endIndex
+            while let hit = logical.text.range(of: query, options: fold, range: searchRange) {
+                let startOffset = logical.text.distance(
+                    from: logical.text.startIndex, to: hit.lowerBound)
+                let endOffset = logical.text.distance(
+                    from: logical.text.startIndex, to: hit.upperBound)
+                guard logical.positions.indices.contains(startOffset),
+                    logical.positions.indices.contains(endOffset)
+                else { break }
+                let start = logical.positions[startOffset]
+                let end = logical.positions[endOffset]
+                let sameRowEnd = end.row == start.row ? end.column : start.column + 1
+                found.append(
+                    Match(
+                        line: start.row,
+                        columns: start.column..<max(start.column, sameRowEnd),
+                        endLine: end.row,
+                        endColumn: end.column
+                    )
+                )
+                searchRange = hit.upperBound..<logical.text.endIndex
+            }
+            return found
+        }
+    }
+
+    private static func logicalLines(_ rows: [Row]) -> [LogicalLine] {
+        var result: [LogicalLine] = []
+        for (rowIndex, row) in rows.enumerated() {
+            let columns =
+                row.cellColumns.count == row.text.count + 1
+                ? row.cellColumns : Array(0...row.text.count)
+            if result.isEmpty || !row.isWrapped {
+                result.append(LogicalLine())
+            }
+            let index = result.count - 1
+            if result[index].positions.isEmpty {
+                result[index].positions.append(CellPosition(row: rowIndex, column: columns[0]))
+            } else {
+                // Replace the prior row's exclusive end with the continuation's start.
+                result[index].positions[result[index].positions.count - 1] =
+                    CellPosition(row: rowIndex, column: columns[0])
+            }
+            result[index].text += row.text
+            for boundary in columns.dropFirst() {
+                result[index].positions.append(CellPosition(row: rowIndex, column: boundary))
             }
         }
-        return found
+        return result
     }
 }

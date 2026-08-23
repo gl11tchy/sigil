@@ -40,11 +40,13 @@ final class BridgeIntegrationTests: XCTestCase {
         let outcome = try await callTool(
             env, "send_to_tab", ["tab": "tab-other", "message": "hello there"])
 
-        XCTAssertEqual(env.delegate.sent, [
-            .init(peer: peer, target: "tab-other", message: "hello there")
-        ])
+        XCTAssertEqual(
+            env.delegate.sent,
+            [
+                .init(peer: peer, target: "tab-other", message: "hello there")
+            ])
         XCTAssertFalse(outcome.isError)
-        XCTAssertEqual(outcome.text, "Delivered.\nto Other")
+        XCTAssertEqual(outcome.text, "Queued.\nto Other")
     }
 
     func testAskTabReturnsAnswerText() async throws {
@@ -56,9 +58,11 @@ final class BridgeIntegrationTests: XCTestCase {
             env, "ask_tab",
             ["tab": "tab-other", "question": "why?", "timeout_seconds": 30])
 
-        XCTAssertEqual(env.delegate.asked, [
-            .init(peer: peer, target: "tab-other", question: "why?", timeout: 30)
-        ])
+        XCTAssertEqual(
+            env.delegate.asked,
+            [
+                .init(peer: peer, target: "tab-other", question: "why?", timeout: 30)
+            ])
         XCTAssertFalse(outcome.isError)
         XCTAssertEqual(outcome.text, "because")
     }
@@ -71,9 +75,11 @@ final class BridgeIntegrationTests: XCTestCase {
         let outcome = try await callTool(
             env, "reply_to", ["request_id": "req-9", "answer": "the answer"])
 
-        XCTAssertEqual(env.delegate.replies, [
-            .init(peer: peer, requestID: "req-9", answer: "the answer")
-        ])
+        XCTAssertEqual(
+            env.delegate.replies,
+            [
+                .init(peer: peer, requestID: "req-9", answer: "the answer")
+            ])
         XCTAssertFalse(outcome.isError)
         XCTAssertEqual(outcome.text, "Replied.\naccepted")
     }
@@ -88,9 +94,11 @@ final class BridgeIntegrationTests: XCTestCase {
             env, "ask_tab",
             ["tab": "tab-other", "question": "slow?", "timeout_seconds": 30])
 
-        XCTAssertEqual(env.delegate.asked, [
-            .init(peer: peer, target: "tab-other", question: "slow?", timeout: 30)
-        ])
+        XCTAssertEqual(
+            env.delegate.asked,
+            [
+                .init(peer: peer, target: "tab-other", question: "slow?", timeout: 30)
+            ])
         XCTAssertFalse(outcome.isError)
         XCTAssertTrue(outcome.text.contains("after-a-pause"), outcome.text)
     }
@@ -104,9 +112,11 @@ final class BridgeIntegrationTests: XCTestCase {
             env, "ask_tab",
             ["tab": "tab-other", "question": "anyone there?", "timeout_seconds": 30])
 
-        XCTAssertEqual(env.delegate.asked, [
-            .init(peer: peer, target: "tab-other", question: "anyone there?", timeout: 30)
-        ])
+        XCTAssertEqual(
+            env.delegate.asked,
+            [
+                .init(peer: peer, target: "tab-other", question: "anyone there?", timeout: 30)
+            ])
         XCTAssertTrue(outcome.isError)
         XCTAssertTrue(outcome.text.lowercased().contains("not answer"), outcome.text)
         XCTAssertTrue(outcome.text.contains("30"), outcome.text)
@@ -127,18 +137,18 @@ final class BridgeIntegrationTests: XCTestCase {
     func testLongMessageSurvivesRoundTrip() async throws {
         let env = try TestEnv(peer: peer)
         defer { env.tearDown() }
-        let message = String(repeating: "m", count: BridgeLimits.maxMessageCharacters + 250)
+        let message = String(repeating: "m", count: BridgeLimits.maxMessageBytes + 250)
 
         let outcome = try await callTool(
             env, "send_to_tab", ["tab": "tab-other", "message": message])
 
         let received = try XCTUnwrap(env.delegate.sent.first?.message)
         XCTAssertFalse(received.isEmpty)
-        let prefixCount = min(received.count, message.count, BridgeLimits.maxMessageCharacters)
-        XCTAssertGreaterThan(prefixCount, 0)
-        XCTAssertEqual(String(received.prefix(prefixCount)), String(message.prefix(prefixCount)))
+        XCTAssertTrue(received.hasPrefix(String(repeating: "m", count: 100)))
+        XCTAssertTrue(received.contains("truncated by Sigil"))
+        XCTAssertLessThanOrEqual(received.utf8.count, BridgeLimits.maxMessageBytes)
         XCTAssertFalse(outcome.isError)
-        XCTAssertTrue(outcome.text.hasPrefix("Delivered."))
+        XCTAssertTrue(outcome.text.hasPrefix("Queued."))
     }
 
     // MARK: - Helpers

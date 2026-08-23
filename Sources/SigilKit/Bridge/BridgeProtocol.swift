@@ -33,7 +33,7 @@ public struct BridgePeer: Codable, Sendable, Hashable {
     /// True when neither identifier is present, which means the client was not
     /// launched by Sigil and cannot be placed in the tab list.
     public var isAnonymous: Bool {
-        (tabID?.isEmpty ?? true) && (sessionID?.isEmpty ?? true)
+        tabID?.nilIfBlank == nil && sessionID?.nilIfBlank == nil
     }
 }
 
@@ -141,9 +141,11 @@ public enum BridgeLimits {
     public static let maxAskSeconds: Double = 900
     public static let defaultAskSeconds: Double = 300
     public static let minAskSeconds: Double = 5
-    /// Longest single message. A tab that pastes a whole file at another tab
-    /// wedges its pty, so the broker truncates instead.
-    public static let maxMessageCharacters = 8_000
+    /// Longest single UTF-8 message. A byte limit prevents one extended
+    /// grapheme from expanding into an arbitrarily large socket frame.
+    public static let maxMessageBytes = 8_000
+    /// Source compatibility for clients built against version 1 of the API.
+    public static let maxMessageCharacters = maxMessageBytes
     /// Refuses a frame that could only be a runaway or a different protocol.
     public static let maxFrameBytes = 1 << 20
 
@@ -152,15 +154,24 @@ public enum BridgeLimits {
         return min(max(requested, minAskSeconds), maxAskSeconds)
     }
 
-    /// Trims `text` to the message cap, marking it so the reader knows why it
-    /// stops. Returns `nil` for text that is empty once trimmed.
+    /// Sanitizes and trims `text` to the byte cap, marking it so the reader
+    /// knows why it stops. Returns `nil` when nothing visible remains.
     public static func clampedMessage(_ text: String?) -> String? {
         guard let text else { return nil }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return nil }
-        if trimmed.count <= maxMessageCharacters { return trimmed }
-        let head = String(trimmed.prefix(maxMessageCharacters))
-        return head + "\n[truncated by Sigil at \(maxMessageCharacters) characters]"
+        let cleaned = BridgePrompt.sanitize(text)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return nil }
+        let bytes = Data(cleaned.utf8)
+        guard bytes.count > maxMessageBytes else { return cleaned }
+
+        let suffix = " [truncated by Sigil at \(maxMessageBytes) bytes]"
+        let prefixLimit = max(0, maxMessageBytes - suffix.utf8.count)
+        var prefixBytes = Data(bytes.prefix(prefixLimit))
+        while String(data: prefixBytes, encoding: .utf8) == nil, !prefixBytes.isEmpty {
+            prefixBytes.removeLast()
+        }
+        guard let prefix = String(data: prefixBytes, encoding: .utf8) else { return nil }
+        return prefix + suffix
     }
 }
 
@@ -182,6 +193,7 @@ public enum BridgeFraming {
     /// Encodes `value` as one frame, including its trailing newline.
     public static func frame<T: Encodable>(_ value: T) throws -> Data {
         var data = try encoder.encode(value)
+        guard data.count <= BridgeLimits.maxFrameBytes else { throw Error.frameTooLarge }
         // A payload may not contain a raw newline: JSON escapes them, so the
         // separator stays unambiguous without any further quoting.
         data.append(0x0A)
@@ -200,6 +212,8 @@ public enum BridgeFraming {
     public static func drainLines(from buffer: inout Data) throws -> [Data] {
         var lines: [Data] = []
         while let index = buffer.firstIndex(of: 0x0A) {
+            let length = buffer.distance(from: buffer.startIndex, to: index)
+            guard length <= BridgeLimits.maxFrameBytes else { throw Error.frameTooLarge }
             let line = buffer[buffer.startIndex..<index]
             buffer.removeSubrange(buffer.startIndex...index)
             let trimmed = trimTrailingReturn(Data(line))
@@ -225,7 +239,8 @@ public enum BridgePaths {
     public static let grokSessionEnvironmentKey = "GROK_SESSION_ID"
 
     public static var supportDirectory: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+        let base =
+            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first ?? FileManager.default.homeDirectoryForCurrentUser
         return base.appendingPathComponent("Sigil", isDirectory: true)
     }
@@ -237,8 +252,12 @@ public enum BridgePaths {
     /// The socket this process should use: the environment wins, so a second
     /// Sigil (or a test) never fights the first one for the same path.
     public static var configuredSocket: URL {
-        if let path = ProcessInfo.processInfo.environment[socketEnvironmentKey],
-            !path.isEmpty
+        configuredSocket(environment: ProcessInfo.processInfo.environment)
+    }
+
+    public static func configuredSocket(environment: [String: String]) -> URL {
+        if let path = environment[socketEnvironmentKey],
+            let path = path.nilIfBlank
         {
             return URL(fileURLWithPath: path)
         }

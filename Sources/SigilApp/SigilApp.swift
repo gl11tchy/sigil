@@ -28,10 +28,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        MainActor.assumeIsolated { model?.appDidBecomeActive() }
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         MainActor.assumeIsolated {
             guard let model else { return .terminateNow }
-            let working = model.tabs.filter { $0.activity == .working }.count
+            let working = model.tabs.filter(\.shouldWarnBeforeStopping).count
             guard working > 0 else { return .terminateNow }
             let alert = NSAlert()
             alert.messageText =
@@ -67,13 +71,9 @@ struct GrokCommands: Commands {
                 .disabled(model.tabs.isEmpty)
             Divider()
             Button("Export Transcript…") {
-                if let id = model.selectedTab?.sessionID,
-                    let session = model.store.sessions.first(where: { $0.id == id })
-                {
-                    model.exportTranscript(session)
-                }
+                model.exportSelectedTranscript()
             }
-            .disabled(model.selectedTab?.sessionID == nil)
+            .disabled(!model.canExportSelectedTranscript)
         }
 
         CommandGroup(replacing: .pasteboard) {
@@ -135,6 +135,13 @@ struct GrokCommands: Commands {
             ForEach(1...9, id: \.self) { index in
                 Button("Tab \(index)") { model.select(index: index - 1) }
                     .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: .command)
+            }
+        }
+
+        CommandGroup(after: .help) {
+            Button("Check for Updates…") {
+                NSWorkspace.shared.open(
+                    URL(string: "https://github.com/gl11tchy/sigil/releases/latest")!)
             }
         }
     }

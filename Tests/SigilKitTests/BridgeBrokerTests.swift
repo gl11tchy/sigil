@@ -13,9 +13,9 @@ struct PendingAskRegistryTests {
         }
         #expect(await waitUntil { registry.isPending("q1") })
 
-        #expect(registry.reply(id: "q1", answer: "hello"))
+        #expect(registry.reply(id: "q1", answer: "hello", respondingTabID: "tgt"))
         #expect(await waiter.value == .answered("hello"))
-        #expect(!registry.reply(id: "q1", answer: "again"))
+        #expect(!registry.reply(id: "q1", answer: "again", respondingTabID: "tgt"))
         #expect(!registry.isPending("q1"))
 
         try? await Task.sleep(for: .milliseconds(250))
@@ -31,7 +31,7 @@ struct PendingAskRegistryTests {
 
         #expect(await waiter.value == .timedOut)
         #expect(registry.timeoutResumeCount == 1)
-        #expect(!registry.reply(id: "q2", answer: "late"))
+        #expect(!registry.reply(id: "q2", answer: "late", respondingTabID: "tgt"))
         #expect(!registry.isPending("q2"))
     }
 
@@ -44,7 +44,7 @@ struct PendingAskRegistryTests {
 
         registry.failTarget(tabID: "tgt")
         #expect(await waiter.value == .targetExited)
-        #expect(!registry.reply(id: "q3", answer: "late"))
+        #expect(!registry.reply(id: "q3", answer: "late", respondingTabID: "tgt"))
         #expect(!registry.isPending("q3"))
 
         try? await Task.sleep(for: .milliseconds(250))
@@ -68,7 +68,7 @@ struct PendingAskRegistryTests {
         #expect(await asAsker.value == .tabClosed)
         #expect(await asTarget.value == .tabClosed)
         #expect(registry.isPending("qo"))
-        #expect(registry.reply(id: "qo", answer: "ok"))
+        #expect(registry.reply(id: "qo", answer: "ok", respondingTabID: "b"))
         #expect(await other.value == .answered("ok"))
     }
 
@@ -85,8 +85,67 @@ struct PendingAskRegistryTests {
         registry.failTarget(tabID: "gone")
         #expect(await asTarget.value == .targetExited)
         #expect(registry.isPending("qa"))
-        #expect(registry.reply(id: "qa", answer: "still going"))
+        #expect(registry.reply(id: "qa", answer: "still going", respondingTabID: "live"))
         #expect(await asAsker.value == .answered("still going"))
+    }
+
+    @Test func wrongTabCannotAnswerAnotherTabsQuestion() async {
+        let registry = PendingAskRegistry()
+        let waiter = Task { @MainActor in
+            await registry.ask(id: "q4", askingTabID: "ask", targetTabID: "target", timeout: 2)
+        }
+        #expect(await waitUntil { registry.isPending("q4") })
+
+        #expect(!registry.reply(id: "q4", answer: "forged", respondingTabID: "intruder"))
+        #expect(registry.isPending("q4"))
+        #expect(registry.reply(id: "q4", answer: "real", respondingTabID: "target"))
+        #expect(await waiter.value == .answered("real"))
+    }
+
+    @Test func cancellingAskingTaskClearsPendingQuestion() async {
+        let registry = PendingAskRegistry()
+        let waiter = Task { @MainActor in
+            await registry.ask(id: "q5", askingTabID: "ask", targetTabID: "target", timeout: 2)
+        }
+        #expect(await waitUntil { registry.isPending("q5") })
+
+        waiter.cancel()
+        #expect(await waiter.value == .cancelled)
+        #expect(!registry.isPending("q5"))
+    }
+
+    @Test func clearAskingTabLeavesOtherQuestionsAlone() async {
+        let registry = PendingAskRegistry()
+        let removed = Task { @MainActor in
+            await registry.ask(
+                id: "q6", askingTabID: "gone", targetTabID: "target", timeout: 2)
+        }
+        let retained = Task { @MainActor in
+            await registry.ask(
+                id: "q7", askingTabID: "other", targetTabID: "target", timeout: 2)
+        }
+        #expect(
+            await waitUntil {
+                registry.isPending("q6") && registry.isPending("q7")
+            })
+
+        registry.clearAskingTab(tabID: "gone")
+        #expect(await removed.value == .tabClosed)
+        #expect(registry.isPending("q7"))
+        #expect(registry.reply(id: "q7", answer: "ok", respondingTabID: "target"))
+        #expect(await retained.value == .answered("ok"))
+    }
+
+    @Test func explicitCancellationResumesOnlyOnce() async {
+        let registry = PendingAskRegistry()
+        let waiter = Task { @MainActor in
+            await registry.ask(id: "q8", askingTabID: "ask", targetTabID: "target", timeout: 2)
+        }
+        #expect(await waitUntil { registry.isPending("q8") })
+
+        #expect(registry.cancel(id: "q8"))
+        #expect(await waiter.value == .cancelled)
+        #expect(!registry.cancel(id: "q8"))
     }
 }
 
@@ -175,7 +234,7 @@ struct BridgeRoutingTests {
         #expect(match == c.expected)
     }
 
-    @Test func peerPrefersTabIDThenSessionID() {
+    @Test func peerUsesTabIDAuthoritativelyAndFallsBackOnlyWhenAbsent() {
         #expect(
             BridgeRouting.matchPeer(BridgePeer(tabID: Self.alpha.tabID), tabs: Self.tabs)
                 == .found(Self.alpha)
@@ -187,9 +246,13 @@ struct BridgeRoutingTests {
         #expect(
             BridgeRouting.matchPeer(
                 BridgePeer(tabID: "missing", sessionID: "sess-delta"), tabs: Self.tabs)
-                == .found(Self.delta)
+                == .notFound
         )
         #expect(BridgeRouting.matchPeer(BridgePeer(tabID: "missing"), tabs: Self.tabs) == .notFound)
+    }
+
+    @Test func whitespaceOnlyPeerIsAnonymous() {
+        #expect(BridgePeer(tabID: " \n", sessionID: "\t").isAnonymous)
     }
 }
 
@@ -252,5 +315,52 @@ struct BridgePromptIdempotenceTests {
         let prompt = BridgePrompt.send(fromTitle: "A", fromTabID: "t1", message: "hello")
         #expect(prompt.hasPrefix(BridgePrompt.marker))
         #expect(!BridgePrompt.sanitize(prompt).hasPrefix(BridgePrompt.marker))
+    }
+}
+
+@Suite("Bridge byte limits")
+struct BridgeByteLimitTests {
+    @Test func configuredSocketUsesNonblankEnvironmentOverride() {
+        let path = "/tmp/sigil-review.sock"
+        #expect(
+            BridgePaths.configuredSocket(environment: [BridgePaths.socketEnvironmentKey: path])
+                .path == path
+        )
+        #expect(
+            BridgePaths.configuredSocket(environment: [BridgePaths.socketEnvironmentKey: "  "])
+                == BridgePaths.defaultSocket
+        )
+    }
+
+    @Test func oneLargeExtendedGraphemeCannotBypassMessageLimit() throws {
+        let source = "a" + String(repeating: "\u{0301}", count: 9_000)
+        #expect(source.count == 1)
+        let result = try #require(BridgeLimits.clampedMessage(source))
+        #expect(result.utf8.count <= BridgeLimits.maxMessageBytes)
+        #expect(result.contains("truncated by Sigil"))
+    }
+
+    @Test func textEmptyAfterSanitizingIsRejected() {
+        #expect(BridgeLimits.clampedMessage("\u{0000}\u{0007}\u{007F}") == nil)
+    }
+
+    @Test func completeOversizedLineIsRejected() {
+        var buffer = Data(repeating: 0x41, count: BridgeLimits.maxFrameBytes + 1)
+        buffer.append(0x0A)
+        #expect(throws: BridgeFraming.Error.frameTooLarge) {
+            _ = try BridgeFraming.drainLines(from: &buffer)
+        }
+    }
+
+    @Test func encoderRejectsOversizedFrameBeforeWriting() {
+        let request = BridgeRequest(
+            method: .sendToTab,
+            from: BridgePeer(tabID: "self"),
+            target: "other",
+            text: String(repeating: "x", count: BridgeLimits.maxFrameBytes + 1)
+        )
+        #expect(throws: BridgeFraming.Error.frameTooLarge) {
+            _ = try BridgeFraming.frame(request)
+        }
     }
 }

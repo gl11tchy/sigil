@@ -48,12 +48,31 @@ struct TerminalLaunchSpecTests {
     }
 
     @Test func environmentPutsGrokBinOnPATHOnceAndSetsTERM() {
-        let spec = GrokLaunchSpec(workingDirectory: cwd, mode: .continueLatest)
+        let custom = URL(fileURLWithPath: "/opt/custom-grok/bin/grok")
+        let spec = GrokLaunchSpec(
+            executable: custom, workingDirectory: cwd, mode: .continueLatest)
         let env = spec.environment()
         let grokBin = GrokPaths.home.appendingPathComponent("bin").path
         let pathEntries = (env["PATH"] ?? "").split(separator: ":").map(String.init)
         #expect(pathEntries.filter { $0 == grokBin }.count == 1)
+        #expect(pathEntries.filter { $0 == custom.deletingLastPathComponent().path }.count == 1)
+        #expect(Set(pathEntries).count == pathEntries.count)
         #expect(env["TERM"] == "xterm-256color")
+    }
+
+    @Test func hostCommandUsesLoginShellAndExecsExactCLIArguments() {
+        let executable = URL(fileURLWithPath: "/opt/grok with spaces/grok")
+        let spec = GrokLaunchSpec(
+            executable: executable,
+            workingDirectory: cwd,
+            mode: .resume(sessionID: "abc")
+        )
+
+        let command = spec.hostCommand(processEnvironment: ["SHELL": "/bin/zsh"])
+        #expect(command.executable.path == "/bin/zsh")
+        #expect(command.arguments.prefix(3) == ["-lic", "exec \"$@\"", "sigil-grok"])
+        #expect(command.arguments.dropFirst(3).first == executable.path)
+        #expect(command.arguments.suffix(4) == ["--cwd", cwd.path, "--resume", "abc"])
     }
 
     struct BridgeEnvCase {

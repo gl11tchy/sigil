@@ -20,34 +20,35 @@ struct SidebarView: View {
     @State private var keyboardSelectionID: String?
     @State private var pendingDelete: GrokSession?
 
-    /// The history runs to thousands of rows; the sidebar shows the newest slice
-    /// and search reaches the rest.
-    private static let rowLimit = 400
-
     var body: some View {
         let sessions = model.sidebarSessions
-        let shown = Array(sessions.prefix(Self.rowLimit))
+        // LazyVStack keeps a large history cheap without making older matches
+        // unreachable behind an arbitrary row cap.
+        let shown = sessions
 
         VStack(spacing: 0) {
             // The traffic lights live here. Nothing else may.
             Color.clear.frame(height: 36)
             searchRow(shown: shown)
             list(shown: shown, buckets: SessionBucket.bucket(shown), isEmpty: sessions.isEmpty)
-            footer(hidden: sessions.count - shown.count)
+            footer
         }
         .background(palette.sidebar)
         .overlay(alignment: .trailing) { Rectangle().fill(palette.hairline).frame(width: 1) }
         .alert(
-            "Move this conversation to the Trash?",
+            deleteConfirmationTitle,
             isPresented: Binding(
                 get: { pendingDelete != nil },
                 set: { if !$0 { pendingDelete = nil } }
             ),
             presenting: pendingDelete
         ) { session in
-            Button("Delete", role: .destructive) {
-                model.deleteConversation(session)
-                if keyboardSelectionID == session.id { keyboardSelectionID = nil }
+            Button("Move to Trash", role: .destructive) {
+                if model.deleteConversation(session),
+                    keyboardSelectionID == model.sessionKey(session)
+                {
+                    keyboardSelectionID = nil
+                }
             }
             Button("Cancel", role: .cancel) {}
         }
@@ -81,7 +82,9 @@ struct SidebarView: View {
                     }
                     .onExitCommand { clearSearch() }
                 if !model.searchText.isEmpty {
-                    Button { model.searchText = "" } label: {
+                    Button {
+                        model.searchText = ""
+                    } label: {
                         Image(systemName: "xmark.circle.fill").font(.system(size: 10))
                     }
                     .buttonStyle(.plain)
@@ -118,20 +121,21 @@ struct SidebarView: View {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                     ForEach(buckets) { bucket in
                         Section {
-                            ForEach(Array(bucket.sessions.enumerated()), id: \.element.id) { index, session in
+                            ForEach(Array(bucket.sessions.enumerated()), id: \.element.directory) { index, session in
                                 SessionRow(
                                     session: session,
                                     state: state(of: session),
-                                    isKeyboardSelected: session.id == keyboardSelectionID,
+                                    isKeyboardSelected:
+                                        model.sessionKey(session) == keyboardSelectionID,
                                     // The last row in a bucket runs into a section
                                     // header, which is its own separation.
                                     showsDivider: index < bucket.sessions.count - 1,
                                     open: {
-                                        keyboardSelectionID = session.id
+                                        keyboardSelectionID = model.sessionKey(session)
                                         model.open(session)
                                     }
                                 )
-                                .id(session.id)
+                                .id(model.sessionKey(session))
                                 .contextMenu {
                                     Button("Open in New Tab") { model.open(session) }
                                     Divider()
@@ -177,9 +181,20 @@ struct SidebarView: View {
     }
 
     private func state(of session: GrokSession) -> SessionRow.State {
-        if session.id == model.activeSessionID { return .active }
-        if model.openSessionIDs.contains(session.id) { return .open }
+        if model.isActive(session) { return .active }
+        if model.isOpen(session) { return .open }
         return .closed
+    }
+
+    private var deleteConfirmationTitle: String {
+        guard let pendingDelete else { return "Move this conversation to Trash?" }
+        if model.shouldWarnBeforeDeleting(pendingDelete) {
+            return "Stop this working session and move it to Trash?"
+        }
+        if model.isRunning(pendingDelete) {
+            return "Close this session and move it to Trash?"
+        }
+        return "Move this conversation to Trash?"
     }
 
     /// Empty states teach the interface rather than announcing the obvious.
@@ -212,8 +227,10 @@ struct SidebarView: View {
 
     private func moveFocusToList(shown: [GrokSession]) -> KeyPress.Result {
         guard !shown.isEmpty else { return .ignored }
-        if keyboardSelectionID == nil || !shown.contains(where: { $0.id == keyboardSelectionID }) {
-            keyboardSelectionID = shown[0].id
+        if keyboardSelectionID == nil
+            || !shown.contains(where: { model.sessionKey($0) == keyboardSelectionID })
+        {
+            keyboardSelectionID = model.sessionKey(shown[0])
         }
         focus = .list
         return .handled
@@ -221,7 +238,7 @@ struct SidebarView: View {
 
     private func moveKeyboardSelection(in shown: [GrokSession], by delta: Int) -> KeyPress.Result {
         guard !shown.isEmpty else { return .ignored }
-        let ids = shown.map(\.id)
+        let ids = shown.map(model.sessionKey)
         if let current = keyboardSelectionID, let index = ids.firstIndex(of: current) {
             keyboardSelectionID = ids[min(max(index + delta, 0), ids.count - 1)]
         } else {
@@ -232,7 +249,7 @@ struct SidebarView: View {
 
     private func openKeyboardSelection(in shown: [GrokSession]) -> KeyPress.Result {
         guard let id = keyboardSelectionID,
-            let session = shown.first(where: { $0.id == id })
+            let session = shown.first(where: { model.sessionKey($0) == id })
         else { return .ignored }
         model.open(session)
         return .handled
@@ -240,15 +257,14 @@ struct SidebarView: View {
 
     private func clampKeyboardSelection() {
         guard let id = keyboardSelectionID else { return }
-        let shown = model.sidebarSessions.prefix(Self.rowLimit)
-        if !shown.contains(where: { $0.id == id }) {
+        if !model.sidebarSessions.contains(where: { model.sessionKey($0) == id }) {
             keyboardSelectionID = nil
         }
     }
 
     // MARK: - Footer
 
-    private func footer(hidden: Int) -> some View {
+    private var footer: some View {
         HStack(spacing: 5) {
             if model.store.isLoading {
                 ProgressView()
@@ -256,7 +272,7 @@ struct SidebarView: View {
                     .scaleEffect(0.55)
                     .frame(width: 10, height: 10)
             }
-            Text(statusText(hidden: hidden))
+            Text(statusText)
                 .font(.system(size: 9.5, design: .monospaced))
                 .foregroundStyle(
                     model.store.loadError == nil
@@ -270,11 +286,9 @@ struct SidebarView: View {
         .overlay(alignment: .top) { Rectangle().fill(palette.hairline).frame(height: 1) }
     }
 
-    private func statusText(hidden: Int) -> String {
+    private var statusText: String {
         if let error = model.store.loadError { return error }
-        let total = model.sidebarSessions.count
-        if hidden > 0 { return "\(total) threads · \(hidden) older" }
-        return "\(total) threads"
+        return "\(model.sidebarSessions.count) threads"
     }
 }
 
@@ -291,7 +305,9 @@ private struct ScopeToggle: View {
     }
 
     var body: some View {
-        Button { isOn.toggle() } label: {
+        Button {
+            isOn.toggle()
+        } label: {
             Image(systemName: isOn ? "folder.fill" : "folder")
                 .font(.system(size: 10.5, weight: .medium))
                 .frame(width: 26, height: 26)

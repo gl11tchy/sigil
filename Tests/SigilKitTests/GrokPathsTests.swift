@@ -32,3 +32,13 @@ import Testing
 func encodeDecodeRoundTrip(path: String) {
     #expect(GrokPaths.decode(directoryName: GrokPaths.encode(path: path)) == path)
 }
+
+@Test func canonicalPathMatchesMacOSRealpathForVar() {
+    #expect(GrokPaths.canonicalPath("/var") == "/private/var")
+    #expect(
+        GrokPaths.sessionDirectory(cwd: "/var", sessionID: "session").path
+            == GrokPaths.sessionsRoot
+            .appendingPathComponent("%2Fprivate%2Fvar")
+            .appendingPathComponent("session").path
+    )
+}

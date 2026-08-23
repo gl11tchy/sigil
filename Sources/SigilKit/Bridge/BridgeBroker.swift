@@ -43,11 +43,13 @@ public enum BridgeTargetMatch: Equatable, Sendable {
 /// Resolves a calling peer and a send/ask target against a fixed tab list.
 public enum BridgeRouting {
 
-    /// Prefer `tabID` against `BridgeTabRef.tabID`; if that misses, `sessionID`.
+    /// A supplied tab id is authoritative. Only fall back to the session id
+    /// when no tab id was supplied; a stale helper must not impersonate a new tab.
     public static func matchPeer(_ peer: BridgePeer, tabs: [BridgeTabRef]) -> BridgePeerMatch {
-        if let tabID = peer.tabID?.nilIfBlank,
-            let tab = tabs.first(where: { $0.tabID == tabID })
-        {
+        if let tabID = peer.tabID?.nilIfBlank {
+            guard let tab = tabs.first(where: { $0.tabID == tabID }) else {
+                return .notFound
+            }
             return .found(tab)
         }
         if let sessionID = peer.sessionID?.nilIfBlank,
@@ -149,13 +151,14 @@ public enum BridgePrompt {
 /// In-flight `ask_tab` questions. Every resume path (reply, timeout, target exit,
 /// tab close) goes through one gate so the continuation runs exactly once.
 @MainActor
-public final class PendingAskRegistry {
+public final class PendingAskRegistry: @unchecked Sendable {
 
     public enum Outcome: Equatable, Sendable {
         case answered(String)
         case timedOut
         case targetExited
         case tabClosed
+        case cancelled
     }
 
     private struct Slot {
@@ -180,30 +183,38 @@ public final class PendingAskRegistry {
         targetTabID: String,
         timeout: Double
     ) async -> Outcome {
-        await withCheckedContinuation { continuation in
-            if slots[id] != nil {
-                continuation.resume(returning: .tabClosed)
-                return
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled, slots[id] == nil else {
+                    continuation.resume(returning: .tabClosed)
+                    return
+                }
+                let timeoutTask = Task { @MainActor [weak self] in
+                    let seconds = max(timeout, 0)
+                    try? await Task.sleep(for: .seconds(seconds))
+                    guard !Task.isCancelled else { return }
+                    self?.resumeTimeout(id)
+                }
+                slots[id] = Slot(
+                    askingTabID: askingTabID,
+                    targetTabID: targetTabID,
+                    continuation: continuation,
+                    timeoutTask: timeoutTask
+                )
             }
-            let timeoutTask = Task { @MainActor [weak self] in
-                let seconds = max(timeout, 0)
-                try? await Task.sleep(for: .seconds(seconds))
-                guard !Task.isCancelled else { return }
-                self?.resumeTimeout(id)
+        } onCancel: { @Sendable [weak self, id] in
+            Task { @MainActor [weak self, id] in
+                self?.cancel(id: id)
             }
-            slots[id] = Slot(
-                askingTabID: askingTabID,
-                targetTabID: targetTabID,
-                continuation: continuation,
-                timeoutTask: timeoutTask
-            )
         }
     }
 
-    /// Completes a pending ask. Returns false when the id is unknown or already done.
+    /// Completes a pending ask only when the replying tab is its intended target.
+    /// Returns false for a wrong responder, unknown id, or completed ask.
     @discardableResult
-    public func reply(id: String, answer: String) -> Bool {
-        resume(id, .answered(answer))
+    public func reply(id: String, answer: String, respondingTabID: String) -> Bool {
+        guard slots[id]?.targetTabID == respondingTabID else { return false }
+        return resume(id, .answered(answer))
     }
 
     public func failTarget(tabID: String) {
@@ -216,6 +227,12 @@ public final class PendingAskRegistry {
             (entry.value.askingTabID == tabID || entry.value.targetTabID == tabID)
                 ? entry.key : nil
         }
+        for id in ids { resume(id, .tabClosed) }
+    }
+
+    /// Clears questions originated by a tab whose client or process went away.
+    public func clearAskingTab(tabID: String) {
+        let ids = slots.compactMap { $0.value.askingTabID == tabID ? $0.key : nil }
         for id in ids { resume(id, .tabClosed) }
     }
 
@@ -234,5 +251,11 @@ public final class PendingAskRegistry {
     private func resumeTimeout(_ id: String) {
         guard resume(id, .timedOut) else { return }
         timeoutResumeCount += 1
+    }
+
+    /// Cancels one pending ask, for example when delivery is declined.
+    @discardableResult
+    public func cancel(id: String) -> Bool {
+        resume(id, .cancelled)
     }
 }

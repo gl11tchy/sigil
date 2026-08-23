@@ -1,8 +1,8 @@
 import AppKit
 import Darwin
 import Foundation
-import os
 import SwiftTerm
+import os
 
 /// Owns one `grok` child process and the view that renders it.
 @MainActor
@@ -18,6 +18,8 @@ public final class TerminalController {
     public var onTerminate: ((Int32?) -> Void)?
     /// Called when the child writes output, coalesced to at most once per ~200 ms.
     public var onActivity: (() -> Void)?
+    /// Called when the user submits a prompt with Return or a multiline paste.
+    public var onUserSubmit: (() -> Void)?
     /// Called when the child sets the terminal title (the CLI reports its state here).
     public var onTitleChange: ((String) -> Void)?
 
@@ -30,10 +32,13 @@ public final class TerminalController {
     private var didReportExit = false
 
     public init(theme: TerminalTheme = .grokNight, fontSize: CGFloat = 13) {
+        var options = TerminalOptions.default
+        options.scrollback = 10_000
+        options.screenReaderMode = true
         let terminal = GrokProcessTerminalView(
             frame: NSRect(x: 0, y: 0, width: 800, height: 480),
             font: Self.monospacedFont(size: Self.clampedFontSize(fontSize)),
-            options: TerminalOptions.default
+            options: options
         )
         self.terminalView = terminal
         self.view = terminal
@@ -41,6 +46,13 @@ public final class TerminalController {
         terminal.onChildOutput = { [weak self] in
             self?.noteActivity()
         }
+        terminal.onUserSubmit = { [weak self] in
+            self?.onUserSubmit?()
+        }
+        terminal.setAccessibilityElement(true)
+        terminal.setAccessibilityRole(.textArea)
+        terminal.setAccessibilityLabel("Grok terminal")
+        terminal.setAccessibilityValue("")
         apply(theme: theme)
     }
 
@@ -50,8 +62,10 @@ public final class TerminalController {
             pid = 0
             return current
         }
-        Self.signal(SIGTERM, to: pid)
-        Self.signal(SIGKILL, to: pid)
+        if !Self.reap(pid) {
+            Self.signal(SIGTERM, to: pid)
+            Self.signal(SIGKILL, to: pid)
+        }
     }
 
     /// Spawns `grok` with `spec`. Does nothing if already running.
@@ -64,9 +78,10 @@ public final class TerminalController {
         activityFlushTask = nil
 
         let environment = spec.environment().map { "\($0.key)=\($0.value)" }
+        let command = spec.hostCommand()
         terminalView.startHosted(
-            executable: spec.executable.path,
-            args: spec.arguments(),
+            executable: command.executable.path,
+            args: command.arguments,
             environment: environment,
             currentDirectory: spec.workingDirectory.path
         )
@@ -90,26 +105,38 @@ public final class TerminalController {
             pid = 0
             return current
         }
+        guard pid > 0 else {
+            isRunning = false
+            return
+        }
+        if Self.reap(pid) {
+            isRunning = false
+            reportExitIfSilent()
+            return
+        }
         Self.signal(SIGTERM, to: pid)
         terminalView.terminateHosted()
         isRunning = false
 
         // Only replace a running escalation when there is a new child to chase;
         // a second terminate() must not cancel the first one's escalation.
-        // Only replace a running escalation when there is a new child to chase;
-        // a second terminate() must not cancel the first one's escalation.
-        guard pid > 0 else { return }
         escalationTask?.cancel()
         escalationTask = Task { [weak self] in
             for delay in Self.escalationDelays {
                 try? await Task.sleep(for: delay)
                 if Task.isCancelled { return }
-                if Self.reap(pid) { self?.reportExitIfSilent(); return }
+                if Self.reap(pid) {
+                    self?.reportExitIfSilent()
+                    return
+                }
                 Self.signal(SIGTERM, to: pid)
             }
             try? await Task.sleep(for: Self.killGrace)
             if Task.isCancelled { return }
-            if Self.reap(pid) { self?.reportExitIfSilent(); return }
+            if Self.reap(pid) {
+                self?.reportExitIfSilent()
+                return
+            }
             Self.signal(SIGKILL, to: pid)
             try? await Task.sleep(for: Self.killGrace)
             _ = Self.reap(pid)
@@ -130,11 +157,18 @@ public final class TerminalController {
         activityFlushTask = nil
         escalationTask?.cancel()
         escalationTask = nil
+        guard pid > 0 else {
+            isRunning = false
+            return
+        }
+        if Self.reap(pid) {
+            isRunning = false
+            reportExitIfSilent()
+            return
+        }
         Self.signal(SIGTERM, to: pid)
         terminalView.terminateHosted()
         isRunning = false
-        guard pid > 0 else { return }
-
         let deadline = ContinuousClock.now + timeout
         let escalateAt = ContinuousClock.now + timeout / 2
         var escalated = false
@@ -171,8 +205,8 @@ public final class TerminalController {
     @discardableResult
     public func copySelection() -> Bool {
         guard terminalView.selectionActive,
-              let text = terminalView.getSelection(),
-              !text.isEmpty
+            let text = terminalView.getSelection(),
+            !text.isEmpty
         else { return false }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
@@ -205,7 +239,7 @@ public final class TerminalController {
 
     /// Sets a plain-text query and selects the first hit, if any.
     public func setFindQuery(_ query: String) {
-        search.setQuery(query, in: findBufferLines())
+        search.setQuery(query, in: findBufferRows())
         applyFindSelection()
     }
 
@@ -217,31 +251,146 @@ public final class TerminalController {
 
     /// Advances to the next hit, wrapping to the first.
     public func findNext() {
-        search.updateLines(findBufferLines())
+        search.updateRows(findBufferRows())
         search.findNext()
         applyFindSelection()
     }
 
     /// Moves to the previous hit, wrapping to the last.
     public func findPrevious() {
-        search.updateLines(findBufferLines())
+        search.updateRows(findBufferRows())
         search.findPrevious()
         applyFindSelection()
     }
 
-    /// One string per buffer row, using `bufferLine(atRow:)` so row indices
-    /// match `SelectionService` / `scrollTo`.
-    private func findBufferLines() -> [String] {
-        let terminal = terminalView.getTerminal()
-        var lines: [String] = []
+    /// One searchable row plus a Character-to-cell map. SwiftTerm stores wide
+    /// characters and extended graphemes differently from Swift String offsets.
+    private func findBufferRows() -> [ScrollbackSearch.Row] {
+        var rows: [ScrollbackSearch.Row] = []
         var row = 0
-        while let line = terminal.bufferLine(atRow: row) {
-            // Default translate emits one character per cell, so match columns
-            // line up with `Position.col` without a separate width map.
-            lines.append(line.translateToString(trimRight: true))
+        while let terminalRow = terminalRow(at: row, preserveWrappedWidth: true) {
+            rows.append(terminalRow)
             row += 1
         }
-        return lines
+        return rows
+    }
+
+    /// Converts one terminal row without counting the null continuation cell of
+    /// a wide glyph as another Character. A row that wraps into the next one
+    /// keeps its full cell width so spaces at the wrap boundary stay searchable.
+    private func terminalRow(
+        at row: Int,
+        preserveWrappedWidth: Bool
+    ) -> ScrollbackSearch.Row? {
+        let terminal = terminalView.getTerminal()
+        guard let line = terminal.bufferLine(atRow: row) else { return nil }
+        let nextLine = terminal.bufferLine(atRow: row + 1)
+        let wrapsToNext = nextLine?.isWrapped == true
+        var limit = preserveWrappedWidth && wrapsToNext ? line.count : line.getTrimmedLength()
+
+        // A wide glyph that does not fit in the final cell is moved to the next
+        // row. SwiftTerm leaves a null placeholder behind; it is not a real space.
+        if preserveWrappedWidth,
+            wrapsToNext,
+            limit > 0,
+            let nextLine,
+            nextLine.count > 0,
+            terminal.getCharacter(for: line[limit - 1]) == "\0",
+            line[limit - 1].width <= 1,
+            nextLine.getWidth(index: 0) == 2
+        {
+            limit -= 1
+        }
+
+        var text = ""
+        var columns = [0]
+        var column = 0
+        while column < limit {
+            let cell = line[column]
+            let character = terminal.getCharacter(for: cell)
+            if character == "\0", column > 0, line[column - 1].width == 2 {
+                column += 1
+                continue
+            }
+            text.append(character == "\0" ? " " : character)
+            column += max(Int(cell.width), 1)
+            columns.append(min(column, limit))
+        }
+        return ScrollbackSearch.Row(
+            text: text,
+            cellColumns: columns,
+            isWrapped: line.isWrapped
+        )
+    }
+
+    /// The newest readable terminal text for VoiceOver. It is deliberately
+    /// bounded so a full scrollback buffer cannot stall the main thread or make
+    /// one accessibility element impractical to navigate.
+    func accessibilitySnapshot(maxCharacters: Int = 50_000) -> String {
+        guard maxCharacters > 0 else { return "" }
+        let count = terminalRowCount()
+        guard count > 0 else { return "" }
+
+        var rows: [ScrollbackSearch.Row] = []
+        var characterCount = 0
+        for index in stride(from: count - 1, through: 0, by: -1) {
+            guard let row = terminalRow(at: index, preserveWrappedWidth: false) else { continue }
+            rows.append(row)
+            characterCount += row.text.count + 1
+            if characterCount >= maxCharacters { break }
+        }
+        rows.reverse()
+
+        let readable = Self.accessibilitySafeText(Self.renderedText(rows))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return readable.count > maxCharacters
+            ? String(readable.suffix(maxCharacters)) : readable
+    }
+
+    /// Finds the first missing row in O(log n), rather than walking all 10,000
+    /// scrollback rows on every accessibility update.
+    private func terminalRowCount() -> Int {
+        let terminal = terminalView.getTerminal()
+        guard terminal.bufferLine(atRow: 0) != nil else { return 0 }
+        var present = 0
+        var missing = 1
+        while terminal.bufferLine(atRow: missing) != nil {
+            present = missing
+            missing *= 2
+        }
+        while missing - present > 1 {
+            let candidate = present + (missing - present) / 2
+            if terminal.bufferLine(atRow: candidate) == nil {
+                missing = candidate
+            } else {
+                present = candidate
+            }
+        }
+        return missing
+    }
+
+    private static func renderedText(_ rows: [ScrollbackSearch.Row]) -> String {
+        var result = ""
+        for (index, row) in rows.enumerated() {
+            if index > 0, !row.isWrapped { result.append("\n") }
+            result += row.text
+        }
+        return result
+    }
+
+    private static func accessibilitySafeText(_ text: String) -> String {
+        var scalars: [Unicode.Scalar] = []
+        scalars.reserveCapacity(text.unicodeScalars.count)
+        for scalar in text.unicodeScalars {
+            if scalar == "\n" || scalar == "\t" {
+                scalars.append(scalar)
+            } else if scalar.properties.generalCategory == .control {
+                scalars.append(" ")
+            } else {
+                scalars.append(scalar)
+            }
+        }
+        return String(String.UnicodeScalarView(scalars))
     }
 
     private func applyFindSelection() {
@@ -254,10 +403,12 @@ public final class TerminalController {
         // `setSelection` clamps `col` to `cols-1`. A hit that ends on the last
         // cell would lose that cell, so park the exclusive end on the next row.
         let end: Position
-        if match.columns.upperBound >= cols {
-            end = Position(col: 0, row: match.line + 1)
+        if match.endColumn >= cols,
+            terminalView.getTerminal().bufferLine(atRow: match.endLine + 1) != nil
+        {
+            end = Position(col: 0, row: match.endLine + 1)
         } else {
-            end = Position(col: match.columns.upperBound, row: match.line)
+            end = Position(col: min(match.endColumn, max(cols - 1, 0)), row: match.endLine)
         }
         terminalView.selection.setSelection(start: start, end: end)
         revealFindMatch(row: match.line)
@@ -277,7 +428,7 @@ public final class TerminalController {
     var processID: pid_t { terminalView.hostedPid }
 
     func bufferText() -> String {
-        String(data: terminalView.getTerminal().getBufferAsData(), encoding: .utf8) ?? ""
+        Self.renderedText(findBufferRows())
     }
 }
 
@@ -331,18 +482,15 @@ extension TerminalController {
     /// without reaping it is exactly how an orphan-looking process survives a
     /// SIGKILL that in fact already worked.
     @discardableResult
-    nonisolated private static func reap(_ pid: pid_t) -> Bool {
+    nonisolated static func reap(_ pid: pid_t) -> Bool {
         guard pid > 0 else { return true }
         var status: Int32 = 0
         let result = waitpid(pid, &status, WNOHANG)
         if result == pid { return true }
-        // ECHILD: already collected, by SwiftTerm's own watcher or a earlier pass.
-        if result < 0 && errno == ECHILD { return kill(pid, 0) != 0 }
+        // ECHILD means SwiftTerm already collected this known child. Never probe
+        // or signal the numeric pid again: the OS may already have reused it.
+        if result < 0 && errno == ECHILD { return true }
         return false
-    }
-
-    nonisolated private static func isAlive(_ pid: pid_t) -> Bool {
-        pid > 0 && kill(pid, 0) == 0
     }
 
     /// Reports an exit the terminal view never told us about, so a tab whose
@@ -353,7 +501,13 @@ extension TerminalController {
     }
 
     private func noteActivity() {
-        guard reportsActivity else { return }
+        guard reportsActivity else {
+            // SwiftTerm can report process termination before its main-queue
+            // output drain has fed the final bytes into the emulator. Keep the
+            // final VoiceOver value in step with those late bytes.
+            if didReportExit { updateAccessibilitySnapshot() }
+            return
+        }
         let now = ContinuousClock.now
         if let last = lastActivityFire, now - last < Self.activityInterval {
             if activityFlushTask == nil {
@@ -373,12 +527,18 @@ extension TerminalController {
     private func fireActivity() {
         guard reportsActivity else { return }
         lastActivityFire = .now
+        updateAccessibilitySnapshot()
         onActivity?()
+    }
+
+    private func updateAccessibilitySnapshot() {
+        terminalView.setAccessibilityValue(accessibilitySnapshot())
     }
 
     private func handleProcessExit(_ rawStatus: Int32?) {
         guard !didReportExit else { return }
         didReportExit = true
+        updateAccessibilitySnapshot()
         isRunning = false
         escalationTask?.cancel()
         escalationTask = nil

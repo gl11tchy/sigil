@@ -1,12 +1,19 @@
 import AppKit
 import Foundation
-import SigilKit
 import Observation
+import SigilKit
 
 /// One terminal tab: a `grok` process, its view, and the state the UI shows about it.
 @MainActor
 @Observable
 final class TerminalTab: Identifiable {
+
+    struct BridgeInboxItem: Identifiable {
+        let id = UUID()
+        let prompt: String
+        let requestID: String?
+        fileprivate let onDismiss: (() -> Void)?
+    }
 
     enum Activity: Equatable {
         case starting
@@ -17,7 +24,7 @@ final class TerminalTab: Identifiable {
 
         /// True only for a known nonzero exit code. A missing code is not a failure.
         var endedInFailure: Bool {
-            guard case let .exited(code?) = self else { return false }
+            guard case .exited(let code?) = self else { return false }
             return code != 0
         }
     }
@@ -28,24 +35,38 @@ final class TerminalTab: Identifiable {
 
     private(set) var activity: Activity = .starting
     /// Set when a turn finishes while this tab is in the background.
-    var hasUnseenActivity = false
+    private(set) var hasUnseenActivity = false
+    private(set) var bridgeInbox: [BridgeInboxItem] = []
+    var onUnseenActivityChange: (() -> Void)?
+    private var hasUnseenTurnCompletion = false
+    private var unseenBridgeItemIDs: Set<UUID> = []
 
     /// Preferred label. The session summary wins once the sidebar knows one.
     var sessionTitle: String?
 
-    private var idleTask: Task<Void, Never>?
+    private var isSelected: () -> Bool = { false }
+    private let completionEventsURL: URL?
+    private var completionWatchTask: Task<Void, Never>?
 
-    init(id: UUID = UUID(), spec: GrokLaunchSpec, settings: AppSettings) {
+    init(
+        id: UUID = UUID(),
+        spec: GrokLaunchSpec,
+        settings: AppSettings,
+        completionEventsURL: URL? = nil
+    ) {
         self.id = id
         self.spec = spec
         self.controller = TerminalController(theme: settings.theme, fontSize: settings.fontSize)
+        self.completionEventsURL =
+            completionEventsURL
+            ?? spec.sessionDirectory?.appendingPathComponent("updates.jsonl")
     }
 
     /// The session this tab reads and writes, when it is known up front.
     var sessionID: String? {
         switch spec.mode {
-        case let .new(uuid): return uuid.uuidString.lowercased()
-        case let .resume(id): return id
+        case .new(let uuid): return uuid.uuidString.lowercased()
+        case .resume(let id): return id
         case .continueLatest: return nil
         }
     }
@@ -63,46 +84,307 @@ final class TerminalTab: Identifiable {
         return true
     }
 
+    var canDeliverBridgePrompt: Bool {
+        activity == .idle && controller.isRunning
+    }
+
+    /// Only a submitted turn needs a destructive-action warning. Idle prompt
+    /// processes remain running by design.
+    var shouldWarnBeforeStopping: Bool {
+        switch activity {
+        case .starting, .working: return controller.isRunning
+        case .idle, .exited: return false
+        }
+    }
+
     func start(isSelected: @escaping () -> Bool) {
-        controller.onActivity = { [weak self] in
-            self?.noteActivity(isSelected: isSelected())
+        self.isSelected = isSelected
+        controller.onUserSubmit = { [weak self] in
+            self?.noteTurnStarted()
+        }
+        controller.onTitleChange = { [weak self] title in
+            self?.noteTerminalTitle(title)
         }
         controller.onTerminate = { [weak self] code in
             guard let self else { return }
-            self.idleTask?.cancel()
+            self.completionWatchTask?.cancel()
+            self.completionWatchTask = nil
+            let notify = self.activity == .working && !self.isSelected()
             self.activity = .exited(code: code)
+            if notify { self.markUnseenTurnCompletion() }
         }
         controller.start(spec)
-        activity = .idle
+        if controller.isRunning {
+            activity = .idle
+        } else if case .starting = activity {
+            activity = .exited(code: nil)
+        }
     }
 
-    /// Output arrived. Hold "working" until the CLI has been quiet for a beat.
-    private func noteActivity(isSelected: Bool) {
+    /// A user submission is a real turn boundary. Unlike output silence, it stays
+    /// working through network waits and long-running tools.
+    func noteTurnStarted() {
         if case .exited = activity { return }
+        guard activity != .working else { return }
         activity = .working
-        idleTask?.cancel()
-        idleTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(1200))
-            guard !Task.isCancelled, let self else { return }
-            if case .exited = self.activity { return }
-            self.activity = .idle
-            if !isSelected {
-                self.hasUnseenActivity = true
-                NSApp.requestUserAttention(.informationalRequest)
+        watchForTurnCompletion()
+    }
+
+    /// Busy spinner titles can reveal work that did not start through this
+    /// view's input path. Titles never mark a turn complete; only the journal's
+    /// exact completion event is authoritative.
+    private func noteTerminalTitle(_ title: String) {
+        guard Self.isBusyTerminalTitle(title), activity != .working else { return }
+        noteTurnStarted()
+    }
+
+    static func isBusyTerminalTitle(_ title: String) -> Bool {
+        let components = title.lowercased().split(separator: "-").map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard components.last == "grok",
+            components.count >= 3,
+            let spinner = components.first?.unicodeScalars.first,
+            (0x2800...0x28FF).contains(spinner.value)
+        else { return false }
+        switch components[components.count - 2] {
+        case "waiting for response…", "waiting for response...", "thinking", "responding":
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Grok 1.0.5 keeps its terminal title at `grok`, including while idle. Its
+    /// append-only event journal is the authoritative turn boundary instead.
+    /// If the journal is unavailable, the tab stays working so destructive
+    /// actions continue to warn rather than guessing from output silence.
+    private func watchForTurnCompletion() {
+        completionWatchTask?.cancel()
+        guard let completionEventsURL else { return }
+        let initialSize = Self.fileSize(at: completionEventsURL)
+        if initialSize == nil {
+            guard case .new = spec.mode else { return }
+        }
+        var offset = initialSize ?? 0
+        completionWatchTask = Task { [weak self] in
+            var remainder = Data()
+            var discardingOversizedLine = false
+            while !Task.isCancelled {
+                guard self != nil else { return }
+                let scanOffset = offset
+                let scanRemainder = remainder
+                let scanDiscardingOversizedLine = discardingOversizedLine
+                let scan = await Task.detached(priority: .utility) {
+                    Self.scanCompletionEvents(
+                        at: completionEventsURL,
+                        offset: scanOffset,
+                        remainder: scanRemainder,
+                        discardingOversizedLine: scanDiscardingOversizedLine
+                    )
+                }.value
+                offset = scan.offset
+                remainder = scan.remainder
+                discardingOversizedLine = scan.discardingOversizedLine
+                if scan.didCompleteTurn {
+                    self?.noteTurnCompleted()
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(250))
             }
         }
     }
 
+    private func noteTurnCompleted() {
+        guard activity == .working else { return }
+        completionWatchTask?.cancel()
+        completionWatchTask = nil
+        activity = .idle
+        if !isSelected() { markUnseenTurnCompletion() }
+    }
+
+    private struct CompletionScan: Sendable {
+        let offset: UInt64
+        let remainder: Data
+        let discardingOversizedLine: Bool
+        let didCompleteTurn: Bool
+    }
+
+    private struct JournalEnvelope: Decodable {
+        struct Parameters: Decodable {
+            struct Update: Decodable { let sessionUpdate: String? }
+            let update: Update?
+        }
+        let params: Parameters?
+    }
+
+    nonisolated private static func fileSize(at url: URL) -> UInt64? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+            let size = attributes[.size] as? NSNumber
+        else { return nil }
+        return size.uint64Value
+    }
+
+    nonisolated private static func scanCompletionEvents(
+        at url: URL,
+        offset: UInt64,
+        remainder: Data,
+        discardingOversizedLine: Bool
+    ) -> CompletionScan {
+        guard let size = fileSize(at: url) else {
+            return CompletionScan(
+                offset: offset,
+                remainder: remainder,
+                discardingOversizedLine: discardingOversizedLine,
+                didCompleteTurn: false
+            )
+        }
+        // A replaced or truncated journal starts a new baseline. Reading from
+        // zero could mistake an old completed turn for this one.
+        guard size >= offset else {
+            return CompletionScan(
+                offset: size,
+                remainder: Data(),
+                discardingOversizedLine: false,
+                didCompleteTurn: false
+            )
+        }
+        guard size > offset,
+            let handle = try? FileHandle(forReadingFrom: url)
+        else {
+            return CompletionScan(
+                offset: offset,
+                remainder: remainder,
+                discardingOversizedLine: discardingOversizedLine,
+                didCompleteTurn: false
+            )
+        }
+        defer { try? handle.close() }
+
+        do {
+            try handle.seek(toOffset: offset)
+            let data = try handle.read(upToCount: 256 * 1024) ?? Data()
+            var buffer = remainder
+            buffer.append(data)
+            var discarding = discardingOversizedLine
+            var completed = false
+
+            while let newline = buffer.firstIndex(of: 0x0A) {
+                let line = Data(buffer[..<newline])
+                buffer.removeSubrange(...newline)
+                if discarding {
+                    discarding = false
+                } else if line.count <= 1_048_576,
+                    let event = try? JSONDecoder().decode(JournalEnvelope.self, from: line),
+                    event.params?.update?.sessionUpdate == "turn_completed"
+                {
+                    completed = true
+                    break
+                }
+            }
+            if buffer.count > 1_048_576 {
+                buffer.removeAll(keepingCapacity: false)
+                discarding = true
+            }
+            return CompletionScan(
+                offset: offset + UInt64(data.count),
+                remainder: buffer,
+                discardingOversizedLine: discarding,
+                didCompleteTurn: completed
+            )
+        } catch {
+            return CompletionScan(
+                offset: offset,
+                remainder: remainder,
+                discardingOversizedLine: discardingOversizedLine,
+                didCompleteTurn: false
+            )
+        }
+    }
+
+    func enqueueBridgePrompt(
+        _ prompt: String,
+        requestID: String? = nil,
+        onDismiss: (() -> Void)? = nil
+    ) {
+        let item = BridgeInboxItem(prompt: prompt, requestID: requestID, onDismiss: onDismiss)
+        bridgeInbox.append(item)
+        if !isSelected() {
+            unseenBridgeItemIDs.insert(item.id)
+            refreshUnseenActivity(requestAttention: true)
+        }
+    }
+
+    func deliverNextBridgePrompt() {
+        guard canDeliverBridgePrompt, !bridgeInbox.isEmpty else { return }
+        let item = bridgeInbox.removeFirst()
+        removeUnseenBridgeItem(item.id)
+        noteTurnStarted()
+        controller.send(text: item.prompt + "\r")
+    }
+
+    func dismissNextBridgePrompt() {
+        guard !bridgeInbox.isEmpty else { return }
+        let item = bridgeInbox.removeFirst()
+        removeUnseenBridgeItem(item.id)
+        item.onDismiss?()
+    }
+
+    /// Drops a question that already timed out or was cancelled. This is not a
+    /// user dismissal, so it must not try to cancel the same ask again.
+    func removeBridgePrompt(requestID: String) {
+        guard let index = bridgeInbox.firstIndex(where: { $0.requestID == requestID }) else {
+            return
+        }
+        let item = bridgeInbox.remove(at: index)
+        removeUnseenBridgeItem(item.id)
+    }
+
+    func clearUnseenActivity() {
+        guard hasUnseenActivity else { return }
+        hasUnseenTurnCompletion = false
+        unseenBridgeItemIDs.removeAll()
+        refreshUnseenActivity()
+    }
+
+    /// Preserves the unread marker when a stopped tab has to be replaced after
+    /// an operation fails. The replacement already owns its callback.
+    func restoreUnseenActivity(from previous: TerminalTab) {
+        guard previous.hasUnseenActivity else { return }
+        hasUnseenTurnCompletion = true
+        refreshUnseenActivity()
+    }
+
+    private func markUnseenTurnCompletion() {
+        hasUnseenTurnCompletion = true
+        refreshUnseenActivity(requestAttention: true)
+    }
+
+    private func removeUnseenBridgeItem(_ id: UUID) {
+        guard unseenBridgeItemIDs.remove(id) != nil else { return }
+        refreshUnseenActivity()
+    }
+
+    private func refreshUnseenActivity(requestAttention: Bool = false) {
+        let unseen = hasUnseenTurnCompletion || !unseenBridgeItemIDs.isEmpty
+        guard unseen != hasUnseenActivity else { return }
+        hasUnseenActivity = unseen
+        onUnseenActivityChange?()
+        if unseen, requestAttention {
+            NSApp.requestUserAttention(.informationalRequest)
+        }
+    }
+
     func terminate() {
-        idleTask?.cancel()
-        idleTask = nil
+        completionWatchTask?.cancel()
+        completionWatchTask = nil
         controller.terminate()
     }
 
     /// Used when the app is quitting: returns only once the child is gone.
     func terminateAndWait() {
-        idleTask?.cancel()
-        idleTask = nil
+        completionWatchTask?.cancel()
+        completionWatchTask = nil
         controller.terminateAndWait()
     }
 

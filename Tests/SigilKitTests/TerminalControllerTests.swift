@@ -138,4 +138,65 @@ struct TerminalControllerTests {
         #expect(count >= 2)
         #expect(count <= 12)
     }
+
+    @Test func inputSubmissionIgnoresBracketedPasteNewlines() {
+        let view = GrokProcessTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 200, height: 100),
+            options: .default
+        )
+        var submissions = 0
+        view.onUserSubmit = { submissions += 1 }
+
+        view.send(source: view, data: [0x0D][...])
+        #expect(submissions == 1)
+
+        view.send(source: view, data: [0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E][...])
+        view.send(source: view, data: Array("first\nsecond".utf8)[...])
+        view.send(source: view, data: [0x1B, 0x5B, 0x32, 0x30, 0x31, 0x7E][...])
+        #expect(submissions == 1)
+
+        view.send(source: view, data: [0x0A][...])
+        #expect(submissions == 2)
+    }
+
+    @Test func accessibilityExposesBoundedUnicodeTerminalText() async throws {
+        let helper = try TerminalTestSupport.makeFlagStrippingHelper()
+        let controller = TerminalController()
+        let marker = "AX_👩‍💻界_END"
+        let output = String(repeating: "x", count: 52_000) + marker
+
+        controller.start(
+            TerminalTestSupport.launchSpec(
+                executable: helper,
+                extraArguments: ["/usr/bin/printf", "%s", output]
+            )
+        )
+        let sawExit = await TerminalTestSupport.waitUntil { !controller.isRunning }
+        let sawFinalValue = await TerminalTestSupport.waitUntil {
+            (controller.view.accessibilityValue() as? String)?.contains(marker) == true
+        }
+        let value = controller.view.accessibilityValue() as? String
+
+        #expect(sawExit)
+        #expect(sawFinalValue)
+        #expect(controller.view.isAccessibilityElement())
+        #expect(controller.view.accessibilityRole() == .textArea)
+        #expect(controller.view.accessibilityLabel() == "Grok terminal")
+        #expect(value?.contains(marker) == true)
+        #expect((value?.count ?? .max) <= 50_000)
+        #expect(
+            value?.unicodeScalars.allSatisfy {
+                $0 == "\n" || $0 == "\t" || $0.properties.generalCategory != .control
+            } == true
+        )
+    }
+
+    @Test func anAlreadyReapedChildIsGoneEvenIfItsPIDCouldBeReused() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/true")
+        try process.run()
+        process.waitUntilExit()
+
+        #expect(TerminalController.reap(process.processIdentifier))
+    }
 }

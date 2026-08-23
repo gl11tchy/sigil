@@ -13,6 +13,9 @@ import SwiftTerm
 final class GrokProcessTerminalView: LocalProcessTerminalView {
     /// Invoked on the main queue when the child writes output.
     var onChildOutput: (() -> Void)?
+    /// Invoked when the user submits the current prompt with Return.
+    var onUserSubmit: (() -> Void)?
+    private var isForwardingBracketedPaste = false
 
     var isProcessRunning: Bool { process.running }
 
@@ -25,6 +28,7 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
         currentDirectory: String?
     ) {
         if isProcessRunning { return }
+        isForwardingBracketedPaste = false
         startProcess(
             executable: executable,
             args: args,
@@ -52,4 +56,22 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
         super.dataReceived(slice: slice)
         onChildOutput?()
     }
+
+    override func send(source: TerminalView, data: ArraySlice<UInt8>) {
+        if data.elementsEqual(Self.bracketedPasteStart) {
+            isForwardingBracketedPaste = true
+        } else if data.elementsEqual(Self.bracketedPasteEnd) {
+            isForwardingBracketedPaste = false
+        } else if !isForwardingBracketedPaste,
+            data.contains(0x0A) || data.contains(0x0D)
+        {
+            // Capture the journal offset before Return reaches the child. A fast
+            // response can otherwise append its completion event first.
+            onUserSubmit?()
+        }
+        super.send(source: source, data: data)
+    }
+
+    private static let bracketedPasteStart: [UInt8] = [0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E]
+    private static let bracketedPasteEnd: [UInt8] = [0x1B, 0x5B, 0x32, 0x30, 0x31, 0x7E]
 }

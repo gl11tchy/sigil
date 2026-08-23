@@ -17,10 +17,14 @@ public struct OpenTabsSnapshot: Codable, Equatable, Sendable {
 
     public var tabs: [Entry]
     public var selectedSessionID: String?
+    /// The selected tab's working directory. Older snapshots do not contain
+    /// this field and continue to fall back to ID-only selection.
+    public var selectedCWD: String?
 
-    public init(tabs: [Entry], selectedSessionID: String?) {
+    public init(tabs: [Entry], selectedSessionID: String?, selectedCWD: String? = nil) {
         self.tabs = tabs
         self.selectedSessionID = selectedSessionID
+        self.selectedCWD = selectedCWD
     }
 
     public func encode() -> Data? {
