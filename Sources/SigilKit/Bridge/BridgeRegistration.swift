@@ -42,8 +42,16 @@ public struct BridgeRegistration: Sendable {
             return nil
         }
         let candidate = directory.appendingPathComponent("sigil-mcp")
-        guard FileManager.default.fileExists(atPath: candidate.path) else { return nil }
-        return candidate
+        return isUsableMCPBinary(at: candidate) ? candidate : nil
+    }
+
+    static func isUsableMCPBinary(at candidate: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
+            !isDirectory.boolValue,
+            FileManager.default.isExecutableFile(atPath: candidate.path)
+        else { return false }
+        return true
     }
 
     /// True when `grok mcp list` reports a server called `sigil`.
@@ -60,7 +68,19 @@ public struct BridgeRegistration: Sendable {
     }
 
     public func remove() throws {
-        try runOrThrow(["mcp", "remove", Self.serverName, "-s", "user"])
+        let (listCode, listing) = runner(executable, ["mcp", "list"])
+        guard listCode == 0 else { throw Error.failed(output: listing) }
+        guard Self.listingContainsServer(listing) else { return }
+
+        let arguments = ["mcp", "remove", Self.serverName, "-s", "user"]
+        let (removeCode, output) = runner(executable, arguments)
+        guard removeCode != 0 else { return }
+
+        // Another process may remove the entry between our list and remove calls.
+        // Confirm the final state before reporting a failure.
+        let (verifyCode, verifiedListing) = runner(executable, ["mcp", "list"])
+        if verifyCode == 0, !Self.listingContainsServer(verifiedListing) { return }
+        throw Error.failed(output: output)
     }
 
     /// Real runner: `Foundation.Process`, stdout and stderr merged, no shell.
@@ -78,8 +98,31 @@ public struct BridgeRegistration: Sendable {
 
         do {
             try process.run()
+            // The child owns its duplicated writer now. Keeping the parent's
+            // copy open can prevent the reader from ever observing EOF.
+            try? pipe.fileHandleForWriting.close()
         } catch {
+            try? pipe.fileHandleForWriting.close()
             return (127, error.localizedDescription)
+        }
+
+        // Drain while the child runs. Waiting first can deadlock when the child
+        // fills the pipe buffer before it exits.
+        let captured = CapturedOutput()
+        let readerFinished = DispatchGroup()
+        readerFinished.enter()
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                while let data = try pipe.fileHandleForReading.read(upToCount: 16_384),
+                    !data.isEmpty
+                {
+                    captured.append(data)
+                }
+            } catch {
+                // The bounded wait closes the handle when a descendant keeps it
+                // open. Bytes already read still provide the useful CLI error.
+            }
+            readerFinished.leave()
         }
 
         let timeoutSeconds: TimeInterval = 15
@@ -91,17 +134,22 @@ public struct BridgeRegistration: Sendable {
                 _ = finished.wait(timeout: .now() + 1)
             }
             let note = "grok did not finish within \(Int(timeoutSeconds)) seconds"
-            if process.isRunning {
-                let partial = String(decoding: pipe.fileHandleForReading.availableData, as: UTF8.self)
-                let trimmed = partial.trimmingCharacters(in: .whitespacesAndNewlines)
-                return (1, trimmed.isEmpty ? note : partial + "\n" + note)
-            }
-            let output = readMerged(pipe)
+            waitForReader(readerFinished, handle: pipe.fileHandleForReading)
+            let output = String(decoding: captured.data, as: UTF8.self)
             let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
             return (1, trimmed.isEmpty ? note : output + "\n" + note)
         }
 
-        return (process.terminationStatus, readMerged(pipe))
+        waitForReader(readerFinished, handle: pipe.fileHandleForReading)
+        return (process.terminationStatus, String(decoding: captured.data, as: UTF8.self))
+    }
+
+    /// A command can launch a descendant that inherits stdout. Do not let that
+    /// unrelated process keep Settings blocked after the command itself exits.
+    private static func waitForReader(_ group: DispatchGroup, handle: FileHandle) {
+        guard group.wait(timeout: .now() + 1) == .timedOut else { return }
+        try? handle.close()
+        _ = group.wait(timeout: .now() + 1)
     }
 
     private func runOrThrow(_ arguments: [String]) throws {
@@ -117,9 +165,23 @@ public struct BridgeRegistration: Sendable {
         }
         return tokens.contains { $0 == serverName[...] }
     }
+}
 
-    private static func readMerged(_ pipe: Pipe) -> String {
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        return String(decoding: data, as: UTF8.self)
+private final class CapturedOutput: @unchecked Sendable {
+    private static let limit = 1_048_576
+    private let lock = NSLock()
+    private var storage = Data()
+
+    var data: Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func append(_ data: Data) {
+        lock.lock()
+        let remaining = max(0, Self.limit - storage.count)
+        if remaining > 0 { storage.append(data.prefix(remaining)) }
+        lock.unlock()
     }
 }

@@ -38,7 +38,7 @@ struct StatusDot: View {
         case .working: return "Working"
         case .idle: return "Idle"
         case .starting: return "Starting"
-        case let .exited(code): return "Exited with code \(code.map(String.init) ?? "unknown")"
+        case .exited(let code): return "Exited with code \(code.map(String.init) ?? "unknown")"
         }
     }
 }

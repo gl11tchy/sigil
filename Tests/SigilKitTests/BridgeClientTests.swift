@@ -77,6 +77,44 @@ struct BridgeClientTests {
             #expect(response == expected)
         }
     }
+
+    @Test func intermittentBytesDoNotResetTotalDeadline() throws {
+        let payload = try BridgeFraming.frame(BridgeResponse(ok: true, answer: "slow"))
+        try withThrowawayServer { conn in
+            _ = try? readLineData(conn)
+            for byte in payload.prefix(8) {
+                guard (try? writeAll(conn, Data([byte]))) != nil else { break }
+                usleep(60_000)
+            }
+        } body: { url in
+            let client = BridgeClient(socketURL: url)
+            let start = ContinuousClock.now
+            #expect(throws: BridgeClient.Error.timedOut) {
+                try client.send(
+                    BridgeRequest(method: .listTabs, from: BridgePeer(tabID: "t1")),
+                    timeout: 0.15
+                )
+            }
+            #expect(ContinuousClock.now - start < .milliseconds(350))
+        }
+    }
+
+    @Test func completeOversizedResponseIsRejected() throws {
+        try withThrowawayServer { conn in
+            _ = try? readLineData(conn)
+            var payload = Data(repeating: 0x41, count: BridgeLimits.maxFrameBytes + 1)
+            payload.append(0x0A)
+            try? writeAll(conn, payload)
+        } body: { url in
+            let client = BridgeClient(socketURL: url)
+            #expect(throws: BridgeClient.Error.malformedResponse) {
+                try client.send(
+                    BridgeRequest(method: .listTabs, from: BridgePeer(tabID: "t1")),
+                    timeout: 3
+                )
+            }
+        }
+    }
 }
 
 private func withThrowawayServer(
@@ -169,7 +207,12 @@ private func acceptOnce(_ listenFD: Int32) -> Int32? {
             Darwin.accept(listenFD, sockaddrPointer, &length)
         }
     }
-    return conn >= 0 ? conn : nil
+    guard conn >= 0 else { return nil }
+    var yes: Int32 = 1
+    _ = withUnsafePointer(to: &yes) {
+        Darwin.setsockopt(conn, SOL_SOCKET, SO_NOSIGPIPE, $0, socklen_t(MemoryLayout<Int32>.size))
+    }
+    return conn
 }
 
 private func readLineData(_ fd: Int32) throws -> Data {

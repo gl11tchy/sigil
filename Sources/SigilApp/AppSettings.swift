@@ -1,6 +1,6 @@
 import Foundation
-import SigilKit
 import Observation
+import SigilKit
 import SwiftUI
 
 /// User preferences, persisted in `UserDefaults`.
@@ -87,7 +87,15 @@ final class AppSettings {
     var executableURL: URL { URL(fileURLWithPath: executablePath) }
 
     var executableExists: Bool {
-        FileManager.default.isExecutableFile(atPath: executablePath)
+        Self.isExecutableFile(at: executableURL)
+    }
+
+    static func isExecutableFile(at url: URL) -> Bool {
+        let resolved = URL(fileURLWithPath: GrokPaths.canonicalPath(url.path))
+        guard FileManager.default.isExecutableFile(atPath: resolved.path),
+            let values = try? resolved.resourceValues(forKeys: [.isRegularFileKey])
+        else { return false }
+        return values.isRegularFile == true
     }
 
     static let effortOptions = ["", "low", "medium", "high", "xhigh"]

@@ -65,7 +65,7 @@ struct ScrollbackSearchTests {
         #expect(search.findPrevious() == nil)
     }
 
-    @Test func queryLongerThanEveryLineFindsNothing() {
+    @Test func queryLongerThanEveryHardLineFindsNothing() {
         let lines = ["short", "also short", "tiny"]
         let longest = lines.map(\.count).max() ?? 0
         var search = ScrollbackSearch()
@@ -73,6 +73,73 @@ struct ScrollbackSearchTests {
 
         #expect(search.matches.isEmpty)
         #expect(search.current == nil)
+    }
+
+    @Test func findsAcrossSoftWrappedRowsAndReturnsCellEndpoints() {
+        let rows = [
+            ScrollbackSearch.Row(text: "abc", cellColumns: [0, 1, 2, 3]),
+            ScrollbackSearch.Row(
+                text: "def", cellColumns: [0, 1, 2, 3], isWrapped: true),
+        ]
+        var search = ScrollbackSearch()
+        search.setQuery("cde", in: rows)
+
+        #expect(search.matchCount == 1)
+        #expect(search.currentMatch?.line == 0)
+        #expect(search.currentMatch?.columns.lowerBound == 2)
+        #expect(search.currentMatch?.endLine == 1)
+        #expect(search.currentMatch?.endColumn == 2)
+    }
+
+    @Test func doesNotSearchAcrossHardLineBreaks() {
+        let rows = [
+            ScrollbackSearch.Row(text: "abc"),
+            ScrollbackSearch.Row(text: "def"),
+        ]
+        var search = ScrollbackSearch()
+        search.setQuery("cde", in: rows)
+
+        #expect(search.matches.isEmpty)
+    }
+
+    @Test func spacesAtASoftWrapRemainPartOfTheLogicalLine() {
+        let rows = [
+            ScrollbackSearch.Row(text: "abc  "),
+            ScrollbackSearch.Row(text: "def", isWrapped: true),
+        ]
+        var search = ScrollbackSearch()
+        search.setQuery("c  d", in: rows)
+
+        #expect(search.matchCount == 1)
+        #expect(search.currentMatch?.line == 0)
+        #expect(search.currentMatch?.columns.lowerBound == 2)
+        #expect(search.currentMatch?.endLine == 1)
+        #expect(search.currentMatch?.endColumn == 1)
+    }
+
+    @Test func extendedAndWideCharactersMapBackToTerminalCells() {
+        let rows = [
+            ScrollbackSearch.Row(
+                text: "👩‍💻界a",
+                cellColumns: [0, 2, 4, 5]
+            )
+        ]
+        var search = ScrollbackSearch()
+        search.setQuery("👩‍💻界a", in: rows)
+
+        #expect(search.matchCount == 1)
+        #expect(search.currentMatch?.columns == 0..<5)
+        #expect(search.currentMatch?.endLine == 0)
+        #expect(search.currentMatch?.endColumn == 5)
+    }
+
+    @Test func foldedMatchWithDifferentUTF8LengthKeepsCharacterColumns() {
+        let rows = [ScrollbackSearch.Row(text: "Straße", cellColumns: [0, 1, 2, 3, 4, 5, 6])]
+        var search = ScrollbackSearch()
+        search.setQuery("STRASSE", in: rows)
+
+        #expect(search.matchCount == 1)
+        #expect(search.currentMatch?.columns == 0..<6)
     }
 
     @Test func hitsOnOneLineDoNotOverlap() {

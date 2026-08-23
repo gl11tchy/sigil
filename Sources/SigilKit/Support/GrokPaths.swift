@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Locations and name encodings used by the Grok Build CLI's on-disk state.
@@ -11,9 +12,9 @@ public enum GrokPaths {
     /// Characters the CLI leaves untouched when encoding a working directory.
     public static let unreserved: CharacterSet = {
         var set = CharacterSet()
-        set.insert(charactersIn: "A" ... "Z")
-        set.insert(charactersIn: "a" ... "z")
-        set.insert(charactersIn: "0" ... "9")
+        set.insert(charactersIn: "A"..."Z")
+        set.insert(charactersIn: "a"..."z")
+        set.insert(charactersIn: "0"..."9")
         set.insert(charactersIn: "-._~")
         return set
     }()
@@ -47,9 +48,23 @@ public enum GrokPaths {
     /// `cwd` is resolved through `realpath` first, because the CLI records the
     /// resolved path (`/tmp/x` is stored as `/private/tmp/x`).
     public static func sessionDirectory(cwd: String, sessionID: String) -> URL {
-        let resolved = URL(fileURLWithPath: cwd).resolvingSymlinksInPath().path
-        return sessionsRoot
+        let resolved = canonicalPath(cwd)
+        return
+            sessionsRoot
             .appendingPathComponent(encode(path: resolved))
             .appendingPathComponent(sessionID)
+    }
+
+    /// Resolves a path through the same POSIX `realpath` behavior the CLI uses.
+    /// Foundation does not resolve macOS firmlinks such as `/var` to `/private/var`.
+    public static func canonicalPath(_ path: String) -> String {
+        let expanded = (path as NSString).expandingTildeInPath
+        return expanded.withCString { pointer in
+            guard let resolved = Darwin.realpath(pointer, nil) else {
+                return URL(fileURLWithPath: expanded).standardizedFileURL.path
+            }
+            defer { Darwin.free(resolved) }
+            return String(cString: resolved)
+        }
     }
 }

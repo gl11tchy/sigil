@@ -112,7 +112,7 @@ struct SessionStoreTests {
         #expect(session.updatedAt == fileDate)
     }
 
-    @Test func malformedEntriesAreSkippedWithoutAborting() async throws {
+    @Test func malformedEntriesAreReportedWithoutAborting() async throws {
         let harness = try FixtureHarness()
         defer { harness.tearDown() }
 
@@ -152,7 +152,7 @@ struct SessionStoreTests {
 
         await harness.store.scan(ignoringCache: false)
 
-        #expect(harness.store.loadError == nil)
+        #expect(harness.store.loadError?.contains("4 session item(s)") == true)
         #expect(!harness.store.isLoading)
         let ids = Set(harness.store.sessions.map(\.id))
         #expect(
@@ -195,6 +195,100 @@ struct SessionStoreTests {
         #expect(harness.store.sessions.count == 1)
         harness.store.stop()
         harness.store.stop()
+    }
+
+    @Test func startDiscoversRootCreatedAfterMissingReload() async throws {
+        let timing = SessionStoreTiming(
+            debounceDelay: .milliseconds(50),
+            maximumDebounceDelay: .milliseconds(150),
+            watcherRetryDelay: .milliseconds(100),
+            watcherLatency: 0.05
+        )
+        let harness = try FixtureHarness(createRoot: false, timing: timing)
+        defer { harness.tearDown() }
+
+        harness.store.start()
+        await harness.store.reload()
+        #expect(harness.store.loadError != nil)
+
+        try harness.write(
+            fixture: "minimal.json",
+            cwd: "/Users/exec",
+            id: "019ffeab-c76b-7fe1-be40-508369febd51"
+        )
+
+        try await waitUntil(timeout: .seconds(4)) {
+            harness.store.sessions.map(\.id) == ["019ffeab-c76b-7fe1-be40-508369febd51"]
+                && harness.store.loadError == nil
+        }
+    }
+
+    @Test func watcherRecoversAfterRootIsDeletedAndRecreated() async throws {
+        let timing = SessionStoreTiming(
+            debounceDelay: .milliseconds(50),
+            maximumDebounceDelay: .milliseconds(150),
+            watcherRetryDelay: .milliseconds(100),
+            watcherLatency: 0.05
+        )
+        let harness = try FixtureHarness(timing: timing)
+        defer { harness.tearDown() }
+        try harness.write(
+            fixture: "minimal.json",
+            cwd: "/Users/exec",
+            id: "019ffeab-c76b-7fe1-be40-508369febd51"
+        )
+        harness.store.start()
+        try await waitUntil(timeout: .seconds(4)) {
+            harness.store.sessions.map(\.id) == ["019ffeab-c76b-7fe1-be40-508369febd51"]
+        }
+
+        try FileManager.default.removeItem(at: harness.root)
+        try await waitUntil(timeout: .seconds(4)) {
+            harness.store.loadError?.contains("does not exist") == true
+        }
+        try harness.write(
+            fixture: "full.json",
+            cwd: "/Users/exec/Documents/keyholding-v0-v2",
+            id: "019f780a-34d7-7993-aadc-f23a46c40a73"
+        )
+
+        try await waitUntil(timeout: .seconds(4)) {
+            harness.store.sessions.map(\.id) == ["019f780a-34d7-7993-aadc-f23a46c40a73"]
+                && harness.store.loadError == nil
+        }
+    }
+
+    @Test func continuousEventsCannotStarveScans() async throws {
+        let recorder = ScanRecorder()
+        let timing = SessionStoreTiming(
+            debounceDelay: .milliseconds(100),
+            maximumDebounceDelay: .milliseconds(220),
+            watcherRetryDelay: .seconds(30),
+            watcherLatency: 0.05
+        )
+        let harness = try FixtureHarness(
+            timing: timing,
+            scanOperation: { root, cache, _ in
+                await recorder.record()
+                return SessionScanner.scan(root: root, cache: cache)
+            }
+        )
+        defer { harness.tearDown() }
+        harness.store.start()
+        try await waitUntil { !harness.store.isLoading }
+        try await Task.sleep(for: .milliseconds(180))
+        let baseline = await recorder.count
+
+        var scannedDuringEventStream = false
+        for _ in 0..<12 {
+            harness.store.scheduleDebouncedScan()
+            try await Task.sleep(for: .milliseconds(35))
+            if await recorder.count > baseline {
+                scannedDuringEventStream = true
+            }
+        }
+
+        #expect(scannedDuringEventStream)
     }
 
     @Test(arguments: SessionQueryCase.all)
@@ -269,6 +363,157 @@ struct SessionStoreTests {
                 == "Untitled session in diablomaxxing"
         )
     }
+
+    @Test func cacheDetectsSameSizeSameModificationDateReplacement() async throws {
+        let harness = try FixtureHarness()
+        defer { harness.tearDown() }
+        var object = try FixtureHarness.jsonObject("full.json")
+        object["session_summary"] = "Initial"
+        let url = try harness.write(
+            json: object,
+            cwd: "/Users/exec/Documents/keyholding-v0-v2",
+            id: "019f780a-34d7-7993-aadc-f23a46c40a73"
+        )
+        await harness.store.scan(ignoringCache: false)
+        let initialValues = try url.resourceValues(
+            forKeys: [.contentModificationDateKey, .fileSizeKey]
+        )
+        let initialDate = try #require(initialValues.contentModificationDate)
+        let initialSize = try #require(initialValues.fileSize)
+
+        object["session_summary"] = "Changed"
+        try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted])
+            .write(to: url, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.modificationDate: initialDate],
+            ofItemAtPath: url.path
+        )
+        let changedValues = try url.resourceValues(
+            forKeys: [.contentModificationDateKey, .fileSizeKey]
+        )
+        #expect(changedValues.fileSize == initialSize)
+        #expect(changedValues.contentModificationDate == initialDate)
+
+        await harness.store.scan(ignoringCache: false)
+
+        #expect(harness.store.sessions.first?.title == "Changed")
+    }
+
+    @Test func forcedReloadIsNotDiscardedByLaterCachedScan() async throws {
+        let recorder = ScanRecorder()
+        let fresh = GrokSession(
+            id: "fresh",
+            cwd: "/fresh",
+            summary: "Fresh forced result",
+            createdAt: .distantPast,
+            updatedAt: .distantFuture,
+            messageCount: 1,
+            modelID: nil,
+            agentName: nil,
+            reasoningEffort: nil,
+            directory: URL(fileURLWithPath: "/sessions/fresh")
+        )
+        let entry = SessionCacheEntry(
+            modificationDate: .distantPast,
+            size: 2,
+            contents: Data("{}".utf8),
+            session: fresh
+        )
+        let store = SessionStore(
+            root: URL(fileURLWithPath: "/unused"),
+            timing: SessionStoreTiming(),
+            scanOperation: { _, cache, ignoringCache in
+                await recorder.record(forced: ignoringCache)
+                if ignoringCache {
+                    try? await Task.sleep(for: .milliseconds(180))
+                    return SessionScanner.Result(
+                        sessions: [fresh],
+                        cache: [fresh.directory.path: entry],
+                        loadError: nil
+                    )
+                }
+                return SessionScanner.Result(
+                    sessions: cache.values.map(\.session),
+                    cache: cache,
+                    loadError: nil
+                )
+            }
+        )
+        defer { store.stop() }
+
+        let reload = Task { await store.reload() }
+        try await waitUntilAsync { await recorder.forcedCount > 0 }
+        await store.scan(ignoringCache: false)
+        await reload.value
+        try await waitUntilAsync { await recorder.cachedCount == 1 }
+        try await waitUntil { !store.isLoading && store.sessions.map(\.id) == ["fresh"] }
+
+        let cachedCount = await recorder.cachedCount
+        #expect(cachedCount == 1)
+        #expect(store.sessions.map(\.id) == ["fresh"])
+    }
+
+    @Test func malformedUpdateIsReportedAndPreservesLastKnownSession() async throws {
+        let harness = try FixtureHarness()
+        defer { harness.tearDown() }
+        let summary = try harness.write(
+            fixture: "full.json",
+            cwd: "/Users/exec/Documents/keyholding-v0-v2",
+            id: "019f780a-34d7-7993-aadc-f23a46c40a73"
+        )
+        await harness.store.scan(ignoringCache: false)
+        let originalTitle = harness.store.sessions.first?.title
+
+        try Data("not valid json".utf8).write(to: summary, options: .atomic)
+        await harness.store.scan(ignoringCache: false)
+
+        #expect(harness.store.sessions.first?.title == originalTitle)
+        #expect(harness.store.loadError?.contains("summary.json is invalid") == true)
+    }
+
+    @Test func totalReadFailureIsReportedAndPreservesLastKnownSessions() async throws {
+        let harness = try FixtureHarness()
+        defer { harness.tearDown() }
+        try harness.write(
+            fixture: "minimal.json",
+            cwd: "/Users/exec",
+            id: "019ffeab-c76b-7fe1-be40-508369febd51"
+        )
+        await harness.store.scan(ignoringCache: false)
+        try FileManager.default.removeItem(at: harness.root)
+
+        await harness.store.reload()
+
+        #expect(harness.store.sessions.map(\.id) == ["019ffeab-c76b-7fe1-be40-508369febd51"])
+        #expect(harness.store.loadError?.contains("does not exist") == true)
+    }
+
+    @Test func unreadableProjectIsReportedAndPreservesItsCachedSessions() async throws {
+        let harness = try FixtureHarness()
+        defer { harness.tearDown() }
+        try harness.write(
+            fixture: "minimal.json",
+            cwd: "/Users/exec",
+            id: "019ffeab-c76b-7fe1-be40-508369febd51"
+        )
+        await harness.store.scan(ignoringCache: false)
+        let project = harness.sessionDirectory(
+            cwd: "/Users/exec",
+            id: "019ffeab-c76b-7fe1-be40-508369febd51"
+        ).deletingLastPathComponent()
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: project.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: project.path
+            )
+        }
+
+        await harness.store.scan(ignoringCache: false)
+
+        #expect(harness.store.sessions.map(\.id) == ["019ffeab-c76b-7fe1-be40-508369febd51"])
+        #expect(harness.store.loadError != nil)
+    }
 }
 
 struct SessionQueryCase: Sendable, CustomTestStringConvertible {
@@ -332,11 +577,27 @@ private struct FixtureHarness {
     let root: URL
     let store: SessionStore
 
-    init() throws {
+    init(
+        createRoot: Bool = true,
+        timing: SessionStoreTiming? = nil,
+        scanOperation: SessionStore.ScanOperation? = nil
+    ) throws {
         root = FileManager.default.temporaryDirectory
             .appendingPathComponent("Sigil-SessionStore-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        store = SessionStore(root: root)
+        if createRoot {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        }
+        if let scanOperation {
+            store = SessionStore(
+                root: root,
+                timing: timing ?? SessionStoreTiming(),
+                scanOperation: scanOperation
+            )
+        } else if let timing {
+            store = SessionStore(root: root, timing: timing)
+        } else {
+            store = SessionStore(root: root)
+        }
     }
 
     func tearDown() {
@@ -554,4 +815,32 @@ private func waitUntil(
         try await Task.sleep(for: .milliseconds(20))
     }
     Issue.record("Timed out waiting for condition")
+}
+
+@MainActor
+private func waitUntilAsync(
+    timeout: Duration = .seconds(2),
+    _ predicate: () async -> Bool
+) async throws {
+    let deadline = ContinuousClock.now + timeout
+    while ContinuousClock.now < deadline {
+        if await predicate() { return }
+        try await Task.sleep(for: .milliseconds(20))
+    }
+    Issue.record("Timed out waiting for condition")
+}
+
+private actor ScanRecorder {
+    private(set) var count = 0
+    private(set) var forcedCount = 0
+    private(set) var cachedCount = 0
+
+    func record(forced: Bool? = nil) {
+        count += 1
+        if forced == true {
+            forcedCount += 1
+        } else if forced == false {
+            cachedCount += 1
+        }
+    }
 }

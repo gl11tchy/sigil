@@ -28,25 +28,38 @@ public final class BridgeServer {
     public let socketURL: URL
     public weak var delegate: BridgeServerDelegate?
     public private(set) var isListening = false
+    public static let maxConcurrentClients = 64
 
     /// Idle seconds a client may take to finish one request frame.
-    /// Past this the connection is dropped with no response. Does not bound
-    /// `bridgeAsk` or writing the response afterwards.
+    /// Past this the connection is dropped with no response.
     private static let frameReadSeconds: Double = 30
+    /// A connected client that stops reading cannot hold a client slot forever.
+    private static let frameWriteSeconds: Double = 30
 
     /// Owns the listen fd and DispatchSource. Sendable so `deinit` can stop it.
     private let listenBox = ListenBox()
+    private let clientPool: ClientPool
     private let frameReadDeadline: Duration
+    private let frameWriteDeadline: Duration
 
-    public init(socketURL: URL = BridgePaths.defaultSocket) {
+    public init(socketURL: URL = BridgePaths.configuredSocket) {
         self.socketURL = socketURL
         self.frameReadDeadline = .seconds(Self.frameReadSeconds)
+        self.frameWriteDeadline = .seconds(Self.frameWriteSeconds)
+        self.clientPool = ClientPool(limit: Self.maxConcurrentClients)
     }
 
     /// Test seam: inject a short frame-read deadline instead of waiting 30s.
-    init(socketURL: URL, frameReadDeadline: Duration) {
+    init(
+        socketURL: URL,
+        frameReadDeadline: Duration,
+        frameWriteDeadline: Duration = .seconds(30),
+        maxConcurrentClients: Int = BridgeServer.maxConcurrentClients
+    ) {
         self.socketURL = socketURL
         self.frameReadDeadline = frameReadDeadline
+        self.frameWriteDeadline = frameWriteDeadline
+        self.clientPool = ClientPool(limit: maxConcurrentClients)
     }
 
     deinit {
@@ -56,14 +69,26 @@ public final class BridgeServer {
     /// Throws if the path cannot be bound. Safe to call twice (second is a no-op).
     public func start() throws {
         if isListening { return }
-        let deadline = frameReadDeadline
+        let readDeadline = frameReadDeadline
+        let writeDeadline = frameWriteDeadline
+        let clientPool = clientPool
         try listenBox.bindAndListen(at: socketURL) { [weak self] clientFD in
+            guard clientPool.admit(clientFD) else {
+                Darwin.close(clientFD)
+                return
+            }
             Task.detached { [weak self] in
                 guard let self else {
+                    clientPool.release(clientFD)
                     Darwin.close(clientFD)
                     return
                 }
-                await self.serve(clientFD: clientFD, frameReadDeadline: deadline)
+                await self.serve(
+                    clientFD: clientFD,
+                    frameReadDeadline: readDeadline,
+                    frameWriteDeadline: writeDeadline,
+                    clientPool: clientPool
+                )
             }
         }
         isListening = true
@@ -71,20 +96,48 @@ public final class BridgeServer {
 
     public func stop() {
         listenBox.stop()
+        clientPool.shutdownAll()
         isListening = false
     }
 
-    nonisolated private func serve(clientFD: Int32, frameReadDeadline: Duration) async {
-        defer { Darwin.close(clientFD) }
+    nonisolated private func serve(
+        clientFD: Int32,
+        frameReadDeadline: Duration,
+        frameWriteDeadline: Duration,
+        clientPool: ClientPool
+    ) async {
+        defer {
+            clientPool.release(clientFD)
+            Darwin.close(clientFD)
+        }
         let frame: Data
         do {
             frame = try await Self.readFrame(from: clientFD, deadline: frameReadDeadline)
         } catch {
             return
         }
-        let response = await processFrame(frame)
+        let response: BridgeResponse? = await withTaskGroup(
+            of: ServeEvent.self,
+            returning: BridgeResponse?.self
+        ) { group in
+            group.addTask { [weak self] in
+                guard let self else { return .disconnected }
+                return .response(await self.processFrame(frame))
+            }
+            group.addTask {
+                await Self.waitForDisconnect(clientFD)
+                return .disconnected
+            }
+            guard let first = await group.next() else { return nil }
+            group.cancelAll()
+            switch first {
+            case .response(let response): return response
+            case .disconnected: return nil
+            }
+        }
+        guard let response else { return }
         guard let data = try? BridgeFraming.frame(response) else { return }
-        try? await Self.writeFully(data, to: clientFD)
+        try? await Self.writeFully(data, to: clientFD, deadline: frameWriteDeadline)
     }
 
     private func processFrame(_ frame: Data) async -> BridgeResponse {
@@ -169,11 +222,14 @@ public final class BridgeServer {
         }
     }
 
-    nonisolated private static func writeFully(_ data: Data, to fd: Int32) async throws {
+    nonisolated private static func writeFully(
+        _ data: Data, to fd: Int32, deadline: Duration
+    ) async throws {
+        let expiry = ContinuousClock.now + deadline
         var offset = 0
         while offset < data.count {
             if Task.isCancelled { throw CancellationError() }
-            try await waitReady(fd: fd, events: Int16(POLLOUT))
+            try await waitReady(fd: fd, events: Int16(POLLOUT), until: expiry)
             let n = data.withUnsafeBytes { raw in
                 Darwin.write(fd, raw.baseAddress! + offset, data.count - offset)
             }
@@ -184,6 +240,27 @@ public final class BridgeServer {
             } else {
                 throw SocketIOError.posix(errno)
             }
+        }
+    }
+
+    /// After a request has been read, a client should send no more data. A
+    /// hangup, EOF, or extra frame means it no longer needs the pending result.
+    nonisolated private static func waitForDisconnect(_ fd: Int32) async {
+        while !Task.isCancelled {
+            var descriptor = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            let result = Darwin.poll(&descriptor, 1, 0)
+            if result > 0 {
+                if descriptor.revents & Int16(POLLHUP | POLLERR | POLLNVAL) != 0 { return }
+                if descriptor.revents & Int16(POLLIN) != 0 {
+                    var byte: UInt8 = 0
+                    let count = Darwin.recv(fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT)
+                    if count == 0 || count > 0 { return }
+                    if errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK { return }
+                }
+            } else if result < 0, errno != EINTR {
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(10))
         }
     }
 
@@ -219,10 +296,51 @@ public final class BridgeServer {
     }
 }
 
+private enum ServeEvent: Sendable {
+    case response(BridgeResponse)
+    case disconnected
+}
+
 private enum SocketIOError: Error {
     case eof
     case posix(Int32)
     case idleTimeout
+}
+
+/// Caps open clients and lets `stop()` interrupt requests already in flight.
+private final class ClientPool: @unchecked Sendable {
+    private let lock = NSLock()
+    private let limit: Int
+    private var descriptors: Set<Int32> = []
+
+    init(limit: Int) {
+        self.limit = max(1, limit)
+    }
+
+    func admit(_ fd: Int32) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard descriptors.count < limit else { return false }
+        descriptors.insert(fd)
+        return true
+    }
+
+    func release(_ fd: Int32) {
+        lock.lock()
+        descriptors.remove(fd)
+        lock.unlock()
+    }
+
+    func shutdownAll() {
+        lock.lock()
+        // Keep the lock until every shutdown is issued. Otherwise a worker can
+        // remove and close an fd, the OS can reuse its number, and this loop can
+        // accidentally shut down an unrelated new descriptor.
+        for fd in descriptors {
+            Darwin.shutdown(fd, SHUT_RDWR)
+        }
+        lock.unlock()
+    }
 }
 
 /// Listen socket + accept source. `@unchecked Sendable` because every mutable

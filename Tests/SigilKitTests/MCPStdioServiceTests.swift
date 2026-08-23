@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Testing
 
@@ -9,12 +10,12 @@ struct MCPStdioServiceTests {
     @Test func initializeReplyShape() throws {
         let (service, recorder) = makeService()
         let line = try #require(
-            service.handleLine(#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#))
+            service.handleLine(Self.initializeLine))
         let object = try parseObject(line)
         #expect(object["jsonrpc"] as? String == "2.0")
         #expect((object["id"] as? NSNumber)?.intValue == 1)
         let result = try #require(object["result"] as? [String: Any])
-        #expect(result["protocolVersion"] as? String == "2024-11-05")
+        #expect(result["protocolVersion"] as? String == MCPStdioService.protocolVersion)
         let capabilities = try #require(result["capabilities"] as? [String: Any])
         let tools = try #require(capabilities["tools"] as? [String: Any])
         #expect(tools.isEmpty)
@@ -36,6 +37,16 @@ struct MCPStdioServiceTests {
         let tools = try listedTools(service)
         #expect(Set(tools.keys) == ["list_tabs", "send_to_tab", "ask_tab", "reply_to"])
         #expect(tools.count == 4)
+    }
+
+    @Test func queuedToolDescriptionsDiscloseUserApproval() throws {
+        let (service, _) = makeService()
+        let tools = try listedTools(service)
+
+        for name in ["send_to_tab", "ask_tab"] {
+            let description = try #require(tools[name]?["description"] as? String)
+            #expect(description.localizedCaseInsensitiveContains("user must approve"))
+        }
     }
 
     @Test(arguments: ["list_tabs", "send_to_tab", "ask_tab", "reply_to"])
@@ -149,6 +160,24 @@ struct MCPStdioServiceTests {
         #expect(outcome.text == "No other tabs are open.")
     }
 
+    @Test func listTabsFlattensUntrustedMetadata() throws {
+        let tabs = [
+            BridgeTab(
+                tabID: "aaa\nforged-id",
+                title: "Alpha\r\nforged-title",
+                directory: "/tmp/a\tforged-directory",
+                status: "idle\u{0007}forged-status",
+                isSelf: false)
+        ]
+        let (service, _) = makeService { _ in BridgeResponse(ok: true, tabs: tabs) }
+        let outcome = try toolOutcome(service.handleLine(Self.toolCall("list_tabs", [:])))
+        #expect(outcome.text.split(separator: "\n").count == 1)
+        #expect(outcome.text.contains("aaa forged-id"))
+        #expect(outcome.text.contains("Alpha forged-title"))
+        #expect(outcome.text.contains("/tmp/a forged-directory"))
+        #expect(outcome.text.contains("idle forged-status"))
+    }
+
     @Test func askTabWithoutAnswerIsATimeoutSentence() throws {
         let (service, _) = makeService { _ in BridgeResponse(ok: true, answer: nil) }
         let outcome = try toolOutcome(
@@ -157,6 +186,19 @@ struct MCPStdioServiceTests {
         #expect(outcome.isError)
         #expect(outcome.text.contains("300"))
         #expect(outcome.text.lowercased().contains("not answer"))
+    }
+
+    @Test func toolMessageIsByteLimitedBeforeSocketTransport() throws {
+        let (service, recorder) = makeService { _ in BridgeResponse(ok: true) }
+        let oneGrapheme = "a" + String(repeating: "\u{0301}", count: 9_000)
+        let outcome = try toolOutcome(
+            service.handleLine(
+                Self.toolCall("send_to_tab", ["tab": "other", "message": oneGrapheme])
+            ))
+        #expect(!outcome.isError)
+        let sent = try #require(recorder.requests.first?.text)
+        #expect(sent.utf8.count <= BridgeLimits.maxMessageBytes)
+        #expect(sent.contains("truncated by Sigil"))
     }
 
     @Test(arguments: [
@@ -265,9 +307,72 @@ struct MCPStdioServiceTests {
     }
 
     @Test(arguments: [
+        #"{"id":1,"method":"ping"}"#,
+        #"{"jsonrpc":"1.0","id":1,"method":"ping"}"#,
+        #"{"jsonrpc":2,"id":1,"method":"ping"}"#,
+        #"{"jsonrpc":"2.0","id":1,"method":"ping","params":[]}"#,
+        #"[]"#,
+    ])
+    func invalidJSONRPCEnvelopeIsMinus32600(requestLine: String) throws {
+        let (service, recorder) = makeService()
+        let line = try #require(service.handleLine(requestLine))
+        let object = try parseObject(line)
+        #expect(object["id"] is NSNull)
+        let error = try #require(object["error"] as? [String: Any])
+        #expect((error["code"] as? NSNumber)?.intValue == -32600)
+        #expect(recorder.requests.isEmpty)
+    }
+
+    @Test(arguments: [
+        #"{"jsonrpc":"2.0","id":null,"method":"ping"}"#,
+        #"{"jsonrpc":"2.0","id":true,"method":"ping"}"#,
+        #"{"jsonrpc":"2.0","id":1.5,"method":"ping"}"#,
+        #"{"jsonrpc":"2.0","id":{},"method":"ping"}"#,
+        #"{"jsonrpc":"2.0","id":[],"method":"ping"}"#,
+    ])
+    func invalidRequestIDTypeIsRejected(requestLine: String) throws {
+        let (service, _) = makeService()
+        let object = try parseObject(try #require(service.handleLine(requestLine)))
+        #expect(object["id"] is NSNull)
+        let error = try #require(object["error"] as? [String: Any])
+        #expect((error["code"] as? NSNumber)?.intValue == -32600)
+    }
+
+    @Test func initializeRejectsNonStringProtocolVersion() throws {
+        let (service, _) = makeService()
+        let line = try #require(
+            service.handleLine(
+                #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":2}}"#
+            ))
+        let object = try parseObject(line)
+        let error = try #require(object["error"] as? [String: Any])
+        #expect((error["code"] as? NSNumber)?.intValue == -32602)
+    }
+
+    @Test(arguments: [
+        #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+        #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{}}}"#,
+    ])
+    func initializeRequiresAdvertisedFields(requestLine: String) throws {
+        let (service, _) = makeService()
+        let line = try #require(service.handleLine(requestLine))
+        let error = try #require(try parseObject(line)["error"] as? [String: Any])
+        #expect((error["code"] as? NSNumber)?.intValue == -32602)
+    }
+
+    @Test func notificationMethodsRejectAnID() throws {
+        let (service, _) = makeService()
+        let line = try #require(
+            service.handleLine(
+                #"{"jsonrpc":"2.0","id":1,"method":"notifications/initialized"}"#
+            ))
+        let error = try #require(try parseObject(line)["error"] as? [String: Any])
+        #expect((error["code"] as? NSNumber)?.intValue == -32600)
+    }
+
+    @Test(arguments: [
         #"{"jsonrpc":"2.0","id":"abc","method":"ping"}"#,
         #"{"jsonrpc":"2.0","id":7,"method":"ping"}"#,
-        #"{"jsonrpc":"2.0","id":null,"method":"ping"}"#,
     ])
     func requestIDRoundTripsUnchanged(requestLine: String) throws {
         let (service, _) = makeService()
@@ -275,6 +380,71 @@ struct MCPStdioServiceTests {
         let request = try parseObject(requestLine)
         let response = try parseObject(responseLine)
         #expect(jsonEquals(request["id"] ?? NSNull(), response["id"] ?? NSNull()))
+    }
+
+    @Test func stdioSessionDoesNotLetAskBlockPing() async throws {
+        let gate = DispatchSemaphore(value: 0)
+        let started = SignalProbe()
+        let service = MCPStdioService(peer: peer) { request in
+            if request.method == .askTab {
+                started.signal()
+                _ = gate.wait(timeout: .now() + 2)
+                return BridgeResponse(ok: true, answer: "done")
+            }
+            return BridgeResponse(ok: true, tabs: [])
+        }
+        let lines = LineRecorder()
+        let session = MCPStdioSession(service: service, output: lines.append)
+        defer {
+            gate.signal()
+            session.cancelAll()
+        }
+
+        session.receive(Self.toolCall("ask_tab", ["tab": "other", "question": "wait"]))
+        #expect(await waitFor { started.value })
+        session.receive(#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#)
+        #expect(await waitFor { lines.hasResponse(id: 2) })
+        #expect(!lines.hasResponse(id: 1))
+
+        gate.signal()
+        #expect(await waitFor { lines.hasResponse(id: 1) })
+        #expect(await waitFor { session.inFlightCount == 0 })
+    }
+
+    @Test func cancelledNotificationStopsAnInFlightCallWithoutResponse() async {
+        let started = SignalProbe()
+        let service = MCPStdioService(peer: peer) { _ in
+            started.signal()
+            while !Task.isCancelled { usleep(5_000) }
+            throw CancellationError()
+        }
+        let lines = LineRecorder()
+        let session = MCPStdioSession(service: service, output: lines.append)
+        defer { session.cancelAll() }
+
+        session.receive(Self.toolCall("ask_tab", ["tab": "other", "question": "wait"]))
+        #expect(await waitFor { started.value })
+        session.receive(
+            #"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":1}}"#
+        )
+        #expect(await waitFor { session.inFlightCount == 0 })
+        #expect(lines.values.isEmpty)
+    }
+
+    @Test func stdioSessionAllowsACompletedRequestIDToBeReused() async {
+        let service = MCPStdioService(peer: peer) { _ in BridgeResponse(ok: true, tabs: []) }
+        let lines = LineRecorder()
+        let session = MCPStdioSession(service: service, output: lines.append)
+        defer { session.cancelAll() }
+
+        let ping = #"{"jsonrpc":"2.0","id":8,"method":"ping"}"#
+        session.receive(ping)
+        #expect(await waitFor { lines.values.count == 1 && session.inFlightCount == 0 })
+        session.receive(ping)
+        #expect(await waitFor { lines.values.count == 2 })
+        let second = try? parseObject(lines.values[1])
+        #expect(second?["result"] != nil)
+        #expect(second?["error"] == nil)
     }
 
     // MARK: - Helpers
@@ -285,6 +455,9 @@ struct MCPStdioServiceTests {
         "ask_tab": ["tab": "other", "question": "why?"],
         "reply_to": ["request_id": "r1", "answer": "yes"],
     ]
+
+    private static let initializeLine =
+        #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"tests","version":"1"}}}"#
 
     private func makeService(
         _ transport: @escaping @Sendable (BridgeRequest) throws -> BridgeResponse = { _ in
@@ -368,6 +541,61 @@ private final class Recorder: @unchecked Sendable {
         defer { lock.unlock() }
         storage.removeAll()
     }
+}
+
+private final class SignalProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage = false
+
+    var value: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func signal() {
+        lock.lock()
+        storage = true
+        lock.unlock()
+    }
+}
+
+private final class LineRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String] = []
+
+    var values: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func append(_ line: String) {
+        lock.lock()
+        storage.append(line)
+        lock.unlock()
+    }
+
+    func hasResponse(id: Int) -> Bool {
+        values.contains { line in
+            guard let raw = try? JSONSerialization.jsonObject(with: Data(line.utf8)),
+                let object = raw as? [String: Any]
+            else { return false }
+            return (object["id"] as? NSNumber)?.intValue == id
+        }
+    }
+}
+
+private func waitFor(
+    timeout: Duration = .seconds(2),
+    _ condition: @escaping @Sendable () -> Bool
+) async -> Bool {
+    let deadline = ContinuousClock.now + timeout
+    while ContinuousClock.now < deadline {
+        if condition() { return true }
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+    return condition()
 }
 
 private func parseObject(_ line: String) throws -> [String: Any] {

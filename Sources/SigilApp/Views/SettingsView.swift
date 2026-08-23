@@ -4,7 +4,13 @@ import SwiftUI
 
 struct SettingsView: View {
     @Bindable var model: AppModel
-    @State private var tabMessagingError: String?
+    @State private var settingsError: String?
+    @State private var executablePath: String
+
+    init(model: AppModel) {
+        self.model = model
+        _executablePath = State(initialValue: model.settings.executablePath)
+    }
 
     var body: some View {
         TabView {
@@ -46,18 +52,22 @@ struct SettingsView: View {
             LabeledContent("Grok CLI") {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
-                        TextField("Path", text: Bindable(model.settings).executablePath)
+                        TextField("Path", text: $executablePath)
                             .textFieldStyle(.roundedBorder)
                             .monospaced()
+                            .onSubmit { applyExecutablePath() }
+                            .onChange(of: executablePath) { _, _ in
+                                if draftExecutableExists { applyExecutablePath() }
+                            }
                         Button("Choose…") { pickExecutable() }
                     }
                     Label(
-                        model.settings.executableExists ? "Found" : "Not found",
-                        systemImage: model.settings.executableExists
+                        draftExecutableExists ? "Found" : "Not found",
+                        systemImage: draftExecutableExists
                             ? "checkmark.circle" : "exclamationmark.triangle"
                     )
                     .font(.caption)
-                    .foregroundStyle(model.settings.executableExists ? .green : .red)
+                    .foregroundStyle(draftExecutableExists ? .green : .red)
                 }
             }
 
@@ -81,24 +91,34 @@ struct SettingsView: View {
                     "Let tabs message each other",
                     isOn: tabMessagingIsOn
                 )
-                .disabled(BridgeRegistration.bundledMCPBinary == nil)
+                .disabled(
+                    (BridgeRegistration.bundledMCPBinary == nil
+                        && !model.settings.isTabMessagingEnabled)
+                        || model.isTabMessagingChangeInProgress
+                )
             } footer: {
-                Text(tabMessagingFooter)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                if let error = model.tabMessagingError {
+                    Text(error)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                } else if BridgeRegistration.bundledMCPBinary != nil {
+                    Text("Applies to tabs opened after this change.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)
         .alert(
-            "Could not update tab messaging",
+            "Could not update Settings",
             isPresented: Binding(
-                get: { tabMessagingError != nil },
-                set: { if !$0 { tabMessagingError = nil } }
+                get: { settingsError != nil },
+                set: { if !$0 { settingsError = nil } }
             )
         ) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(tabMessagingError ?? "")
+            Text(settingsError ?? "")
         }
     }
 
@@ -109,40 +129,29 @@ struct SettingsView: View {
         )
     }
 
-    private var tabMessagingFooter: String {
-        if BridgeRegistration.bundledMCPBinary == nil {
-            return "Unavailable: this build has no sigil-mcp helper."
-        }
-        return """
-            Each session gets tools to list the other tabs, send one a message, \
-            and ask one a question. This adds a sigil entry to ~/.grok/config.toml. \
-            Tabs you open afterwards can message each other; tabs already open cannot.
-            """
-    }
-
     private func applyTabMessaging(enabled: Bool) {
-        let previous = model.settings.isTabMessagingEnabled
-        guard enabled != previous else { return }
-        guard let binary = BridgeRegistration.bundledMCPBinary else { return }
-        model.settings.isTabMessagingEnabled = enabled
-        let executable = model.settings.executableURL
-        Task.detached(priority: .userInitiated) {
-            let registration = BridgeRegistration(executable: executable)
+        guard enabled != model.settings.isTabMessagingEnabled else { return }
+        Task {
             do {
-                if enabled {
-                    try registration.install(mcpBinary: binary)
-                } else {
-                    try registration.remove()
-                }
-                await MainActor.run { model.setTabMessaging(enabled: enabled) }
+                try await model.setTabMessaging(enabled: enabled)
             } catch {
-                let text = error.localizedDescription
-                await MainActor.run {
-                    model.settings.isTabMessagingEnabled = previous
-                    tabMessagingError = text
-                }
+                settingsError = error.localizedDescription
             }
         }
+    }
+
+    private var draftExecutableExists: Bool {
+        AppSettings.isExecutableFile(at: URL(fileURLWithPath: executablePath))
+    }
+
+    private func applyExecutablePath() {
+        guard draftExecutableExists else {
+            settingsError = "Choose an executable file."
+            return
+        }
+        guard executablePath != model.settings.executablePath else { return }
+        model.settings.executablePath = executablePath
+        Task { await model.executableConfigurationChanged() }
     }
 
     private func pickExecutable() {
@@ -150,11 +159,12 @@ struct SettingsView: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.directoryURL = URL(fileURLWithPath: model.settings.executablePath)
+        panel.directoryURL = URL(fileURLWithPath: executablePath)
             .deletingLastPathComponent()
         panel.prompt = "Choose"
         if panel.runModal() == .OK, let url = panel.url {
-            model.settings.executablePath = url.path
+            executablePath = url.path
+            applyExecutablePath()
         }
     }
 }

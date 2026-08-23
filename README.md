@@ -2,7 +2,7 @@
 
 ![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-000000)
 ![Swift](https://img.shields.io/badge/Swift-6-F05138)
-![Tests](https://img.shields.io/badge/tests-111%20passing-4FA87A)
+[![CI](https://github.com/gl11tchy/sigil/actions/workflows/ci.yml/badge.svg)](https://github.com/gl11tchy/sigil/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-MIT-6A6A6A)
 
 A native macOS app around the `grok` command line tool. It runs the real Grok Build
@@ -40,12 +40,13 @@ Grok Build has no channel between sessions. Sigil supplies one: it owns every ta
 carries the messages itself.
 
 Turning the switch on registers a `sigil` MCP server in `~/.grok/config.toml`, pointing at
-a small helper inside the app bundle. Turning it off removes that entry again. Tabs you
-open afterwards can message each other; tabs already open cannot.
+a small helper inside the app bundle. Turning it off removes that entry again. Only
+sessions started or restarted after you turn it on receive the tools.
 
-A message arrives in the other tab exactly as if you had typed it, on one line, marked
-with the sending tab's name. An `ask` waits until the other tab calls `reply_to`, or until
-the timeout runs out (5 minutes by default, 15 at most).
+A message is queued in the other tab, marked with the sending tab's name. The user can
+deliver or dismiss it from the inbox banner. Sigil does not inject an incoming message
+without the user's approval. An `ask` waits until the other tab calls
+`reply_to`, or until the timeout runs out (5 minutes by default, 15 at most).
 
 The socket lives at `~/Library/Application Support/Sigil/bridge.sock` and is readable only
 by you. Any process running as you can talk to it, which is the same trust level as the
@@ -83,7 +84,62 @@ that process needs the same access to your files and network that it has in a te
 Scripts/build-app.sh
 ```
 
-Writes `dist/Sigil.app`. Double-click it, or `open dist/Sigil.app`.
+This makes a release bundle containing both Apple silicon and Intel executables. It
+refuses to package an old or single-architecture executable if that build fails. The
+result is `dist/Sigil.app`.
+
+Release builds need Apple's Metal Toolchain. Install it once if Xcode does not have it:
+
+```sh
+xcodebuild -downloadComponent MetalToolchain
+```
+
+For a faster local bundle on the current Mac:
+
+```sh
+SIGIL_CONFIG=debug Scripts/build-app.sh
+```
+
+To allow a current-architecture release bundle for local use only:
+
+```sh
+SIGIL_ALLOW_THIN=1 Scripts/build-app.sh
+```
+
+Local bundles use an ad-hoc signature. To keep macOS folder permissions across rebuilds,
+set a signing identity:
+
+```sh
+SIGIL_CODESIGN_IDENTITY="Apple Development: Your Name (TEAMID)" Scripts/build-app.sh
+```
+
+### Signed and notarized distribution build
+
+Store App Store Connect API credentials in Keychain once:
+
+```sh
+xcrun notarytool store-credentials "sigil-notary" \
+  --key "/path/to/AuthKey_KEYID.p8" \
+  --key-id "KEYID" \
+  --issuer "ISSUER_UUID"
+```
+
+Then build, sign, submit, staple, and verify the app:
+
+```sh
+SIGIL_DISTRIBUTION=1 \
+SIGIL_CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+SIGIL_NOTARY_PROFILE="sigil-notary" \
+SIGIL_VERSION="1.0.0" \
+SIGIL_BUILD="1" \
+Scripts/build-app.sh
+```
+
+The distribution command requires a verified universal build. It stops on signing,
+notarization, stapling, or Gatekeeper errors. Notarization waits for 30 minutes by
+default; set `SIGIL_NOTARY_TIMEOUT` to another duration such as `45m` if needed.
+
+Double-click the finished app, or run `open dist/Sigil.app`.
 
 Debug build that stays attached to the terminal:
 
@@ -103,8 +159,9 @@ Scripts/make-icon.sh
 Scripts/verify.sh
 ```
 
-Runs the build, the tests, an optional format lint, the app bundling, and a launch
-smoke check.
+Runs the build, tests, shell checks, optional Swift format lint, debug app bundling, and
+a launch smoke check. The smoke launch uses temporary home, preferences, cache, and Grok
+folders. It does not restore tabs, register the bridge, or start a real session.
 
 ## License
 
@@ -112,7 +169,8 @@ MIT — see [LICENSE](LICENSE).
 
 Sigil bundles [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) (MIT) and
 [swift-argument-parser](https://github.com/apple/swift-argument-parser) (Apache 2.0).
-It wraps the Grok Build CLI but does not include it.
+Their license texts ship in `Sigil.app/Contents/Resources/ThirdPartyLicenses`. Sigil wraps
+the Grok Build CLI but does not include it.
 
 ## Where the conversations come from
 

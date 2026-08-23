@@ -22,7 +22,7 @@ struct RootView: View {
         .sheet(isPresented: $model.isShowingNewSessionSheet) {
             NewSessionSheet(model: model)
         }
-        .task { model.onAppear() }
+        .task { await model.onAppear() }
     }
 
     // MARK: - Detail column
@@ -67,6 +67,18 @@ struct RootView: View {
                 }
                 .onChange(of: model.findQuery) { _, _ in
                     model.applyFindQuery()
+                }
+                if let tab = model.selectedTab, let item = tab.bridgeInbox.first {
+                    BridgeInboxBanner(
+                        prompt: item.prompt,
+                        pendingCount: tab.bridgeInbox.count,
+                        canDeliver: tab.canDeliverBridgePrompt,
+                        deliver: {
+                            tab.deliverNextBridgePrompt()
+                            tab.controller.focus()
+                        },
+                        dismiss: { tab.dismissNextBridgePrompt() }
+                    )
                 }
                 if let tab = model.selectedTab, case .exited = tab.activity {
                     ExitedBanner(
@@ -182,11 +194,20 @@ private struct SplitDivider: View {
     @Binding var width: Double
     @Environment(\.palette) private var palette
     @State private var widthAtDragStart: Double?
+    @FocusState private var isFocused: Bool
 
     var body: some View {
         Rectangle()
             .fill(palette.hairline)
             .frame(width: 1)
+            .overlay {
+                if isFocused {
+                    Rectangle()
+                        .fill(palette.accent)
+                        .frame(width: 2)
+                        .allowsHitTesting(false)
+                }
+            }
             .overlay {
                 Color.clear
                     .frame(width: 9)
@@ -204,6 +225,64 @@ private struct SplitDivider: View {
                             .onEnded { _ in widthAtDragStart = nil }
                     )
             }
+            .focusable()
+            .focused($isFocused)
+            .onKeyPress(.leftArrow) {
+                width = max(200, width - 20)
+                return .handled
+            }
+            .onKeyPress(.rightArrow) {
+                width = min(430, width + 20)
+                return .handled
+            }
+            .accessibilityElement()
+            .accessibilityLabel("Sidebar width")
+            .accessibilityValue("\(Int(width)) points")
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: width = min(430, width + 20)
+                case .decrement: width = max(200, width - 20)
+                @unknown default: break
+                }
+            }
+    }
+}
+
+private struct BridgeInboxBanner: View {
+    let prompt: String
+    let pendingCount: Int
+    let canDeliver: Bool
+    let deliver: () -> Void
+    let dismiss: () -> Void
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "tray.and.arrow.down")
+                .foregroundStyle(palette.accent)
+            Text(prompt)
+                .font(.system(size: 10.5))
+                .foregroundStyle(palette.textDim)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if pendingCount > 1 {
+                Text("\(pendingCount) queued")
+                    .font(.system(size: 9.5, design: .monospaced))
+                    .foregroundStyle(palette.textFaint)
+            }
+            Spacer(minLength: 0)
+            Button("Dismiss", action: dismiss)
+            Button("Deliver", action: deliver)
+                .buttonStyle(.borderedProminent)
+                .disabled(!canDeliver)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 36)
+        .background(palette.raised)
+        .overlay(alignment: .top) { Rectangle().fill(palette.hairline).frame(height: 1) }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Incoming tab message")
     }
 }
 
@@ -276,7 +355,7 @@ private struct ExitedBanner: View {
     @Environment(\.palette) private var palette
 
     private var code: Int32? {
-        if case let .exited(code) = activity { return code }
+        if case .exited(let code) = activity { return code }
         return nil
     }
 

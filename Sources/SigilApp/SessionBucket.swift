@@ -43,8 +43,7 @@ struct SessionBucket: Identifiable {
             return ("9-earlier", "Earlier")
         }
         if date >= yesterday { return ("1-yesterday", "Yesterday") }
-        if let weekAgo = calendar.date(byAdding: .day, value: -7, to: startOfToday), date >= weekAgo
-        {
+        if let weekAgo = calendar.date(byAdding: .day, value: -7, to: startOfToday), date >= weekAgo {
             return ("2-week", "Previous 7 days")
         }
         if let monthAgo = calendar.date(byAdding: .day, value: -30, to: startOfToday),
@@ -63,7 +62,7 @@ extension Date {
     /// minute reads as "now".
     var shortRelative: String {
         let seconds = Date().timeIntervalSince(self)
-        if seconds < 60 { return "now" }
+        if abs(seconds) < 60 { return "now" }
         return formatted(.relative(presentation: .numeric))
     }
 
