@@ -47,8 +47,10 @@ fail() {
   exit 1
 }
 
-echo "==> swift test"
-swift test || fail "swift test"
+echo "==> swift test --no-parallel"
+# Several integration tests use blocking processes and sockets. Serial execution
+# avoids starving the older Swift concurrency runtime on GitHub's macOS runner.
+swift test --no-parallel || fail "swift test"
 
 echo "==> bash -n"
 bash -n "$SCRIPT_DIR"/*.sh || fail "bash syntax"
@@ -127,7 +129,7 @@ SMOKE_LOG=""
 
 echo
 echo "==== verify: PASS ===="
-echo "  swift test"
+echo "  swift test --no-parallel"
 echo "  $FORMAT_STATUS"
 echo "  Scripts/build-app.sh (debug bundle)"
 echo "  launch smoke check (alive after 3s, then quit)"
