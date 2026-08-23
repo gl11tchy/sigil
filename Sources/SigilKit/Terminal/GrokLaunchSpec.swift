@@ -20,6 +20,10 @@ public struct GrokLaunchSpec: Sendable, Hashable {
     public var reasoningEffort: String?
     /// Anything the user typed into the advanced field, already split into arguments.
     public var extraArguments: [String]
+    /// Identifies this tab to the `sigil-mcp` server grok launches. Both this and
+    /// `bridgeSocketPath` must be set for tab messaging to reach the app.
+    public var bridgeTabID: String?
+    public var bridgeSocketPath: String?
 
     public init(
         executable: URL = GrokPaths.defaultExecutable,
@@ -27,7 +31,9 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         mode: Mode,
         model: String? = nil,
         reasoningEffort: String? = nil,
-        extraArguments: [String] = []
+        extraArguments: [String] = [],
+        bridgeTabID: String? = nil,
+        bridgeSocketPath: String? = nil
     ) {
         self.executable = executable
         self.workingDirectory = workingDirectory
@@ -35,6 +41,8 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         self.model = model
         self.reasoningEffort = reasoningEffort
         self.extraArguments = extraArguments
+        self.bridgeTabID = bridgeTabID
+        self.bridgeSocketPath = bridgeSocketPath
     }
 
     /// The session directory this launch reads and writes, when the app knows it up front.
@@ -83,6 +91,15 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         let existing = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
         if !existing.split(separator: ":").contains(Substring(grokBin)) {
             env["PATH"] = "\(grokBin):\(existing)"
+        }
+        if let tabID = bridgeTabID?.nilIfBlank,
+            let socketPath = bridgeSocketPath?.nilIfBlank
+        {
+            env[BridgePaths.tabEnvironmentKey] = tabID
+            env[BridgePaths.socketEnvironmentKey] = socketPath
+        } else {
+            env.removeValue(forKey: BridgePaths.tabEnvironmentKey)
+            env.removeValue(forKey: BridgePaths.socketEnvironmentKey)
         }
         return env
     }

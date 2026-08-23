@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import SigilKit
 import Observation
+import os
 import UniformTypeIdentifiers
 
 /// Window-level state: the open tabs, the session sidebar, and the actions the menus call.
@@ -33,6 +34,10 @@ final class AppModel {
     /// the sidebar just became visible, or already had it.
     private(set) var searchFocusToken = 0
 
+    /// True while this process owns the tab-messaging socket.
+    private(set) var isTabMessagingAvailable = false
+    private var tabBridge: TabBridge?
+
     init(settings: AppSettings = AppSettings(), store: SessionStore = SessionStore()) {
         self.settings = settings
         self.store = store
@@ -40,6 +45,7 @@ final class AppModel {
 
     func onAppear() {
         store.start()
+        startTabMessaging()
         restoreOpenTabs()
     }
 
@@ -141,12 +147,14 @@ final class AppModel {
 
     @discardableResult
     private func add(_ spec: GrokLaunchSpec) -> TerminalTab {
-        let tab = TerminalTab(spec: spec, settings: settings)
+        let tabID = UUID()
+        let tab = TerminalTab(id: tabID, spec: tagged(spec, tabID: tabID), settings: settings)
         tabs.append(tab)
         selectedTabID = tab.id
         rememberDefaultDirectory(spec.workingDirectory)
         let id = tab.id
         tab.start(isSelected: { [weak self] in self?.selectedTabID == id })
+        attachBridge(to: tab)
         persistOpenTabs()
         return tab
     }
@@ -157,6 +165,7 @@ final class AppModel {
         let old = tabs[index]
         // `.new` tabs already have a UUID the CLI wrote a session directory for.
         guard let sessionID = old.sessionID else { return }
+        tabBridge?.noteTabClosed(id: old.id)
         old.terminate()
         let spec = GrokLaunchSpec(
             executable: settings.executableURL,
@@ -165,17 +174,20 @@ final class AppModel {
             model: settings.model.nilIfEmpty,
             reasoningEffort: settings.effort.nilIfEmpty
         )
-        let tab = TerminalTab(spec: spec, settings: settings)
+        let tabID = UUID()
+        let tab = TerminalTab(id: tabID, spec: tagged(spec, tabID: tabID), settings: settings)
         tab.sessionTitle = old.sessionTitle
         tabs[index] = tab
         selectedTabID = tab.id
         let newID = tab.id
         tab.start(isSelected: { [weak self] in self?.selectedTabID == newID })
+        attachBridge(to: tab)
         persistOpenTabs()
     }
 
     func closeTab(_ id: TerminalTab.ID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        tabBridge?.noteTabClosed(id: id)
         tabs[index].terminate()
         tabs.remove(at: index)
         if selectedTabID == id {
@@ -224,7 +236,10 @@ final class AppModel {
     }
 
     func closeAllTabs() {
-        tabs.forEach { $0.terminate() }
+        for tab in tabs {
+            tabBridge?.noteTabClosed(id: tab.id)
+            tab.terminate()
+        }
         tabs.removeAll()
         selectedTabID = nil
         persistOpenTabs()
@@ -234,10 +249,74 @@ final class AppModel {
     /// left to finish an asynchronous kill. Does not persist — the last user
     /// mutation already wrote the tabs that should come back next launch.
     func closeAllTabsAndWait() {
+        stopTabMessaging()
         tabs.forEach { $0.terminateAndWait() }
         tabs.removeAll()
         selectedTabID = nil
     }
+
+    // MARK: - Tab messaging
+
+    /// Applies a Settings change without a relaunch. Tabs already open keep the
+    /// environment they were started with, so only new tabs can message.
+    func setTabMessaging(enabled: Bool) {
+        if enabled {
+            startTabMessaging()
+        } else {
+            stopTabMessaging()
+        }
+    }
+
+    private func startTabMessaging() {
+        guard settings.isTabMessagingEnabled else {
+            isTabMessagingAvailable = false
+            return
+        }
+        if tabBridge?.isListening == true { return }
+        let bridge = TabBridge(model: self)
+        do {
+            try bridge.start()
+            tabBridge = bridge
+            isTabMessagingAvailable = true
+        } catch BridgeServer.Error.alreadyInUse {
+            Self.bridgeLog.error("Tab messaging unavailable: another Sigil owns the socket")
+            tabBridge = nil
+            isTabMessagingAvailable = false
+        } catch {
+            Self.bridgeLog.error(
+                "Tab messaging failed to start: \(String(describing: error), privacy: .public)")
+            tabBridge = nil
+            isTabMessagingAvailable = false
+        }
+    }
+
+    private func stopTabMessaging() {
+        tabBridge?.stop()
+        tabBridge = nil
+        isTabMessagingAvailable = false
+    }
+
+    /// Stamps the tab's identity and the socket onto the launch, so the
+    /// `sigil-mcp` server grok starts knows which tab it speaks for. Left off
+    /// when messaging is unavailable, which also strips any inherited value.
+    private func tagged(_ spec: GrokLaunchSpec, tabID: UUID) -> GrokLaunchSpec {
+        guard isTabMessagingAvailable, let bridge = tabBridge else { return spec }
+        var tagged = spec
+        tagged.bridgeTabID = tabID.uuidString
+        tagged.bridgeSocketPath = bridge.socketURL.path
+        return tagged
+    }
+
+    private func attachBridge(to tab: TerminalTab) {
+        let previous = tab.controller.onTerminate
+        let id = tab.id
+        tab.controller.onTerminate = { [weak self] code in
+            previous?(code)
+            self?.tabBridge?.noteTabExited(id: id)
+        }
+    }
+
+    private static let bridgeLog = Logger(subsystem: "com.gl11tchy.sigil", category: "bridge")
 
     // MARK: - Appearance
 

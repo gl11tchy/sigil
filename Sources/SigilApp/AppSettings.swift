@@ -12,6 +12,7 @@ final class AppSettings {
         static let themeName = "terminal.theme"
         static let executablePath = "grok.executablePath"
         static let showEmptySessions = "sidebar.showEmptySessions"
+        static let isTabMessagingEnabled = "bridge.enabled"
         static let defaultDirectory = "session.defaultDirectory"
         static let openTabs = "session.openTabs"
         static let model = "session.model"
@@ -33,6 +34,9 @@ final class AppSettings {
     /// hook-triggered one-shot runs otherwise drown the sidebar.
     var showEmptySessions: Bool {
         didSet { defaults.set(showEmptySessions, forKey: Key.showEmptySessions) }
+    }
+    var isTabMessagingEnabled: Bool {
+        didSet { defaults.set(isTabMessagingEnabled, forKey: Key.isTabMessagingEnabled) }
     }
     var defaultDirectory: String {
         didSet { defaults.set(defaultDirectory, forKey: Key.defaultDirectory) }
@@ -68,6 +72,7 @@ final class AppSettings {
         executablePath =
             defaults.string(forKey: Key.executablePath) ?? GrokPaths.defaultExecutable.path
         showEmptySessions = defaults.bool(forKey: Key.showEmptySessions)
+        isTabMessagingEnabled = defaults.bool(forKey: Key.isTabMessagingEnabled)
         defaultDirectory =
             defaults.string(forKey: Key.defaultDirectory)
             ?? FileManager.default.homeDirectoryForCurrentUser.path
