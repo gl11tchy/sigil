@@ -29,11 +29,24 @@ public final class BridgeServer {
     public weak var delegate: BridgeServerDelegate?
     public private(set) var isListening = false
 
+    /// Idle seconds a client may take to finish one request frame.
+    /// Past this the connection is dropped with no response. Does not bound
+    /// `bridgeAsk` or writing the response afterwards.
+    private static let frameReadSeconds: Double = 30
+
     /// Owns the listen fd and DispatchSource. Sendable so `deinit` can stop it.
     private let listenBox = ListenBox()
+    private let frameReadDeadline: Duration
 
     public init(socketURL: URL = BridgePaths.defaultSocket) {
         self.socketURL = socketURL
+        self.frameReadDeadline = .seconds(Self.frameReadSeconds)
+    }
+
+    /// Test seam: inject a short frame-read deadline instead of waiting 30s.
+    init(socketURL: URL, frameReadDeadline: Duration) {
+        self.socketURL = socketURL
+        self.frameReadDeadline = frameReadDeadline
     }
 
     deinit {
@@ -43,13 +56,14 @@ public final class BridgeServer {
     /// Throws if the path cannot be bound. Safe to call twice (second is a no-op).
     public func start() throws {
         if isListening { return }
+        let deadline = frameReadDeadline
         try listenBox.bindAndListen(at: socketURL) { [weak self] clientFD in
             Task.detached { [weak self] in
                 guard let self else {
                     Darwin.close(clientFD)
                     return
                 }
-                await self.serve(clientFD: clientFD)
+                await self.serve(clientFD: clientFD, frameReadDeadline: deadline)
             }
         }
         isListening = true
@@ -60,11 +74,11 @@ public final class BridgeServer {
         isListening = false
     }
 
-    nonisolated private func serve(clientFD: Int32) async {
+    nonisolated private func serve(clientFD: Int32, frameReadDeadline: Duration) async {
         defer { Darwin.close(clientFD) }
         let frame: Data
         do {
-            frame = try await Self.readFrame(from: clientFD)
+            frame = try await Self.readFrame(from: clientFD, deadline: frameReadDeadline)
         } catch {
             return
         }
@@ -80,6 +94,11 @@ public final class BridgeServer {
         } catch {
             return .failure("undecodable request")
         }
+        return await processRequest(request)
+    }
+
+    /// Test seam for values JSON cannot carry (`inf` / `nan` timeouts).
+    func processRequest(_ request: BridgeRequest) async -> BridgeResponse {
         if request.version != BridgeProtocol.version {
             return .failure(
                 "protocol version mismatch: got \(request.version), want \(BridgeProtocol.version)"
@@ -96,32 +115,42 @@ public final class BridgeServer {
             let tabs = delegate.bridgeListTabs(asking: request.from)
             return BridgeResponse(ok: true, tabs: tabs)
         case .sendToTab:
-            guard let target = request.target else {
-                return .failure("send_to_tab requires a target")
+            guard let target = request.target?.nilIfBlank else {
+                return .failure("target is empty")
             }
-            return delegate.bridgeSend(
-                from: request.from, to: target, message: request.text ?? "")
+            guard let message = BridgeLimits.clampedMessage(request.text) else {
+                return .failure("message is empty")
+            }
+            return delegate.bridgeSend(from: request.from, to: target, message: message)
         case .askTab:
-            guard let target = request.target else {
-                return .failure("ask_tab requires a target")
+            guard let target = request.target?.nilIfBlank else {
+                return .failure("target is empty")
             }
-            let timeout = request.timeoutSeconds ?? BridgeLimits.defaultAskSeconds
+            guard let question = BridgeLimits.clampedMessage(request.text) else {
+                return .failure("question is empty")
+            }
+            let timeout = BridgeLimits.clampedAskSeconds(request.timeoutSeconds)
             return await delegate.bridgeAsk(
-                from: request.from, to: target, question: request.text ?? "", timeout: timeout)
+                from: request.from, to: target, question: question, timeout: timeout)
         case .replyTo:
-            guard let requestID = request.requestID else {
-                return .failure("reply_to requires a requestID")
+            guard let requestID = request.requestID?.nilIfBlank else {
+                return .failure("requestID is empty")
+            }
+            guard let answer = BridgeLimits.clampedMessage(request.text) else {
+                return .failure("answer is empty")
             }
             return delegate.bridgeReply(
-                from: request.from, requestID: requestID, answer: request.text ?? "")
+                from: request.from, requestID: requestID, answer: answer)
         }
     }
 
-    nonisolated private static func readFrame(from fd: Int32) async throws -> Data {
+    nonisolated private static func readFrame(from fd: Int32, deadline: Duration) async throws -> Data {
+        let expiry = ContinuousClock.now + deadline
         var buffer = Data()
         while true {
             if Task.isCancelled { throw CancellationError() }
-            try await waitReady(fd: fd, events: Int16(POLLIN))
+            if ContinuousClock.now >= expiry { throw SocketIOError.idleTimeout }
+            try await waitReady(fd: fd, events: Int16(POLLIN), until: expiry)
             var chunk = [UInt8](repeating: 0, count: 8192)
             let n = chunk.withUnsafeMutableBytes { raw in
                 Darwin.read(fd, raw.baseAddress, raw.count)
@@ -158,9 +187,14 @@ public final class BridgeServer {
         }
     }
 
-    nonisolated private static func waitReady(fd: Int32, events: Int16) async throws {
+    nonisolated private static func waitReady(
+        fd: Int32, events: Int16, until expiry: ContinuousClock.Instant? = nil
+    ) async throws {
         while true {
             if Task.isCancelled { throw CancellationError() }
+            if let expiry, ContinuousClock.now >= expiry {
+                throw SocketIOError.idleTimeout
+            }
             var pfd = pollfd(fd: fd, events: events, revents: 0)
             let rc = Darwin.poll(&pfd, 1, 0)
             if rc > 0 {
@@ -174,7 +208,13 @@ public final class BridgeServer {
                 if errno == EINTR { continue }
                 throw SocketIOError.posix(errno)
             }
-            try await Task.sleep(for: .milliseconds(5))
+            if let expiry {
+                let remaining = expiry - ContinuousClock.now
+                if remaining <= .zero { throw SocketIOError.idleTimeout }
+                try await Task.sleep(for: min(remaining, Duration.milliseconds(5)))
+            } else {
+                try await Task.sleep(for: .milliseconds(5))
+            }
         }
     }
 }
@@ -182,6 +222,7 @@ public final class BridgeServer {
 private enum SocketIOError: Error {
     case eof
     case posix(Int32)
+    case idleTimeout
 }
 
 /// Listen socket + accept source. `@unchecked Sendable` because every mutable

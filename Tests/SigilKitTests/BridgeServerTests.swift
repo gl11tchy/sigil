@@ -247,6 +247,177 @@ final class BridgeServerTests: XCTestCase {
         let error = try XCTUnwrap(response.error)
         XCTAssertTrue(error.lowercased().contains("not ready"), error)
     }
+
+    func testBlankTextIsRejectedForTextBearingMethods() async throws {
+        struct Case {
+            var method: BridgeMethod
+            var field: String
+            var target: String?
+            var requestID: String?
+        }
+        let methods = [
+            Case(method: .sendToTab, field: "message", target: "tab-2", requestID: nil),
+            Case(method: .askTab, field: "question", target: "tab-2", requestID: nil),
+            Case(method: .replyTo, field: "answer", target: nil, requestID: "req-1"),
+        ]
+        let texts: [String?] = [nil, "", "   \n\t  "]
+
+        let env = try TestEnv()
+        defer { env.tearDown() }
+
+        for methodCase in methods {
+            for text in texts {
+                env.delegate.resetCalls()
+                let response = try await env.roundTrip(
+                    BridgeRequest(
+                        method: methodCase.method,
+                        from: peer,
+                        target: methodCase.target,
+                        text: text,
+                        requestID: methodCase.requestID)
+                )
+                XCTAssertEqual(
+                    response.ok, false,
+                    "\(methodCase.method.rawValue) text=\(String(describing: text))")
+                let error = try XCTUnwrap(response.error)
+                XCTAssertTrue(
+                    error.contains(methodCase.field),
+                    "error \(error) should name \(methodCase.field)")
+                XCTAssertFalse(
+                    env.delegate.didReceiveWork,
+                    "\(methodCase.method.rawValue) must not call the delegate")
+            }
+        }
+    }
+
+    func testOverlongTextIsTruncatedBeforeDelegate() async throws {
+        let env = try TestEnv()
+        defer { env.tearDown() }
+        let original = String(repeating: "x", count: BridgeLimits.maxMessageCharacters + 80)
+        let expected = try XCTUnwrap(BridgeLimits.clampedMessage(original))
+        XCTAssertNotEqual(expected, original)
+        XCTAssertTrue(
+            expected.contains(
+                "[truncated by Sigil at \(BridgeLimits.maxMessageCharacters) characters]"),
+            expected)
+
+        let send = try await env.roundTrip(
+            BridgeRequest(method: .sendToTab, from: peer, target: "tab-2", text: original)
+        )
+        XCTAssertEqual(send.ok, true)
+        XCTAssertEqual(env.delegate.sent, [
+            .init(peer: peer, target: "tab-2", message: expected)
+        ])
+
+        let ask = try await env.roundTrip(
+            BridgeRequest(
+                method: .askTab, from: peer, target: "tab-2", text: original, timeoutSeconds: 30)
+        )
+        XCTAssertEqual(ask.ok, true)
+        XCTAssertEqual(env.delegate.asked, [
+            .init(
+                peer: peer, target: "tab-2", question: expected,
+                timeout: BridgeLimits.clampedAskSeconds(30))
+        ])
+
+        let reply = try await env.roundTrip(
+            BridgeRequest(method: .replyTo, from: peer, text: original, requestID: "req-1")
+        )
+        XCTAssertEqual(reply.ok, true)
+        XCTAssertEqual(env.delegate.replies, [
+            .init(peer: peer, requestID: "req-1", answer: expected)
+        ])
+    }
+
+    func testAskTimeoutIsClampedToBridgeLimits() async throws {
+        let env = try TestEnv()
+        defer { env.tearDown() }
+        let requested: [Double?] = [nil, -5, 1, 60, 900, 901, 1e9, .infinity, .nan]
+
+        for value in requested {
+            env.delegate.resetCalls()
+            let request = BridgeRequest(
+                method: .askTab, from: peer, target: "tab-2", text: "why?",
+                timeoutSeconds: value)
+            // JSON cannot encode inf/nan; those still have to hit the same clamp.
+            let response: BridgeResponse
+            if let frame = try? BridgeFraming.frame(request) {
+                response = try await env.roundTrip(raw: frame)
+            } else {
+                response = await env.server.processRequest(request)
+            }
+            XCTAssertEqual(response.ok, true, "timeout \(String(describing: value))")
+            XCTAssertEqual(
+                env.delegate.asked.first?.timeout,
+                BridgeLimits.clampedAskSeconds(value),
+                "timeout \(String(describing: value))")
+            XCTAssertEqual(env.delegate.asked.count, 1)
+        }
+    }
+
+    func testBlankTargetAndRequestIDAreRejected() async throws {
+        let env = try TestEnv()
+        defer { env.tearDown() }
+
+        for method in [BridgeMethod.sendToTab, .askTab] {
+            for target in ["", "   \n"] {
+                env.delegate.resetCalls()
+                let response = try await env.roundTrip(
+                    BridgeRequest(method: method, from: peer, target: target, text: "hi")
+                )
+                XCTAssertEqual(
+                    response.ok, false, "\(method.rawValue) target=\(String(describing: target))")
+                let error = try XCTUnwrap(response.error)
+                XCTAssertTrue(error.contains("target"), error)
+                XCTAssertFalse(env.delegate.didReceiveWork)
+            }
+        }
+
+        for requestID in ["", "   \n"] {
+            env.delegate.resetCalls()
+            let response = try await env.roundTrip(
+                BridgeRequest(method: .replyTo, from: peer, text: "hi", requestID: requestID)
+            )
+            XCTAssertEqual(response.ok, false, "requestID=\(String(describing: requestID))")
+            let error = try XCTUnwrap(response.error)
+            XCTAssertTrue(error.contains("requestID"), error)
+            XCTAssertFalse(env.delegate.didReceiveWork)
+        }
+    }
+
+    func testIdleClientIsClosedWithoutResponse() async throws {
+        let env = try TestEnv(frameReadDeadline: .milliseconds(80))
+        defer { env.tearDown() }
+        let socketURL = env.socketURL
+
+        try await Task.detached {
+            let fd = try RawBridgeClient.connect(to: socketURL)
+            defer { Darwin.close(fd) }
+            let line = try? RawBridgeClient.readLine(from: fd)
+            XCTAssertTrue(
+                line == nil || line?.isEmpty == true,
+                "idle client must close with no response")
+        }.value
+
+        let response = try await env.roundTrip(BridgeRequest(method: .listTabs, from: peer))
+        XCTAssertEqual(response.ok, true)
+        XCTAssertEqual(env.delegate.listedPeers, [peer])
+    }
+
+    func testAskLongerThanFrameDeadlineStillResponds() async throws {
+        let env = try TestEnv(frameReadDeadline: .milliseconds(80))
+        defer { env.tearDown() }
+        env.delegate.askSleep = .milliseconds(250)
+        env.delegate.askResponse = BridgeResponse(ok: true, answer: "late")
+
+        let response = try await env.roundTrip(
+            BridgeRequest(
+                method: .askTab, from: peer, target: "tab-2", text: "slow?", timeoutSeconds: 30)
+        )
+        XCTAssertEqual(response.ok, true)
+        XCTAssertEqual(response.answer, "late")
+        XCTAssertEqual(env.delegate.asked.count, 1)
+    }
 }
 
 @MainActor
@@ -255,13 +426,19 @@ private final class TestEnv {
     let server: BridgeServer
     let delegate: RecordingDelegate
 
-    init(start: Bool = true, attachDelegate: Bool = true) throws {
+    init(
+        start: Bool = true, attachDelegate: Bool = true, frameReadDeadline: Duration? = nil
+    ) throws {
         let short = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(8))
         socketURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(short).s")
         XCTAssertLessThan(
             socketURL.path.count, 100, "unix bind path is \(socketURL.path.count) chars")
         delegate = RecordingDelegate()
-        server = BridgeServer(socketURL: socketURL)
+        if let frameReadDeadline {
+            server = BridgeServer(socketURL: socketURL, frameReadDeadline: frameReadDeadline)
+        } else {
+            server = BridgeServer(socketURL: socketURL)
+        }
         if attachDelegate {
             server.delegate = delegate
         }
@@ -321,6 +498,17 @@ private final class RecordingDelegate: BridgeServerDelegate {
     var askResponse = BridgeResponse(ok: true, answer: "pong")
     var replyResponse = BridgeResponse(ok: true)
     var askSleep: Duration = .zero
+
+    var didReceiveWork: Bool {
+        !listedPeers.isEmpty || !sent.isEmpty || !asked.isEmpty || !replies.isEmpty
+    }
+
+    func resetCalls() {
+        listedPeers = []
+        sent = []
+        asked = []
+        replies = []
+    }
 
     func bridgeListTabs(asking peer: BridgePeer) -> [BridgeTab] {
         listedPeers.append(peer)
