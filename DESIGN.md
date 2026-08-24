@@ -3,8 +3,10 @@
 ## Strategy
 
 **Restrained.** A neutral black shell, one ember accent under 5% of the surface.
-The accent comes off the app's own sigil mark and is reserved for state: the active
-conversation, a session doing work, a focused field. It is never decoration.
+The accent comes off the app's own sigil mark and is reserved for state: a pinned
+row, a session doing work, the current folder, a focused field. It is never
+decoration. The conversation on screen is marked by the `selected` fill, not by
+an accent stripe.
 
 The window is one surface. Every chrome colour is derived from the terminal theme,
 with the hue removed from the panel greys, so a tinted terminal can never leak
@@ -35,8 +37,8 @@ Two families on a contrast axis:
 
 - **SF (system)** for anything a human wrote: conversation titles, labels, buttons.
 - **SF Mono** for anything a machine wrote: folder slugs, timestamps, counts,
-  section headers, paths. This is what makes metadata read as metadata rather than
-  as a failed title.
+  paths. This is what makes metadata read as metadata rather than as a failed title.
+  Section titles stay in SF, because they are labels a human reads as structure.
 
 Fixed scale, no fluid sizing. 12 / 11.5 / 10 / 9.5 px. Product UI is viewed at one
 DPI; clamped headings serve nothing here.
@@ -44,17 +46,20 @@ DPI; clamped headings serve nothing here.
 ## Density
 
 The list is the product, and it is read at a glance, not scanned for maximum count.
-A row is two lines — title, then folder and time in mono — with 10pt above and below
-and a hairline rule between rows. About 50pt in total.
+A row is two lines — title, then folder and time in mono — with 8pt above and below
+and a rounded hover/selected fill. About 44pt in total.
 
-Packing more rows in was tried twice and failed both times. Rows at 32pt with no rule
-read as one continuous block of text; collapsing to a single line made that worse,
-not better, because the eye had nothing to break on. **The rule between rows is what
-separates them, not tightness.** Vertical room is cheap here: the user is looking for
-one conversation they half-remember, not counting how many fit on screen.
+Hairlines between every row were the previous separator. They made a 600-thread
+list look like a table. Frontier chat lists separate rows with fill, not rules.
+Two-line rows stay: a single line was tried and the titles ran together.
 
-Section headers take 16pt above and 6pt below, because they separate days and that
-break should be the largest one in the list.
+Section headers for Recents are uppercase with a count, `PINNED (2)` / `TODAY (1)`,
+because that is how the chosen mockup marks structure. They take 16pt above and
+5pt below. Project names stay in their own case, `sigil (4)`, so a folder slug
+does not become a shout.
+
+The sidebar has one list and two sorts. Recents is time. Projects is the same
+chats grouped by working folder. Pins sit at the top of either sort.
 
 ## Type ramp and the contrast floor
 
@@ -66,10 +71,14 @@ mono — never by more grey.
 
 Every interactive element ships all of these, or it is not done:
 
-- **Row**: default, hover, open (dim ember bar), active (ember bar + `selected` fill).
+- **Row**: default, hover (`raised` fill), open, active (`selected` fill + medium title). Titles stay at `text`; metadata carries the dim. No side stripe.
+- **Pin**: hover control on the trailing edge; a small ember pin stays on pinned rows.
 - **Field**: default, hover, focused (ember hairline).
 - **Icon button**: default, hover, on.
-- **Session**: starting, working (pulsing ember), idle, exited.
+- **Session**: starting, working (pulsing ember on the row), idle, exited.
+- **Folder**: in Projects sort, the working folder is a section of chats, not a
+  drill-in. The current folder is the one you are already in; it does not need
+  a second icon language.
 
 ## Motion
 

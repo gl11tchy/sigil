@@ -38,6 +38,22 @@ struct AppSettingsTests {
         settings.executablePath = "/bin/echo"
         #expect(settings.executableExists)
     }
+
+    @Test @MainActor
+    func settingsRememberModePinsAndFocusedFolder() {
+        let defaults = isolatedDefaults()
+        defer { defaults.reset() }
+
+        let first = AppSettings(defaults: defaults.value)
+        first.sidebarMode = .projects
+        first.focusedProjectPath = "/tmp/sigil"
+        first.pinnedConversations = [.init(sessionID: "abc", cwd: "/tmp/sigil")]
+
+        let second = AppSettings(defaults: defaults.value)
+        #expect(second.sidebarMode == .projects)
+        #expect(second.focusedProjectPath == "/tmp/sigil")
+        #expect(second.pinnedConversations == [.init(sessionID: "abc", cwd: "/tmp/sigil")])
+    }
 }
 
 private func temporaryDirectory() throws -> URL {

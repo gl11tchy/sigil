@@ -347,6 +347,27 @@ struct AppModelTests {
         #expect(model.isOpen(viaLink))
         #expect(counter.count == afterOpen)
     }
+
+    @Test @MainActor
+    func pinToggleAndDeleteDropThePin() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let session = makeSession(id: "s1", cwd: cwd)
+        let model = fixture.model(trashConversation: { _ in })
+        defer { model.closeAllTabsAndWait() }
+
+        #expect(!model.isPinned(session))
+        model.pin(session)
+        #expect(model.isPinned(session))
+        #expect(fixture.settings.pinnedConversations.map(\.sessionID) == ["s1"])
+        model.togglePin(session)
+        #expect(!model.isPinned(session))
+        model.togglePin(session)
+        #expect(model.deleteConversation(session))
+        #expect(!model.isPinned(session))
+        #expect(fixture.settings.pinnedConversations.isEmpty)
+    }
 }
 
 private enum TestFailure: Error {

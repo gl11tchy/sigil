@@ -12,6 +12,9 @@ final class AppSettings {
         static let themeName = "terminal.theme"
         static let executablePath = "grok.executablePath"
         static let showEmptySessions = "sidebar.showEmptySessions"
+        static let sidebarMode = "sidebar.mode"
+        static let focusedProjectPath = "sidebar.focusedProjectPath"
+        static let pinnedConversations = "sidebar.pinnedConversations"
         static let isTabMessagingEnabled = "bridge.enabled"
         static let defaultDirectory = "session.defaultDirectory"
         static let openTabs = "session.openTabs"
@@ -34,6 +37,21 @@ final class AppSettings {
     /// hook-triggered one-shot runs otherwise drown the sidebar.
     var showEmptySessions: Bool {
         didSet { defaults.set(showEmptySessions, forKey: Key.showEmptySessions) }
+    }
+    var sidebarMode: SidebarMode {
+        didSet { defaults.set(sidebarMode.rawValue, forKey: Key.sidebarMode) }
+    }
+    /// Empty means the Projects list, not a drilled-in folder.
+    var focusedProjectPath: String {
+        didSet { defaults.set(focusedProjectPath, forKey: Key.focusedProjectPath) }
+    }
+    /// Pin order is newest-pinned first. Identity is session id + working directory.
+    var pinnedConversations: [OpenTabsSnapshot.Entry] {
+        didSet {
+            if let data = try? JSONEncoder().encode(pinnedConversations) {
+                defaults.set(data, forKey: Key.pinnedConversations)
+            }
+        }
     }
     var isTabMessagingEnabled: Bool {
         didSet { defaults.set(isTabMessagingEnabled, forKey: Key.isTabMessagingEnabled) }
@@ -72,6 +90,21 @@ final class AppSettings {
         executablePath =
             defaults.string(forKey: Key.executablePath) ?? GrokPaths.defaultExecutable.path
         showEmptySessions = defaults.bool(forKey: Key.showEmptySessions)
+        if let raw = defaults.string(forKey: Key.sidebarMode),
+            let mode = SidebarMode(rawValue: raw)
+        {
+            sidebarMode = mode
+        } else {
+            sidebarMode = .recents
+        }
+        focusedProjectPath = defaults.string(forKey: Key.focusedProjectPath) ?? ""
+        if let data = defaults.data(forKey: Key.pinnedConversations),
+            let decoded = try? JSONDecoder().decode([OpenTabsSnapshot.Entry].self, from: data)
+        {
+            pinnedConversations = decoded
+        } else {
+            pinnedConversations = []
+        }
         isTabMessagingEnabled = defaults.bool(forKey: Key.isTabMessagingEnabled)
         defaultDirectory =
             defaults.string(forKey: Key.defaultDirectory)
