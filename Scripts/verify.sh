@@ -6,13 +6,15 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT" || exit 1
 
-APP="$ROOT/dist/Sigil.app"
-BIN="$APP/Contents/MacOS/Sigil"
-MCP_BIN="$APP/Contents/MacOS/sigil-mcp"
+RELEASE_APP="$ROOT/dist/Sigil.app"
+APP=""
+BIN=""
+MCP_BIN=""
 FORMAT_STATUS=""
 SMOKE_PID=""
 SMOKE_ROOT=""
 SMOKE_LOG=""
+RELEASE_SUM=""
 
 stop_smoke() {
   if [[ -n "${SMOKE_PID}" ]]; then
@@ -84,7 +86,33 @@ fi
 echo "==> Scripts/build-app.sh"
 # Verification needs a runnable local bundle, not a release artifact. A debug
 # bundle avoids an expensive universal release rebuild after the tests.
-SIGIL_CONFIG=debug "$SCRIPT_DIR/build-app.sh" || fail "Scripts/build-app.sh"
+# Write it under the smoke temp dir so dist/Sigil.app is not replaced.
+RELEASE_BIN="$RELEASE_APP/Contents/MacOS/Sigil"
+if [[ -x "$RELEASE_BIN" ]]; then
+  RELEASE_SUM="$(shasum -a 256 "$RELEASE_BIN" | awk '{print $1}')"
+fi
+
+SMOKE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/sigil-smoke-home.XXXXXX")"
+APP="$SMOKE_ROOT/Sigil.app"
+BIN="$APP/Contents/MacOS/Sigil"
+MCP_BIN="$APP/Contents/MacOS/sigil-mcp"
+
+SIGIL_CONFIG=debug \
+  SIGIL_APP="$APP" \
+  SIGIL_CODESIGN_IDENTITY=- \
+  "$SCRIPT_DIR/build-app.sh" || fail "Scripts/build-app.sh"
+
+if [[ -n "$RELEASE_SUM" ]]; then
+  if [[ ! -x "$RELEASE_BIN" ]]; then
+    fail "debug verify removed dist/Sigil.app"
+  fi
+  after_sum="$(shasum -a 256 "$RELEASE_BIN" | awk '{print $1}')"
+  if [[ "$after_sum" != "$RELEASE_SUM" ]]; then
+    fail "debug verify overwrote dist/Sigil.app"
+  fi
+elif [[ -e "$RELEASE_APP" ]]; then
+  fail "debug verify created dist/Sigil.app"
+fi
 
 if [[ ! -x "$BIN" || ! -x "$MCP_BIN" ]]; then
   fail "bundled executable or MCP helper is missing"
@@ -98,7 +126,6 @@ plutil -lint "$APP/Contents/Info.plist" >/dev/null || fail "Info.plist"
 codesign --verify --deep --strict "$APP" || fail "bundle signature"
 
 echo "==> launch smoke check"
-SMOKE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/sigil-smoke-home.XXXXXX")"
 SMOKE_LOG="$SMOKE_ROOT/sigil.log"
 mkdir -p "$SMOKE_ROOT/.grok" "$SMOKE_ROOT/tmp" "$SMOKE_ROOT/cache" "$SMOKE_ROOT/config"
 # The smoke flag prevents session restore and bridge registration. The temporary

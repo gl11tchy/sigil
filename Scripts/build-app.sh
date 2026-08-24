@@ -4,11 +4,19 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-FINAL_APP="$ROOT/dist/Sigil.app"
+if [[ -n "${SIGIL_APP:-}" ]]; then
+  case "$SIGIL_APP" in
+    /*) FINAL_APP="$SIGIL_APP" ;;
+    *) FINAL_APP="$ROOT/$SIGIL_APP" ;;
+  esac
+else
+  FINAL_APP="$ROOT/dist/Sigil.app"
+fi
 CONFIG="${SIGIL_CONFIG:-release}"
 ALLOW_THIN="${SIGIL_ALLOW_THIN:-0}"
 DISTRIBUTION="${SIGIL_DISTRIBUTION:-0}"
-IDENTITY="${SIGIL_CODESIGN_IDENTITY:--}"
+# Named by SHA-1 so the designated requirement stays stable across rebuilds.
+IDENTITY="${SIGIL_CODESIGN_IDENTITY:-B1AE0BA1FA81B8D532ADDF25FA38F59F2DB3078A}"
 NOTARY_PROFILE="${SIGIL_NOTARY_PROFILE:-}"
 NOTARY_TIMEOUT="${SIGIL_NOTARY_TIMEOUT:-30m}"
 NOTARY_TMP=""
@@ -103,10 +111,13 @@ if [[ "$IDENTITY" != "-" ]]; then
   identity_line="$(security find-identity -v -p codesigning 2>/dev/null \
     | grep -F -- "$IDENTITY" | head -n 1 || true)"
   if [[ -z "$identity_line" ]]; then
-    echo "error: signing identity not found: $IDENTITY" >&2
-    exit 1
-  fi
-  if [[ "$DISTRIBUTION" == "1" && "$identity_line" != *"Developer ID Application:"* ]]; then
+    if [[ "$DISTRIBUTION" == "1" ]]; then
+      echo "error: signing identity not found: $IDENTITY" >&2
+      exit 1
+    fi
+    echo "WARNING: signing identity not found: $IDENTITY; using ad-hoc (folder prompts will repeat)" >&2
+    IDENTITY="-"
+  elif [[ "$DISTRIBUTION" == "1" && "$identity_line" != *"Developer ID Application:"* ]]; then
     echo "error: distribution requires a Developer ID Application identity" >&2
     exit 1
   fi
@@ -210,8 +221,9 @@ if [[ ! -f "$PLIST_TEMPLATE" ]]; then
   exit 1
 fi
 
-mkdir -p "$ROOT/dist"
-STAGING_ROOT="$(mktemp -d "$ROOT/dist/.sigil-stage.XXXXXX")"
+final_parent="$(dirname "$FINAL_APP")"
+mkdir -p "$final_parent"
+STAGING_ROOT="$(mktemp -d "$final_parent/.sigil-stage.XXXXXX")"
 APP="$STAGING_ROOT/Sigil.app"
 CONTENTS="$APP/Contents"
 echo "==> assembling $FINAL_APP (version $version build $build)"
@@ -253,15 +265,23 @@ fi
 # away — you get asked for Desktop, Documents and Downloads again each time.
 # Signing with a real identity keeps the signature stable, so the grants stick.
 #
-# Local builds are ad-hoc by default. Distribution builds must explicitly name
-# a Developer ID identity and are hardened, timestamped, notarized, and stapled.
+# The identity is named by SHA-1 hash, never by its subject name. Override with
+# SIGIL_CODESIGN_IDENTITY, or set it to '-' for an explicit ad-hoc local build.
+# Leave it unset on a machine that lacks the certificate and the build falls
+# back to ad-hoc. Distribution builds must name a Developer ID identity and
+# are hardened, timestamped, notarized, and stapled.
 if [[ "$IDENTITY" != "-" ]]; then
-  echo "==> codesign (hardened runtime)"
-  codesign --force --options runtime --timestamp --sign "$IDENTITY" "$CONTENTS/MacOS/sigil-mcp"
-  codesign --force --options runtime --timestamp --sign "$IDENTITY" "$CONTENTS/MacOS/Sigil"
-  codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
+  if [[ "$DISTRIBUTION" == "1" ]]; then
+    echo "==> codesign (hardened runtime)"
+    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$CONTENTS/MacOS/sigil-mcp"
+    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$CONTENTS/MacOS/Sigil"
+    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
+  else
+    echo "==> codesign (stable identity)"
+    codesign --force --deep --sign "$IDENTITY" "$APP"
+  fi
 else
-  echo "==> ad-hoc codesign (local build)"
+  echo "==> ad-hoc codesign (folder prompts will repeat)"
   codesign --force --deep --sign - "$APP"
 fi
 echo "==> codesign --verify --deep --strict"
