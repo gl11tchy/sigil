@@ -1,7 +1,7 @@
 import Foundation
 import SigilKit
 
-/// Recents is a time-ordered thread list. Projects is a folder list you drill into.
+/// Recents is a time-ordered thread list. Projects is that same list grouped by folder.
 enum SidebarMode: String, CaseIterable, Identifiable, Sendable {
     case recents
     case projects

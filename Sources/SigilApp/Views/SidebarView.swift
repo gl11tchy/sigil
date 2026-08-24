@@ -3,9 +3,9 @@ import SwiftUI
 
 /// The thread viewer: every Grok Build conversation on this machine.
 ///
-/// Recents is a time-ordered list. Projects is a folder list you drill into.
-/// Pins sit at the top of either view. The list is the product: find one
-/// conversation in a history of hundreds, without leaving the keyboard.
+/// Recents is the time-ordered list. Projects is the same list grouped by
+/// folder. Pins sit at the top of either sort. The list is the product: find
+/// one conversation in a history of hundreds, without leaving the keyboard.
 struct SidebarView: View {
     private enum Focus: Hashable {
         case search
@@ -25,9 +25,6 @@ struct SidebarView: View {
             Color.clear.frame(height: 36)
             searchRow
             modeRow
-            if let project = model.focusedProject, model.settings.sidebarMode == .projects {
-                projectHeader(project)
-            }
             list
             footer
         }
@@ -58,7 +55,6 @@ struct SidebarView: View {
         .onChange(of: model.searchText) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.scopeToCurrentFolder) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.settings.sidebarMode) { _, _ in clampKeyboardSelection() }
-        .onChange(of: model.settings.focusedProjectPath) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.store.isLoading) { _, loading in
             if !loading { model.pruneMissingPins() }
         }
@@ -110,56 +106,37 @@ struct SidebarView: View {
     // MARK: - Mode
 
     private var modeRow: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .bottom, spacing: 16) {
             ForEach(SidebarMode.allCases) { mode in
                 let selected = model.settings.sidebarMode == mode
                 Button {
                     model.settings.sidebarMode = mode
                 } label: {
-                    Text(mode.title)
-                        .font(.system(size: 11.5, weight: selected ? .semibold : .medium))
-                        .foregroundStyle(selected ? palette.text : palette.textFaint)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(mode.title)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(selected ? palette.text : palette.textFaint)
+                        Rectangle()
+                            .fill(selected ? palette.text : Color.clear)
+                            .frame(height: 2)
+                    }
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(selected ? .isSelected : [])
+                .help(
+                    mode == .recents
+                        ? "Sort conversations by time"
+                        : "Sort conversations by project"
+                )
             }
             Spacer(minLength: 0)
             ScopeToggle(isOn: $model.scopeToCurrentFolder, folder: model.currentDirectory)
+                .padding(.bottom, 2)
         }
         .padding(.horizontal, 14)
-        .padding(.bottom, 6)
-        .frame(height: 28, alignment: .center)
+        .padding(.top, 4)
+        .padding(.bottom, 8)
         .overlay(alignment: .bottom) { Rectangle().fill(palette.hairline).frame(height: 1) }
-    }
-
-    private func projectHeader(_ project: SidebarProject) -> some View {
-        HStack(spacing: 8) {
-            IconButton(systemImage: "chevron.left", help: "All projects") {
-                model.leaveProject()
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(project.name)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(palette.text)
-                    .lineLimit(1)
-                Text(project.displayPath)
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundStyle(palette.textFaint)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .help(project.displayPath)
-            }
-            Spacer(minLength: 0)
-            IconButton(
-                systemImage: "plus",
-                help: "New session in \(project.displayPath)"
-            ) {
-                model.newTab(in: URL(fileURLWithPath: project.cwd))
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
     }
 
     // MARK: - List
@@ -174,7 +151,7 @@ struct SidebarView: View {
                     if !pinned.isEmpty {
                         section("Pinned", count: pinned.count, isFirst: true) {
                             ForEach(pinned, id: \.directory) { session in
-                                sessionRow(session, showsProject: showsProjectOnSessionRows)
+                                sessionRow(session, showsProject: true)
                             }
                         }
                     }
@@ -199,19 +176,13 @@ struct SidebarView: View {
 
     @ViewBuilder
     private var listContent: some View {
+        let unpinned = model.unpinnedSessions(from: model.sidebarSessions)
+        let afterPinned = !visiblePinned.isEmpty
         switch model.settings.sidebarMode {
         case .recents:
-            recentsSections(
-                from: model.unpinnedSessions(from: model.sidebarSessions), afterPinned: !visiblePinned.isEmpty)
+            recentsSections(from: unpinned, afterPinned: afterPinned)
         case .projects:
-            if let project = model.focusedProject {
-                recentsSections(
-                    from: model.unpinnedSessions(from: project.sessions),
-                    afterPinned: !visiblePinned.isEmpty
-                )
-            } else {
-                projectSections
-            }
+            projectGroupedSections(from: unpinned, afterPinned: afterPinned)
         }
     }
 
@@ -221,66 +192,39 @@ struct SidebarView: View {
         ForEach(Array(buckets.enumerated()), id: \.element.id) { index, bucket in
             section(bucket.title, count: bucket.sessions.count, isFirst: !afterPinned && index == 0) {
                 ForEach(bucket.sessions, id: \.directory) { session in
-                    sessionRow(session, showsProject: showsProjectOnSessionRows)
+                    sessionRow(session, showsProject: true)
                 }
             }
         }
     }
 
     @ViewBuilder
-    private var projectSections: some View {
-        let projects = model.sidebarProjects
-        if !projects.isEmpty {
-            section("Folders", count: projects.count, isFirst: visiblePinned.isEmpty) {
-                ForEach(projects) { project in
-                    ProjectRow(
-                        project: project,
-                        isCurrent: model.isCurrentFolder(project.cwd),
-                        isWorking: model.isWorking(project),
-                        isKeyboardSelected: keyboardSelectionID == projectRowID(project),
-                        open: {
-                            keyboardSelectionID = projectRowID(project)
-                            model.openProject(project)
-                        }
-                    )
-                    .id(projectRowID(project))
-                    .contextMenu {
-                        Button("Open Folder") { model.openProject(project) }
-                        Button("New Session in This Folder") {
-                            model.newTab(in: URL(fileURLWithPath: project.cwd))
-                        }
-                        Button("Reveal Folder in Finder") {
-                            if let session = project.sessions.first {
-                                model.revealInFinder(session)
-                            }
-                        }
-                    }
+    private func projectGroupedSections(from sessions: [GrokSession], afterPinned: Bool) -> some View {
+        // Keep AppModel's folder order (most recently active first), then drop
+        // folders whose remaining rows are all pinned.
+        let ordered = model.sidebarProjects.compactMap { project -> (id: String, name: String, rows: [GrokSession])? in
+            let rows = sessions.filter { session in
+                project.sessions.contains { $0.directory == session.directory }
+            }
+            return rows.isEmpty ? nil : (project.id, project.name, rows)
+        }
+        ForEach(Array(ordered.enumerated()), id: \.element.id) { index, item in
+            section(
+                item.name, count: item.rows.count, isFirst: !afterPinned && index == 0, caps: false
+            ) {
+                ForEach(item.rows, id: \.directory) { session in
+                    sessionRow(session, showsProject: false)
                 }
             }
         }
     }
 
-    private var showsProjectOnSessionRows: Bool {
-        !(model.settings.sidebarMode == .projects && model.focusedProject != nil)
-    }
-
     private var visiblePinned: [GrokSession] {
-        if model.settings.sidebarMode == .projects {
-            return model.pinnedSessions(in: model.focusedProject)
-        }
-        return model.pinnedSessions()
+        model.pinnedSessions()
     }
 
     private var isListEmpty: Bool {
-        switch model.settings.sidebarMode {
-        case .recents:
-            return model.sidebarSessions.isEmpty
-        case .projects:
-            if let project = model.focusedProject {
-                return project.sessions.isEmpty
-            }
-            return model.sidebarProjects.isEmpty
-        }
+        model.sidebarSessions.isEmpty
     }
 
     private func sessionRow(_ session: GrokSession, showsProject: Bool) -> some View {
@@ -320,25 +264,22 @@ struct SidebarView: View {
         _ title: String,
         count: Int,
         isFirst: Bool,
+        caps: Bool = true,
         @ViewBuilder content: () -> Content
     ) -> some View {
         Section {
             content()
         } header: {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(title)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(palette.textFaint)
-                Spacer(minLength: 4)
-                Text("\(count)")
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundStyle(palette.textFaint)
-            }
-            .padding(.horizontal, 14)
-            .padding(.top, isFirst ? 10 : 18)
-            .padding(.bottom, 4)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(palette.sidebar)
+            let label = caps ? "\(title.uppercased()) (\(count))" : "\(title) (\(count))"
+            Text(label)
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .tracking(caps ? 0.6 : 0)
+                .foregroundStyle(palette.textFaint)
+                .padding(.horizontal, 14)
+                .padding(.top, isFirst ? 10 : 18)
+                .padding(.bottom, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(palette.sidebar)
         }
     }
 
@@ -375,49 +316,40 @@ struct SidebarView: View {
 
     private var emptyTitle: String {
         if !model.searchText.isEmpty { return "No matches" }
-        if model.settings.sidebarMode == .projects, model.focusedProject == nil {
-            return "No folders yet"
-        }
         return "No conversations yet"
     }
 
     private var hint: String {
         if !model.searchText.isEmpty { return "Nothing matches “\(model.searchText)”." }
         if model.scopeToCurrentFolder { return "Turn off the folder filter to see the rest." }
-        if model.settings.sidebarMode == .projects, model.focusedProject == nil {
-            return "Start a session and its folder shows up here."
-        }
         return "Press ⌘T to start one. It shows up here as soon as it has a name."
     }
 
     // MARK: - Keyboard
 
     private func visibleRowIDs() -> [String] {
-        var ids: [String] = visiblePinned.map { model.sessionKey($0) }
-        switch model.settings.sidebarMode {
-        case .recents:
-            ids += model.unpinnedSessions(from: model.sidebarSessions).map { model.sessionKey($0) }
-        case .projects:
-            if let project = model.focusedProject {
-                ids += model.unpinnedSessions(from: project.sessions).map { model.sessionKey($0) }
-            } else {
-                ids += model.sidebarProjects.map(projectRowID)
-            }
-        }
-        return ids
+        visiblePinned.map { model.sessionKey($0) }
+            + groupedUnpinnedSessions().map { model.sessionKey($0) }
     }
 
-    private func projectRowID(_ project: SidebarProject) -> String {
-        "project:" + project.id
+    /// Unpinned chats in the order the current sort draws them.
+    private func groupedUnpinnedSessions() -> [GrokSession] {
+        let unpinned = model.unpinnedSessions(from: model.sidebarSessions)
+        switch model.settings.sidebarMode {
+        case .recents:
+            return unpinned
+        case .projects:
+            return model.sidebarProjects.flatMap { project in
+                unpinned.filter { session in
+                    project.sessions.contains { $0.directory == session.directory }
+                }
+            }
+        }
     }
 
     private func handleEscape() -> KeyPress.Result {
         if !model.searchText.isEmpty {
             model.searchText = ""
-            return .handled
-        }
-        if model.settings.sidebarMode == .projects, model.focusedProject != nil {
-            model.leaveProject()
             return .handled
         }
         focus = nil
@@ -446,20 +378,9 @@ struct SidebarView: View {
     }
 
     private func activateKeyboardSelection() -> KeyPress.Result {
-        guard let id = keyboardSelectionID else { return .ignored }
-        if id.hasPrefix("project:") {
-            let key = String(id.dropFirst("project:".count))
-            if let project = model.sidebarProjects.first(where: { $0.id == key }) {
-                model.openProject(project)
-                return .handled
-            }
-            return .ignored
-        }
-        if let session = session(for: id) {
-            model.open(session)
-            return .handled
-        }
-        return .ignored
+        guard let id = keyboardSelectionID, let session = session(for: id) else { return .ignored }
+        model.open(session)
+        return .handled
     }
 
     private func session(for id: String) -> GrokSession? {
@@ -499,17 +420,19 @@ struct SidebarView: View {
 
     private var statusText: String {
         if let error = model.store.loadError { return error }
-        if model.settings.sidebarMode == .projects, let project = model.focusedProject {
-            return "\(project.count) in \(project.name)"
-        }
-        if model.settings.sidebarMode == .projects {
-            return "\(model.sidebarProjects.count) folders · \(model.sidebarSessions.count) threads"
-        }
+        let threads = model.sidebarSessions.count
         let pinned = model.pinnedSessions().count
-        if pinned > 0 {
-            return "\(model.sidebarSessions.count) threads · \(pinned) pinned"
+        if model.settings.sidebarMode == .projects {
+            let folders = model.sidebarProjects.count
+            if pinned > 0 {
+                return "\(threads) threads · \(folders) projects · \(pinned) pinned"
+            }
+            return "\(threads) threads · \(folders) projects"
         }
-        return "\(model.sidebarSessions.count) threads"
+        if pinned > 0 {
+            return "\(threads) threads · \(pinned) pinned"
+        }
+        return "\(threads) threads"
     }
 }
 
@@ -654,65 +577,5 @@ private struct SessionRow: View {
     private var fill: Color {
         if state == .active { return palette.selected }
         return (isHovering || isKeyboardSelected) ? palette.raised : .clear
-    }
-}
-
-private struct ProjectRow: View {
-    let project: SidebarProject
-    let isCurrent: Bool
-    let isWorking: Bool
-    let isKeyboardSelected: Bool
-    let open: () -> Void
-
-    @Environment(\.palette) private var palette
-    @State private var isHovering = false
-
-    var body: some View {
-        Button(action: open) {
-            HStack(spacing: 8) {
-                Image(systemName: isCurrent ? "folder.fill" : "folder")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(isCurrent ? palette.accent : palette.textFaint)
-                    .frame(width: 16)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(project.name)
-                        .font(.system(size: 12, weight: isCurrent ? .medium : .regular))
-                        .foregroundStyle(palette.text)
-                        .lineLimit(1)
-                    Text("\(project.displayPath) · \(project.updatedAt.shortRelative)")
-                        .font(.system(size: 9.5, design: .monospaced))
-                        .foregroundStyle(palette.textFaint)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                Spacer(minLength: 4)
-                if isWorking {
-                    StatusDot(activity: .working)
-                }
-                Text("\(project.count)")
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundStyle(palette.textFaint)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(palette.textFaint)
-            }
-            .padding(.leading, 8)
-            .padding(.trailing, 10)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(isHovering || isKeyboardSelected ? palette.raised : Color.clear)
-            )
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 6)
-        .onHover { isHovering = $0 }
-        .help("\(project.name)\n\(project.displayPath)\n\(project.count) conversations")
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityLabel(
-            "\(project.name), \(project.count) conversations, \(project.updatedAt.shortRelative)"
-        )
-        .accessibilityAction { open() }
     }
 }

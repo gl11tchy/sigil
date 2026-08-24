@@ -53,12 +53,13 @@ Hairlines between every row were the previous separator. They made a 600-thread
 list look like a table. Frontier chat lists separate rows with fill, not rules.
 Two-line rows stay: a single line was tried and the titles ran together.
 
-Section headers are title case, not tracked small caps. They take 16pt above and
-5pt below, because they separate days (or folders) and that break should be the
-largest one in the list. A count sits on the right in mono.
+Section headers for Recents are uppercase with a count, `PINNED (2)` / `TODAY (1)`,
+because that is how the chosen mockup marks structure. They take 16pt above and
+5pt below. Project names stay in their own case, `sigil (4)`, so a folder slug
+does not become a shout.
 
-The sidebar has two views. Recents is the time-ordered thread list, with pins
-first. Projects is a folder list you drill into; pinned chats still sit on top.
+The sidebar has one list and two sorts. Recents is time. Projects is the same
+chats grouped by working folder. Pins sit at the top of either sort.
 
 ## Type ramp and the contrast floor
 
@@ -75,7 +76,9 @@ Every interactive element ships all of these, or it is not done:
 - **Field**: default, hover, focused (ember hairline).
 - **Icon button**: default, hover, on.
 - **Session**: starting, working (pulsing ember on the row), idle, exited.
-- **Folder**: current working folder uses a filled ember folder; other folders stay faint.
+- **Folder**: in Projects sort, the working folder is a section of chats, not a
+  drill-in. The current folder is the one you are already in; it does not need
+  a second icon language.
 
 ## Motion
 
