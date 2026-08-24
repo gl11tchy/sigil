@@ -74,19 +74,21 @@ final class AppModel {
         presentError: @escaping ErrorPresenter = { error in
             NSAlert(error: error).runModal()
         },
-        registrationRunner: @escaping BridgeRegistration.Runner = BridgeRegistration.processRunner,
+        // Optional defaults, coalesced below: Swift 6.1.2 (CI) segfaults in
+        // SILGen when these closures/URLs are default argument expressions.
+        registrationRunner: BridgeRegistration.Runner? = nil,
         mcpBinary: URL? = nil,
-        tabMessagingSocketURL: URL = BridgePaths.configuredSocket,
-        canonicalPath: @escaping @Sendable (String) -> String = { GrokPaths.canonicalPath($0) }
+        tabMessagingSocketURL: URL? = nil,
+        canonicalPath: (@Sendable (String) -> String)? = nil
     ) {
         self.settings = settings
         self.store = store
         self.trashConversation = trashConversation
         self.presentError = presentError
-        self.registrationRunner = registrationRunner
+        self.registrationRunner = registrationRunner ?? BridgeRegistration.processRunner
         self.mcpBinaryOverride = mcpBinary
-        self.tabMessagingSocketURL = tabMessagingSocketURL
-        self.resolveCanonicalPath = canonicalPath
+        self.tabMessagingSocketURL = tabMessagingSocketURL ?? BridgePaths.configuredSocket
+        self.resolveCanonicalPath = canonicalPath ?? { GrokPaths.canonicalPath($0) }
     }
 
     func onAppear() async {
