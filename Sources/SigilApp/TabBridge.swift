@@ -9,7 +9,7 @@ final class TabBridge: BridgeServerDelegate {
     private let server: BridgeServer
     let asks = PendingAskRegistry()
 
-    init(model: AppModel, socketURL: URL = BridgePaths.defaultSocket) {
+    init(model: AppModel, socketURL: URL = BridgePaths.configuredSocket) {
         self.model = model
         self.server = BridgeServer(socketURL: socketURL)
         self.server.delegate = self
@@ -29,6 +29,7 @@ final class TabBridge: BridgeServerDelegate {
 
     func noteTabExited(id: TerminalTab.ID) {
         asks.failTarget(tabID: id.uuidString)
+        asks.clearAskingTab(tabID: id.uuidString)
     }
 
     func noteTabClosed(id: TerminalTab.ID) {
@@ -81,7 +82,7 @@ final class TabBridge: BridgeServerDelegate {
                 requestID: requestID,
                 question: question
             )
-            let delivered = deliver(prompt, to: tab, dest: dest)
+            let delivered = deliver(prompt, to: tab, dest: dest, requestID: requestID)
             guard delivered.ok else { return delivered }
 
             let outcome = await asks.ask(
@@ -90,6 +91,9 @@ final class TabBridge: BridgeServerDelegate {
                 targetTabID: dest.tabID,
                 timeout: timeout
             )
+            // A reply consumes the item through the UI. Timeout, cancellation,
+            // or either tab exiting must also remove the now-stale question.
+            tab.removeBridgePrompt(requestID: requestID)
             switch outcome {
             case .answered(let answer):
                 return BridgeResponse(
@@ -103,17 +107,26 @@ final class TabBridge: BridgeServerDelegate {
                     "tab \"\(dest.title)\" (\(dest.tabID)) exited before answering")
             case .tabClosed:
                 return .failure("a tab closed before the question was answered")
+            case .cancelled:
+                return .failure("the question was dismissed before it was answered")
             }
         }
     }
 
     func bridgeReply(from peer: BridgePeer, requestID: String, answer: String) -> BridgeResponse {
         let refs = snapshots()
-        guard case .found = BridgeRouting.matchPeer(peer, tabs: refs) else {
+        guard case .found(let caller) = BridgeRouting.matchPeer(peer, tabs: refs) else {
             return .failure("could not match this client to an open tab")
         }
-        guard asks.reply(id: requestID, answer: answer) else {
-            return .failure("unknown or already-answered request id: \(requestID)")
+        guard
+            asks.reply(
+                id: requestID,
+                answer: answer,
+                respondingTabID: caller.tabID
+            )
+        else {
+            return .failure(
+                "this request is unknown, already answered, or belongs to another tab")
         }
         return BridgeResponse(ok: true, note: "accepted")
     }
@@ -158,17 +171,27 @@ final class TabBridge: BridgeServerDelegate {
         }
     }
 
-    private func deliver(_ prompt: String, to tab: TerminalTab, dest: BridgeTabRef) -> BridgeResponse
-    {
+    private func deliver(
+        _ prompt: String,
+        to tab: TerminalTab,
+        dest: BridgeTabRef,
+        requestID: String? = nil
+    ) -> BridgeResponse {
         if case .exited = tab.activity {
             let title = model?.title(for: tab) ?? dest.title
             return .failure("tab \"\(title)\" (\(tab.id.uuidString)) is not running")
         }
-        // Already one sanitised line: `BridgePrompt` cleaned the untrusted body
-        // and the title. Sanitising again would strip our own marker.
+        // Never inject unsolicited keystrokes. The tab shows a small inbox and
+        // the user chooses when to submit the prompt.
         guard !prompt.isEmpty else { return .failure("message is empty") }
-        tab.controller.send(text: prompt + "\r")
-        return BridgeResponse(ok: true, note: "delivered to \(dest.title)")
+        tab.enqueueBridgePrompt(
+            prompt,
+            requestID: requestID,
+            onDismiss: requestID.map { id in
+                { [weak self] in self?.asks.cancel(id: id) }
+            }
+        )
+        return BridgeResponse(ok: true, note: "queued for \(dest.title)")
     }
 
     private func snapshots() -> [BridgeTabRef] {

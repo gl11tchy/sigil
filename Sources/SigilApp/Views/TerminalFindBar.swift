@@ -36,7 +36,9 @@ struct TerminalFindBar: View {
                 .accessibilityLabel(counterLabel)
 
             FindBarIconButton(systemName: "chevron.up", help: "Previous", action: findPrevious)
+                .disabled(matchCount == 0)
             FindBarIconButton(systemName: "chevron.down", help: "Next", action: findNext)
+                .disabled(matchCount == 0)
             FindBarIconButton(systemName: "xmark", help: "Close", action: dismiss)
         }
         .padding(.horizontal, 8)
@@ -87,6 +89,7 @@ private struct FindBarIconButton: View {
     let action: () -> Void
 
     @Environment(\.palette) private var palette
+    @Environment(\.isEnabled) private var isEnabled
     @State private var isHovering = false
 
     var body: some View {
@@ -101,7 +104,11 @@ private struct FindBarIconButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(isHovering ? palette.textDim : palette.textFaint)
+        .foregroundStyle(
+            isEnabled
+                ? (isHovering ? palette.textDim : palette.textFaint)
+                : palette.textFaint.opacity(0.4)
+        )
         .onHover { isHovering = $0 }
         .help(help)
         .accessibilityLabel(help)

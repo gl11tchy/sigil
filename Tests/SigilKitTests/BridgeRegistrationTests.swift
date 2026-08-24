@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Testing
 
@@ -23,9 +24,43 @@ struct BridgeRegistrationTests {
 
     @Test func removeSendsExactArguments() throws {
         let probe = RunnerProbe()
+        probe.responses = [(0, "| sigil |"), (0, "removed")]
         let registration = BridgeRegistration(executable: grok, runner: probe.run)
         try registration.remove()
-        #expect(probe.calls == [["mcp", "remove", "sigil", "-s", "user"]])
+        #expect(
+            probe.calls == [
+                ["mcp", "list"],
+                ["mcp", "remove", "sigil", "-s", "user"],
+            ])
+    }
+
+    @Test func removeAlreadyAbsentSucceedsWithoutRemoveCommand() throws {
+        let probe = RunnerProbe()
+        probe.response = (0, "| another-server |")
+        let registration = BridgeRegistration(executable: grok, runner: probe.run)
+
+        try registration.remove()
+
+        #expect(probe.calls == [["mcp", "list"]])
+    }
+
+    @Test func removeRaceSucceedsWhenASecondListConfirmsAbsence() throws {
+        let probe = RunnerProbe()
+        probe.responses = [
+            (0, "| sigil |"),
+            (1, "server not found"),
+            (0, "| another-server |"),
+        ]
+        let registration = BridgeRegistration(executable: grok, runner: probe.run)
+
+        try registration.remove()
+
+        #expect(
+            probe.calls == [
+                ["mcp", "list"],
+                ["mcp", "remove", "sigil", "-s", "user"],
+                ["mcp", "list"],
+            ])
     }
 
     @Test(arguments: [
@@ -80,6 +115,61 @@ struct BridgeRegistrationTests {
             Issue.record("remove threw \(error)")
         }
     }
+
+    @Test func realRunnerDrainsLargeOutputWithoutPipeDeadlock() {
+        let start = ContinuousClock.now
+        let (code, output) = BridgeRegistration.processRunner(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "/usr/bin/yes x | /usr/bin/head -c 200000"]
+        )
+        #expect(code == 0)
+        #expect(output.utf8.count == 200_000)
+        #expect(ContinuousClock.now - start < .seconds(5))
+    }
+
+    @Test func realRunnerDoesNotWaitForeverForADescendantHoldingThePipe() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let pidFile = root.appendingPathComponent("child.pid")
+        let start = ContinuousClock.now
+
+        let (code, output) = BridgeRegistration.processRunner(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: [
+                "-c",
+                "/bin/sleep 30 & echo $! > \"$1\"; echo parent-finished",
+                "sigil-test",
+                pidFile.path,
+            ]
+        )
+        if let rawPID = try? String(contentsOf: pidFile, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            let pid = Int32(rawPID)
+        {
+            Darwin.kill(pid, SIGKILL)
+        }
+
+        #expect(code == 0)
+        #expect(output.contains("parent-finished"))
+        #expect(ContinuousClock.now - start < .seconds(4))
+    }
+
+    @Test func helperMustBeARegularExecutableFile() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(!BridgeRegistration.isUsableMCPBinary(at: root))
+
+        let file = root.appendingPathComponent("sigil-mcp")
+        try Data("#!/bin/sh\n".utf8).write(to: file)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: Int16(0o600))], ofItemAtPath: file.path)
+        #expect(!BridgeRegistration.isUsableMCPBinary(at: file))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: Int16(0o700))], ofItemAtPath: file.path)
+        #expect(BridgeRegistration.isUsableMCPBinary(at: file))
+    }
 }
 
 struct ListingCase: Sendable {
@@ -91,9 +181,11 @@ struct ListingCase: Sendable {
 private final class RunnerProbe: @unchecked Sendable {
     var calls: [[String]] = []
     var response: (Int32, String) = (0, "")
+    var responses: [(Int32, String)] = []
 
     func run(executable: URL, arguments: [String]) -> (Int32, String) {
         calls.append(arguments)
+        if !responses.isEmpty { return responses.removeFirst() }
         return response
     }
 }

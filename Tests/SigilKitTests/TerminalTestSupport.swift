@@ -32,23 +32,23 @@ enum TerminalTestSupport {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent("run")
         let script = """
-        #!/bin/sh
-        while [ $# -gt 0 ]; do
-          case "$1" in
-            --cwd|--session-id|--resume|--model|--reasoning-effort)
-              [ $# -ge 2 ] || exit 1
-              shift 2
-              ;;
-            --continue)
-              shift
-              ;;
-            *)
-              break
-              ;;
-          esac
-        done
-        exec "$@"
-        """
+            #!/bin/sh
+            while [ $# -gt 0 ]; do
+              case "$1" in
+                --cwd|--session-id|--resume|--model|--reasoning-effort)
+                  [ $# -ge 2 ] || exit 1
+                  shift 2
+                  ;;
+                --continue)
+                  shift
+                  ;;
+                *)
+                  break
+                  ;;
+              esac
+            done
+            exec "$@"
+            """
         try script.write(to: url, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
         return url

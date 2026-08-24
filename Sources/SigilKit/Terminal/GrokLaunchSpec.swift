@@ -3,6 +3,11 @@ import Foundation
 /// How to start one `grok` process inside a terminal tab.
 public struct GrokLaunchSpec: Sendable, Hashable {
 
+    public struct HostCommand: Sendable, Equatable {
+        public let executable: URL
+        public let arguments: [String]
+    }
+
     /// Whether the tab opens a fresh conversation or reattaches to an existing one.
     public enum Mode: Sendable, Hashable {
         /// A new conversation whose UUID the app chooses, so it can watch the session live.
@@ -49,10 +54,10 @@ public struct GrokLaunchSpec: Sendable, Hashable {
     /// `nil` for `.continueLatest`, whose ID is only known once the CLI picks one.
     public var sessionDirectory: URL? {
         switch mode {
-        case let .new(sessionID):
+        case .new(let sessionID):
             return GrokPaths.sessionDirectory(
                 cwd: workingDirectory.path, sessionID: sessionID.uuidString.lowercased())
-        case let .resume(sessionID):
+        case .resume(let sessionID):
             return GrokPaths.sessionDirectory(cwd: workingDirectory.path, sessionID: sessionID)
         case .continueLatest:
             return nil
@@ -63,9 +68,9 @@ public struct GrokLaunchSpec: Sendable, Hashable {
     public func arguments() -> [String] {
         var args = ["--cwd", workingDirectory.path]
         switch mode {
-        case let .new(sessionID):
+        case .new(let sessionID):
             args += ["--session-id", sessionID.uuidString.lowercased()]
-        case let .resume(sessionID):
+        case .resume(let sessionID):
             args += ["--resume", sessionID]
         case .continueLatest:
             args += ["--continue"]
@@ -78,6 +83,30 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         return args
     }
 
+    /// Runs Grok through the user's login shell so a Finder launch receives the
+    /// same PATH, credentials, and tool settings as a normal terminal.
+    public func hostCommand(
+        processEnvironment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> HostCommand {
+        let fallback = URL(fileURLWithPath: "/bin/zsh")
+        let requested = URL(fileURLWithPath: processEnvironment["SHELL"] ?? fallback.path)
+        let shell = FileManager.default.isExecutableFile(atPath: requested.path) ? requested : fallback
+        switch shell.lastPathComponent {
+        case "zsh", "bash", "sh":
+            return HostCommand(
+                executable: shell,
+                arguments: ["-lic", "exec \"$@\"", "sigil-grok", executable.path] + arguments()
+            )
+        case "fish":
+            return HostCommand(
+                executable: shell,
+                arguments: ["-lic", "exec $argv", executable.path] + arguments()
+            )
+        default:
+            return HostCommand(executable: executable, arguments: arguments())
+        }
+    }
+
     /// Environment for the child process: the user's login environment plus the
     /// terminal capabilities SwiftTerm actually provides.
     public func environment() -> [String: String] {
@@ -86,11 +115,17 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         env["COLORTERM"] = "truecolor"
         env["LANG"] = env["LANG"] ?? "en_US.UTF-8"
         env["GROK_WRAPPER"] = "Sigil.app"
-        // The app bundle inherits a bare PATH; put the CLI's own bin dir on it.
+        // The app bundle inherits a bare or duplicated PATH. Keep one copy of
+        // each entry and put both the selected CLI directory and Grok bin first.
         let grokBin = GrokPaths.home.appendingPathComponent("bin").path
         let existing = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
-        if !existing.split(separator: ":").contains(Substring(grokBin)) {
-            env["PATH"] = "\(grokBin):\(existing)"
+        var seen = Set<String>()
+        let preferred =
+            [executable.deletingLastPathComponent().path, grokBin]
+            + existing.split(separator: ":").map(String.init)
+        let entries = preferred.filter { !$0.isEmpty && seen.insert($0).inserted }
+        if !entries.isEmpty {
+            env["PATH"] = entries.joined(separator: ":")
         }
         if let tabID = bridgeTabID?.nilIfBlank,
             let socketPath = bridgeSocketPath?.nilIfBlank

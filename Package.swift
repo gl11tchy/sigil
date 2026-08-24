@@ -29,5 +29,9 @@ let package = Package(
             name: "SigilKitTests",
             dependencies: ["SigilKit"]
         ),
+        .testTarget(
+            name: "SigilAppTests",
+            dependencies: ["SigilApp", "SigilKit"]
+        ),
     ]
 )

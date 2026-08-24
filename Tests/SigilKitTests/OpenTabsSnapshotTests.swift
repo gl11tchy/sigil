@@ -11,7 +11,8 @@ struct OpenTabsSnapshotTests {
                 .init(sessionID: "019f780a-34d7-7993-aadc-f23a46c40a73", cwd: "/Users/exec/proj"),
                 .init(sessionID: "019ffeab-c76b-7fe1-be40-508369febd51", cwd: "/tmp/work"),
             ],
-            selectedSessionID: "019ffeab-c76b-7fe1-be40-508369febd51"
+            selectedSessionID: "019ffeab-c76b-7fe1-be40-508369febd51",
+            selectedCWD: "/tmp/work"
         )
         let data = try #require(snapshot.encode())
         let decoded = try #require(OpenTabsSnapshot.decode(data))
@@ -27,5 +28,14 @@ struct OpenTabsSnapshotTests {
 
     @Test func decodeRejectsGarbage() {
         #expect(OpenTabsSnapshot.decode(Data("not-json".utf8)) == nil)
+    }
+
+    @Test func decodesSnapshotsFromBeforeSelectedFolderWasStored() throws {
+        let data = Data(
+            #"{"tabs":[{"sessionID":"same","cwd":"/old/project"}],"selectedSessionID":"same"}"#.utf8
+        )
+        let decoded = try #require(OpenTabsSnapshot.decode(data))
+        #expect(decoded.selectedSessionID == "same")
+        #expect(decoded.selectedCWD == nil)
     }
 }
