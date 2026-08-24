@@ -56,6 +56,14 @@ final class AppModel {
     private var deferredLegacySelectedSessionID: String?
     private let trashConversation: TrashConversation
     private let presentError: ErrorPresenter
+    @ObservationIgnored private let registrationRunner: BridgeRegistration.Runner
+    @ObservationIgnored private let mcpBinaryOverride: URL?
+    @ObservationIgnored private let tabMessagingSocketURL: URL
+    @ObservationIgnored private let resolveCanonicalPath: @Sendable (String) -> String
+    @ObservationIgnored private var canonicalPathCache: [String: String] = [:]
+    @ObservationIgnored private var canonicalCacheTabCount = -1
+    @ObservationIgnored private var canonicalCacheSessionCount = -1
+    @ObservationIgnored private var canonicalCacheSessionStamp: Date?
 
     init(
         settings: AppSettings = AppSettings(),
@@ -65,12 +73,20 @@ final class AppModel {
         },
         presentError: @escaping ErrorPresenter = { error in
             NSAlert(error: error).runModal()
-        }
+        },
+        registrationRunner: @escaping BridgeRegistration.Runner = BridgeRegistration.processRunner,
+        mcpBinary: URL? = nil,
+        tabMessagingSocketURL: URL = BridgePaths.configuredSocket,
+        canonicalPath: @escaping @Sendable (String) -> String = { GrokPaths.canonicalPath($0) }
     ) {
         self.settings = settings
         self.store = store
         self.trashConversation = trashConversation
         self.presentError = presentError
+        self.registrationRunner = registrationRunner
+        self.mcpBinaryOverride = mcpBinary
+        self.tabMessagingSocketURL = tabMessagingSocketURL
+        self.resolveCanonicalPath = canonicalPath
     }
 
     func onAppear() async {
@@ -78,8 +94,13 @@ final class AppModel {
         didAppear = true
         if Self.isSmokeTest { return }
         store.start()
-        await reconcileTabMessaging()
+        // Bind the local socket before restoring tabs so they inherit it.
+        // Registration is add-or-update and can take seconds; do not wait on it.
+        if settings.isTabMessagingEnabled {
+            try? startTabMessaging()
+        }
         restoreOpenTabs()
+        await reconcileTabMessaging()
     }
 
     var selectedTab: TerminalTab? {
@@ -116,7 +137,7 @@ final class AppModel {
         }
         if scopeToCurrentFolder {
             let folder = currentDirectory.resolvingSymlinksInPath().path
-            result = result.filter { Self.samePath($0.cwd, folder) }
+            result = result.filter { samePath($0.cwd, folder) }
         }
         return result
     }
@@ -150,7 +171,7 @@ final class AppModel {
     }
 
     func sessionKey(_ session: GrokSession) -> String {
-        Self.entryKey(.init(sessionID: session.id, cwd: session.cwd))
+        entryKey(.init(sessionID: session.id, cwd: session.cwd))
     }
 
     /// A tab's label. New sessions start out named after their folder; once the CLI
@@ -158,7 +179,7 @@ final class AppModel {
     func title(for tab: TerminalTab) -> String {
         if let id = tab.sessionID,
             let session = store.sessions.first(where: {
-                $0.id == id && Self.samePath($0.cwd, tab.workingDirectory.path)
+                $0.id == id && samePath($0.cwd, tab.workingDirectory.path)
             }),
             !session.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         {
@@ -398,7 +419,9 @@ final class AppModel {
         }
     }
 
-    /// Repairs an absolute helper path after the app moves and refuses a half-on state.
+    /// Starts the local listener and registers (or updates) the helper when the
+    /// saved switch is on. `grok mcp add` rewrites a stale absolute helper path
+    /// after the app bundle moves.
     private func reconcileTabMessaging() async {
         guard !isTabMessagingChangeInProgress else { return }
         isTabMessagingChangeInProgress = true
@@ -423,30 +446,18 @@ final class AppModel {
             try await installTabMessagingRegistration()
             tabMessagingError = nil
         } catch {
-            let installError = error
-            stopTabMessaging()
-            do {
-                // If the helper path could not be repaired, remove the old global
-                // entry before showing the switch as off.
-                try await removeTabMessagingRegistration()
-                settings.isTabMessagingEnabled = false
-                tabMessagingError = installError.localizedDescription
-            } catch {
-                // Cleanup also failed, so keep the desired setting visible and
-                // tell the user the registration still needs repair.
-                tabMessagingError =
-                    TabMessagingRepairError(
-                        installError: installError, cleanupError: error
-                    ).localizedDescription
-            }
-            let repairMessage = self.tabMessagingError ?? installError.localizedDescription
-            Self.bridgeLog.error("Tab messaging repair failed: \(repairMessage, privacy: .public)")
+            // Keep the local server and the user's setting. A pre-existing
+            // registration must not be deleted because this run's install failed.
+            tabMessagingError = error.localizedDescription
+            Self.bridgeLog.error(
+                "Tab messaging registration failed: \(error.localizedDescription, privacy: .public)"
+            )
         }
     }
 
     private func startTabMessaging() throws {
         if tabBridge?.isListening == true { return }
-        let bridge = TabBridge(model: self)
+        let bridge = TabBridge(model: self, socketURL: tabMessagingSocketURL)
         do {
             try bridge.start()
             tabBridge = bridge
@@ -462,19 +473,26 @@ final class AppModel {
         }
     }
 
+    /// `grok mcp add` is add-or-update (verified grok 1.0.5). Re-running it after
+    /// the app moves rewrites the registered helper path. Do not skip merely
+    /// because a server named `sigil` already exists.
     private func installTabMessagingRegistration() async throws {
-        guard let binary = BridgeRegistration.bundledMCPBinary else {
+        let executable = settings.executableURL
+        let runner = registrationRunner
+        guard let helper = mcpBinaryOverride ?? BridgeRegistration.bundledMCPBinary else {
             throw TabMessagingChangeError.helperMissing
         }
-        let registration = BridgeRegistration(executable: settings.executableURL)
         try await Task.detached(priority: .userInitiated) {
-            try registration.install(mcpBinary: binary)
+            let registration = BridgeRegistration(executable: executable, runner: runner)
+            try registration.install(mcpBinary: helper)
         }.value
     }
 
     private func removeTabMessagingRegistration() async throws {
-        let registration = BridgeRegistration(executable: settings.executableURL)
+        let executable = settings.executableURL
+        let runner = registrationRunner
         try await Task.detached(priority: .userInitiated) {
+            let registration = BridgeRegistration(executable: executable, runner: runner)
             try registration.remove()
         }.value
     }
@@ -641,9 +659,14 @@ final class AppModel {
             tabMatches($0, sessionID: session.id, cwd: session.cwd)
         }
         let stoppedTabs = matchingTabs.filter(\.isRunning)
+        let tabsToRestore = matchingTabs.filter { tab in
+            if tab.isRunning { return true }
+            if case .exited(nil) = tab.activity { return true }
+            return false
+        }
         let selectionBeforeDelete = selectedTabID
         // Keep the tab objects and saved snapshot until Trash succeeds. If it
-        // fails, restart the stopped processes and leave the user's layout intact.
+        // fails, relaunch tabs we stopped, and tabs whose process never started.
         for tab in stoppedTabs {
             tabBridge?.noteTabClosed(id: tab.id)
             tab.terminateAndWait()
@@ -658,10 +681,10 @@ final class AppModel {
             let firstRemovedIndex = tabs.firstIndex { removedIDs.contains($0.id) }
             tabs.removeAll { removedIDs.contains($0.id) }
             deferredOpenTabs.removeAll {
-                Self.entryMatches($0, sessionID: session.id, cwd: session.cwd)
+                entryMatches($0, sessionID: session.id, cwd: session.cwd)
             }
             if let deferredSelectedEntry,
-                Self.entryMatches(deferredSelectedEntry, sessionID: session.id, cwd: session.cwd)
+                entryMatches(deferredSelectedEntry, sessionID: session.id, cwd: session.cwd)
             {
                 clearDeferredSelection()
             } else if deferredLegacySelectedSessionID == session.id {
@@ -681,7 +704,7 @@ final class AppModel {
             return true
         } catch {
             var replacementForSelection: TerminalTab.ID?
-            for old in stoppedTabs {
+            for old in tabsToRestore {
                 guard let sessionID = old.sessionID,
                     let index = tabs.firstIndex(where: { $0.id == old.id })
                 else { continue }
@@ -906,7 +929,7 @@ final class AppModel {
                 reasoningEffort: settings.effort.nilIfEmpty
             )
             let tab = add(spec)
-            if deferredSelectedEntry.map({ Self.sameEntry($0, entry) }) == true
+            if deferredSelectedEntry.map({ sameEntry($0, entry) }) == true
                 || (deferredSelectedEntry == nil
                     && deferredLegacySelectedSessionID == entry.sessionID
                     && restoredSelection == nil)
@@ -925,10 +948,10 @@ final class AppModel {
             guard let sessionID = tab.sessionID else { return nil }
             return OpenTabsSnapshot.Entry(sessionID: sessionID, cwd: tab.workingDirectory.path)
         }
-        let liveKeys = Set(entries.map(Self.entryKey))
+        let liveKeys = Set(entries.map { entryKey($0) })
         entries.append(
             contentsOf: deferredOpenTabs.filter {
-                !liveKeys.contains(Self.entryKey($0))
+                !liveKeys.contains(entryKey($0))
             }
         )
         let liveSelection = selectedTab.flatMap { tab -> OpenTabsSnapshot.Entry? in
@@ -949,31 +972,46 @@ final class AppModel {
     }
 
     private func tabMatches(_ tab: TerminalTab, sessionID: String, cwd: String) -> Bool {
-        tab.sessionID == sessionID && Self.samePath(tab.workingDirectory.path, cwd)
+        tab.sessionID == sessionID && samePath(tab.workingDirectory.path, cwd)
     }
 
-    private static func entryMatches(
+    private func entryMatches(
         _ entry: OpenTabsSnapshot.Entry, sessionID: String, cwd: String
     ) -> Bool {
         entry.sessionID == sessionID && samePath(entry.cwd, cwd)
     }
 
-    private static func sameEntry(
+    private func sameEntry(
         _ lhs: OpenTabsSnapshot.Entry, _ rhs: OpenTabsSnapshot.Entry
     ) -> Bool {
         entryMatches(lhs, sessionID: rhs.sessionID, cwd: rhs.cwd)
     }
 
-    private static func entryKey(_ entry: OpenTabsSnapshot.Entry) -> String {
+    private func entryKey(_ entry: OpenTabsSnapshot.Entry) -> String {
         entry.sessionID + "\u{0}" + canonicalPath(entry.cwd)
     }
 
-    private static func samePath(_ lhs: String, _ rhs: String) -> Bool {
+    private func samePath(_ lhs: String, _ rhs: String) -> Bool {
         canonicalPath(lhs) == canonicalPath(rhs)
     }
 
-    private static func canonicalPath(_ path: String) -> String {
-        GrokPaths.canonicalPath(path)
+    private func canonicalPath(_ path: String) -> String {
+        let tabCount = tabs.count
+        let sessionCount = store.sessions.count
+        let stamp = store.sessions.first?.updatedAt
+        if tabCount != canonicalCacheTabCount
+            || sessionCount != canonicalCacheSessionCount
+            || stamp != canonicalCacheSessionStamp
+        {
+            canonicalPathCache.removeAll(keepingCapacity: true)
+            canonicalCacheTabCount = tabCount
+            canonicalCacheSessionCount = sessionCount
+            canonicalCacheSessionStamp = stamp
+        }
+        if let cached = canonicalPathCache[path] { return cached }
+        let resolved = resolveCanonicalPath(path)
+        canonicalPathCache[path] = resolved
+        return resolved
     }
 
     private func clearDeferredSelection() {
@@ -1011,7 +1049,7 @@ extension String {
     var nilIfEmpty: String? { isEmpty ? nil : self }
 }
 
-private enum TabMessagingChangeError: Error, LocalizedError {
+private enum TabMessagingChangeError: Error, LocalizedError, Sendable {
     case inProgress
     case helperMissing
     case socketInUse
@@ -1022,16 +1060,6 @@ private enum TabMessagingChangeError: Error, LocalizedError {
         case .helperMissing: return "This build has no sigil-mcp helper."
         case .socketInUse: return "Another copy of Sigil is already using tab messaging."
         }
-    }
-}
-
-private struct TabMessagingRepairError: Error, LocalizedError {
-    let installError: Error
-    let cleanupError: Error
-
-    var errorDescription: String? {
-        "Could not repair tab messaging. \(installError.localizedDescription) "
-            + "Cleanup also failed: \(cleanupError.localizedDescription)"
     }
 }
 
