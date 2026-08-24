@@ -5,11 +5,12 @@ import SwiftUI
 struct SettingsView: View {
     @Bindable var model: AppModel
     @State private var settingsError: String?
-    @State private var executablePath: String
+    @State private var pathDraft: ExecutablePathDraft
+    @FocusState private var isExecutablePathFocused: Bool
 
     init(model: AppModel) {
         self.model = model
-        _executablePath = State(initialValue: model.settings.executablePath)
+        _pathDraft = State(initialValue: ExecutablePathDraft(text: model.settings.executablePath))
     }
 
     var body: some View {
@@ -52,12 +53,14 @@ struct SettingsView: View {
             LabeledContent("Grok CLI") {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
-                        TextField("Path", text: $executablePath)
+                        TextField("Path", text: $pathDraft.text)
                             .textFieldStyle(.roundedBorder)
                             .monospaced()
+                            .focused($isExecutablePathFocused)
+                            // Commit on Return or focus loss only — never on each keystroke.
                             .onSubmit { applyExecutablePath() }
-                            .onChange(of: executablePath) { _, _ in
-                                if draftExecutableExists { applyExecutablePath() }
+                            .onChange(of: isExecutablePathFocused) { _, focused in
+                                if !focused { applyExecutablePath() }
                             }
                         Button("Choose…") { pickExecutable() }
                     }
@@ -141,17 +144,19 @@ struct SettingsView: View {
     }
 
     private var draftExecutableExists: Bool {
-        AppSettings.isExecutableFile(at: URL(fileURLWithPath: executablePath))
+        AppSettings.isExecutableFile(at: URL(fileURLWithPath: pathDraft.text))
     }
 
     private func applyExecutablePath() {
-        guard draftExecutableExists else {
+        switch pathDraft.commit(stored: model.settings.executablePath) {
+        case .rejected:
             settingsError = "Choose an executable file."
-            return
+        case .unchanged:
+            break
+        case .applied(let path):
+            model.settings.executablePath = path
+            Task { await model.executableConfigurationChanged() }
         }
-        guard executablePath != model.settings.executablePath else { return }
-        model.settings.executablePath = executablePath
-        Task { await model.executableConfigurationChanged() }
     }
 
     private func pickExecutable() {
@@ -159,13 +164,33 @@ struct SettingsView: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.directoryURL = URL(fileURLWithPath: executablePath)
+        panel.directoryURL = URL(fileURLWithPath: pathDraft.text)
             .deletingLastPathComponent()
         panel.prompt = "Choose"
         if panel.runModal() == .OK, let url = panel.url {
-            executablePath = url.path
+            pathDraft.text = url.path
             applyExecutablePath()
         }
+    }
+}
+
+/// Local Grok CLI path text. Call `commit` from Return or focus loss only.
+struct ExecutablePathDraft: Equatable {
+    var text: String
+
+    enum Outcome: Equatable {
+        case applied(String)
+        case unchanged
+        case rejected
+    }
+
+    @MainActor
+    func commit(stored: String) -> Outcome {
+        guard AppSettings.isExecutableFile(at: URL(fileURLWithPath: text)) else {
+            return .rejected
+        }
+        guard text != stored else { return .unchanged }
+        return .applied(text)
     }
 }
 
