@@ -1,13 +1,15 @@
+import Darwin
 import Foundation
 
 struct SessionCacheEntry: Sendable, Equatable {
     var modificationDate: Date
     var size: Int
-    /// The exact bytes used to build `session`.
-    ///
-    /// File size and modification time are not reliable cache identities: writers can preserve
-    /// both while replacing a summary. Keeping the small summary body lets us compare it exactly
-    /// and skip decoding without ever returning stale content.
+    /// POSIX inode of `summary.json`. With `device`, an atomic replace cannot reuse this entry.
+    var inode: UInt64? = nil
+    var device: UInt64? = nil
+    /// Attribute-change time (`ctime`). Catches in-place rewrites that restore mtime.
+    var changeDate: Date? = nil
+    /// Bytes used to build `session`. A metadata miss can skip JSON decoding when the body matches.
     var contents: Data
     var session: GrokSession
 }
@@ -36,10 +38,20 @@ enum SessionScanner: Sendable {
         var loadError: String?
     }
 
+    /// Reads `summary.json` bodies. Production uses disk; tests inject a counter.
+    struct ContentReader: Sendable {
+        var read: @Sendable (URL) throws -> Data
+
+        static let disk = ContentReader { url in
+            try Data(contentsOf: url)
+        }
+    }
+
     static func scan(
         root: URL,
         cache: [String: SessionCacheEntry],
-        ignoringCache: Bool = false
+        ignoringCache: Bool = false,
+        contentReader: ContentReader = .disk
     ) -> Result {
         let fm = FileManager()
         var isDirectory: ObjCBool = false
@@ -105,7 +117,8 @@ enum SessionScanner: Sendable {
                 switch loadSession(
                     at: sessionDir,
                     cache: cache,
-                    ignoringCache: ignoringCache
+                    ignoringCache: ignoringCache,
+                    contentReader: contentReader
                 ) {
                 case .loaded(let path, let entry):
                     nextCache[path] = entry
@@ -237,59 +250,151 @@ enum SessionScanner: Sendable {
     private static func loadSession(
         at sessionDir: URL,
         cache: [String: SessionCacheEntry],
-        ignoringCache: Bool
+        ignoringCache: Bool,
+        contentReader: ContentReader
     ) -> LoadResult {
         let path = sessionDir.standardizedFileURL.path
         let summaryURL = sessionDir.appendingPathComponent("summary.json")
-        let keys: Set<URLResourceKey> = [
-            .isRegularFileKey, .isDirectoryKey, .contentModificationDateKey, .fileSizeKey,
-        ]
-        let values: URLResourceValues
-        do {
-            values = try summaryURL.resourceValues(forKeys: keys)
-        } catch {
-            return .failed(path: path, reason: "summary.json could not be inspected")
+        let identity: SummaryIdentity
+        switch inspectSummary(summaryURL) {
+        case .failed(let reason):
+            return .failed(path: path, reason: reason)
+        case .ok(let value):
+            identity = value
         }
-        if values.isDirectory == true {
-            return .failed(path: path, reason: "summary.json is a directory")
-        }
-        guard values.isRegularFile == true else {
-            return .failed(path: path, reason: "summary.json is not a regular file")
-        }
-        guard let modificationDate = values.contentModificationDate, let size = values.fileSize
-        else {
-            return .failed(path: path, reason: "summary.json metadata is unavailable")
+
+        if !ignoringCache, let cached = cache[path], matches(cached, identity) {
+            return .loaded(path: path, entry: cached)
         }
 
         let data: Data
         do {
-            data = try Data(contentsOf: summaryURL)
+            data = try contentReader.read(summaryURL)
         } catch {
             return .failed(path: path, reason: "summary.json could not be read")
         }
-        if !ignoringCache,
-            let cached = cache[path],
-            cached.modificationDate == modificationDate,
-            cached.size == size,
-            cached.contents == data
-        {
-            return .loaded(path: path, entry: cached)
+        if !ignoringCache, let cached = cache[path], cached.contents == data {
+            return .loaded(path: path, entry: updatingIdentity(cached, identity))
         }
         guard
             let session = parse(
-                data: data, directory: sessionDir, fileModificationDate: modificationDate)
+                data: data, directory: sessionDir, fileModificationDate: identity.modificationDate)
         else {
             return .failed(path: path, reason: "summary.json is invalid")
         }
         return .loaded(
             path: path,
             entry: SessionCacheEntry(
-                modificationDate: modificationDate,
-                size: size,
+                modificationDate: identity.modificationDate,
+                size: identity.size,
+                inode: identity.inode,
+                device: identity.device,
+                changeDate: identity.changeDate,
                 contents: data,
                 session: session
             )
         )
+    }
+
+    private struct SummaryIdentity: Equatable {
+        var modificationDate: Date
+        var size: Int
+        var inode: UInt64?
+        var device: UInt64?
+        var changeDate: Date?
+    }
+
+    private enum InspectResult {
+        case ok(SummaryIdentity)
+        case failed(String)
+    }
+
+    /// Metadata only: `getattrlist` plus `stat`. Never reads file contents.
+    private static func inspectSummary(_ url: URL) -> InspectResult {
+        let keys: Set<URLResourceKey> = [
+            .isRegularFileKey, .isDirectoryKey, .contentModificationDateKey, .fileSizeKey,
+            .attributeModificationDateKey,
+        ]
+        let values: URLResourceValues
+        do {
+            values = try url.resourceValues(forKeys: keys)
+        } catch {
+            return .failed("summary.json could not be inspected")
+        }
+        if values.isDirectory == true {
+            return .failed("summary.json is a directory")
+        }
+        guard values.isRegularFile == true else {
+            return .failed("summary.json is not a regular file")
+        }
+        guard let modificationDate = values.contentModificationDate, let size = values.fileSize
+        else {
+            return .failed("summary.json metadata is unavailable")
+        }
+
+        var inode: UInt64?
+        var device: UInt64?
+        var st = stat()
+        if stat(url.path, &st) == 0 {
+            inode = st.st_ino
+            device = UInt64(bitPattern: Int64(st.st_dev))
+        }
+
+        return .ok(
+            SummaryIdentity(
+                modificationDate: modificationDate,
+                size: size,
+                inode: inode,
+                device: device,
+                changeDate: values.attributeModificationDate
+            )
+        )
+    }
+
+    /// True when mtime, size, and every available extra identity field match.
+    /// Inode and/or ctime are required so an atomic replace that restores mtime+size still misses.
+    private static func matches(_ cached: SessionCacheEntry, _ identity: SummaryIdentity) -> Bool {
+        guard cached.modificationDate == identity.modificationDate,
+            cached.size == identity.size
+        else {
+            return false
+        }
+
+        var extra = false
+        switch (cached.inode, cached.device, identity.inode, identity.device) {
+        case (let cachedInode?, let cachedDevice?, let newInode?, let newDevice?):
+            guard cachedInode == newInode, cachedDevice == newDevice else { return false }
+            extra = true
+        case (nil, nil, nil, nil):
+            break
+        default:
+            return false
+        }
+
+        switch (cached.changeDate, identity.changeDate) {
+        case (let cachedChange?, let newChange?):
+            guard cachedChange == newChange else { return false }
+            extra = true
+        case (nil, nil):
+            break
+        default:
+            return false
+        }
+
+        return extra
+    }
+
+    private static func updatingIdentity(
+        _ cached: SessionCacheEntry,
+        _ identity: SummaryIdentity
+    ) -> SessionCacheEntry {
+        var next = cached
+        next.modificationDate = identity.modificationDate
+        next.size = identity.size
+        next.inode = identity.inode
+        next.device = identity.device
+        next.changeDate = identity.changeDate
+        return next
     }
 }
 
