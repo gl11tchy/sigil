@@ -47,6 +47,11 @@ final class TerminalTab: Identifiable {
     private var isSelected: () -> Bool = { false }
     private let completionEventsURL: URL?
     private var completionWatchTask: Task<Void, Never>?
+    private var idleFallbackTask: Task<Void, Never>?
+
+    /// Quiet period after the last submit or child output that returns a tab
+    /// to idle when the journal never writes `turn_completed`.
+    static let idleFallbackSilence: Duration = .milliseconds(1200)
 
     init(
         id: UUID = UUID(),
@@ -102,13 +107,15 @@ final class TerminalTab: Identifiable {
         controller.onUserSubmit = { [weak self] in
             self?.noteTurnStarted()
         }
+        controller.onActivity = { [weak self] in
+            self?.noteTerminalOutput()
+        }
         controller.onTitleChange = { [weak self] title in
             self?.noteTerminalTitle(title)
         }
         controller.onTerminate = { [weak self] code in
             guard let self else { return }
-            self.completionWatchTask?.cancel()
-            self.completionWatchTask = nil
+            self.stopTurnTracking()
             let notify = self.activity == .working && !self.isSelected()
             self.activity = .exited(code: code)
             if notify { self.markUnseenTurnCompletion() }
@@ -121,20 +128,36 @@ final class TerminalTab: Identifiable {
         }
     }
 
-    /// A user submission is a real turn boundary. Unlike output silence, it stays
-    /// working through network waits and long-running tools.
+    /// A user submission is a real turn boundary. The journal is authoritative
+    /// when it writes `turn_completed`; output silence is the fallback when
+    /// that event never arrives (empty Return, missing journal).
     func noteTurnStarted() {
         if case .exited = activity { return }
-        guard activity != .working else { return }
+        let needsWatcher = completionWatchTask == nil
         activity = .working
-        watchForTurnCompletion()
+        armIdleFallback()
+        if needsWatcher {
+            watchForTurnCompletion()
+        }
+    }
+
+    /// Child output resets the silence fallback so a turn that is still
+    /// drawing never goes idle. Output never starts a turn on its own.
+    func noteTerminalOutput() {
+        if case .exited = activity { return }
+        guard activity == .working else { return }
+        armIdleFallback()
     }
 
     /// Busy spinner titles can reveal work that did not start through this
-    /// view's input path. Titles never mark a turn complete; only the journal's
-    /// exact completion event is authoritative.
+    /// view's input path. Titles never mark a turn complete; they only start
+    /// a turn or keep the silence fallback from firing during a wait.
     private func noteTerminalTitle(_ title: String) {
-        guard Self.isBusyTerminalTitle(title), activity != .working else { return }
+        guard Self.isBusyTerminalTitle(title) else { return }
+        if activity == .working {
+            armIdleFallback()
+            return
+        }
         noteTurnStarted()
     }
 
@@ -156,17 +179,14 @@ final class TerminalTab: Identifiable {
     }
 
     /// Grok 1.0.5 keeps its terminal title at `grok`, including while idle. Its
-    /// append-only event journal is the authoritative turn boundary instead.
-    /// If the journal is unavailable, the tab stays working so destructive
-    /// actions continue to warn rather than guessing from output silence.
+    /// append-only event journal is the authoritative turn boundary when the
+    /// file exists. A missing `updates.jsonl` is still watched so a later
+    /// create can complete the turn; silence covers the case where it never
+    /// writes `turn_completed`.
     private func watchForTurnCompletion() {
-        completionWatchTask?.cancel()
+        guard completionWatchTask == nil else { return }
         guard let completionEventsURL else { return }
-        let initialSize = Self.fileSize(at: completionEventsURL)
-        if initialSize == nil {
-            guard case .new = spec.mode else { return }
-        }
-        var offset = initialSize ?? 0
+        var offset = Self.fileSize(at: completionEventsURL) ?? 0
         completionWatchTask = Task { [weak self] in
             var remainder = Data()
             var discardingOversizedLine = false
@@ -197,10 +217,25 @@ final class TerminalTab: Identifiable {
 
     private func noteTurnCompleted() {
         guard activity == .working else { return }
-        completionWatchTask?.cancel()
-        completionWatchTask = nil
+        stopTurnTracking()
         activity = .idle
         if !isSelected() { markUnseenTurnCompletion() }
+    }
+
+    private func armIdleFallback() {
+        idleFallbackTask?.cancel()
+        idleFallbackTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.idleFallbackSilence)
+            guard !Task.isCancelled, let self else { return }
+            self.noteTurnCompleted()
+        }
+    }
+
+    private func stopTurnTracking() {
+        idleFallbackTask?.cancel()
+        idleFallbackTask = nil
+        completionWatchTask?.cancel()
+        completionWatchTask = nil
     }
 
     private struct CompletionScan: Sendable {
@@ -376,15 +411,13 @@ final class TerminalTab: Identifiable {
     }
 
     func terminate() {
-        completionWatchTask?.cancel()
-        completionWatchTask = nil
+        stopTurnTracking()
         controller.terminate()
     }
 
     /// Used when the app is quitting: returns only once the child is gone.
     func terminateAndWait() {
-        completionWatchTask?.cancel()
-        completionWatchTask = nil
+        stopTurnTracking()
         controller.terminateAndWait()
     }
 
