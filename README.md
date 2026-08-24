@@ -20,6 +20,10 @@ By gl11tchy.
 - **Thread sidebar.** Every conversation on this machine, newest first, in Today /
   Yesterday / Previous 7 days buckets. Search by title, folder or path. Click one to
   reopen it; if it is already open, the app moves to that tab.
+- **Pins.** Hover a row and pin it. Pinned chats stay at the top of Recents and of
+  each project, in the order you pinned them.
+- **Projects.** Switch the list to folders. Click a folder to see only that project's
+  chats; the back control returns to the folder list.
 - **Scope switch.** Show all conversations, or only the ones started in the folder the
   current tab is working in.
 - **Tabs.** Several sessions at once, each in its own folder.

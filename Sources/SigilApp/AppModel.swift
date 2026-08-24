@@ -176,6 +176,99 @@ final class AppModel {
         entryKey(.init(sessionID: session.id, cwd: session.cwd))
     }
 
+    func isCurrentFolder(_ cwd: String) -> Bool {
+        samePath(cwd, currentDirectory.path)
+    }
+
+    func activity(of session: GrokSession) -> TerminalTab.Activity? {
+        tabs.first { tabMatches($0, sessionID: session.id, cwd: session.cwd) }?.activity
+    }
+
+    func isWorking(_ session: GrokSession) -> Bool {
+        activity(of: session) == .working
+    }
+
+    func isWorking(_ project: SidebarProject) -> Bool {
+        project.sessions.contains { isWorking($0) }
+    }
+
+    func isPinned(_ session: GrokSession) -> Bool {
+        SidebarOrganization.containsPin(
+            settings.pinnedConversations, session: session, samePath: samePath)
+    }
+
+    func pin(_ session: GrokSession) {
+        settings.pinnedConversations = SidebarOrganization.pinning(
+            session, onto: settings.pinnedConversations, samePath: samePath)
+    }
+
+    func unpin(_ session: GrokSession) {
+        settings.pinnedConversations = SidebarOrganization.unpinning(
+            session, from: settings.pinnedConversations, samePath: samePath)
+    }
+
+    func togglePin(_ session: GrokSession) {
+        if isPinned(session) { unpin(session) } else { pin(session) }
+    }
+
+    /// Pinned conversations still in the current sidebar filter, in pin order.
+    func pinnedSessions(in project: SidebarProject? = nil) -> [GrokSession] {
+        let pinned = SidebarOrganization.matchingPins(
+            sessions: sidebarSessions,
+            pins: settings.pinnedConversations,
+            samePath: samePath
+        )
+        guard let project else { return pinned }
+        return pinned.filter { session in
+            project.sessions.contains {
+                $0.id == session.id && samePath($0.cwd, session.cwd)
+            }
+        }
+    }
+
+    func unpinnedSessions(from sessions: [GrokSession]) -> [GrokSession] {
+        SidebarOrganization.withoutPins(
+            sessions: sessions,
+            pins: settings.pinnedConversations,
+            samePath: samePath
+        )
+    }
+
+    var sidebarProjects: [SidebarProject] {
+        SidebarOrganization.projects(from: sidebarSessions, canonicalPath: canonicalPath)
+    }
+
+    var focusedProject: SidebarProject? {
+        let path = settings.focusedProjectPath
+        guard !path.isEmpty else { return nil }
+        let focused = canonicalPath(path)
+        return sidebarProjects.first { $0.id == focused || samePath($0.cwd, path) }
+    }
+
+    func openProject(_ project: SidebarProject) {
+        settings.sidebarMode = .projects
+        settings.focusedProjectPath = project.cwd
+    }
+
+    func leaveProject() {
+        settings.focusedProjectPath = ""
+    }
+
+    /// Drops pins whose conversations are gone, after a successful scan.
+    func pruneMissingPins() {
+        guard !store.isLoading, store.loadError == nil else { return }
+        let remaining = settings.pinnedConversations.filter { pin in
+            store.sessions.contains { $0.id == pin.sessionID && samePath($0.cwd, pin.cwd) }
+                || tabs.contains { tabMatches($0, sessionID: pin.sessionID, cwd: pin.cwd) }
+        }
+        if remaining != settings.pinnedConversations {
+            settings.pinnedConversations = remaining
+        }
+        if !settings.focusedProjectPath.isEmpty, focusedProject == nil {
+            settings.focusedProjectPath = ""
+        }
+    }
+
     /// A tab's label. New sessions start out named after their folder; once the CLI
     /// writes a summary for them, the store supplies the real conversation name.
     func title(for tab: TerminalTab) -> String {
@@ -675,6 +768,7 @@ final class AppModel {
         }
         do {
             try trashConversation(session.directory)
+            unpin(session)
             let removedIDs = Set(matchingTabs.map(\.id))
             for tab in matchingTabs where !stoppedTabs.contains(where: { $0.id == tab.id }) {
                 tabBridge?.noteTabClosed(id: tab.id)
