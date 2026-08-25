@@ -53,4 +53,20 @@ struct EphemeralPathTests {
         #expect(isEphemeral(path: tmp.path))
         #expect(isEphemeral(path: tmp.appendingPathComponent("scratch").path))
     }
+
+    @Test func treatsSymlinkToScratchLocationAsEphemeral() throws {
+        let fm = FileManager.default
+        let target = fm.temporaryDirectory.appendingPathComponent("sigil-wt-\(UUID().uuidString)")
+        let alias = fm.homeDirectoryForCurrentUser.appendingPathComponent(
+            "sigil-ephemeral-test-\(UUID().uuidString)")
+        try fm.createDirectory(at: target, withIntermediateDirectories: true)
+        try fm.createSymbolicLink(at: alias, withDestinationURL: target)
+        defer {
+            try? fm.removeItem(at: alias)
+            try? fm.removeItem(at: target)
+        }
+
+        #expect(!isEphemeral(path: alias.deletingLastPathComponent().path))
+        #expect(isEphemeral(path: alias.path))
+    }
 }
