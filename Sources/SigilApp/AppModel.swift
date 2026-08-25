@@ -224,6 +224,24 @@ final class AppModel {
         if isPinned(session) { unpin(session) } else { pin(session) }
     }
 
+    func isPinned(_ project: SidebarProject) -> Bool {
+        SidebarOrganization.contains(settings.pinnedProjects, path: project.cwd, samePath: samePath)
+    }
+
+    func pin(_ project: SidebarProject) {
+        settings.pinnedProjects = SidebarOrganization.inserting(
+            project.cwd, onto: settings.pinnedProjects, samePath: samePath)
+    }
+
+    func unpin(_ project: SidebarProject) {
+        settings.pinnedProjects = SidebarOrganization.removing(
+            project.cwd, from: settings.pinnedProjects, samePath: samePath)
+    }
+
+    func togglePin(_ project: SidebarProject) {
+        if isPinned(project) { unpin(project) } else { pin(project) }
+    }
+
     func isArchived(_ session: GrokSession) -> Bool {
         SidebarOrganization.contains(
             settings.archivedConversations, session: session, samePath: samePath)
@@ -272,6 +290,23 @@ final class AppModel {
         )
     }
 
+    /// Pinned folders still in the current sidebar filter, in pin order.
+    func pinnedProjects() -> [SidebarProject] {
+        SidebarOrganization.matching(
+            projects: sidebarProjects,
+            paths: settings.pinnedProjects,
+            samePath: samePath
+        )
+    }
+
+    func unpinnedProjects() -> [SidebarProject] {
+        SidebarOrganization.without(
+            projects: sidebarProjects,
+            paths: settings.pinnedProjects,
+            samePath: samePath
+        )
+    }
+
     var sidebarProjects: [SidebarProject] {
         SidebarOrganization.projects(from: sidebarSessions, canonicalPath: canonicalPath)
     }
@@ -299,6 +334,10 @@ final class AppModel {
         if remainingPins != settings.pinnedConversations {
             settings.pinnedConversations = remainingPins
         }
+        let remainingProjectPins = pruningMissingProjects(settings.pinnedProjects)
+        if remainingProjectPins != settings.pinnedProjects {
+            settings.pinnedProjects = remainingProjectPins
+        }
         let remainingArchives = pruningMissing(settings.archivedConversations)
         if remainingArchives != settings.archivedConversations {
             settings.archivedConversations = remainingArchives
@@ -312,6 +351,24 @@ final class AppModel {
         entries.filter { entry in
             store.sessions.contains { $0.id == entry.sessionID && samePath($0.cwd, entry.cwd) }
                 || tabs.contains { tabMatches($0, sessionID: entry.sessionID, cwd: entry.cwd) }
+        }
+    }
+
+    private func pruningMissingProjects(_ paths: [String]) -> [String] {
+        paths.filter { path in
+            store.sessions.contains { samePath($0.cwd, path) }
+                || tabs.contains { samePath($0.workingDirectory.path, path) }
+        }
+    }
+
+    /// The deleted conversation still sits in `store` until the next scan.
+    private func dropOrphanedProjectPin(for session: GrokSession) {
+        let othersRemain =
+            store.sessions.contains { $0.id != session.id && samePath($0.cwd, session.cwd) }
+            || tabs.contains { samePath($0.workingDirectory.path, session.cwd) }
+        if !othersRemain {
+            settings.pinnedProjects = SidebarOrganization.removing(
+                session.cwd, from: settings.pinnedProjects, samePath: samePath)
         }
     }
 
@@ -827,6 +884,7 @@ final class AppModel {
             let selectedWasRemoved = selectedTabID.map(removedIDs.contains) ?? false
             let firstRemovedIndex = tabs.firstIndex { removedIDs.contains($0.id) }
             tabs.removeAll { removedIDs.contains($0.id) }
+            dropOrphanedProjectPin(for: session)
             deferredOpenTabs.removeAll {
                 entryMatches($0, sessionID: session.id, cwd: session.cwd)
             }

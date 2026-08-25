@@ -83,6 +83,53 @@ enum SidebarOrganization {
         }
     }
 
+    static func contains(
+        _ paths: [String],
+        path: String,
+        samePath: (String, String) -> Bool
+    ) -> Bool {
+        paths.contains { samePath($0, path) }
+    }
+
+    static func inserting(
+        _ path: String,
+        onto paths: [String],
+        samePath: (String, String) -> Bool
+    ) -> [String] {
+        var next = removing(path, from: paths, samePath: samePath)
+        next.insert(path, at: 0)
+        return next
+    }
+
+    static func removing(
+        _ path: String,
+        from paths: [String],
+        samePath: (String, String) -> Bool
+    ) -> [String] {
+        paths.filter { !samePath($0, path) }
+    }
+
+    /// Projects that still exist, in stored pin order.
+    static func matching(
+        projects: [SidebarProject],
+        paths: [String],
+        samePath: (String, String) -> Bool
+    ) -> [SidebarProject] {
+        paths.compactMap { path in
+            projects.first { samePath($0.cwd, path) }
+        }
+    }
+
+    static func without(
+        projects: [SidebarProject],
+        paths: [String],
+        samePath: (String, String) -> Bool
+    ) -> [SidebarProject] {
+        projects.filter { project in
+            !contains(paths, path: project.cwd, samePath: samePath)
+        }
+    }
+
     /// Groups already-newest-first `sessions` by canonical working directory.
     /// Group order follows the newest session in each folder.
     static func projects(

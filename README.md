@@ -20,10 +20,12 @@ By gl11tchy.
 - **Thread sidebar.** Every conversation on this machine, newest first, in Today /
   Yesterday / Previous 7 days buckets. Search by title, folder or path. Click one to
   reopen it; if it is already open, the app moves to that tab.
-- **Pins.** Hover a row and pin it. Pinned chats stay at the top of Recents and
-  Projects, in the order you pinned them.
+- **Pins.** Hover a row and pin a chat. Pinned chats stay at the top of Recents
+  and Projects, in the order you pinned them. In Projects, hover a folder name
+  to pin the folder; pinned folders stay at the top of that sort.
 - **Projects.** The same Recents list, grouped by working folder. Newest folder
-  first; chats inside a folder stay newest first.
+  first; chats inside a folder stay newest first. Pin a folder to keep it above
+  the rest.
 - **Scope switch.** Show all conversations, or only the ones started in the folder the
   current tab is working in.
 - **Tabs.** Several sessions at once, each in its own folder.

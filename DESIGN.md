@@ -76,7 +76,8 @@ because that is how the chosen mockup marks structure. They take 16pt above and
 does not become a shout.
 
 The sidebar has one list and two sorts. Recents is time. Projects is the same
-chats grouped by working folder. Pins sit at the top of either sort.
+chats grouped by working folder. Chat pins sit at the top of either sort.
+Project pins sit at the top of Projects, newest-pinned first.
 
 ## Type ramp and the contrast floor
 
@@ -92,15 +93,16 @@ Every interactive element ships all of these, or it is not done:
   stroke, so the arrow keys are visible even when the mouse is elsewhere), open,
   active (`selected` fill + medium title). Titles stay at `text`; metadata carries
   the dim. No side stripe.
-- **Pin**: hover control on the trailing edge; a small ember pin stays on pinned rows.
+- **Pin**: hover control on the trailing edge of a chat row or a project header;
+  a small ember pin stays on pinned rows and pinned folders.
 - **Field**: default, hover, focused (ember hairline).
 - **Icon button**: default, hover, on.
 - **Tab**: default, hover, selected (`selected` fill — the same fill as the open
   row, because it is the same state), close button with its own hover.
 - **Session**: starting, working (pulsing ember on the row), idle, exited.
 - **Folder**: in Projects sort, the working folder is a section of chats, not a
-  drill-in. The current folder is the one you are already in; it does not need
-  a second icon language.
+  drill-in. Pin it from the header; pinned folders stay at the top. The current
+  folder is the one you are already in; it does not need a second icon language.
 
 ## System appearance
 
