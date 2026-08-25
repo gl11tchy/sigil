@@ -15,6 +15,7 @@ struct SidebarView: View {
 
     @Bindable var model: AppModel
     @Environment(\.palette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focus: Focus?
     /// Arrow-key highlight. Separate from open/active so those markers stay
     /// about the tab strip, not about where the keys are.
@@ -120,8 +121,13 @@ struct SidebarView: View {
             ForEach(SidebarMode.allCases) { mode in
                 let selected = model.settings.sidebarMode == mode
                 Button {
-                    withAnimation(.easeOut(duration: 0.16)) {
+                    // Reduce Motion: the underline jumps instead of sliding.
+                    if reduceMotion {
                         model.settings.sidebarMode = mode
+                    } else {
+                        withAnimation(.easeOut(duration: 0.16)) {
+                            model.settings.sidebarMode = mode
+                        }
                     }
                 } label: {
                     VStack(alignment: .leading, spacing: 5) {

@@ -19,6 +19,7 @@ struct SettingsView: View {
             general.tabItem { Label("General", systemImage: "gearshape") }
         }
         .tint(Palette(theme: model.settings.theme).accent)
+        .environment(\.palette, Palette(theme: model.settings.theme))
         .frame(width: 460)
         .scenePadding()
     }
@@ -196,6 +197,7 @@ private struct ThemeCard: View {
     let select: () -> Void
 
     @Environment(\.palette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
 
     private var colors: Palette { Palette(theme: theme) }
@@ -234,7 +236,7 @@ private struct ThemeCard: View {
                                 lineWidth: 1
                             )
                     )
-                    .scaleEffect(isHovering && !isSelected ? 1.03 : 1)
+                    .scaleEffect(isHovering && !isSelected && !reduceMotion ? 1.03 : 1)
                 Text(theme.name)
                     .font(.system(size: 10))
                     .foregroundStyle(isSelected ? palette.text : palette.textDim)
