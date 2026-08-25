@@ -38,6 +38,43 @@ struct SidebarOrganizationTests {
         )
     }
 
+    @Test func projectPinningPrependsAndIsIdempotentOnPath() {
+        var pins: [String] = []
+        pins = SidebarOrganization.inserting("/tmp/one", onto: pins, samePath: ==)
+        pins = SidebarOrganization.inserting("/tmp/two", onto: pins, samePath: ==)
+        #expect(pins == ["/tmp/two", "/tmp/one"])
+
+        pins = SidebarOrganization.inserting("/tmp/one", onto: pins, samePath: ==)
+        #expect(pins == ["/tmp/one", "/tmp/two"])
+    }
+
+    @Test func projectPinsMatchByCanonicalWorkingDirectory() {
+        let newer = session(id: "n", cwd: "/tmp/alias", name: "newer", updated: 3)
+        let other = session(id: "p", cwd: "/tmp/other", name: "other", updated: 2)
+        let grouped = SidebarOrganization.projects(from: [newer, other]) { path in
+            path == "/tmp/alias" ? "/private/tmp/alias" : path
+        }
+        let samePath: (String, String) -> Bool = { lhs, rhs in
+            let canon: (String) -> String = {
+                $0 == "/tmp/alias" || $0 == "/private/tmp/alias" ? "/private/tmp/alias" : $0
+            }
+            return canon(lhs) == canon(rhs)
+        }
+        let matched = SidebarOrganization.matching(
+            projects: grouped,
+            paths: ["/private/tmp/alias"],
+            samePath: samePath
+        )
+        #expect(matched.map(\.cwd) == ["/tmp/alias"])
+        #expect(
+            SidebarOrganization.without(
+                projects: grouped,
+                paths: ["/tmp/alias"],
+                samePath: samePath
+            ).map(\.cwd) == ["/tmp/other"]
+        )
+    }
+
     @Test func projectsGroupByCanonicalPathAndKeepNewestFirst() {
         let newer = session(id: "n", cwd: "/tmp/alias", name: "newer", updated: 3)
         let older = session(id: "o", cwd: "/tmp/alias", name: "older", updated: 1)

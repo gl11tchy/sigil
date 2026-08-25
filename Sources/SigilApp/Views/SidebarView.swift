@@ -4,9 +4,10 @@ import SwiftUI
 /// The thread viewer: every Grok Build conversation on this machine.
 ///
 /// Recents is the time-ordered list. Projects is the same list grouped by
-/// folder. Pins sit at the top of either sort. Archived chats leave both
-/// until the archivebox in the header is turned on. The list is the product:
-/// find one conversation in a history of hundreds, without leaving the keyboard.
+/// folder. Chat pins sit at the top of either sort. Project pins sit at the
+/// top of Projects. Archived chats leave both until the archivebox in the
+/// header is turned on. The list is the product: find one conversation in a
+/// history of hundreds, without leaving the keyboard.
 struct SidebarView: View {
     private enum Focus: Hashable {
         case search
@@ -62,6 +63,7 @@ struct SidebarView: View {
         .onChange(of: model.settings.sidebarMode) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.settings.showWorktreeSessions) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.settings.archivedConversations) { _, _ in clampKeyboardSelection() }
+        .onChange(of: model.settings.pinnedProjects) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.store.isLoading) { _, loading in
             if !loading { model.pruneMissingPins() }
         }
@@ -234,22 +236,45 @@ struct SidebarView: View {
 
     @ViewBuilder
     private func projectGroupedSections(from sessions: [GrokSession], afterPinned: Bool) -> some View {
-        // Keep AppModel's folder order (most recently active first), then drop
-        // folders whose remaining rows are all pinned.
-        let ordered = model.sidebarProjects.compactMap { project -> (id: String, name: String, rows: [GrokSession])? in
+        // Pinned folders first (pin order), then remaining folders in recency
+        // order. Drop folders whose remaining rows are all pinned chats.
+        let pinned = visibleProjects(model.pinnedProjects(), from: sessions)
+        let rest = visibleProjects(model.unpinnedProjects(), from: sessions)
+        ForEach(Array(pinned.enumerated()), id: \.element.id) { index, item in
+            projectSection(item.project, rows: item.rows, isFirst: !afterPinned && index == 0)
+        }
+        ForEach(Array(rest.enumerated()), id: \.element.id) { index, item in
+            projectSection(
+                item.project, rows: item.rows, isFirst: !afterPinned && pinned.isEmpty && index == 0)
+        }
+    }
+
+    private func visibleProjects(
+        _ projects: [SidebarProject], from sessions: [GrokSession]
+    ) -> [ProjectRows] {
+        projects.compactMap { project in
             let rows = sessions.filter { session in
                 project.sessions.contains { $0.directory == session.directory }
             }
-            return rows.isEmpty ? nil : (project.id, project.name, rows)
+            return rows.isEmpty ? nil : ProjectRows(project: project, rows: rows)
         }
-        ForEach(Array(ordered.enumerated()), id: \.element.id) { index, item in
-            section(
-                item.name, count: item.rows.count, isFirst: !afterPinned && index == 0, caps: false
-            ) {
-                ForEach(item.rows, id: \.directory) { session in
-                    sessionRow(session, showsProject: false)
-                }
+    }
+
+    private func projectSection(
+        _ project: SidebarProject, rows: [GrokSession], isFirst: Bool
+    ) -> some View {
+        Section {
+            ForEach(rows, id: \.directory) { session in
+                sessionRow(session, showsProject: false)
             }
+        } header: {
+            ProjectSectionHeader(
+                title: project.name,
+                count: rows.count,
+                isFirst: isFirst,
+                isPinned: model.isPinned(project),
+                togglePin: { model.togglePin(project) }
+            )
         }
     }
 
@@ -286,6 +311,11 @@ struct SidebarView: View {
             Divider()
             Button("New Session in This Folder") {
                 model.newTab(in: URL(fileURLWithPath: session.cwd))
+            }
+            if let project = project(containing: session) {
+                Button(model.isPinned(project) ? "Unpin Project" : "Pin Project") {
+                    model.togglePin(project)
+                }
             }
             Button("Reveal Folder in Finder") { model.revealInFinder(session) }
             Button("Copy Session ID") { model.copySessionID(session) }
@@ -388,7 +418,7 @@ struct SidebarView: View {
         case .recents:
             return unpinned
         case .projects:
-            return model.sidebarProjects.flatMap { project in
+            return (model.pinnedProjects() + model.unpinnedProjects()).flatMap { project in
                 unpinned.filter { session in
                     project.sessions.contains { $0.directory == session.directory }
                 }
@@ -436,6 +466,12 @@ struct SidebarView: View {
         model.sidebarSessions.first { model.sessionKey($0) == id }
     }
 
+    private func project(containing session: GrokSession) -> SidebarProject? {
+        model.sidebarProjects.first { project in
+            project.sessions.contains { $0.directory == session.directory }
+        }
+    }
+
     private func clampKeyboardSelection() {
         guard let id = keyboardSelectionID else { return }
         if !visibleRowIDs().contains(id) {
@@ -477,15 +513,89 @@ struct SidebarView: View {
         let pinned = model.pinnedSessions().count
         if model.settings.sidebarMode == .projects {
             let folders = model.sidebarProjects.count
-            if pinned > 0 {
-                return "\(threads) threads · \(folders) projects · \(pinned) pinned"
+            let pinnedFolders = model.pinnedProjects().count
+            var parts = ["\(threads) threads", "\(folders) projects"]
+            if pinned > 0 { parts.append("\(pinned) pinned") }
+            if pinnedFolders == 1 {
+                parts.append("1 pinned project")
+            } else if pinnedFolders > 0 {
+                parts.append("\(pinnedFolders) pinned projects")
             }
-            return "\(threads) threads · \(folders) projects"
+            return parts.joined(separator: " · ")
         }
         if pinned > 0 {
             return "\(threads) threads · \(pinned) pinned"
         }
         return "\(threads) threads"
+    }
+}
+
+private struct ProjectRows: Identifiable {
+    var id: String { project.id }
+    var project: SidebarProject
+    var rows: [GrokSession]
+}
+
+private struct ProjectSectionHeader: View {
+    let title: String
+    let count: Int
+    let isFirst: Bool
+    let isPinned: Bool
+    let togglePin: () -> Void
+
+    @Environment(\.palette) private var palette
+    @State private var isHovering = false
+
+    var body: some View {
+        let label = "\(title) (\(count))"
+        Text(label)
+            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .foregroundStyle(palette.textFaint)
+            .padding(.horizontal, 14)
+            .padding(.top, isFirst ? 10 : 18)
+            .padding(.bottom, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(palette.sidebar)
+            .overlay(alignment: .topTrailing) { trailing }
+            .contentShape(Rectangle())
+            .onHover { isHovering = $0 }
+            .contextMenu {
+                Button(isPinned ? "Unpin Project" : "Pin Project", action: togglePin)
+            }
+            .help(isPinned ? "Unpin this project" : "Pin this project")
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityLabel(
+                "\(title), \(count) conversations" + (isPinned ? ", pinned" : "")
+            )
+            .accessibilityAction(named: isPinned ? "Unpin Project" : "Pin Project") {
+                togglePin()
+            }
+    }
+
+    @ViewBuilder
+    private var trailing: some View {
+        if isHovering {
+            Button(action: togglePin) {
+                Image(systemName: isPinned ? "pin.fill" : "pin")
+                    .font(.system(size: 8, weight: .semibold))
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(isPinned ? palette.accent : palette.textDim)
+            .help(isPinned ? "Unpin Project" : "Pin Project")
+            .accessibilityLabel(isPinned ? "Unpin Project" : "Pin Project")
+            .padding(.trailing, 10)
+            .padding(.top, isFirst ? 6 : 14)
+        } else if isPinned {
+            Image(systemName: "pin.fill")
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(palette.accent.opacity(0.9))
+                .padding(.trailing, 12)
+                .padding(.top, isFirst ? 10 : 18)
+                .accessibilityHidden(true)
+        }
     }
 }
 

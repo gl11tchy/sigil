@@ -407,6 +407,113 @@ struct AppModelTests {
         #expect(!model.isPinned(session))
         #expect(fixture.settings.pinnedConversations.isEmpty)
     }
+
+    @Test @MainActor
+    func projectPinToggleIsIndependentOfChatPins() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let session = makeSession(id: "s1", cwd: cwd)
+        let model = fixture.model(trashConversation: { _ in })
+        defer { model.closeAllTabsAndWait() }
+        let project = SidebarProject(
+            id: cwd.path,
+            name: "project",
+            displayPath: cwd.path,
+            cwd: cwd.path,
+            sessions: [session],
+            updatedAt: session.updatedAt
+        )
+
+        #expect(!model.isPinned(project))
+        model.pin(project)
+        #expect(model.isPinned(project))
+        #expect(!model.isPinned(session))
+        #expect(fixture.settings.pinnedProjects == [cwd.path])
+        model.togglePin(project)
+        #expect(!model.isPinned(project))
+        model.togglePin(project)
+        #expect(model.deleteConversation(session))
+        #expect(!model.isPinned(project))
+        #expect(fixture.settings.pinnedProjects.isEmpty)
+    }
+
+    @Test @MainActor
+    func projectPinsKeepNewestFirstAcrossFolders() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(id: "a", cwd: "/Users/someone/Documents/alpha")
+        try fixture.writeListedSession(id: "b", cwd: "/Users/someone/Documents/beta")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let alpha = try #require(model.sidebarProjects.first { $0.name == "alpha" })
+        let beta = try #require(model.sidebarProjects.first { $0.name == "beta" })
+
+        model.pin(alpha)
+        model.pin(beta)
+        #expect(model.pinnedProjects().map(\.name) == ["beta", "alpha"])
+        #expect(model.unpinnedProjects().isEmpty)
+
+        model.pin(alpha)
+        #expect(model.pinnedProjects().map(\.name) == ["alpha", "beta"])
+    }
+
+    @Test @MainActor
+    func pruneDropsProjectPinsForMissingFolders() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(id: "gone", cwd: "/Users/someone/Documents/project")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let project = try #require(model.sidebarProjects.first)
+        model.pin(project)
+        let session = try #require(fixture.store.sessions.first { $0.id == "gone" })
+        try FileManager.default.removeItem(at: session.directory)
+        await fixture.store.reload()
+        model.pruneMissingPins()
+        #expect(fixture.settings.pinnedProjects.isEmpty)
+    }
+
+    @Test @MainActor
+    func deletingOneChatKeepsTheProjectPin() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(id: "keep", cwd: "/Users/someone/Documents/project")
+        try fixture.writeListedSession(id: "drop", cwd: "/Users/someone/Documents/project")
+        await fixture.store.reload()
+
+        let model = fixture.model(trashConversation: { _ in })
+        defer { model.closeAllTabsAndWait() }
+        let project = try #require(model.sidebarProjects.first)
+        model.pin(project)
+        let drop = try #require(fixture.store.sessions.first { $0.id == "drop" })
+        #expect(model.deleteConversation(drop))
+        #expect(model.isPinned(project))
+        #expect(fixture.settings.pinnedProjects == [project.cwd])
+    }
+
+    @Test @MainActor
+    func archivingEveryChatKeepsTheProjectPin() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(id: "only", cwd: "/Users/someone/Documents/kept")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let project = try #require(model.sidebarProjects.first)
+        model.pin(project)
+        let session = try #require(fixture.store.sessions.first)
+        model.archive(session)
+        #expect(model.sidebarProjects.isEmpty)
+        #expect(fixture.settings.pinnedProjects == [project.cwd])
+        model.unarchive(session)
+        #expect(model.pinnedProjects().map(\.name) == ["kept"])
+    }
 }
 
 private enum TestFailure: Error {
