@@ -101,6 +101,7 @@ final class AppModel {
         if settings.isTabMessagingEnabled {
             try? startTabMessaging()
         }
+        applyAppearance()
         restoreOpenTabs()
         await reconcileTabMessaging()
     }
@@ -126,9 +127,12 @@ final class AppModel {
 
     /// Restrict the sidebar to conversations started in the current tab's folder.
     var scopeToCurrentFolder = false
+    /// Recents and Projects hide archived chats; this shows only those.
+    var showingArchived = false
 
     /// Conversations for the sidebar: newest first, one-shot noise filtered out,
-    /// optionally scoped to the folder the current tab is working in.
+    /// optionally scoped to the folder the current tab is working in. Archived
+    /// chats are hidden unless `showingArchived` is on.
     var sidebarSessions: [GrokSession] {
         var result = store.search(searchText)
         if !settings.showEmptySessions {
@@ -143,6 +147,11 @@ final class AppModel {
         if scopeToCurrentFolder {
             let folder = currentDirectory.resolvingSymlinksInPath().path
             result = result.filter { samePath($0.cwd, folder) }
+        }
+        if showingArchived {
+            result = result.filter { isArchived($0) }
+        } else {
+            result = result.filter { !isArchived($0) }
         }
         return result
     }
@@ -196,17 +205,18 @@ final class AppModel {
     }
 
     func isPinned(_ session: GrokSession) -> Bool {
-        SidebarOrganization.containsPin(
+        SidebarOrganization.contains(
             settings.pinnedConversations, session: session, samePath: samePath)
     }
 
     func pin(_ session: GrokSession) {
-        settings.pinnedConversations = SidebarOrganization.pinning(
+        unarchive(session)
+        settings.pinnedConversations = SidebarOrganization.inserting(
             session, onto: settings.pinnedConversations, samePath: samePath)
     }
 
     func unpin(_ session: GrokSession) {
-        settings.pinnedConversations = SidebarOrganization.unpinning(
+        settings.pinnedConversations = SidebarOrganization.removing(
             session, from: settings.pinnedConversations, samePath: samePath)
     }
 
@@ -214,11 +224,36 @@ final class AppModel {
         if isPinned(session) { unpin(session) } else { pin(session) }
     }
 
+    func isArchived(_ session: GrokSession) -> Bool {
+        SidebarOrganization.contains(
+            settings.archivedConversations, session: session, samePath: samePath)
+    }
+
+    func archive(_ session: GrokSession) {
+        unpin(session)
+        settings.archivedConversations = SidebarOrganization.inserting(
+            session, onto: settings.archivedConversations, samePath: samePath)
+    }
+
+    func unarchive(_ session: GrokSession) {
+        settings.archivedConversations = SidebarOrganization.removing(
+            session, from: settings.archivedConversations, samePath: samePath)
+    }
+
+    func toggleArchive(_ session: GrokSession) {
+        if isArchived(session) { unarchive(session) } else { archive(session) }
+    }
+
+    /// Archived conversations still on disk, in archive order.
+    var archivedCount: Int {
+        store.sessions.filter { isArchived($0) }.count
+    }
+
     /// Pinned conversations still in the current sidebar filter, in pin order.
     func pinnedSessions(in project: SidebarProject? = nil) -> [GrokSession] {
-        let pinned = SidebarOrganization.matchingPins(
+        let pinned = SidebarOrganization.matching(
             sessions: sidebarSessions,
-            pins: settings.pinnedConversations,
+            entries: settings.pinnedConversations,
             samePath: samePath
         )
         guard let project else { return pinned }
@@ -230,9 +265,9 @@ final class AppModel {
     }
 
     func unpinnedSessions(from sessions: [GrokSession]) -> [GrokSession] {
-        SidebarOrganization.withoutPins(
+        SidebarOrganization.without(
             sessions: sessions,
-            pins: settings.pinnedConversations,
+            entries: settings.pinnedConversations,
             samePath: samePath
         )
     }
@@ -257,18 +292,26 @@ final class AppModel {
         settings.focusedProjectPath = ""
     }
 
-    /// Drops pins whose conversations are gone, after a successful scan.
+    /// Drops pins and archives whose conversations are gone, after a successful scan.
     func pruneMissingPins() {
         guard !store.isLoading, store.loadError == nil else { return }
-        let remaining = settings.pinnedConversations.filter { pin in
-            store.sessions.contains { $0.id == pin.sessionID && samePath($0.cwd, pin.cwd) }
-                || tabs.contains { tabMatches($0, sessionID: pin.sessionID, cwd: pin.cwd) }
+        let remainingPins = pruningMissing(settings.pinnedConversations)
+        if remainingPins != settings.pinnedConversations {
+            settings.pinnedConversations = remainingPins
         }
-        if remaining != settings.pinnedConversations {
-            settings.pinnedConversations = remaining
+        let remainingArchives = pruningMissing(settings.archivedConversations)
+        if remainingArchives != settings.archivedConversations {
+            settings.archivedConversations = remainingArchives
         }
         if !settings.focusedProjectPath.isEmpty, focusedProject == nil {
             settings.focusedProjectPath = ""
+        }
+    }
+
+    private func pruningMissing(_ entries: [OpenTabsSnapshot.Entry]) -> [OpenTabsSnapshot.Entry] {
+        entries.filter { entry in
+            store.sessions.contains { $0.id == entry.sessionID && samePath($0.cwd, entry.cwd) }
+                || tabs.contains { tabMatches($0, sessionID: entry.sessionID, cwd: entry.cwd) }
         }
     }
 
@@ -667,6 +710,9 @@ final class AppModel {
     }
 
     func applyAppearance() {
+        // Sheets, alerts, menus, and the Settings window are system-rendered;
+        // they follow the app appearance, so the shell picks it, not macOS.
+        NSApp.appearance = NSAppearance(named: settings.theme.isDark ? .darkAqua : .aqua)
         for tab in tabs {
             tab.controller.setFontSize(settings.fontSize)
             tab.controller.apply(theme: settings.theme)
@@ -773,6 +819,7 @@ final class AppModel {
         do {
             try trashConversation(session.directory)
             unpin(session)
+            unarchive(session)
             let removedIDs = Set(matchingTabs.map(\.id))
             for tab in matchingTabs where !stoppedTabs.contains(where: { $0.id == tab.id }) {
                 tabBridge?.noteTabClosed(id: tab.id)

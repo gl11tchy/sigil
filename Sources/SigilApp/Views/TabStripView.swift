@@ -46,6 +46,7 @@ private struct TabChip: View {
 
     @Environment(\.palette) private var palette
     @State private var isHovering = false
+    @State private var isCloseHovering = false
 
     var body: some View {
         HStack(spacing: 2) {
@@ -68,17 +69,26 @@ private struct TabChip: View {
             Button(action: close) {
                 Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
                     .frame(width: 16, height: 20)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(isCloseHovering ? palette.selected : Color.clear)
+                    )
             }
             .buttonStyle(.plain)
             .foregroundStyle(palette.textDim)
             .opacity(isHovering || isSelected ? 1 : 0.45)
+            .onHover { isCloseHovering = $0 }
             .accessibilityLabel("Close \(label)")
         }
         .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, minHeight: 24, maxHeight: 24)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? palette.raised : (isHovering ? palette.raised.opacity(0.5) : Color.clear))
+                .fill(
+                    isSelected
+                        ? palette.selected
+                        : (isHovering ? palette.raised.opacity(0.5) : Color.clear)
+                )
         )
         .overlay(alignment: .topTrailing) {
             if tab.hasUnseenActivity && !isSelected {
