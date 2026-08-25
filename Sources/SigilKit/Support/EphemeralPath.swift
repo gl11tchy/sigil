@@ -57,7 +57,7 @@ private func hasScratchWorkspaceMarker(_ path: String) -> Bool {
 private func pathVariants(_ path: String) -> [String] {
     let url = URL(fileURLWithPath: path)
     var result: Set<String> = []
-    for raw in [path, url.path, url.standardizedFileURL.path] {
+    for raw in [path, url.path, url.standardizedFileURL.path, url.resolvingSymlinksInPath().path] {
         let trimmed = (raw.count > 1 && raw.hasSuffix("/")) ? String(raw.dropLast()) : raw
         result.insert(trimmed)
         if trimmed.hasPrefix("/private/") {
