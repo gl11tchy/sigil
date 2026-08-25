@@ -55,6 +55,7 @@ struct SidebarView: View {
         .onChange(of: model.searchText) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.scopeToCurrentFolder) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.settings.sidebarMode) { _, _ in clampKeyboardSelection() }
+        .onChange(of: model.settings.showWorktreeSessions) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.store.isLoading) { _, loading in
             if !loading { model.pruneMissingPins() }
         }

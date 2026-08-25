@@ -13,6 +13,18 @@ struct EphemeralPathTests {
         "/private/tmp/claude-xxx",
         "/private/var/folders",
         "/private/var/folders/zz/T/scratch",
+        "/Users/someone/src/.claude/worktrees/chunk",
+        "/Users/someone/src/.claude/worktrees",
+        "/Users/someone/.claude/projects/encoded/wt-foo",
+        "/Users/someone/.claude/scratch/ra-esc",
+        "/Users/someone/.claude/scratchpads/qg",
+        "/Users/someone/.claude/tmp/quick-grok-x",
+        "/Users/someone/src/.worktrees/qg-foo",
+        "/Users/someone/.t3/worktrees/foo",
+        "/Users/someone/.codex/worktrees/foo",
+        "/Users/someone/.cache/quick-grok/pa-button",
+        "/Users/someone/src/scratchpad/wt-a",
+        "/Users/someone/src/scratchpads/wt-a",
     ])
     func treatsScratchLocationsAsEphemeral(path: String) {
         #expect(isEphemeral(path: path))
@@ -26,6 +38,11 @@ struct EphemeralPathTests {
         "/tmpish",
         "/private/var/tmp",
         "/",
+        "/Users/someone/Documents/sigil",
+        "/Users/someone/.claude/skills/quick-grok/scripts",
+        "/Users/someone/.claude",
+        "/Users/someone/.cache/other",
+        "/Users/someone/Documents/scratchpad-notes",
     ])
     func treatsRealLocationsAsPersistent(path: String) {
         #expect(!isEphemeral(path: path))

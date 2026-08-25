@@ -89,6 +89,11 @@ struct SettingsView: View {
                 isOn: Bindable(model.settings).showEmptySessions
             )
 
+            Toggle(
+                "Show worktree sessions in the sidebar",
+                isOn: Bindable(model.settings).showWorktreeSessions
+            )
+
             Section {
                 Toggle(
                     "Let tabs message each other",

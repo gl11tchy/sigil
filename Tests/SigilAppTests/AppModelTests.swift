@@ -349,6 +349,45 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func sidebarHidesWorktreeSessionsUntilEnabled() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "proj-session", cwd: "/Users/someone/Documents/sigil")
+        try fixture.writeListedSession(
+            id: "wt-session",
+            cwd: "/Users/someone/Documents/sigil/.claude/worktrees/chunk"
+        )
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        #expect(model.sidebarSessions.map(\.id) == ["proj-session"])
+
+        model.settings.showWorktreeSessions = true
+        #expect(Set(model.sidebarSessions.map(\.id)) == ["proj-session", "wt-session"])
+    }
+
+    @Test @MainActor
+    func sidebarKeepsAnOpenWorktreeSessionVisible() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let worktree = try fixture.directory("agent-wt")
+        try fixture.writeListedSession(id: "open-wt", cwd: worktree.path)
+        try fixture.writeListedSession(
+            id: "closed-wt", cwd: "/Users/someone/.t3/worktrees/other")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let open = try #require(fixture.store.sessions.first { $0.id == "open-wt" })
+        model.open(open)
+
+        #expect(Set(model.sidebarSessions.map(\.id)) == ["open-wt"])
+        #expect(!model.sidebarSessions.contains { $0.id == "closed-wt" })
+    }
+
+    @Test @MainActor
     func pinToggleAndDeleteDropThePin() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
@@ -417,6 +456,25 @@ private final class ModelFixture {
             at: GrokPaths.sessionDirectory(cwd: cwd.path, sessionID: id),
             withIntermediateDirectories: true
         )
+    }
+
+    func writeListedSession(
+        id: String,
+        cwd: String,
+        summary: String = "Session",
+        messages: Int = 4
+    ) throws {
+        let dir = GrokPaths.sessionDirectory(cwd: cwd, sessionID: id)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let json: [String: Any] = [
+            "info": ["id": id, "cwd": cwd],
+            "session_summary": summary,
+            "created_at": "2026-08-01T00:00:00Z",
+            "updated_at": "2026-08-01T00:00:00Z",
+            "num_chat_messages": messages,
+        ]
+        let data = try JSONSerialization.data(withJSONObject: json)
+        try data.write(to: dir.appendingPathComponent("summary.json"), options: .atomic)
     }
 
     func model(
