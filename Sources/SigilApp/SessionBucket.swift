@@ -60,10 +60,27 @@ extension Date {
     /// Relative time for the sidebar. Clock skew between the CLI and the app can
     /// make a just-written timestamp look like the future, so anything inside a
     /// minute reads as "now".
+    ///
+    /// Compact on purpose: the subtitle is metadata in mono, and a column of
+    /// "14 minutes ago" is noise where "14m" scans. `longRelative` spells it out
+    /// where there is room (tooltips, accessibility).
     var shortRelative: String {
+        let seconds = Date().timeIntervalSince(self)
+        if abs(seconds) < 60 { return "now" }
+        let minutes = Int(abs(seconds) / 60)
+        if minutes < 60 { return "\(minutes)m" }
+        let hours = minutes / 60
+        if hours < 24 { return "\(hours)h" }
+        let days = hours / 24
+        if days < 7 { return "\(days)d" }
+        if days < 35 { return "\(days / 7)w" }
+        return formatted(.dateTime.month(.abbreviated).day())
+    }
+
+    /// Spelled-out relative time for tooltips and accessibility labels.
+    var longRelative: String {
         let seconds = Date().timeIntervalSince(self)
         if abs(seconds) < 60 { return "now" }
         return formatted(.relative(presentation: .numeric))
     }
-
 }

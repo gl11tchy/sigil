@@ -20,13 +20,13 @@ Dark ramp (Grok Night), in the order they stack:
 |------------|-----------|---------------------------------------------|
 | `sidebar`  | `#000000` | The rail. True black, and the darkest surface.|
 | `ground`   | `#0A0A0A` | Window and terminal, sitting above the rail.|
-| `raised`   | `#1A1A1A` | Hover, search field, selected tab.          |
-| `selected` | `#262626` | The row whose conversation is on screen.    |
+| `raised`   | `#1A1A1A` | Hover, search field, key caps.              |
+| `selected` | `#262626` | The row whose conversation is on screen, and the selected tab. One state, one fill, everywhere.|
 | `hairline` | `#2B2B2B` | Every border and every row rule.            |
 | `text`     | `#EDEDED` | Titles, active labels.                      |
 | `textDim`  | `#9A9A9A` | Inactive labels, secondary controls.        |
 | `textFaint`| `#6B6B6B` | Metadata, section headers, counts.          |
-| `accent`   | `#E8934A` | Active conversation, working dot, focus ring.|
+| `accent`   | `#E8934A` | Active conversation, working dot, focus ring, control tint.|
 
 Text steps are discrete values, not opacities of one colour. Opacity ramps mush
 together over a near-black ground and are the reason grey-on-black reads unfinished.
@@ -40,8 +40,25 @@ Two families on a contrast axis:
   paths. This is what makes metadata read as metadata rather than as a failed title.
   Section titles stay in SF, because they are labels a human reads as structure.
 
-Fixed scale, no fluid sizing. 12 / 11.5 / 10 / 9.5 px. Product UI is viewed at one
-DPI; clamped headings serve nothing here.
+Fixed scale, no fluid sizing. 13 / 12 / 11.5 / 10 / 9.5 px. Product UI is viewed at
+one DPI; clamped headings serve nothing here. 13 semibold belongs to the sidebar
+mode switch alone — it is the only heading in the chrome.
+
+Relative time in the list is compact mono — `now`, `14m`, `3h`, `2d`, `3w`, then a
+short date. A column of "14 minutes ago" is noise; `14m` scans. Tooltips and
+accessibility labels spell it out.
+
+## Shape
+
+One radius system: **6pt** for every container fill (rows, search field, tab
+chips, banners), **5pt** for small controls (icon buttons, swatches), **4pt** for
+key caps and mini controls. No other values.
+
+## Keyboard hints
+
+The app is keyboard-first, so hints name the key: a mono key cap (`⌘T`, `⌘F`) in
+`raised` with a `hairline` border, inline in sentences and inside the empty search
+field. A shortcut buried in prose is a hint for nobody.
 
 ## Density
 
@@ -71,17 +88,31 @@ mono — never by more grey.
 
 Every interactive element ships all of these, or it is not done:
 
-- **Row**: default, hover (`raised` fill), open, active (`selected` fill + medium title). Titles stay at `text`; metadata carries the dim. No side stripe.
+- **Row**: default, hover (`raised` fill), keyboard (hover fill + `hairline`
+  stroke, so the arrow keys are visible even when the mouse is elsewhere), open,
+  active (`selected` fill + medium title). Titles stay at `text`; metadata carries
+  the dim. No side stripe.
 - **Pin**: hover control on the trailing edge; a small ember pin stays on pinned rows.
 - **Field**: default, hover, focused (ember hairline).
 - **Icon button**: default, hover, on.
+- **Tab**: default, hover, selected (`selected` fill — the same fill as the open
+  row, because it is the same state), close button with its own hover.
 - **Session**: starting, working (pulsing ember on the row), idle, exited.
 - **Folder**: in Projects sort, the working folder is a section of chats, not a
   drill-in. The current folder is the one you are already in; it does not need
   a second icon language.
 
+## System appearance
+
+`NSApp.appearance` follows the terminal theme (dark theme → darkAqua), so sheets,
+alerts, menus, and the Settings window render in the shell's world instead of
+whatever the Mac is set to. Controls are tinted `accent`, so a default button is
+ember, never system blue.
+
 ## Motion
 
 150–200ms, ease-out. Motion reports state changes only: the sidebar collapsing, a
-session starting work. There is no page-load choreography — the app opens into a
-task.
+session starting work, the find bar entering, the mode underline sliding. There is
+no page-load choreography — the app opens into a task. Every animation has a
+`prefers-reduced-motion` answer: crossfade instead of move, a steady dot instead
+of a pulse.

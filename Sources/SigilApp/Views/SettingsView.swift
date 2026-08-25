@@ -18,18 +18,27 @@ struct SettingsView: View {
             appearance.tabItem { Label("Appearance", systemImage: "paintbrush") }
             general.tabItem { Label("General", systemImage: "gearshape") }
         }
+        .tint(Palette(theme: model.settings.theme).accent)
         .frame(width: 460)
         .scenePadding()
     }
 
     private var appearance: some View {
         Form {
-            Picker("Theme", selection: Bindable(model.settings).themeName) {
-                ForEach(TerminalTheme.all) { theme in
-                    Text(theme.name).tag(theme.name)
+            LabeledContent("Theme") {
+                HStack(spacing: 8) {
+                    ForEach(TerminalTheme.all) { theme in
+                        ThemeCard(
+                            theme: theme,
+                            isSelected: model.settings.themeName == theme.name
+                        ) {
+                            model.settings.themeName = theme.name
+                            model.applyAppearance()
+                        }
+                    }
                 }
+                .padding(.vertical, 2)
             }
-            .onChange(of: model.settings.themeName) { _, _ in model.applyAppearance() }
 
             LabeledContent("Font size") {
                 HStack {
@@ -176,6 +185,67 @@ struct SettingsView: View {
             pathDraft.text = url.path
             applyExecutablePath()
         }
+    }
+}
+
+/// One theme as a selectable swatch: its ground, its accent dot, its name.
+/// Appearance is a visual choice, so the picker shows the thing itself.
+private struct ThemeCard: View {
+    let theme: TerminalTheme
+    let isSelected: Bool
+    let select: () -> Void
+
+    @Environment(\.palette) private var palette
+    @State private var isHovering = false
+
+    private var colors: Palette { Palette(theme: theme) }
+
+    var body: some View {
+        Button(action: select) {
+            VStack(spacing: 5) {
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(colors.ground)
+                    .frame(width: 64, height: 34)
+                    .overlay(alignment: .bottomLeading) {
+                        Circle()
+                            .fill(colors.accent)
+                            .frame(width: 6, height: 6)
+                            .padding(5)
+                    }
+                    .overlay(alignment: .topTrailing) {
+                        // Three text steps, so the ramp reads at a glance.
+                        VStack(alignment: .trailing, spacing: 2) {
+                            RoundedRectangle(cornerRadius: 1)
+                                .fill(colors.text)
+                                .frame(width: 22, height: 3)
+                            RoundedRectangle(cornerRadius: 1)
+                                .fill(colors.textDim)
+                                .frame(width: 14, height: 3)
+                            RoundedRectangle(cornerRadius: 1)
+                                .fill(colors.textFaint)
+                                .frame(width: 18, height: 3)
+                        }
+                        .padding(5)
+                    }
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5)
+                            .strokeBorder(
+                                isSelected ? palette.text : palette.hairline,
+                                lineWidth: 1
+                            )
+                    )
+                    .scaleEffect(isHovering && !isSelected ? 1.03 : 1)
+                Text(theme.name)
+                    .font(.system(size: 10))
+                    .foregroundStyle(isSelected ? palette.text : palette.textDim)
+            }
+            .animation(.easeOut(duration: 0.12), value: isHovering)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .accessibilityLabel("\(theme.name) theme")
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        .help("Use the \(theme.name) terminal theme")
     }
 }
 

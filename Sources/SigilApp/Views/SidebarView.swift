@@ -4,8 +4,9 @@ import SwiftUI
 /// The thread viewer: every Grok Build conversation on this machine.
 ///
 /// Recents is the time-ordered list. Projects is the same list grouped by
-/// folder. Pins sit at the top of either sort. The list is the product: find
-/// one conversation in a history of hundreds, without leaving the keyboard.
+/// folder. Pins sit at the top of either sort. Archived chats leave both
+/// until the archivebox in the header is turned on. The list is the product:
+/// find one conversation in a history of hundreds, without leaving the keyboard.
 struct SidebarView: View {
     private enum Focus: Hashable {
         case search
@@ -19,6 +20,8 @@ struct SidebarView: View {
     /// about the tab strip, not about where the keys are.
     @State private var keyboardSelectionID: String?
     @State private var pendingDelete: GrokSession?
+    @State private var hoveredMode: SidebarMode?
+    @Namespace private var modeUnderline
 
     var body: some View {
         VStack(spacing: 0) {
@@ -54,8 +57,10 @@ struct SidebarView: View {
         }
         .onChange(of: model.searchText) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.scopeToCurrentFolder) { _, _ in clampKeyboardSelection() }
+        .onChange(of: model.showingArchived) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.settings.sidebarMode) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.settings.showWorktreeSessions) { _, _ in clampKeyboardSelection() }
+        .onChange(of: model.settings.archivedConversations) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.store.isLoading) { _, loading in
             if !loading { model.pruneMissingPins() }
         }
@@ -84,15 +89,18 @@ struct SidebarView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(palette.textFaint)
+            } else if focus != .search {
+                KbdChip(label: "⌘F", palette: palette)
+                    .transition(.opacity)
             }
         }
         .padding(.horizontal, 8)
         .frame(height: 28)
         .background(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: 6)
                 .fill(palette.raised)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: 6)
                         .strokeBorder(
                             focus == .search ? palette.accent.opacity(0.45) : Color.clear,
                             lineWidth: 1
@@ -102,6 +110,7 @@ struct SidebarView: View {
         .padding(.horizontal, 10)
         .padding(.bottom, 6)
         .animation(.easeOut(duration: 0.12), value: focus == .search)
+        .animation(.easeOut(duration: 0.12), value: model.searchText.isEmpty)
     }
 
     // MARK: - Mode
@@ -111,18 +120,33 @@ struct SidebarView: View {
             ForEach(SidebarMode.allCases) { mode in
                 let selected = model.settings.sidebarMode == mode
                 Button {
-                    model.settings.sidebarMode = mode
+                    withAnimation(.easeOut(duration: 0.16)) {
+                        model.settings.sidebarMode = mode
+                    }
                 } label: {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(mode.title)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(selected ? palette.text : palette.textFaint)
-                        Rectangle()
-                            .fill(selected ? palette.text : Color.clear)
-                            .frame(height: 2)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(
+                                selected
+                                    ? palette.text
+                                    : (hoveredMode == mode ? palette.textDim : palette.textFaint)
+                            )
+                        ZStack {
+                            Rectangle().fill(Color.clear).frame(height: 2)
+                            if selected {
+                                Rectangle()
+                                    .fill(palette.text)
+                                    .frame(height: 2)
+                                    .matchedGeometryEffect(id: "mode", in: modeUnderline)
+                            }
+                        }
                     }
                 }
                 .buttonStyle(.plain)
+                .onHover { hovering in
+                    hoveredMode = hovering ? mode : nil
+                }
                 .accessibilityAddTraits(selected ? .isSelected : [])
                 .help(
                     mode == .recents
@@ -131,8 +155,11 @@ struct SidebarView: View {
                 )
             }
             Spacer(minLength: 0)
-            ScopeToggle(isOn: $model.scopeToCurrentFolder, folder: model.currentDirectory)
-                .padding(.bottom, 2)
+            HStack(spacing: 2) {
+                ArchiveToggle(isOn: $model.showingArchived, count: model.archivedCount)
+                ScopeToggle(isOn: $model.scopeToCurrentFolder, folder: model.currentDirectory)
+            }
+            .padding(.bottom, 2)
         }
         .padding(.horizontal, 14)
         .padding(.top, 4)
@@ -234,17 +261,20 @@ struct SidebarView: View {
             state: state(of: session),
             activity: model.activity(of: session),
             isPinned: model.isPinned(session),
+            isArchived: model.isArchived(session),
             isKeyboardSelected: model.sessionKey(session) == keyboardSelectionID,
             showsProject: showsProject,
             open: {
                 keyboardSelectionID = model.sessionKey(session)
                 model.open(session)
             },
-            togglePin: { model.togglePin(session) }
+            togglePin: { model.togglePin(session) },
+            toggleArchive: { model.toggleArchive(session) }
         )
         .id(model.sessionKey(session))
         .contextMenu {
             Button(model.isPinned(session) ? "Unpin" : "Pin") { model.togglePin(session) }
+            Button(model.isArchived(session) ? "Unarchive" : "Archive") { model.toggleArchive(session) }
             Divider()
             Button("Open in New Tab") { model.open(session) }
             Divider()
@@ -306,7 +336,7 @@ struct SidebarView: View {
             Text(emptyTitle)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(palette.textDim)
-            Text(hint)
+            emptyHint
                 .font(.system(size: 11))
                 .foregroundStyle(palette.textFaint)
                 .fixedSize(horizontal: false, vertical: true)
@@ -317,13 +347,25 @@ struct SidebarView: View {
 
     private var emptyTitle: String {
         if !model.searchText.isEmpty { return "No matches" }
+        if model.showingArchived { return "No archived conversations" }
         return "No conversations yet"
     }
 
-    private var hint: String {
-        if !model.searchText.isEmpty { return "Nothing matches “\(model.searchText)”." }
-        if model.scopeToCurrentFolder { return "Turn off the folder filter to see the rest." }
-        return "Press ⌘T to start one. It shows up here as soon as it has a name."
+    @ViewBuilder
+    private var emptyHint: some View {
+        if !model.searchText.isEmpty {
+            Text("Nothing matches “\(model.searchText)”.")
+        } else if model.scopeToCurrentFolder {
+            Text("Turn off the folder filter to see the rest.")
+        } else if model.showingArchived {
+            Text("Archive a conversation from Recents or Projects to send it here.")
+        } else {
+            HStack(spacing: 4) {
+                Text("Press")
+                KbdChip(label: "⌘T", palette: palette)
+                Text("to start one. It shows up here as soon as it has a name.")
+            }
+        }
     }
 
     // MARK: - Keyboard
@@ -406,7 +448,7 @@ struct SidebarView: View {
                     .frame(width: 10, height: 10)
             }
             Text(statusText)
-                .font(.system(size: 9.5, design: .monospaced))
+                .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(
                     model.store.loadError == nil
                         ? AnyShapeStyle(palette.textFaint) : AnyShapeStyle(Color.red.opacity(0.85))
@@ -421,6 +463,10 @@ struct SidebarView: View {
 
     private var statusText: String {
         if let error = model.store.loadError { return error }
+        if model.showingArchived {
+            let threads = model.sidebarSessions.count
+            return threads == 1 ? "1 archived" : "\(threads) archived"
+        }
         let threads = model.sidebarSessions.count
         let pinned = model.pinnedSessions().count
         if model.settings.sidebarMode == .projects {
@@ -434,6 +480,52 @@ struct SidebarView: View {
             return "\(threads) threads · \(pinned) pinned"
         }
         return "\(threads) threads"
+    }
+}
+
+/// Shows archived conversations instead of Recents and Projects.
+private struct ArchiveToggle: View {
+    @Binding var isOn: Bool
+    let count: Int
+
+    @Environment(\.palette) private var palette
+    @State private var isHovering = false
+
+    private var helpText: String {
+        if isOn {
+            return count == 1
+                ? "Showing 1 archived conversation"
+                : "Showing \(count) archived conversations"
+        }
+        if count == 0 { return "No archived conversations" }
+        return count == 1
+            ? "Show 1 archived conversation"
+            : "Show \(count) archived conversations"
+    }
+
+    var body: some View {
+        Button {
+            isOn.toggle()
+        } label: {
+            Image(systemName: isOn ? "archivebox.fill" : "archivebox")
+                .font(.system(size: 10.5, weight: .medium))
+                .frame(width: 22, height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(
+                            isOn
+                                ? palette.accent.opacity(0.14)
+                                : (isHovering ? palette.raised : Color.clear)
+                        )
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isOn ? palette.accent : (isHovering ? palette.textDim : palette.textFaint))
+        .onHover { isHovering = $0 }
+        .help(helpText)
+        .accessibilityLabel(helpText)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }
 
@@ -485,10 +577,12 @@ private struct SessionRow: View {
     let state: State
     let activity: TerminalTab.Activity?
     let isPinned: Bool
+    let isArchived: Bool
     let isKeyboardSelected: Bool
     let showsProject: Bool
     let open: () -> Void
     let togglePin: () -> Void
+    let toggleArchive: () -> Void
 
     @Environment(\.palette) private var palette
     @SwiftUI.State private var isHovering = false
@@ -515,22 +609,35 @@ private struct SessionRow: View {
         .padding(.leading, 8)
         .padding(.trailing, 10)
         .padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 8).fill(fill))
-        .overlay(alignment: .topTrailing) { pinOverlay }
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(fill)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(
+                            isKeyboardSelected && state != .active ? palette.hairline : Color.clear,
+                            lineWidth: 1
+                        )
+                )
+        )
+        .overlay(alignment: .topTrailing) { trailingOverlay }
         .padding(.horizontal, 6)
         .contentShape(Rectangle())
         .onTapGesture(perform: open)
         .onHover { isHovering = $0 }
         .help(
             "\(session.title)\n\(session.displayPath)\n"
-                + "\(session.messageCount) messages · \(session.updatedAt.shortRelative)"
+                + "\(session.messageCount) messages · \(session.updatedAt.longRelative)"
         )
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel(
-            "\(session.title), \(session.projectName), \(session.updatedAt.shortRelative)"
+            "\(session.title), \(session.projectName), \(session.updatedAt.longRelative)"
                 + (isPinned ? ", pinned" : "")
+                + (isArchived ? ", archived" : "")
         )
+        .accessibilityAction(named: isPinned ? "Unpin" : "Pin") { togglePin() }
+        .accessibilityAction(named: isArchived ? "Unarchive" : "Archive") { toggleArchive() }
         .accessibilityAction { open() }
     }
 
@@ -542,7 +649,7 @@ private struct SessionRow: View {
     }
 
     @ViewBuilder
-    private var pinOverlay: some View {
+    private var trailingOverlay: some View {
         if isHovering || isKeyboardSelected {
             HStack(spacing: 0) {
                 LinearGradient(
@@ -551,16 +658,20 @@ private struct SessionRow: View {
                     endPoint: .trailing
                 )
                 .frame(width: 14)
-                Button(action: togglePin) {
-                    Image(systemName: isPinned ? "pin.fill" : "pin")
-                        .font(.system(size: 9, weight: .semibold))
-                        .frame(width: 22, height: 22)
-                        .contentShape(Rectangle())
+                HStack(spacing: 0) {
+                    rowActionButton(
+                        systemImage: isArchived ? "archivebox.fill" : "archivebox",
+                        tinted: isArchived,
+                        help: isArchived ? "Unarchive" : "Archive",
+                        action: toggleArchive
+                    )
+                    rowActionButton(
+                        systemImage: isPinned ? "pin.fill" : "pin",
+                        tinted: isPinned,
+                        help: isPinned ? "Unpin" : "Pin",
+                        action: togglePin
+                    )
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(isPinned ? palette.accent : palette.textDim)
-                .help(isPinned ? "Unpin" : "Pin")
-                .accessibilityLabel(isPinned ? "Unpin" : "Pin")
                 .padding(.trailing, 8)
                 .padding(.top, 4)
                 .background(fill)
@@ -573,6 +684,24 @@ private struct SessionRow: View {
                 .padding(.top, 8)
                 .accessibilityHidden(true)
         }
+    }
+
+    private func rowActionButton(
+        systemImage: String,
+        tinted: Bool,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 9, weight: .semibold))
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(tinted ? palette.accent : palette.textDim)
+        .help(help)
+        .accessibilityLabel(help)
     }
 
     private var fill: Color {

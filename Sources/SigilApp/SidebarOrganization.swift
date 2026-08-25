@@ -30,56 +30,56 @@ struct SidebarProject: Identifiable, Equatable, Sendable {
 }
 
 /// Pure grouping for the sidebar. Path identity is injected so tests do not
-/// need POSIX `realpath`.
+/// need POSIX `realpath`. Pins and archives share the same identity list.
 enum SidebarOrganization {
-    static func pinEntry(for session: GrokSession) -> OpenTabsSnapshot.Entry {
+    static func entry(for session: GrokSession) -> OpenTabsSnapshot.Entry {
         OpenTabsSnapshot.Entry(sessionID: session.id, cwd: session.cwd)
     }
 
-    static func containsPin(
-        _ pins: [OpenTabsSnapshot.Entry],
+    static func contains(
+        _ entries: [OpenTabsSnapshot.Entry],
         session: GrokSession,
         samePath: (String, String) -> Bool
     ) -> Bool {
-        pins.contains { $0.sessionID == session.id && samePath($0.cwd, session.cwd) }
+        entries.contains { $0.sessionID == session.id && samePath($0.cwd, session.cwd) }
     }
 
-    static func pinning(
+    static func inserting(
         _ session: GrokSession,
-        onto pins: [OpenTabsSnapshot.Entry],
+        onto entries: [OpenTabsSnapshot.Entry],
         samePath: (String, String) -> Bool
     ) -> [OpenTabsSnapshot.Entry] {
-        var next = unpinning(session, from: pins, samePath: samePath)
-        next.insert(pinEntry(for: session), at: 0)
+        var next = removing(session, from: entries, samePath: samePath)
+        next.insert(entry(for: session), at: 0)
         return next
     }
 
-    static func unpinning(
+    static func removing(
         _ session: GrokSession,
-        from pins: [OpenTabsSnapshot.Entry],
+        from entries: [OpenTabsSnapshot.Entry],
         samePath: (String, String) -> Bool
     ) -> [OpenTabsSnapshot.Entry] {
-        pins.filter { !($0.sessionID == session.id && samePath($0.cwd, session.cwd)) }
+        entries.filter { !($0.sessionID == session.id && samePath($0.cwd, session.cwd)) }
     }
 
-    /// Pins that still exist, in pin order.
-    static func matchingPins(
+    /// Entries that still exist, in stored order.
+    static func matching(
         sessions: [GrokSession],
-        pins: [OpenTabsSnapshot.Entry],
+        entries: [OpenTabsSnapshot.Entry],
         samePath: (String, String) -> Bool
     ) -> [GrokSession] {
-        pins.compactMap { pin in
-            sessions.first { $0.id == pin.sessionID && samePath($0.cwd, pin.cwd) }
+        entries.compactMap { entry in
+            sessions.first { $0.id == entry.sessionID && samePath($0.cwd, entry.cwd) }
         }
     }
 
-    static func withoutPins(
+    static func without(
         sessions: [GrokSession],
-        pins: [OpenTabsSnapshot.Entry],
+        entries: [OpenTabsSnapshot.Entry],
         samePath: (String, String) -> Bool
     ) -> [GrokSession] {
         sessions.filter { session in
-            !containsPin(pins, session: session, samePath: samePath)
+            !contains(entries, session: session, samePath: samePath)
         }
     }
 

@@ -4,6 +4,7 @@ import SwiftUI
 struct RootView: View {
     @Bindable var model: AppModel
     @AppStorage("window.sidebarWidth") private var sidebarWidth: Double = 272
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var palette: Palette { Palette(theme: model.settings.theme) }
 
@@ -17,6 +18,7 @@ struct RootView: View {
             detail
         }
         .background(palette.ground)
+        .tint(palette.accent)
         .environment(\.palette, palette)
         .background(WindowChrome(background: palette.groundNSColor))
         .sheet(isPresented: $model.isShowingNewSessionSheet) {
@@ -63,8 +65,18 @@ struct RootView: View {
                             dismiss: { model.dismissFindBar() }
                         )
                         .padding(8)
+                        .transition(
+                            reduceMotion
+                                ? .opacity
+                                : .opacity.combined(with: .offset(y: -6))
+                        )
+                        .zIndex(1)
                     }
                 }
+                .animation(
+                    reduceMotion ? .easeOut(duration: 0.1) : .easeOut(duration: 0.16),
+                    value: model.isFindBarVisible
+                )
                 .onChange(of: model.findQuery) { _, _ in
                     model.applyFindQuery()
                 }
@@ -312,19 +324,37 @@ private struct MissingCLIView: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 14) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 22))
+                .font(.system(size: 20, weight: .light))
                 .foregroundStyle(palette.textFaint)
-            Text("Grok Build CLI not found")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(palette.text)
+            VStack(spacing: 6) {
+                Text("Grok Build CLI not found")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(palette.text)
+                Text("Set the path in Settings, or install the CLI.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(palette.textDim)
+            }
             Text(path)
-                .font(.system(size: 11).monospaced())
-                .foregroundStyle(palette.textFaint)
-            SettingsLink { Text("Set the path…") }
+                .font(.system(size: 10.5, design: .monospaced))
+                .foregroundStyle(palette.textDim)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(palette.raised)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 5)
+                                .strokeBorder(palette.hairline, lineWidth: 1)
+                        )
+                )
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 420)
+            SettingsLink { Text("Open Settings…") }
                 .controlSize(.small)
-                .padding(.top, 4)
+                .padding(.top, 2)
         }
     }
 }
@@ -334,16 +364,20 @@ private struct EmptyDetailView: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 7) {
             Text("No open session")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(palette.textDim)
-            Text("Press ⌘T to start one, or pick a conversation.")
-                .font(.system(size: 11))
-                .foregroundStyle(palette.textFaint)
+            HStack(spacing: 5) {
+                Text("Press")
+                KbdChip(label: "⌘T", palette: palette)
+                Text("to start one, or pick a conversation.")
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(palette.textFaint)
             Button("New Session", action: newSession)
                 .controlSize(.small)
-                .padding(.top, 2)
+                .padding(.top, 4)
         }
     }
 }

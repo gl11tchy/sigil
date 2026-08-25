@@ -16,6 +16,7 @@ final class AppSettings {
         static let sidebarMode = "sidebar.mode"
         static let focusedProjectPath = "sidebar.focusedProjectPath"
         static let pinnedConversations = "sidebar.pinnedConversations"
+        static let archivedConversations = "sidebar.archivedConversations"
         static let isTabMessagingEnabled = "bridge.enabled"
         static let defaultDirectory = "session.defaultDirectory"
         static let openTabs = "session.openTabs"
@@ -56,6 +57,14 @@ final class AppSettings {
         didSet {
             if let data = try? JSONEncoder().encode(pinnedConversations) {
                 defaults.set(data, forKey: Key.pinnedConversations)
+            }
+        }
+    }
+    /// Archive order is newest-archived first. Same identity as pins.
+    var archivedConversations: [OpenTabsSnapshot.Entry] {
+        didSet {
+            if let data = try? JSONEncoder().encode(archivedConversations) {
+                defaults.set(data, forKey: Key.archivedConversations)
             }
         }
     }
@@ -111,6 +120,13 @@ final class AppSettings {
             pinnedConversations = decoded
         } else {
             pinnedConversations = []
+        }
+        if let data = defaults.data(forKey: Key.archivedConversations),
+            let decoded = try? JSONDecoder().decode([OpenTabsSnapshot.Entry].self, from: data)
+        {
+            archivedConversations = decoded
+        } else {
+            archivedConversations = []
         }
         isTabMessagingEnabled = defaults.bool(forKey: Key.isTabMessagingEnabled)
         defaultDirectory =

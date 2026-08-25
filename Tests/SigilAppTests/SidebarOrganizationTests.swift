@@ -9,11 +9,11 @@ struct SidebarOrganizationTests {
         let first = session(id: "a", cwd: "/tmp/one", updated: 2)
         let second = session(id: "b", cwd: "/tmp/two", updated: 1)
         var pins: [OpenTabsSnapshot.Entry] = []
-        pins = SidebarOrganization.pinning(first, onto: pins, samePath: ==)
-        pins = SidebarOrganization.pinning(second, onto: pins, samePath: ==)
+        pins = SidebarOrganization.inserting(first, onto: pins, samePath: ==)
+        pins = SidebarOrganization.inserting(second, onto: pins, samePath: ==)
         #expect(pins.map(\.sessionID) == ["b", "a"])
 
-        pins = SidebarOrganization.pinning(first, onto: pins, samePath: ==)
+        pins = SidebarOrganization.inserting(first, onto: pins, samePath: ==)
         #expect(pins.map(\.sessionID) == ["a", "b"])
     }
 
@@ -23,16 +23,16 @@ struct SidebarOrganizationTests {
         let pins = [
             OpenTabsSnapshot.Entry(sessionID: "same", cwd: "/tmp/one")
         ]
-        let matched = SidebarOrganization.matchingPins(
+        let matched = SidebarOrganization.matching(
             sessions: [otherFolder, kept],
-            pins: pins,
+            entries: pins,
             samePath: ==
         )
         #expect(matched.map(\.cwd) == ["/tmp/one"])
         #expect(
-            SidebarOrganization.withoutPins(
+            SidebarOrganization.without(
                 sessions: [otherFolder, kept],
-                pins: pins,
+                entries: pins,
                 samePath: ==
             ).map(\.cwd) == ["/tmp/two"]
         )
