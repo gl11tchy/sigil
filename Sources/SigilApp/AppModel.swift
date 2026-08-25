@@ -137,6 +137,9 @@ final class AppModel {
             // conversation on screen is the one row the list refuses to show.
             result = result.filter { isReal($0) || isOpen($0) }
         }
+        if !settings.showWorktreeSessions {
+            result = result.filter { !isEphemeral(path: $0.cwd) || isOpen($0) }
+        }
         if scopeToCurrentFolder {
             let folder = currentDirectory.resolvingSymlinksInPath().path
             result = result.filter { samePath($0.cwd, folder) }
@@ -628,8 +631,9 @@ final class AppModel {
     private static let bridgeLog = Logger(subsystem: "com.gl11tchy.sigil", category: "bridge")
 
     private func refreshDockIndicator() {
-        NSApp.dockTile.badgeLabel = tabs.contains(where: \.hasUnseenActivity) ? "•" : nil
-        NSApp.dockTile.display()
+        guard let app = NSApp else { return }
+        app.dockTile.badgeLabel = tabs.contains(where: \.hasUnseenActivity) ? "•" : nil
+        app.dockTile.display()
     }
 
     /// Clear the selected tab's badge once its contents are visible again.

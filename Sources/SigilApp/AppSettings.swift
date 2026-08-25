@@ -12,6 +12,7 @@ final class AppSettings {
         static let themeName = "terminal.theme"
         static let executablePath = "grok.executablePath"
         static let showEmptySessions = "sidebar.showEmptySessions"
+        static let showWorktreeSessions = "sidebar.showWorktreeSessions"
         static let sidebarMode = "sidebar.mode"
         static let focusedProjectPath = "sidebar.focusedProjectPath"
         static let pinnedConversations = "sidebar.pinnedConversations"
@@ -37,6 +38,11 @@ final class AppSettings {
     /// hook-triggered one-shot runs otherwise drown the sidebar.
     var showEmptySessions: Bool {
         didSet { defaults.set(showEmptySessions, forKey: Key.showEmptySessions) }
+    }
+    /// Agent worktrees are hidden by default; implementer checkouts otherwise
+    /// drown the project list.
+    var showWorktreeSessions: Bool {
+        didSet { defaults.set(showWorktreeSessions, forKey: Key.showWorktreeSessions) }
     }
     var sidebarMode: SidebarMode {
         didSet { defaults.set(sidebarMode.rawValue, forKey: Key.sidebarMode) }
@@ -90,6 +96,7 @@ final class AppSettings {
         executablePath =
             defaults.string(forKey: Key.executablePath) ?? GrokPaths.defaultExecutable.path
         showEmptySessions = defaults.bool(forKey: Key.showEmptySessions)
+        showWorktreeSessions = defaults.bool(forKey: Key.showWorktreeSessions)
         if let raw = defaults.string(forKey: Key.sidebarMode),
             let mode = SidebarMode(rawValue: raw)
         {

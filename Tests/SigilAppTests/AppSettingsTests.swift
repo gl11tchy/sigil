@@ -48,11 +48,21 @@ struct AppSettingsTests {
         first.sidebarMode = .projects
         first.focusedProjectPath = "/tmp/sigil"
         first.pinnedConversations = [.init(sessionID: "abc", cwd: "/tmp/sigil")]
+        first.showWorktreeSessions = true
 
         let second = AppSettings(defaults: defaults.value)
         #expect(second.sidebarMode == .projects)
         #expect(second.focusedProjectPath == "/tmp/sigil")
         #expect(second.pinnedConversations == [.init(sessionID: "abc", cwd: "/tmp/sigil")])
+        #expect(second.showWorktreeSessions)
+    }
+
+    @Test @MainActor
+    func worktreeSessionsAreHiddenByDefault() {
+        let defaults = isolatedDefaults()
+        defer { defaults.reset() }
+        let settings = AppSettings(defaults: defaults.value)
+        #expect(!settings.showWorktreeSessions)
     }
 }
 
