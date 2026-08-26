@@ -104,6 +104,11 @@ struct SettingsView: View {
                 isOn: Bindable(model.settings).showWorktreeSessions
             )
 
+            Toggle(
+                "Show subagent sessions in the sidebar",
+                isOn: Bindable(model.settings).showSubagentSessions
+            )
+
             Section {
                 Toggle(
                     "Let tabs message each other",

@@ -144,6 +144,9 @@ final class AppModel {
         if !settings.showWorktreeSessions {
             result = result.filter { !isEphemeral(path: $0.cwd) || isOpen($0) }
         }
+        if !settings.showSubagentSessions {
+            result = result.filter { !$0.isSubagent || isOpen($0) }
+        }
         if scopeToCurrentFolder {
             let folder = currentDirectory.resolvingSymlinksInPath().path
             result = result.filter { samePath($0.cwd, folder) }

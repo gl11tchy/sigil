@@ -13,6 +13,8 @@ public struct GrokSession: Identifiable, Hashable, Sendable {
     public let modelID: String?
     public let agentName: String?
     public let reasoningEffort: String?
+    /// CLI `session_kind`. `"subagent"` is a child of another conversation.
+    public let kind: String?
     /// On-disk location, used to watch the session and to export its transcript.
     public let directory: URL
 
@@ -26,6 +28,7 @@ public struct GrokSession: Identifiable, Hashable, Sendable {
         modelID: String?,
         agentName: String?,
         reasoningEffort: String?,
+        kind: String? = nil,
         directory: URL
     ) {
         self.id = id
@@ -37,7 +40,13 @@ public struct GrokSession: Identifiable, Hashable, Sendable {
         self.modelID = modelID
         self.agentName = agentName
         self.reasoningEffort = reasoningEffort
+        self.kind = kind
         self.directory = directory
+    }
+
+    /// Child of a parent chat: workflow / spawn_subagent. Hidden from the sidebar by default.
+    public var isSubagent: Bool {
+        kind == "subagent"
     }
 
     /// What the sidebar shows. Falls back to the folder name when the CLI wrote no summary.

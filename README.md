@@ -19,7 +19,9 @@ By gl11tchy.
 
 - **Thread sidebar.** Every conversation on this machine, newest first, in Today /
   Yesterday / Previous 7 days buckets. Search by title, folder or path. Click one to
-  reopen it; if it is already open, the app moves to that tab.
+  reopen it; if it is already open, the app moves to that tab. Workflow and
+  subagent children stay off the list unless you turn them on in Settings. They
+  still run in the background.
 - **Pins.** Hover a row and pin a chat. Pinned chats stay at the top of Recents
   and Projects, in the order you pinned them. In Projects, hover a folder name
   to pin the folder; pinned folders stay at the top of that sort.
@@ -144,6 +146,17 @@ Scripts/build-app.sh
 The distribution command requires a verified universal build. It stops on signing,
 notarization, stapling, or Gatekeeper errors. Notarization waits for 30 minutes by
 default; set `SIGIL_NOTARY_TIMEOUT` to another duration such as `45m` if needed.
+
+Install that bundle on this Mac (quits a running copy first):
+
+```sh
+Scripts/install.sh
+```
+
+That copies `dist/Sigil.app` to `/Applications/Sigil.app` and opens it. GitHub
+cannot write to this Mac. After a merge to `main`, CI builds a zip and attaches
+it to the rolling [latest release](https://github.com/gl11tchy/sigil/releases/latest).
+Download that zip, or rebuild locally and run `Scripts/install.sh`.
 
 Double-click the finished app, or run `open dist/Sigil.app`.
 
