@@ -50,6 +50,7 @@ struct AppSettingsTests {
         first.pinnedConversations = [.init(sessionID: "abc", cwd: "/tmp/sigil")]
         first.pinnedProjects = ["/tmp/sigil"]
         first.showWorktreeSessions = true
+        first.showSubagentSessions = true
 
         let second = AppSettings(defaults: defaults.value)
         #expect(second.sidebarMode == .projects)
@@ -57,6 +58,7 @@ struct AppSettingsTests {
         #expect(second.pinnedConversations == [.init(sessionID: "abc", cwd: "/tmp/sigil")])
         #expect(second.pinnedProjects == ["/tmp/sigil"])
         #expect(second.showWorktreeSessions)
+        #expect(second.showSubagentSessions)
     }
 
     @Test @MainActor
@@ -65,6 +67,7 @@ struct AppSettingsTests {
         defer { defaults.reset() }
         let settings = AppSettings(defaults: defaults.value)
         #expect(!settings.showWorktreeSessions)
+        #expect(!settings.showSubagentSessions)
     }
 }
 

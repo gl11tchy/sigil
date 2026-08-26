@@ -62,6 +62,7 @@ struct SidebarView: View {
         .onChange(of: model.showingArchived) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.settings.sidebarMode) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.settings.showWorktreeSessions) { _, _ in clampKeyboardSelection() }
+        .onChange(of: model.settings.showSubagentSessions) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.settings.archivedConversations) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.settings.pinnedProjects) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.store.isLoading) { _, loading in

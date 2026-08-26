@@ -388,6 +388,52 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func sidebarHidesSubagentSessionsUntilEnabled() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(id: "parent", cwd: "/Users/someone/Documents/peptide")
+        try fixture.writeListedSession(
+            id: "child",
+            cwd: "/Users/someone/Documents/peptide",
+            summary: "Verify sticky nav",
+            sessionKind: "subagent"
+        )
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        #expect(model.sidebarSessions.map(\.id) == ["parent"])
+
+        model.settings.showSubagentSessions = true
+        #expect(Set(model.sidebarSessions.map(\.id)) == ["parent", "child"])
+    }
+
+    @Test @MainActor
+    func sidebarKeepsAnOpenSubagentSessionVisible() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Documents")
+            .appendingPathComponent("Sigil-SubagentSidebar-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: cwd) }
+        try fixture.writeListedSession(
+            id: "open-child", cwd: cwd.path, sessionKind: "subagent")
+        try fixture.writeListedSession(
+            id: "closed-child", cwd: cwd.path, sessionKind: "subagent")
+        try fixture.writeListedSession(id: "parent", cwd: cwd.path)
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let open = try #require(fixture.store.sessions.first { $0.id == "open-child" })
+        model.open(open)
+
+        #expect(Set(model.sidebarSessions.map(\.id)) == ["open-child", "parent"])
+        #expect(!model.sidebarSessions.contains { $0.id == "closed-child" })
+    }
+
+    @Test @MainActor
     func pinToggleAndDeleteDropThePin() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
@@ -569,17 +615,21 @@ private final class ModelFixture {
         id: String,
         cwd: String,
         summary: String = "Session",
-        messages: Int = 4
+        messages: Int = 4,
+        sessionKind: String? = nil
     ) throws {
         let dir = GrokPaths.sessionDirectory(cwd: cwd, sessionID: id)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let json: [String: Any] = [
+        var json: [String: Any] = [
             "info": ["id": id, "cwd": cwd],
             "session_summary": summary,
             "created_at": "2026-08-01T00:00:00Z",
             "updated_at": "2026-08-01T00:00:00Z",
             "num_chat_messages": messages,
         ]
+        if let sessionKind {
+            json["session_kind"] = sessionKind
+        }
         let data = try JSONSerialization.data(withJSONObject: json)
         try data.write(to: dir.appendingPathComponent("summary.json"), options: .atomic)
     }

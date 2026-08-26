@@ -172,6 +172,7 @@ enum SessionScanner: Sendable {
             modelID: dto.currentModelId,
             agentName: dto.agentName,
             reasoningEffort: dto.reasoningEffort,
+            kind: dto.sessionKind,
             directory: directory
         )
     }
@@ -413,6 +414,7 @@ private struct SummaryDTO: Decodable, Sendable {
     var currentModelId: String?
     var agentName: String?
     var reasoningEffort: String?
+    var sessionKind: String?
 
     enum CodingKeys: String, CodingKey {
         case info
@@ -424,5 +426,6 @@ private struct SummaryDTO: Decodable, Sendable {
         case currentModelId = "current_model_id"
         case agentName = "agent_name"
         case reasoningEffort = "reasoning_effort"
+        case sessionKind = "session_kind"
     }
 }

@@ -13,6 +13,7 @@ final class AppSettings {
         static let executablePath = "grok.executablePath"
         static let showEmptySessions = "sidebar.showEmptySessions"
         static let showWorktreeSessions = "sidebar.showWorktreeSessions"
+        static let showSubagentSessions = "sidebar.showSubagentSessions"
         static let sidebarMode = "sidebar.mode"
         static let focusedProjectPath = "sidebar.focusedProjectPath"
         static let pinnedConversations = "sidebar.pinnedConversations"
@@ -45,6 +46,11 @@ final class AppSettings {
     /// drown the project list.
     var showWorktreeSessions: Bool {
         didSet { defaults.set(showWorktreeSessions, forKey: Key.showWorktreeSessions) }
+    }
+    /// Subagent and workflow children are hidden by default; they otherwise
+    /// drown the parent chat in the sidebar. They still run in the background.
+    var showSubagentSessions: Bool {
+        didSet { defaults.set(showSubagentSessions, forKey: Key.showSubagentSessions) }
     }
     var sidebarMode: SidebarMode {
         didSet { defaults.set(sidebarMode.rawValue, forKey: Key.sidebarMode) }
@@ -115,6 +121,7 @@ final class AppSettings {
             defaults.string(forKey: Key.executablePath) ?? GrokPaths.defaultExecutable.path
         showEmptySessions = defaults.bool(forKey: Key.showEmptySessions)
         showWorktreeSessions = defaults.bool(forKey: Key.showWorktreeSessions)
+        showSubagentSessions = defaults.bool(forKey: Key.showSubagentSessions)
         if let raw = defaults.string(forKey: Key.sidebarMode),
             let mode = SidebarMode(rawValue: raw)
         {

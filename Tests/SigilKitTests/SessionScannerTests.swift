@@ -65,6 +65,26 @@ struct SessionScannerTests {
         #expect(counter.count == 2)
     }
 
+    @Test func sessionKindIsReadFromSummary() throws {
+        let fixture = try ScannerFixture()
+        defer { fixture.tearDown() }
+        try fixture.write(
+            data: try ScannerFixture.summaryData(
+                id: "child", cwd: "/proj", text: "Verify nav", kind: "subagent"),
+            cwd: "/proj",
+            id: "child"
+        )
+        try fixture.write(summary: "Parent chat", cwd: "/proj", id: "parent")
+
+        let result = SessionScanner.scan(root: fixture.root, cache: [:])
+        let child = try #require(result.sessions.first { $0.id == "child" })
+        let parent = try #require(result.sessions.first { $0.id == "parent" })
+        #expect(child.isSubagent)
+        #expect(child.kind == "subagent")
+        #expect(!parent.isSubagent)
+        #expect(parent.kind == nil)
+    }
+
     @Test func invalidSummaryIsReportedWithoutSession() throws {
         let fixture = try ScannerFixture()
         defer { fixture.tearDown() }
@@ -213,8 +233,10 @@ private struct ScannerFixture {
         return GrokPaths.decode(directoryName: encoded)
     }
 
-    private static func summaryData(id: String, cwd: String, text: String) throws -> Data {
-        let object: [String: Any] = [
+    static func summaryData(
+        id: String, cwd: String, text: String, kind: String? = nil
+    ) throws -> Data {
+        var object: [String: Any] = [
             "info": ["id": id, "cwd": cwd],
             "session_summary": text,
             "created_at": "2026-08-01T00:00:00Z",
@@ -222,6 +244,9 @@ private struct ScannerFixture {
             "num_messages": 1,
             "num_chat_messages": 1,
         ]
+        if let kind {
+            object["session_kind"] = kind
+        }
         return try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted])
     }
 }
