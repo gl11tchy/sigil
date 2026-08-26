@@ -47,8 +47,12 @@ jobs:
       - name: Verify
         run: Scripts/verify.sh
 
-      - name: Build universal release bundle
+      - name: Build release bundle
         if: github.event_name != 'pull_request'
+        env:
+          # GitHub macos-15 cannot currently produce the x86_64 half of a
+          # universal bundle (SigilMCP @main). Ship a host-arch zip instead.
+          SIGIL_ALLOW_THIN: "1"
         run: Scripts/build-app.sh
 
       - name: Zip the app
