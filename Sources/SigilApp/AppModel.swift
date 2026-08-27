@@ -16,6 +16,8 @@ final class AppModel {
 
     let settings: AppSettings
     let store: SessionStore
+    /// The right-hand utility column: scratch shell, dev-server browser, notes.
+    let panel = RightPanel()
 
     private(set) var tabs: [TerminalTab] = []
     var selectedTabID: TerminalTab.ID? {
@@ -103,6 +105,7 @@ final class AppModel {
         }
         applyAppearance()
         restoreOpenTabs()
+        preparePanel()
         await reconcileTabMessaging()
     }
 
@@ -577,6 +580,7 @@ final class AppModel {
     /// mutation already wrote the tabs that should come back next launch.
     func closeAllTabsAndWait() {
         stopTabMessaging()
+        panel.closeShellAndWait()
         for tab in tabs { tab.terminateAndWait() }
         tabs.removeAll()
         selectedTabID = nil
@@ -757,6 +761,37 @@ final class AppModel {
         }
     }
 
+    // MARK: - Right panel
+
+    /// Shows `mode` in the panel, or hides the panel when that tool is already up.
+    func showPanel(_ mode: RightPanelMode) {
+        panel.toggle(mode, in: currentDirectory)
+        preparePanel()
+    }
+
+    /// Opens or closes the panel on whatever tool it last showed.
+    func togglePanel() {
+        panel.toggle(nil, in: currentDirectory)
+        preparePanel()
+    }
+
+    /// Kills the scratch shell and starts a new one in the current folder.
+    func restartPanelShell() {
+        panel.restartShell(
+            in: currentDirectory, theme: settings.theme, fontSize: settings.fontSize)
+    }
+
+    /// Starts whatever the visible tool needs, with the app's own theme and size.
+    private func preparePanel() {
+        guard panel.isVisible else { return }
+        if panel.mode == .shell {
+            panel.startShellIfNeeded(
+                in: currentDirectory, theme: settings.theme, fontSize: settings.fontSize)
+        } else {
+            panel.prepare(in: currentDirectory)
+        }
+    }
+
     // MARK: - Appearance
 
     func adjustFontSize(by delta: CGFloat) {
@@ -777,6 +812,8 @@ final class AppModel {
             tab.controller.setFontSize(settings.fontSize)
             tab.controller.apply(theme: settings.theme)
         }
+        panel.shell?.setFontSize(settings.fontSize)
+        panel.shell?.apply(theme: settings.theme)
     }
 
     // MARK: - Session actions
