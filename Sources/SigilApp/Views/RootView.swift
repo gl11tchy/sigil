@@ -16,6 +16,11 @@ struct RootView: View {
                 SplitDivider(width: $sidebarWidth)
             }
             detail
+            if model.panel.isVisible {
+                PanelDivider(width: Bindable(model.panel).width)
+                RightPanelView(model: model)
+                    .frame(width: model.panel.width)
+            }
         }
         .background(palette.ground)
         .tint(palette.accent)
@@ -130,6 +135,13 @@ private struct TopBar: View {
             } else {
                 label
                 Spacer(minLength: 8)
+            }
+
+            IconButton(
+                systemImage: "sidebar.trailing",
+                help: model.panel.isVisible ? "Hide Panel (⌥⌘B)" : "Show Panel (⌥⌘B)"
+            ) {
+                withAnimation(.easeOut(duration: 0.14)) { model.togglePanel() }
             }
 
             IconButton(systemImage: "plus", help: "New Session in \(model.currentDirectory.abbreviatedPath) (⌘T)") {

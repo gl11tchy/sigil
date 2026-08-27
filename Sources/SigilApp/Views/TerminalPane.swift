@@ -8,15 +8,24 @@ struct TerminalPane: NSViewRepresentable {
     /// Matches the sidebar's outer gutter, so both columns breathe the same.
     static let gutter: CGFloat = 8
 
-    let tab: TerminalTab
+    let controller: TerminalController
     /// Painted behind the terminal so the inset below blends into the window.
     let background: NSColor
+
+    init(tab: TerminalTab, background: NSColor) {
+        self.init(controller: tab.controller, background: background)
+    }
+
+    init(controller: TerminalController, background: NSColor) {
+        self.controller = controller
+        self.background = background
+    }
 
     func makeNSView(context: Context) -> NSView {
         let container = ContainerView()
         container.wantsLayer = true
         container.layer?.backgroundColor = background.cgColor
-        let terminal = tab.controller.view
+        let terminal = controller.view
         terminal.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(terminal)
         // The same gutter the sidebar uses, on all four sides. Glyphs should sit

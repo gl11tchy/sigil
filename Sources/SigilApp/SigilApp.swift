@@ -112,6 +112,18 @@ struct GrokCommands: Commands {
                 model.isSidebarVisible.toggle()
             }
             .keyboardShortcut("b", modifiers: .command)
+            Button(model.panel.isVisible ? "Hide Panel" : "Show Panel") {
+                model.togglePanel()
+            }
+            .keyboardShortcut("b", modifiers: [.command, .option])
+            Menu("Panel") {
+                Button("Terminal") { model.showPanel(.shell) }
+                    .keyboardShortcut("1", modifiers: [.command, .option])
+                Button("Browser") { model.showPanel(.web) }
+                    .keyboardShortcut("2", modifiers: [.command, .option])
+                Button("Notes") { model.showPanel(.notes) }
+                    .keyboardShortcut("3", modifiers: [.command, .option])
+            }
             Divider()
             Button("Increase Font Size") { model.adjustFontSize(by: 1) }
                 .keyboardShortcut("+", modifiers: .command)

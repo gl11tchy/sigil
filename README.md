@@ -31,6 +31,11 @@ By gl11tchy.
 - **Scope switch.** Show all conversations, or only the ones started in the folder the
   current tab is working in.
 - **Tabs.** Several sessions at once, each in its own folder.
+- **Right panel.** ⌥⌘B opens a second column beside the session. It holds three
+  tools: a plain login shell in the same folder (⌥⌘1), a browser for a local dev
+  server — type a bare port and it goes to `localhost` (⌥⌘2), and a notes pad kept
+  per working folder (⌥⌘3). The shell is a scratch terminal only: no conversation,
+  no tab messaging.
 - **Status light.** A green dot per tab while the agent is working, and a dot on the
   Dock icon when a background tab finishes a turn.
 - **Themes and font size**, applied live to running sessions.

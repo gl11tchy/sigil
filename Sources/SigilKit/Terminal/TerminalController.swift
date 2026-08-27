@@ -90,6 +90,27 @@ public final class TerminalController {
         childPid.withLock { $0 = pid }
     }
 
+    /// Spawns a plain login shell with `spec`. Does nothing if already running.
+    public func startShell(_ spec: ShellLaunchSpec) {
+        if isRunning || terminalView.isProcessRunning { return }
+        reportsActivity = true
+        didReportExit = false
+        lastActivityFire = nil
+        activityFlushTask?.cancel()
+        activityFlushTask = nil
+
+        let environment = spec.environment().map { "\($0.key)=\($0.value)" }
+        let command = spec.hostCommand()
+        terminalView.startHosted(
+            executable: command.executable.path,
+            args: command.arguments,
+            environment: environment,
+            currentDirectory: spec.workingDirectory.path
+        )
+        isRunning = terminalView.isProcessRunning
+        childPid.withLock { $0 = terminalView.hostedPid }
+    }
+
     /// Stops the child: SIGTERM first, then SIGKILL if it is still there.
     ///
     /// A single immediate signal is not enough. `forkpty` returns the child's pid
