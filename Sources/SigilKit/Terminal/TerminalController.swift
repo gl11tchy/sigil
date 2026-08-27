@@ -108,7 +108,8 @@ public final class TerminalController {
             currentDirectory: spec.workingDirectory.path
         )
         isRunning = terminalView.isProcessRunning
-        childPid.withLock { $0 = terminalView.hostedPid }
+        let pid = terminalView.hostedPid
+        childPid.withLock { $0 = pid }
     }
 
     /// Stops the child: SIGTERM first, then SIGKILL if it is still there.
