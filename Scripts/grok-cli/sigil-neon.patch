@@ -1,7 +1,7 @@
 From f217abf2c80c846ddbec621c782aed119f2e82c4 Mon Sep 17 00:00:00 2001
 From: gl11tchy <gl11tchy@users.noreply.github.com>
 Date: Fri, 28 Aug 2026 01:30:00 -0400
-Subject: [PATCH 1/2] feat(theme): add the Sigil Neon TUI theme
+Subject: [PATCH 1/3] feat(theme): add the Sigil Neon TUI theme
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -1768,7 +1768,7 @@ index da2fc19..6cefcbd 100644
 From 16db618ac19d2bc7a51a3d41205a55b05e880a76 Mon Sep 17 00:00:00 2001
 From: gl11tchy <gl11tchy@users.noreply.github.com>
 Date: Fri, 28 Aug 2026 01:57:34 -0400
-Subject: [PATCH 2/2] feat(sigil): make Sigil Neon a layout, not only a palette
+Subject: [PATCH 2/3] feat(sigil): make Sigil Neon a layout, not only a palette
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -2196,6 +2196,68 @@ index 13d0dfd..e5f8270 100644
          ..PromptStyle::default()
      };
  
+-- 
+2.54.0
+
+
+From 5b263c198db5cda1e5fb51f11a4c1141d5531d8a Mon Sep 17 00:00:00 2001
+From: gl11tchy <gl11tchy@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 11:10:23 -0400
+Subject: [PATCH 3/3] feat(sigil): drop the prompt band, close the header with
+ a rule
+
+The margin bar already says whose turn it is, so the band behind the
+prompt text only broke the transcript into panels again. The header now
+ends in the same hairline the composer opens with, and the transcript
+sits between the two.
+---
+ .../xai-grok-pager/src/app/agent_view/render.rs  | 16 ++++++++++++++++
+ .../xai-grok-pager/src/scrollback/blocks/user.rs |  5 +++++
+ 2 files changed, 21 insertions(+)
+
+diff --git a/crates/codegen/xai-grok-pager/src/app/agent_view/render.rs b/crates/codegen/xai-grok-pager/src/app/agent_view/render.rs
+index 22febad..0784ac5 100644
+--- a/crates/codegen/xai-grok-pager/src/app/agent_view/render.rs
++++ b/crates/codegen/xai-grok-pager/src/app/agent_view/render.rs
+@@ -1623,6 +1623,22 @@ impl AgentView {
+             status.push("context", ctx_line);
+         }
+         let areas = status.render(buf, layout.status_bar);
++        // Sigil Neon closes the header with a hairline, the same rule the
++        // composer opens with, so the transcript sits between two lines.
++        // It goes in the scrollback's own top padding row, which never holds
++        // content, so nothing is overdrawn.
++        if crate::theme::Theme::current_kind() == crate::theme::ThemeKind::SigilNeon {
++            let rule_y = layout.status_bar.y + layout.status_bar.height;
++            if rule_y < layout.scrollback.y + layout.scrollback.height {
++                let style = Style::default().fg(theme.prompt_border).bg(theme.bg_base);
++                for x in layout.status_bar.x..layout.status_bar.x + layout.status_bar.width {
++                    if let Some(cell) = buf.cell_mut((x, rule_y)) {
++                        cell.set_char('\u{2500}');
++                        cell.set_style(style);
++                    }
++                }
++            }
++        }
+         self.hit_bg_status.rect = areas.get("bg_tasks").copied();
+         self.hit_goal_status.rect = areas.get("goal").copied();
+         self.hit_context.rect = areas.get("context").copied();
+diff --git a/crates/codegen/xai-grok-pager/src/scrollback/blocks/user.rs b/crates/codegen/xai-grok-pager/src/scrollback/blocks/user.rs
+index 3404d2c..1a65ae2 100644
+--- a/crates/codegen/xai-grok-pager/src/scrollback/blocks/user.rs
++++ b/crates/codegen/xai-grok-pager/src/scrollback/blocks/user.rs
+@@ -211,6 +211,11 @@ impl UserPromptBlock {
+         terminal_native: bool,
+     ) -> Option<ratatui::style::Color> {
+         use ratatui::style::Color;
++        // Sigil Neon carries the turn in the margin bar, so the band behind the
++        // text has nothing left to say and only breaks the transcript up.
++        if crate::theme::Theme::current_kind() == crate::theme::ThemeKind::SigilNeon {
++            return None;
++        }
+         if terminal_native {
+             Some(if is_selected {
+                 Color::Gray
 -- 
 2.54.0
 
