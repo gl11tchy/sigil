@@ -116,7 +116,7 @@ final class AppSettings {
         self.defaults = defaults
         let storedSize = defaults.double(forKey: Key.fontSize)
         fontSize = storedSize > 0 ? CGFloat(storedSize) : 13
-        themeName = defaults.string(forKey: Key.themeName) ?? TerminalTheme.grokNight.name
+        themeName = defaults.string(forKey: Key.themeName) ?? TerminalTheme.sigilNeon.name
         executablePath =
             defaults.string(forKey: Key.executablePath) ?? GrokPaths.defaultExecutable.path
         showEmptySessions = defaults.bool(forKey: Key.showEmptySessions)
@@ -160,7 +160,7 @@ final class AppSettings {
     }
 
     var theme: TerminalTheme {
-        TerminalTheme.all.first { $0.name == themeName } ?? .grokNight
+        TerminalTheme.all.first { $0.name == themeName } ?? .sigilNeon
     }
 
     var executableURL: URL { URL(fileURLWithPath: executablePath) }

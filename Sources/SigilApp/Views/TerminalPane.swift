@@ -11,20 +11,26 @@ struct TerminalPane: NSViewRepresentable {
     let controller: TerminalController
     /// Painted behind the terminal so the inset below blends into the window.
     let background: NSColor
+    /// Rounds the screen to the frame it sits in. Zero leaves it square.
+    var cornerRadius: CGFloat = 0
 
-    init(tab: TerminalTab, background: NSColor) {
-        self.init(controller: tab.controller, background: background)
+    init(tab: TerminalTab, background: NSColor, cornerRadius: CGFloat = 0) {
+        self.init(controller: tab.controller, background: background, cornerRadius: cornerRadius)
     }
 
-    init(controller: TerminalController, background: NSColor) {
+    init(controller: TerminalController, background: NSColor, cornerRadius: CGFloat = 0) {
         self.controller = controller
         self.background = background
+        self.cornerRadius = cornerRadius
     }
 
     func makeNSView(context: Context) -> NSView {
         let container = ContainerView()
         container.wantsLayer = true
         container.layer?.backgroundColor = background.cgColor
+        container.layer?.cornerRadius = cornerRadius
+        container.layer?.cornerCurve = .continuous
+        container.layer?.masksToBounds = cornerRadius > 0
         let terminal = controller.view
         terminal.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(terminal)
@@ -46,6 +52,8 @@ struct TerminalPane: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         nsView.layer?.backgroundColor = background.cgColor
+        nsView.layer?.cornerRadius = cornerRadius
+        nsView.layer?.masksToBounds = cornerRadius > 0
     }
 
     /// A plain container that keeps the terminal pinned to its bounds.

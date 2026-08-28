@@ -30,8 +30,18 @@ public enum GrokPaths {
     /// `~/.grok/sessions` — one subdirectory per working directory.
     public static var sessionsRoot: URL { home.appendingPathComponent("sessions") }
 
-    /// The bundled CLI binary shipped by the Grok installer.
-    public static var defaultExecutable: URL { home.appendingPathComponent("bin/grok") }
+    /// The CLI the app starts by default.
+    ///
+    /// `bin/grok-sigil` wins when it is there: it is the app's own build of the
+    /// open-source CLI, which carries the `sigil-neon` TUI theme and honours
+    /// `GROK_THEME`. Without it the app falls back to the installer's `bin/grok`,
+    /// which runs exactly as before and ignores the theme variable.
+    public static var defaultExecutable: URL {
+        let bin = home.appendingPathComponent("bin")
+        let themed = bin.appendingPathComponent("grok-sigil")
+        if FileManager.default.isExecutableFile(atPath: themed.path) { return themed }
+        return bin.appendingPathComponent("grok")
+    }
 
     /// Encodes an absolute path the way the CLI names its per-directory session folder.
     public static func encode(path: String) -> String {

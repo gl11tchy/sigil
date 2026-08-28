@@ -6,11 +6,20 @@ import Testing
 
 struct TerminalThemeTests {
 
-    @Test func allStartsWithGrokNightAndHasAtLeastThreeThemes() {
+    @Test func allStartsWithSigilNeonAndHasAtLeastThreeThemes() {
         #expect(TerminalTheme.all.count >= 3)
-        #expect(TerminalTheme.all.first == .grokNight)
+        #expect(TerminalTheme.all.first == .sigilNeon)
+        #expect(TerminalTheme.all.contains(.grokNight))
         #expect(TerminalTheme.all.contains(.grokDay))
         #expect(TerminalTheme.all.contains(.grokEmber))
+    }
+
+    /// Every theme names a CLI theme, so the program and its window match.
+    @Test func everyThemeNamesACLITheme() {
+        #expect(TerminalTheme.sigilNeon.grokThemeName == "sigil-neon")
+        #expect(TerminalTheme.grokDay.grokThemeName == "grokday")
+        #expect(TerminalTheme.grokNight.grokThemeName == "groknight")
+        #expect(TerminalTheme.grokEmber.grokThemeName == "groknight")
     }
 
     @Test(arguments: TerminalTheme.all)

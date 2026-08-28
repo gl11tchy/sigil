@@ -2,31 +2,64 @@
 
 ## Strategy
 
-**Restrained.** A neutral black shell, one ember accent under 5% of the surface.
-The accent comes off the app's own sigil mark and is reserved for state: a pinned
-row, a session doing work, the current folder, a focused field. It is never
-decoration. The conversation on screen is marked by the `selected` fill, not by
-an accent stripe.
+**Restrained.** A neutral near-black shell, one accent under 5% of the surface.
+The accent is reserved for state: a pinned row, a session doing work, the current
+folder, a focused field. It is never decoration. The conversation on screen is
+marked by the `selected` fill, not by an accent stripe.
 
 The window is one surface. Every chrome colour is derived from the terminal theme,
 with the hue removed from the panel greys, so a tinted terminal can never leak
 colour into the shell.
 
+## The program inside the window
+
+The app's whole detail column is a program someone else drew. Theming only the
+frame around it leaves two designs in one window, so the app ships **Sigil Neon**
+on both sides of that line: the window's own palette, and a CLI theme of the same
+name in the app's build of the open-source Grok Build CLI
+(`~/.grok/bin/grok-sigil`). Each tab is launched with `GROK_THEME`, so the
+program renders in the theme its window is wearing. A stock `grok` ignores the
+variable and runs exactly as before.
+
+Sigil Neon is a neutral ramp with two neon hues and nothing in between:
+
+| Role      | Value     | Carries                                        |
+|-----------|-----------|------------------------------------------------|
+| ground    | `#08090B` | The screen, and the window behind it.          |
+| text      | `#C9CFD9` | Everything the program prints.                 |
+| mint      | `#4EF0C4` | The agent's own voice, success, the app accent.|
+| cyan      | `#5AD9FF` | Anything in motion: running tools, links, model.|
+| violet    | `#A98BFF` | The human's turn.                              |
+| amber     | `#FFC46B` | Shell commands and warnings.                   |
+| magenta   | `#FF5F9E` | Failure.                                       |
+
+The greys stay neutral so the neon never smears: saturation appears only on the
+small marks that carry state, and body text is never a neon colour.
+
+## The screen
+
+The terminal is a screen, not a background. It sits in a 10pt rounded rectangle,
+inset 8pt from the window, with the same hairline every other container uses.
+While a turn is in flight the hairline picks up the accent and a soft glow
+breathes underneath it, so a working session reads from across the desk. Idle is
+a plain hairline — there is nothing to look at when nothing is happening, and
+reduced motion holds the lit state steady instead of breathing.
+
 ## Colour
 
-Dark ramp (Grok Night), in the order they stack:
+Dark ramp (Sigil Neon), in the order they stack:
 
 | Role       | Value     | Used for                                    |
 |------------|-----------|---------------------------------------------|
 | `sidebar`  | `#000000` | The rail. True black, and the darkest surface.|
-| `ground`   | `#0A0A0A` | Window and terminal, sitting above the rail.|
+| `ground`   | `#08090B` | Window and terminal, sitting above the rail.|
 | `raised`   | `#1A1A1A` | Hover, search field, key caps.              |
 | `selected` | `#262626` | The row whose conversation is on screen, and the selected tab. One state, one fill, everywhere.|
 | `hairline` | `#2B2B2B` | Every border and every row rule.            |
-| `text`     | `#EDEDED` | Titles, active labels.                      |
-| `textDim`  | `#9A9A9A` | Inactive labels, secondary controls.        |
-| `textFaint`| `#6B6B6B` | Metadata, section headers, counts.          |
-| `accent`   | `#E8934A` | Active conversation, working dot, focus ring, control tint.|
+| `text`     | `#D5DAE1` | Titles, active labels.                      |
+| `textDim`  | `#ABB0B8` | Inactive labels, secondary controls.        |
+| `textFaint`| `#8D9198` | Metadata, section headers, counts.          |
+| `accent`   | `#4EF0C4` | Active conversation, working dot, focus ring, control tint.|
 
 Text steps are discrete values, not opacities of one colour. Opacity ramps mush
 together over a near-black ground and are the reason grey-on-black reads unfinished.

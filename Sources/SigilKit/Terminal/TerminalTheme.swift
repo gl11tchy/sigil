@@ -20,8 +20,12 @@ public struct TerminalTheme: Sendable, Hashable, Identifiable {
     public var cursor: SwiftTerm.Color { Self.color(resolved.cursor) }
     public var selection: SwiftTerm.Color { Self.color(resolved.selection) }
 
-    /// Themes the app offers, `grokNight` first.
-    public static let all: [TerminalTheme] = [.grokNight, .grokDay, .grokEmber]
+    /// Themes the app offers, `sigilNeon` first — it is what the app ships as.
+    public static let all: [TerminalTheme] = [.sigilNeon, .grokNight, .grokDay, .grokEmber]
+    /// The app's own theme: a neutral near-black ground with two neon accents.
+    /// The CLI is asked to render in the matching `sigil-neon` TUI theme, so the
+    /// window and the program inside it are one design instead of two.
+    public static let sigilNeon = TerminalTheme(name: "Sigil Neon", isDark: true)
     public static let grokNight = TerminalTheme(name: "Grok Night", isDark: true)
     public static let grokDay = TerminalTheme(name: "Grok Day", isDark: false)
     public static let grokEmber = TerminalTheme(name: "Grok Ember", isDark: true)
@@ -38,6 +42,8 @@ extension TerminalTheme {
 
     fileprivate var resolved: HexPalette {
         switch name {
+        case Self.sigilNeon.name:
+            return Self.neonPalette
         case Self.grokDay.name:
             return Self.dayPalette
         case Self.grokEmber.name:
@@ -46,6 +52,23 @@ extension TerminalTheme {
             return isDark ? Self.nightPalette : Self.dayPalette
         }
     }
+
+    /// The shipping theme. The ground and every grey are neutral, so the two
+    /// neon hues only ever appear on the marks that carry state. The ANSI ramp
+    /// is the same family the CLI's own `sigil-neon` theme draws with, so a
+    /// plain shell in a tab matches the agent in the tab beside it.
+    fileprivate static let neonPalette = HexPalette(
+        ansi: [
+            0x14161A, 0xFF5F9E, 0x4EF0C4, 0xFFC46B,
+            0x5AD9FF, 0xA98BFF, 0x5FE0E8, 0xC9CFD9,
+            0x505864, 0xFF87B7, 0x7CFFB2, 0xFFD79B,
+            0x8AE4FF, 0xC3AEFF, 0x8AEDF2, 0xE6E9EF,
+        ],
+        background: 0x08090B,
+        foreground: 0xC9CFD9,
+        cursor: 0x4EF0C4,
+        selection: 0x1F242C
+    )
 
     /// Neutral black ground and grey foreground. The syntax hues stay saturated;
     /// nothing else in the theme carries a tint, so the app reads as black.
@@ -110,5 +133,18 @@ extension TerminalTheme {
     /// The one accent the app chrome is allowed. It comes off the sigil mark, and
     /// marks state only: the open conversation, a session doing work, a focused
     /// field. The terminal itself never uses it.
-    public var accentHex: UInt32 { isDark ? 0xE8934A : 0xB4601C }
+    public var accentHex: UInt32 {
+        if name == Self.sigilNeon.name { return 0x4EF0C4 }
+        return isDark ? 0xE8934A : 0xB4601C
+    }
+
+    /// The name of the CLI theme that matches this one. It reaches the CLI as
+    /// `GROK_THEME`, which a build that does not know the name simply ignores.
+    public var grokThemeName: String {
+        switch name {
+        case Self.sigilNeon.name: return "sigil-neon"
+        case Self.grokDay.name: return "grokday"
+        default: return "groknight"
+        }
+    }
 }
