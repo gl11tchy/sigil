@@ -1,7 +1,7 @@
 From f217abf2c80c846ddbec621c782aed119f2e82c4 Mon Sep 17 00:00:00 2001
 From: gl11tchy <gl11tchy@users.noreply.github.com>
 Date: Fri, 28 Aug 2026 01:30:00 -0400
-Subject: [PATCH] feat(theme): add the Sigil Neon TUI theme
+Subject: [PATCH 1/2] feat(theme): add the Sigil Neon TUI theme
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -1761,6 +1761,441 @@ index da2fc19..6cefcbd 100644
      let logo_lines: Vec<Line> = lines
          .iter()
          .enumerate()
+-- 
+2.54.0
+
+
+From 16db618ac19d2bc7a51a3d41205a55b05e880a76 Mon Sep 17 00:00:00 2001
+From: gl11tchy <gl11tchy@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 01:57:34 -0400
+Subject: [PATCH 2/2] feat(sigil): make Sigil Neon a layout, not only a palette
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The theme now reshapes the TUI. Every other theme is untouched.
+
+- appearance: a Sigil profile — no filled prompt card, wider outer
+  margins, a dot bullet, shell-style command headers
+- prompt widget: PromptStyle::rule_chrome — the composer is a hairline
+  above the text and its info line below, with the accent bar as the
+  left edge, instead of a box
+- scrollback: the speaker is carried in the margin — a violet bar for
+  the human's turn, mint for the agent's
+- welcome: a wordmark and one rule in place of the braille art and the
+  bordered hero box
+- context: the meter is the resting state, not a hover reveal
+---
+ .../xai-grok-pager-minimal/src/live.rs        |  1 +
+ .../xai-grok-pager-minimal/src/overlay.rs     |  1 +
+ .../xai-grok-pager-minimal/src/plan.rs        |  1 +
+ .../src/appearance/config.rs                  | 35 +++++++++++++
+ .../src/appearance/watcher.rs                 |  2 +
+ .../src/app/agent_view/render.rs              | 11 +++-
+ .../src/scrollback/blocks/agent.rs            |  6 +++
+ .../src/scrollback/blocks/user.rs             |  6 +++
+ .../xai-grok-pager/src/views/context_bar.rs   |  4 ++
+ .../src/views/prompt_widget/mod.rs            | 26 ++++++++--
+ .../src/views/welcome/hero_box.rs             | 13 +++--
+ .../xai-grok-pager/src/views/welcome/logo.rs  | 50 +++++++++++++++++++
+ .../src/views/welcome/prompt.rs               |  5 ++
+ 13 files changed, 152 insertions(+), 9 deletions(-)
+
+diff --git a/crates/codegen/xai-grok-pager-minimal/src/live.rs b/crates/codegen/xai-grok-pager-minimal/src/live.rs
+index c7c5fc1..37fe600 100644
+--- a/crates/codegen/xai-grok-pager-minimal/src/live.rs
++++ b/crates/codegen/xai-grok-pager-minimal/src/live.rs
+@@ -90,6 +90,7 @@ pub(super) fn prompt_style(
+         placeholder_override: input_mode.placeholder_override(multiline),
+         show_accent_line: false,
+         show_borders: false,
++        rule_chrome: false,
+         title: None,
+         image_preview: true,
+     }
+diff --git a/crates/codegen/xai-grok-pager-minimal/src/overlay.rs b/crates/codegen/xai-grok-pager-minimal/src/overlay.rs
+index 79ebdd3..57f3f34 100644
+--- a/crates/codegen/xai-grok-pager-minimal/src/overlay.rs
++++ b/crates/codegen/xai-grok-pager-minimal/src/overlay.rs
+@@ -912,6 +912,7 @@ fn inline_input_style(theme: &Theme) -> PromptStyle {
+         placeholder_override: None,
+         show_accent_line: false,
+         show_borders: false,
++        rule_chrome: false,
+         title: None,
+         image_preview: true,
+     }
+diff --git a/crates/codegen/xai-grok-pager-minimal/src/plan.rs b/crates/codegen/xai-grok-pager-minimal/src/plan.rs
+index 94b58e8..7b6572e 100644
+--- a/crates/codegen/xai-grok-pager-minimal/src/plan.rs
++++ b/crates/codegen/xai-grok-pager-minimal/src/plan.rs
+@@ -249,6 +249,7 @@ fn input_style(theme: &Theme) -> PromptStyle {
+         placeholder_override: None,
+         show_accent_line: false,
+         show_borders: false,
++        rule_chrome: false,
+         title: None,
+         image_preview: true,
+     }
+diff --git a/crates/codegen/xai-grok-pager-render/src/appearance/config.rs b/crates/codegen/xai-grok-pager-render/src/appearance/config.rs
+index de579f5..689bad2 100644
+--- a/crates/codegen/xai-grok-pager-render/src/appearance/config.rs
++++ b/crates/codegen/xai-grok-pager-render/src/appearance/config.rs
+@@ -2464,3 +2464,38 @@ gutter_bg = true
+         assert!(!template.contains("collapsed_expand_hint"));
+     }
+ }
++
++// -- Sigil Neon layout profile -----------------------------------------------
++
++/// Reshape the appearance config for the Sigil Neon theme.
++///
++/// The theme is not only a palette. Sigil Neon is a layout: no filled cards in
++/// the transcript, wider outer margins, the smallest bullet in the set, and a
++/// shell-style command header — so the transcript reads as a document with
++/// marks in the margin instead of a stack of panels. Every other theme is
++/// returned untouched.
++pub fn apply_sigil_profile(mut config: AppearanceConfig) -> AppearanceConfig {
++    if crate::theme::Theme::current_kind() != crate::theme::ThemeKind::SigilNeon {
++        return config;
++    }
++    // The user's turn is marked by a rule and a label, not by a filled card.
++    config.scrollback.blocks.prompt.bg = BlockBackground::None;
++    config.scrollback.blocks.prompt.show_prefix = false;
++    config.scrollback.blocks.prompt.vpad = true;
++    // Margins wide enough that the marks in the left column read as a margin.
++    config.scrollback.layout.outer_hpad_left = 4;
++    config.scrollback.layout.outer_hpad_right = 3;
++    config.scrollback.layout.block_pad_left = 1;
++    config.scrollback.layout.block_pad_right = 1;
++    // One dot per tool call. The diamond was the loudest glyph on the screen.
++    config.scrollback.blocks.tool.bullet = ToolBullet::Dot;
++    config.scrollback.blocks.tool.dim_details = true;
++    // A shell command should look like one.
++    config.scrollback.blocks.execute.header_style = ExecuteHeaderStyle::Shell;
++    // Reasoning is an aside: no header emphasis, and it stays out of the way.
++    config.scrollback.blocks.thinking.header_bright = false;
++    config.scrollback.blocks.list_dir.terminal_bg = false;
++    config.scrollback.display.collapsed_accent_char = "\u{2502}".to_string();
++    config.scrollback.display.expandable_indicator_char = "\u{203A}".to_string();
++    config
++}
+diff --git a/crates/codegen/xai-grok-pager-render/src/appearance/watcher.rs b/crates/codegen/xai-grok-pager-render/src/appearance/watcher.rs
+index 91dfafb..4714ff1 100644
+--- a/crates/codegen/xai-grok-pager-render/src/appearance/watcher.rs
++++ b/crates/codegen/xai-grok-pager-render/src/appearance/watcher.rs
+@@ -52,6 +52,8 @@ impl ConfigWatcher {
+                     .map(AppearanceConfig::from)
+             })
+             .unwrap_or_default();
++        // The theme owns the layout too; see `apply_sigil_profile`.
++        let config = super::config::apply_sigil_profile(config);
+         let (tx, rx) = watch::channel(config);
+         Ok(Self {
+             rx,
+diff --git a/crates/codegen/xai-grok-pager/src/app/agent_view/render.rs b/crates/codegen/xai-grok-pager/src/app/agent_view/render.rs
+index 585c643..22febad 100644
+--- a/crates/codegen/xai-grok-pager/src/app/agent_view/render.rs
++++ b/crates/codegen/xai-grok-pager/src/app/agent_view/render.rs
+@@ -1022,6 +1022,9 @@ impl AgentView {
+         } else {
+             self.active_pane == AgentPane::Prompt && !overlay_focused
+         };
++        // Sigil Neon composes with rules, not a box; see `PromptStyle::rule_chrome`.
++        let sigil_layout =
++            crate::theme::Theme::current_kind() == crate::theme::ThemeKind::SigilNeon;
+         let prompt_style = PromptStyle {
+             focused: prompt_focused,
+             show_prefix: appearance.prompt.show_prefix,
+@@ -1084,8 +1087,9 @@ impl AgentView {
+             } else {
+                 None
+             },
+-            show_accent_line: false,
+-            show_borders: true,
++            show_accent_line: sigil_layout,
++            show_borders: !sigil_layout,
++            rule_chrome: sigil_layout,
+             title: self.prompt_caption(),
+             image_preview: true,
+         };
+@@ -1220,6 +1224,7 @@ impl AgentView {
+             compact: false,
+             show_accent_line: false,
+             show_borders: false,
++            rule_chrome: false,
+             title: None,
+             image_preview: true,
+         };
+@@ -1256,6 +1261,7 @@ impl AgentView {
+                 compact: false,
+                 show_accent_line: false,
+                 show_borders: false,
++            rule_chrome: false,
+                 title: None,
+                 image_preview: true,
+             };
+@@ -2621,6 +2627,7 @@ impl AgentView {
+                         compact: false,
+                         show_accent_line: false,
+                         show_borders: false,
++            rule_chrome: false,
+                         title: None,
+                         image_preview: true,
+                     };
+diff --git a/crates/codegen/xai-grok-pager/src/scrollback/blocks/agent.rs b/crates/codegen/xai-grok-pager/src/scrollback/blocks/agent.rs
+index 20d003a..25f43af 100644
+--- a/crates/codegen/xai-grok-pager/src/scrollback/blocks/agent.rs
++++ b/crates/codegen/xai-grok-pager/src/scrollback/blocks/agent.rs
+@@ -205,7 +205,13 @@ impl BlockContent for AgentMessageBlock {
+         self.mermaid.len() as u16
+     }
+ 
++    /// See the user block: Sigil Neon carries the speaker in the margin.
+     fn accent(&self, _ctx: &BlockContext) -> Option<AccentStyle> {
++        if crate::theme::Theme::current_kind() == crate::theme::ThemeKind::SigilNeon {
++            return Some(AccentStyle::static_color(
++                crate::theme::Theme::current().accent_assistant,
++            ));
++        }
+         None
+     }
+ 
+diff --git a/crates/codegen/xai-grok-pager/src/scrollback/blocks/user.rs b/crates/codegen/xai-grok-pager/src/scrollback/blocks/user.rs
+index dccc7a8..3404d2c 100644
+--- a/crates/codegen/xai-grok-pager/src/scrollback/blocks/user.rs
++++ b/crates/codegen/xai-grok-pager/src/scrollback/blocks/user.rs
+@@ -477,7 +477,13 @@ impl BlockContent for UserPromptBlock {
+         BlockOutput { lines }
+     }
+ 
++    /// Sigil Neon marks who is speaking in the margin instead of in a card:
++    /// a violet bar for the human's turn, mint for the agent's. Every other
++    /// theme keeps the unmarked transcript.
+     fn accent(&self, _ctx: &BlockContext) -> Option<AccentStyle> {
++        if crate::theme::Theme::current_kind() == crate::theme::ThemeKind::SigilNeon {
++            return Some(AccentStyle::static_color(Theme::current().accent_user));
++        }
+         None
+     }
+ 
+diff --git a/crates/codegen/xai-grok-pager/src/views/context_bar.rs b/crates/codegen/xai-grok-pager/src/views/context_bar.rs
+index 2d354e3..2a3ebeb 100644
+--- a/crates/codegen/xai-grok-pager/src/views/context_bar.rs
++++ b/crates/codegen/xai-grok-pager/src/views/context_bar.rs
+@@ -206,6 +206,10 @@ pub fn context_bar_line_for_session(
+     let used = used_tokens?;
+     let total = total_tokens.filter(|&t| t > 0)?;
+     let pct = xai_token_estimation::usage_percentage(used, total);
++    // Sigil Neon reads the context as a meter, not as arithmetic: the bar is
++    // the resting state there, not something the mouse has to uncover.
++    let hovered =
++        hovered || crate::theme::Theme::current_kind() == crate::theme::ThemeKind::SigilNeon;
+ 
+     // Default form drives the line width: `used / total`, right-padded to the
+     // minimum hover width so the two states always render at the same width.
+diff --git a/crates/codegen/xai-grok-pager/src/views/prompt_widget/mod.rs b/crates/codegen/xai-grok-pager/src/views/prompt_widget/mod.rs
+index 5d60732..2a9608e 100644
+--- a/crates/codegen/xai-grok-pager/src/views/prompt_widget/mod.rs
++++ b/crates/codegen/xai-grok-pager/src/views/prompt_widget/mod.rs
+@@ -185,6 +185,11 @@ pub struct PromptStyle {
+     /// `true` (the full-TUI boxed prompt); minimal mode sets it `false` for a
+     /// cleaner, border-less input that still keeps the chrome padding.
+     pub show_borders: bool,
++    /// Draw the composer as two rules instead of a box: one hairline above the
++    /// text, the info line below it, and no sides. Sigil Neon uses this — the
++    /// window already draws a frame, so a second rectangle inside it is one
++    /// border too many. The accent bar carries the left edge.
++    pub rule_chrome: bool,
+     /// Session title inlined in the top border (right-aligned, 2-cell inset),
+     /// styled like the bottom info line's model name.
+     /// None (default) keeps the plain border. Set only by the agent view.
+@@ -240,6 +245,7 @@ impl Default for PromptStyle {
+             compact: false,
+             show_accent_line: false,
+             show_borders: true,
++            rule_chrome: false,
+             title: None,
+             image_preview: true,
+         }
+@@ -275,6 +281,7 @@ impl PromptStyle {
+             compact: false,
+             show_accent_line: false,
+             show_borders: false,
++            rule_chrome: false,
+             title: None,
+             image_preview: true,
+         }
+@@ -3114,14 +3121,16 @@ impl PromptWidget {
+         let text_area_rect = chunks[1];
+ 
+         // Top divider: ╭──────────╮
+-        if vpad_top > 0 && style.chrome && style.show_borders {
++        if vpad_top > 0 && style.chrome && (style.show_borders || style.rule_chrome) {
+             let div_style = Style::default().fg(border_color).bg(bg);
+             let div_y = chunks[0].y;
+             let left_x = area.x;
+             let right_x = area.x + area.width.saturating_sub(1);
+             for x in area.x..area.x + area.width {
+                 if let Some(cell) = buf.cell_mut((x, div_y)) {
+-                    let ch = if x == left_x {
++                    let ch = if style.rule_chrome {
++                        '\u{2500}' // ─ — one rule, no corners
++                    } else if x == left_x {
+                         '\u{256d}' // ╭
+                     } else if x == right_x {
+                         '\u{256e}' // ╮
+@@ -3385,14 +3394,23 @@ impl PromptWidget {
+         // Guard on actual allocated height, not requested `info_block`: during
+         // resize the layout may squeeze the info block to 0 rows, leaving
+         // chunks[2].y past the buffer boundary.
+-        if info_block > 0 && style.chrome && style.show_borders && chunks[2].height > 0 {
++        if info_block > 0
++            && style.chrome
++            && (style.show_borders || style.rule_chrome)
++            && chunks[2].height > 0
++        {
+             let div_y = chunks[2].y;
+             let div_style = Style::default().fg(border_color).bg(bg);
+             let left_x = area.x;
+             let right_x = area.x + area.width.saturating_sub(1);
+             for x in area.x..area.x + area.width {
+                 if let Some(cell) = buf.cell_mut((x, div_y)) {
+-                    let ch = if x == left_x {
++                    // The rule composer leaves this row to the info line alone:
++                    // the model and the mode are the only things worth a row
++                    // here, and a second rule under them adds nothing.
++                    let ch = if style.rule_chrome {
++                        ' '
++                    } else if x == left_x {
+                         '\u{2570}' // ╰
+                     } else if x == right_x {
+                         '\u{256f}' // ╯
+diff --git a/crates/codegen/xai-grok-pager/src/views/welcome/hero_box.rs b/crates/codegen/xai-grok-pager/src/views/welcome/hero_box.rs
+index 31afeaa..102b560 100644
+--- a/crates/codegen/xai-grok-pager/src/views/welcome/hero_box.rs
++++ b/crates/codegen/xai-grok-pager/src/views/welcome/hero_box.rs
+@@ -315,10 +315,17 @@ pub(super) fn render_hero_box(
+     )>,
+ ) -> HeroBoxRects {
+     // Dim the box border toward the background for a softer, dimmer gray.
+-    let border_color = crate::render::color::blend_color(theme.bg_base, theme.gray_dim, 0.45)
+-        .unwrap_or(theme.gray_dim);
++    let sigil = crate::theme::Theme::current_kind() == crate::theme::ThemeKind::SigilNeon;
++    // Sigil Neon opens on a rule, not a box: one line above the mark is enough
++    // to hold the menu together, and the screen stays quiet.
++    let border_color = if sigil {
++        theme.prompt_border_active
++    } else {
++        crate::render::color::blend_color(theme.bg_base, theme.gray_dim, 0.45)
++            .unwrap_or(theme.gray_dim)
++    };
+     let border_block = Block::new()
+-        .borders(Borders::ALL)
++        .borders(if sigil { Borders::TOP } else { Borders::ALL })
+         .border_type(BorderType::Rounded)
+         .border_style(Style::default().fg(border_color));
+     border_block.render(layout.hero_box, buf);
+diff --git a/crates/codegen/xai-grok-pager/src/views/welcome/logo.rs b/crates/codegen/xai-grok-pager/src/views/welcome/logo.rs
+index 6cefcbd..2d5876a 100644
+--- a/crates/codegen/xai-grok-pager/src/views/welcome/logo.rs
++++ b/crates/codegen/xai-grok-pager/src/views/welcome/logo.rs
+@@ -179,6 +179,9 @@ pub fn full_logo_line_count() -> u16 {
+ }
+ 
+ fn full_logo_line_count_for(hidden: bool) -> u16 {
++    if sigil_wordmark() {
++        return WORDMARK_ROWS;
++    }
+     if hidden { 0 } else { count_lines(LOGO) }
+ }
+ 
+@@ -187,15 +190,62 @@ pub fn full_logo_visual_width() -> u16 {
+ }
+ 
+ fn full_logo_visual_width_for(hidden: bool) -> u16 {
++    if sigil_wordmark() {
++        return WORDMARK_WIDTH;
++    }
+     if hidden { 0 } else { visual_width(LOGO) }
+ }
+ 
+ pub fn render_full_logo(area: Rect, buf: &mut Buffer, theme: &Theme) {
++    if sigil_wordmark() {
++        render_wordmark(area, buf, theme);
++        return;
++    }
+     if !logo_hidden() {
+         render_into(area, buf, theme, LOGO);
+     }
+ }
+ 
++/// Sigil Neon replaces the braille art with a wordmark.
++///
++/// The art is a picture of a brand. A wordmark, one rule, and the product name
++/// under it say the same thing in three rows and leave the screen quiet.
++fn sigil_wordmark() -> bool {
++    crate::theme::Theme::current_kind() == crate::theme::ThemeKind::SigilNeon
++}
++
++/// Columns the wordmark occupies: `S I G I L` is 9 cells.
++const WORDMARK: &str = "S I G I L";
++const WORDMARK_RULE: &str = "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}";
++const WORDMARK_SUB: &str = "grok build";
++const WORDMARK_WIDTH: u16 = 10;
++const WORDMARK_ROWS: u16 = 3;
++
++fn render_wordmark(area: Rect, buf: &mut Buffer, theme: &Theme) {
++    if area.height == 0 || area.width == 0 {
++        return;
++    }
++    // The shine still sweeps, so the mark breathes like the art it replaces.
++    let shine = shine_opacity(0.5, anim_phase_secs());
++    let mark = blend_color(theme.gray_bright, theme.logo_shine, shine.max(0.35))
++        .unwrap_or(theme.logo_shine);
++    let rows = [
++        (WORDMARK, Style::default().fg(mark).add_modifier(ratatui::style::Modifier::BOLD)),
++        (WORDMARK_RULE, Style::default().fg(theme.logo_shine)),
++        (WORDMARK_SUB, Style::default().fg(theme.gray)),
++    ];
++    let top = area.y + area.height.saturating_sub(WORDMARK_ROWS) / 2;
++    for (i, (text, style)) in rows.iter().enumerate() {
++        let y = top + i as u16;
++        if y >= area.y + area.height {
++            break;
++        }
++        let w = unicode_width::UnicodeWidthStr::width(*text) as u16;
++        let x = area.x + area.width.saturating_sub(w) / 2;
++        buf.set_string(x, y, *text, *style);
++    }
++}
++
+ /// Line count of the small logo used in minimal's committed welcome card
+ /// (0 on a legacy Windows console, where the braille art is suppressed).
+ pub fn compact_logo_line_count() -> u16 {
+diff --git a/crates/codegen/xai-grok-pager/src/views/welcome/prompt.rs b/crates/codegen/xai-grok-pager/src/views/welcome/prompt.rs
+index 13d0dfd..e5f8270 100644
+--- a/crates/codegen/xai-grok-pager/src/views/welcome/prompt.rs
++++ b/crates/codegen/xai-grok-pager/src/views/welcome/prompt.rs
+@@ -28,6 +28,8 @@ pub fn render_prompt(
+     Option<crate::terminal::overlay::PostFlush>,
+ ) {
+     let focused = focus == WelcomePromptFocus::Focused;
++    // Same composer as the session view; see `PromptStyle::rule_chrome`.
++    let sigil = crate::theme::Theme::current_kind() == crate::theme::ThemeKind::SigilNeon;
+     let style = PromptStyle {
+         focused,
+         show_prefix: true,
+@@ -37,6 +39,9 @@ pub fn render_prompt(
+         chrome_pad_left: pad_left,
+         chrome_pad_right: pad_right,
+         placeholder_override: Some("Type a message..."),
++        show_accent_line: sigil,
++        show_borders: !sigil,
++        rule_chrome: sigil,
+         ..PromptStyle::default()
+     };
+ 
 -- 
 2.54.0
 

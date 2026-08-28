@@ -37,10 +37,20 @@ public enum GrokPaths {
     /// `GROK_THEME`. Without it the app falls back to the installer's `bin/grok`,
     /// which runs exactly as before and ignores the theme variable.
     public static var defaultExecutable: URL {
-        let bin = home.appendingPathComponent("bin")
-        let themed = bin.appendingPathComponent("grok-sigil")
-        if FileManager.default.isExecutableFile(atPath: themed.path) { return themed }
-        return bin.appendingPathComponent("grok")
+        if FileManager.default.isExecutableFile(atPath: themedExecutable.path) {
+            return themedExecutable
+        }
+        return installerExecutable
+    }
+
+    /// The app's own build of the CLI, which carries the `sigil-neon` theme.
+    public static var themedExecutable: URL {
+        home.appendingPathComponent("bin/grok-sigil")
+    }
+
+    /// The binary the Grok installer puts on disk.
+    public static var installerExecutable: URL {
+        home.appendingPathComponent("bin/grok")
     }
 
     /// Encodes an absolute path the way the CLI names its per-directory session folder.

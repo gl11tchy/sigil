@@ -117,8 +117,17 @@ final class AppSettings {
         let storedSize = defaults.double(forKey: Key.fontSize)
         fontSize = storedSize > 0 ? CGFloat(storedSize) : 13
         themeName = defaults.string(forKey: Key.themeName) ?? TerminalTheme.sigilNeon.name
-        executablePath =
-            defaults.string(forKey: Key.executablePath) ?? GrokPaths.defaultExecutable.path
+        // A stored path is the user's choice and stays — except when it is the
+        // installer's own binary and the themed build is now there. That path
+        // was never chosen; it is what the default resolved to before the
+        // themed build existed, and keeping it would leave the window themed
+        // and the program inside it not.
+        let stored = defaults.string(forKey: Key.executablePath)
+        if let stored, stored != GrokPaths.installerExecutable.path {
+            executablePath = stored
+        } else {
+            executablePath = GrokPaths.defaultExecutable.path
+        }
         showEmptySessions = defaults.bool(forKey: Key.showEmptySessions)
         showWorktreeSessions = defaults.bool(forKey: Key.showWorktreeSessions)
         showSubagentSessions = defaults.bool(forKey: Key.showSubagentSessions)
