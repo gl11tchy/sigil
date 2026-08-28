@@ -105,6 +105,19 @@ struct TerminalLaunchSpecTests {
         #expect(spec.arguments() == ["--cwd", cwd.path, "--continue"])
     }
 
+    /// The window and the CLI inside it have to agree on one theme.
+    @Test func themeNameReachesTheCLIAsAnEnvironmentVariable() {
+        let themed = GrokLaunchSpec(
+            workingDirectory: cwd,
+            mode: .continueLatest,
+            themeName: TerminalTheme.sigilNeon.grokThemeName
+        )
+        #expect(themed.environment()["GROK_THEME"] == "sigil-neon")
+
+        let plain = GrokLaunchSpec(workingDirectory: cwd, mode: .continueLatest)
+        #expect(plain.environment()["GROK_THEME"] == nil)
+    }
+
     @Test func inheritedBridgeKeysAreDroppedWhenSpecOmitsThem() {
         let tabKey = BridgePaths.tabEnvironmentKey
         let socketKey = BridgePaths.socketEnvironmentKey

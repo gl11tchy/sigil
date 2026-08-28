@@ -1,0 +1,1766 @@
+From f217abf2c80c846ddbec621c782aed119f2e82c4 Mon Sep 17 00:00:00 2001
+From: gl11tchy <gl11tchy@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 01:30:00 -0400
+Subject: [PATCH] feat(theme): add the Sigil Neon TUI theme
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A neutral near-black ground with two neon hues — mint for the agent's own
+voice and success, cyan for anything in motion — and nothing in between.
+The greys stay neutral so saturation only ever lands on the marks that
+carry state.
+
+- theme/sigil.rs: the palette, registered as ThemeKind::SigilNeon
+- assets/sigil-neon.tmTheme: the matching syntax theme
+- theme/cache.rs: GROK_THEME picks the theme, so a host app can theme the
+  window it draws into without rewriting the user's config
+- Theme::logo_shine: the welcome logo's shine sweeps toward a themed
+  colour instead of primary text
+---
+ .../assets/sigil-neon.tmTheme                 | 1312 +++++++++++++++++
+ .../xai-grok-pager-render/src/syntax.rs       |    3 +
+ .../xai-grok-pager-render/src/theme/cache.rs  |    9 +
+ .../src/theme/grokday.rs                      |    1 +
+ .../src/theme/groknight.rs                    |    1 +
+ .../xai-grok-pager-render/src/theme/mod.rs    |   12 +
+ .../xai-grok-pager-render/src/theme/oscura.rs |    1 +
+ .../src/theme/rosepine.rs                     |    1 +
+ .../xai-grok-pager-render/src/theme/sigil.rs  |  143 ++
+ .../src/theme/terminal_default.rs             |    1 +
+ .../src/theme/tokyonight.rs                   |    5 +
+ .../xai-grok-pager/src/settings/defs.rs       |   10 +
+ .../xai-grok-pager/src/views/welcome/logo.rs  |    2 +-
+ 13 files changed, 1500 insertions(+), 1 deletion(-)
+ create mode 100644 crates/codegen/xai-grok-pager-render/assets/sigil-neon.tmTheme
+ create mode 100644 crates/codegen/xai-grok-pager-render/src/theme/sigil.rs
+
+diff --git a/crates/codegen/xai-grok-pager-render/assets/sigil-neon.tmTheme b/crates/codegen/xai-grok-pager-render/assets/sigil-neon.tmTheme
+new file mode 100644
+index 0000000..37fc8ba
+--- /dev/null
++++ b/crates/codegen/xai-grok-pager-render/assets/sigil-neon.tmTheme
+@@ -0,0 +1,1312 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++	<key>name</key>
++	<string>Sigil Neon</string>
++	<key>settings</key>
++	<array>
++		<dict>
++			<key>settings</key>
++			<dict>
++				<key>background</key>
++				<string>#08090b</string>
++				<key>caret</key>
++				<string>#4ef0c4</string>
++				<key>foreground</key>
++				<string>#b8bfcb</string>
++				<key>invisibles</key>
++				<string>#202224</string>
++				<key>lineHighlight</key>
++				<string>#14161a</string>
++				<key>selection</key>
++				<string>#35373b4d</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Italics - Comments, Storage, Keyword Flow, Vue attributes, Decorators</string>
++			<key>scope</key>
++			<string>comment, meta.var.expr storage.type, keyword.control.flow, keyword.control.return, meta.directive.vue punctuation.separator.key-value.html, meta.directive.vue entity.other.attribute-name.html, tag.decorator.js entity.name.tag.js, tag.decorator.js punctuation.definition.tag.js, storage.modifier, string.quoted.docstring.multi, string.quoted.docstring.multi.python punctuation.definition.string.begin, string.quoted.docstring.multi.python punctuation.definition.string.end, string.quoted.docstring.multi.python constant.character.escape</string>
++			<key>settings</key>
++			<dict>
++				<key>fontStyle</key>
++				<string>italic</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Fix YAML block scalar, Python Logical</string>
++			<key>scope</key>
++			<string>keyword.control.flow.block-scalar.literal, keyword.control.flow.python</string>
++			<key>settings</key>
++			<dict>
++				<key>fontStyle</key>
++				<string></string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Comment</string>
++			<key>scope</key>
++			<string>comment, comment.block.documentation, punctuation.definition.comment, comment.block.documentation punctuation, string.quoted.docstring.multi, string.quoted.docstring.multi.python punctuation.definition.string.begin, string.quoted.docstring.multi.python punctuation.definition.string.end, string.quoted.docstring.multi.python constant.character.escape</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#8563e6</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Comment Doc</string>
++			<key>scope</key>
++			<string>keyword.operator.assignment.jsdoc, comment.block.documentation variable, comment.block.documentation storage, comment.block.documentation keyword, comment.block.documentation support, comment.block.documentation markup, comment.block.documentation markup.inline.raw.string.markdown, meta.other.type.phpdoc.php keyword.other.type.php, meta.other.type.phpdoc.php support.other.namespace.php, meta.other.type.phpdoc.php punctuation.separator.inheritance.php, meta.other.type.phpdoc.php support.class, keyword.other.phpdoc.php, log.date</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#8a6ae7</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Comment Doc Emphasized</string>
++			<key>scope</key>
++			<string>meta.other.type.phpdoc.php support.class, comment.block.documentation storage.type, comment.block.documentation punctuation.definition.block.tag, comment.block.documentation entity.name.type.instance</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#9072e8</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Number, Boolean, Undefined, Null</string>
++			<key>scope</key>
++			<string>variable.other.constant, punctuation.definition.constant, constant.language, constant.numeric, support.constant, constant.other.caps</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#eabf7e</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>String, Symbols</string>
++			<key>scope</key>
++			<string>string, constant.other.symbol, constant.other.key, meta.attribute-selector, string constant.character</string>
++			<key>settings</key>
++			<dict>
++				<key>fontStyle</key>
++				<string></string>
++				<key>foreground</key>
++				<string>#e8b871</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Colors</string>
++			<key>scope</key>
++			<string>constant.other.color, constant.other.color.rgb-value.hex punctuation.definition.constant</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#a991ed</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Invalid</string>
++			<key>scope</key>
++			<string>invalid, invalid.illegal</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e872a0</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Invalid deprecated</string>
++			<key>scope</key>
++			<string>invalid.deprecated</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#b29def</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Storage Type</string>
++			<key>scope</key>
++			<string>storage.type</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#b29def</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Storage - modifier, var, const, let</string>
++			<key>scope</key>
++			<string>meta.var.expr storage.type, storage.modifier</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#a48bec</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Interpolation, PHP tags, Smarty tags</string>
++			<key>scope</key>
++			<string>punctuation.definition.template-expression, punctuation.section.embedded, meta.embedded.line.tag.smarty, support.constant.handlebars, punctuation.section.tag.twig</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#7cd0ea</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Blade, Twig, Smarty Handlebars keywords</string>
++			<key>scope</key>
++			<string>keyword.control.smarty, keyword.control.twig, support.constant.handlebars keyword.control, keyword.operator.comparison.twig, keyword.blade, entity.name.function.blade, meta.tag.blade keyword.other.type.php</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#50c1e2</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Spread</string>
++			<key>scope</key>
++			<string>keyword.operator.spread, keyword.operator.rest</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e97aa6</string>
++				<key>fontStyle</key>
++				<string>bold</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Operator, Misc</string>
++			<key>scope</key>
++			<string>keyword.operator, keyword.control.as, keyword.other, keyword.operator.bitwise.shift, punctuation, expression.embbeded.vue punctuation.definition.tag, text.html.twig meta.tag.inline.any.html, meta.tag.template.value.twig meta.function.arguments.twig, meta.directive.vue punctuation.separator.key-value.html, punctuation.definition.constant.markdown, punctuation.definition.string, punctuation.support.type.property-name, text.html.vue-html meta.tag, meta.attribute.directive, punctuation.definition.keyword, punctuation.terminator.rule, punctuation.definition.entity, punctuation.separator.inheritance.php, keyword.other.template, keyword.other.substitution, entity.name.operator, meta.property-list punctuation.separator.key-value, meta.at-rule.mixin punctuation.separator.key-value, meta.at-rule.function variable.parameter.url, meta.embedded.inline.phpx punctuation.definition.tag.begin.html, meta.embedded.inline.phpx punctuation.definition.tag.end.html</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#7fd2ea</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Import, Export, From, Default</string>
++			<key>scope</key>
++			<string>keyword.control.module.js, keyword.control.import, keyword.control.export, keyword.control.from, keyword.control.default, meta.import keyword.other</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#7cd0ea</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Keyword</string>
++			<key>scope</key>
++			<string>keyword, keyword.control, keyword.other.important</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#b29def</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Keyword SQL</string>
++			<key>scope</key>
++			<string>keyword.other.DML</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#7cd0ea</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Keyword Operator Logical, Arrow, Ternary, Comparison</string>
++			<key>scope</key>
++			<string>keyword.operator.logical, storage.type.function, keyword.operator.bitwise, keyword.operator.ternary, keyword.operator.comparison, keyword.operator.relational, keyword.operator.or.regexp</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#b29def</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Tag</string>
++			<key>scope</key>
++			<string>entity.name.tag</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e97aa6</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Tag - Custom / Unrecognized</string>
++			<key>scope</key>
++			<string>entity.name.tag support.class.component, meta.tag.custom entity.name.tag, meta.tag.other.unrecognized.html.derivative entity.name.tag, meta.tag</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e76a9b</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Tag Punctuation</string>
++			<key>scope</key>
++			<string>punctuation.definition.tag, text.html.php meta.embedded.block.html meta.tag.metadata.script.end.html punctuation.definition.tag.begin.html text.html.basic</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e4568e</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Globals, PHP Constants, etc</string>
++			<key>scope</key>
++			<string>constant.other.php, variable.other.global.safer, variable.other.global.safer punctuation.definition.variable, variable.other.global, variable.other.global punctuation.definition.variable, constant.other</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e9bb75</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Variables</string>
++			<key>scope</key>
++			<string>variable, support.variable, string constant.other.placeholder, variable.parameter.handlebars, variable.other.object, meta.fstring, meta.function-call meta.function-call.arguments, meta.embedded.inline.phpx constant.other.php</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#c5c7cb</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Variable Array Key</string>
++			<key>scope</key>
++			<string>meta.array.literal variable</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#7cd0ea</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Object Key</string>
++			<key>scope</key>
++			<string>meta.object-literal.key, entity.name.type.hcl, string.alias.graphql, string.unquoted.graphql, string.unquoted.alias.graphql, meta.group.braces.curly constant.other.object.key.js string.unquoted.label.js, meta.field.declaration.ts variable.object.property, meta.block entity.name.label</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#67ddbd</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Object Property</string>
++			<key>scope</key>
++			<string>variable.other.property, support.variable.property, support.variable.property.dom, meta.function-call variable.other.object.property</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#7cd0ea</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Object Property</string>
++			<key>scope</key>
++			<string>variable.other.object.property</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#c5c7cb</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Object Literal Member lvl 3 (Vue Prop Validation)</string>
++			<key>scope</key>
++			<string>meta.objectliteral meta.object.member meta.objectliteral meta.object.member meta.objectliteral meta.object.member meta.object-literal.key</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#53c2e3</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>C-related Block Level Variables</string>
++			<key>scope</key>
++			<string>source.cpp meta.block variable.other</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e97aa6</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Other Variable</string>
++			<key>scope</key>
++			<string>support.other.variable</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e97aa6</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Methods</string>
++			<key>scope</key>
++			<string>meta.class-method.js entity.name.function.js, entity.name.method.js, variable.function.constructor, keyword.other.special-method, storage.type.cs</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#78cfe9</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Function Definition</string>
++			<key>scope</key>
++			<string>entity.name.function, variable.other.enummember, meta.function-call, meta.function-call entity.name.function, variable.function, meta.definition.method entity.name.function, meta.object-literal entity.name.function</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#78cfe9</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Function Argument</string>
++			<key>scope</key>
++			<string>variable.parameter.function.language.special, variable.parameter, meta.function.parameters punctuation.definition.variable, meta.function.parameter variable</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e9bb75</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Constant, Tag Attribute</string>
++			<key>scope</key>
++			<string>keyword.other.type.php, storage.type.php, constant.character, constant.escape, keyword.other.unit</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#b29def</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Variable Definition</string>
++			<key>scope</key>
++			<string>meta.definition.variable variable.other.constant, meta.definition.variable variable.other.readwrite, variable.declaration.hcl variable.other.readwrite.hcl, meta.mapping.key.hcl variable.other.readwrite.hcl, variable.other.declaration</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#b29def</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Inherited Class</string>
++			<key>scope</key>
++			<string>entity.other.inherited-class</string>
++			<key>settings</key>
++			<dict>
++				<key>fontStyle</key>
++				<string></string>
++				<key>foreground</key>
++				<string>#b29def</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Class, Support, DOM, etc</string>
++			<key>scope</key>
++			<string>support.class, support.type, variable.other.readwrite.alias, support.orther.namespace.use.php, meta.use.php, support.other.namespace.php, support.type.sys-types, support.variable.dom, support.constant.math, support.type.object.module, support.constant.json, entity.name.namespace, meta.import.qualifier, variable.other.constant.object</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#50c1e2</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Class Name</string>
++			<key>scope</key>
++			<string>entity.name</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#c5c7cb</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Support Function</string>
++			<key>scope</key>
++			<string>support.function</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#50c1e2</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>CSS Class and Support</string>
++			<key>scope</key>
++			<string>source.css support.type.property-name, source.sass support.type.property-name, source.scss support.type.property-name, source.less support.type.property-name, source.stylus support.type.property-name, source.postcss support.type.property-name, support.type.property-name.css, support.type.vendored.property-name, support.type.map.key</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#78cfe9</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>CSS Font</string>
++			<key>scope</key>
++			<string>support.constant.font-name, meta.definition.variable</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e8b871</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>CSS Class</string>
++			<key>scope</key>
++			<string>entity.other.attribute-name.class, meta.at-rule.mixin.scss entity.name.function.scss</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e8b871</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>CSS ID</string>
++			<key>scope</key>
++			<string>entity.other.attribute-name.id</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#ea7da8</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>CSS Tag</string>
++			<key>scope</key>
++			<string>entity.name.tag.css</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#50c1e2</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>CSS Tag Reference, Pseudo &amp; Class Punctuation</string>
++			<key>scope</key>
++			<string>entity.other.attribute-name.pseudo-class punctuation.definition.entity, entity.other.attribute-name.pseudo-element punctuation.definition.entity, entity.other.attribute-name.class punctuation.definition.entity, entity.name.tag.reference</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e9bb75</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>CSS Punctuation</string>
++			<key>scope</key>
++			<string>meta.property-list</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#81d2eb</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>CSS at-rule fix</string>
++			<key>scope</key>
++			<string>meta.property-list meta.at-rule.if, meta.at-rule.return variable.parameter.url, meta.property-list meta.at-rule.else</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#eabf7e</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>CSS Parent Selector Entity</string>
++			<key>scope</key>
++			<string>entity.other.attribute-name.parent-selector-suffix punctuation.definition.entity.css</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#67ddbd</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>CSS Punctuation comma fix</string>
++			<key>scope</key>
++			<string>meta.property-list meta.property-list</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#81d2eb</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>SCSS @</string>
++			<key>scope</key>
++			<string>meta.at-rule.mixin keyword.control.at-rule.mixin, meta.at-rule.include entity.name.function.scss, meta.at-rule.include keyword.control.at-rule.include</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#b29def</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>SCSS Mixins, Extends, Include Keyword</string>
++			<key>scope</key>
++			<string>keyword.control.at-rule.include punctuation.definition.keyword, keyword.control.at-rule.mixin punctuation.definition.keyword, meta.at-rule.include keyword.control.at-rule.include, keyword.control.at-rule.extend punctuation.definition.keyword, meta.at-rule.extend keyword.control.at-rule.extend, entity.other.attribute-name.placeholder.css punctuation.definition.entity.css, meta.at-rule.media keyword.control.at-rule.media, meta.at-rule.mixin keyword.control.at-rule.mixin, meta.at-rule.function keyword.control.at-rule.function, keyword.control punctuation.definition.keyword</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#a48bec</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>SCSS Include Mixin Argument</string>
++			<key>scope</key>
++			<string>meta.property-list meta.at-rule.include</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#c5c7cb</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>CSS value</string>
++			<key>scope</key>
++			<string>support.constant.property-value</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#eabf7e</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Sub-methods</string>
++			<key>scope</key>
++			<string>entity.name.module.js, variable.import.parameter.js, variable.other.class.js</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#c5c7cb</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Language methods</string>
++			<key>scope</key>
++			<string>variable.language</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e97aa6</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Variable punctuation</string>
++			<key>scope</key>
++			<string>variable.other punctuation.definition.variable</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#c5c7cb</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Keyword this with Punctuation, ES7 Bind Operator</string>
++			<key>scope</key>
++			<string>source.js constant.other.object.key.js string.unquoted.label.js, variable.language.this punctuation.definition.variable, keyword.other.this</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e97aa6</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>HTML Attributes</string>
++			<key>scope</key>
++			<string>entity.other.attribute-name, text.html.basic entity.other.attribute-name.html, text.html.basic entity.other.attribute-name</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#b29def</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>HTML Character Entity</string>
++			<key>scope</key>
++			<string>text.html constant.character.entity</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#50c1e2</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Vue (Vetur / deprecated) Template attributes</string>
++			<key>scope</key>
++			<string>entity.other.attribute-name.id.html, meta.directive.vue entity.other.attribute-name.html</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#b29def</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>CSS ID&apos;s</string>
++			<key>scope</key>
++			<string>source.sass keyword.control</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#78cfe9</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>CSS psuedo selectors</string>
++			<key>scope</key>
++			<string>entity.other.attribute-name.pseudo-class, entity.other.attribute-name.pseudo-element, entity.other.attribute-name.placeholder, meta.property-list meta.property-value</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#b29def</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Inserted</string>
++			<key>scope</key>
++			<string>markup.inserted</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#51c1e3</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Deleted</string>
++			<key>scope</key>
++			<string>markup.deleted</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e25089</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Changed</string>
++			<key>scope</key>
++			<string>markup.changed</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#5fc6e5</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Regular Expressions</string>
++			<key>scope</key>
++			<string>string.regexp</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#8ad6ec</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Regular Expressions - Punctuation</string>
++			<key>scope</key>
++			<string>punctuation.definition.group</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e97aa6</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Regular Expressions - Character Class</string>
++			<key>scope</key>
++			<string>constant.other.character-class.regexp</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#b29def</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Regular Expressions - Character Class Set</string>
++			<key>scope</key>
++			<string>constant.other.character-class.set.regexp, punctuation.definition.character-class.regexp</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e9bb75</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Regular Expressions - Quantifier</string>
++			<key>scope</key>
++			<string>keyword.operator.quantifier.regexp</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#7fd2ea</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Regular Expressions - Backslash</string>
++			<key>scope</key>
++			<string>constant.character.escape.backslash</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#c5c7cb</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Escape Characters</string>
++			<key>scope</key>
++			<string>constant.character.escape</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#7fd2ea</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Decorators</string>
++			<key>scope</key>
++			<string>tag.decorator.js entity.name.tag.js, tag.decorator.js punctuation.definition.tag.js</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#78cfe9</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>CSS Units</string>
++			<key>scope</key>
++			<string>keyword.other.unit</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e97aa6</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>JSON Key - Level 0</string>
++			<key>scope</key>
++			<string>source.json meta.structure.dictionary.json support.type.property-name.json</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#78cfe9</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>JSON Key - Level 1</string>
++			<key>scope</key>
++			<string>source.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json support.type.property-name.json</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#50c1e2</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>JSON Key - Level 2</string>
++			<key>scope</key>
++			<string>source.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json support.type.property-name.json</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#7cd0ea</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>JSON Key - Level 3</string>
++			<key>scope</key>
++			<string>source.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json support.type.property-name.json</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#b29def</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>JSON Key - Level 4</string>
++			<key>scope</key>
++			<string>source.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json support.type.property-name.json</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e9bb75</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>JSON Key - Level 5</string>
++			<key>scope</key>
++			<string>source.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json support.type.property-name.json</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#50c1e2</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>JSON Key - Level 6</string>
++			<key>scope</key>
++			<string>source.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json support.type.property-name.json</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#67ddbd</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>JSON Key - Level 7</string>
++			<key>scope</key>
++			<string>source.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json support.type.property-name.json</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e97aa6</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>JSON Key - Level 8</string>
++			<key>scope</key>
++			<string>source.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json meta.structure.dictionary.value.json meta.structure.dictionary.json support.type.property-name.json</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e8b871</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Plain Punctuation</string>
++			<key>scope</key>
++			<string>punctuation.definition.list_item.markdown</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#81d2eb</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Block Punctuation</string>
++			<key>scope</key>
++			<string>meta.block, meta.brace, punctuation.definition.block, punctuation.definition.use, punctuation.definition.class, punctuation.definition.begin.bracket, punctuation.definition.end.bracket, punctuation.definition.switch-expression.begin.bracket, punctuation.definition.switch-expression.end.bracket, punctuation.definition.section.switch-block.begin.bracket, punctuation.definition.section.switch-block.end.bracket, punctuation.definition.group.shell, punctuation.definition.parameters, punctuation.definition.arguments, punctuation.definition.dictionary, punctuation.definition.array, punctuation.section</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#81d2eb</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Markdown - Plain</string>
++			<key>scope</key>
++			<string>meta.embedded.block</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#c5c7cb</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>HTML text</string>
++			<key>scope</key>
++			<string>meta.tag JSXNested, meta.jsx.children, text.html, text.log</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#a991ed</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Markdown - Markup Raw Inline</string>
++			<key>scope</key>
++			<string>text.html.markdown markup.inline.raw.markdown</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#b29def</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Markdown - Markup Raw Inline Punctuation</string>
++			<key>scope</key>
++			<string>text.html.markdown markup.inline.raw.markdown punctuation.definition.raw.markdown</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#8361e5</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Markdown - Heading 1</string>
++			<key>scope</key>
++			<string>heading.1.markdown entity.name, heading.1.markdown punctuation.definition.heading.markdown</string>
++			<key>settings</key>
++			<dict>
++				<key>fontStyle</key>
++				<string>bold</string>
++				<key>foreground</key>
++				<string>#7fd2ea</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Markdown - Heading 2</string>
++			<key>scope</key>
++			<string>heading.2.markdown entity.name, heading.2.markdown punctuation.definition.heading.markdown</string>
++			<key>settings</key>
++			<dict>
++				<key>fontStyle</key>
++				<string>bold</string>
++				<key>foreground</key>
++				<string>#6fcce8</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Markdown - Heading 3</string>
++			<key>scope</key>
++			<string>heading.3.markdown entity.name, heading.3.markdown punctuation.definition.heading.markdown</string>
++			<key>settings</key>
++			<dict>
++				<key>fontStyle</key>
++				<string>bold</string>
++				<key>foreground</key>
++				<string>#78cfe9</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Markdown - Heading 4</string>
++			<key>scope</key>
++			<string>heading.4.markdown entity.name, heading.4.markdown punctuation.definition.heading.markdown</string>
++			<key>settings</key>
++			<dict>
++				<key>fontStyle</key>
++				<string>bold</string>
++				<key>foreground</key>
++				<string>#6dcbe7</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Markdown - Heading 5</string>
++			<key>scope</key>
++			<string>heading.5.markdown entity.name, heading.5.markdown punctuation.definition.heading.markdown</string>
++			<key>settings</key>
++			<dict>
++				<key>fontStyle</key>
++				<string>bold</string>
++				<key>foreground</key>
++				<string>#a991ed</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Markdown - Heading 6</string>
++			<key>scope</key>
++			<string>heading.6.markdown entity.name, heading.6.markdown punctuation.definition.heading.markdown</string>
++			<key>settings</key>
++			<dict>
++				<key>fontStyle</key>
++				<string>bold</string>
++				<key>foreground</key>
++				<string>#9578e9</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Markup - Italic</string>
++			<key>scope</key>
++			<string>markup.italic, markup.italic punctuation</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#c5c7cb</string>
++				<key>fontStyle</key>
++				<string>italic</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Markup - Bold</string>
++			<key>scope</key>
++			<string>markup.bold, markup.bold punctuation</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#c5c7cb</string>
++				<key>fontStyle</key>
++				<string>bold</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Markup - Bold-Italic</string>
++			<key>scope</key>
++			<string>markup.bold markup.italic, markup.bold markup.italic punctuation</string>
++			<key>settings</key>
++			<dict>
++				<key>fontStyle</key>
++				<string>bold italic</string>
++				<key>foreground</key>
++				<string>#c5c7cb</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Markup - Underline</string>
++			<key>scope</key>
++			<string>markup.underline, markup.underline punctuation</string>
++			<key>settings</key>
++			<dict>
++				<key>fontStyle</key>
++				<string>underline</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Markdown - Blockquote</string>
++			<key>scope</key>
++			<string>markup.quote punctuation.definition.blockquote.markdown</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#8361e5</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Markup - Quote</string>
++			<key>scope</key>
++			<string>markup.quote</string>
++			<key>settings</key>
++			<dict>
++				<key>fontStyle</key>
++				<string>italic</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Markdown - Link</string>
++			<key>scope</key>
++			<string>string.other.link, markup.underline.link, constant.other.reference.link.markdown, string.other.link.description.title.markdown</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#67ddbd</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Markdown - Fenced Code Block</string>
++			<key>scope</key>
++			<string>markup.fenced_code.block.markdown, markup.inline.raw.string.markdown, variable.language.fenced.markdown</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#7fd2ea</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Markdown - Separator</string>
++			<key>scope</key>
++			<string>meta.separator</string>
++			<key>settings</key>
++			<dict>
++				<key>fontStyle</key>
++				<string>bold</string>
++				<key>foreground</key>
++				<string>#8563e6</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Markup - Table</string>
++			<key>scope</key>
++			<string>markup.table</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#bdaaf1</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Token - Info</string>
++			<key>scope</key>
++			<string>token.info-token</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#50c1e2</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Token - Warn</string>
++			<key>scope</key>
++			<string>token.warn-token</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#eac07f</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Token - Error</string>
++			<key>scope</key>
++			<string>token.error-token</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e66597</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Token - Debug</string>
++			<key>scope</key>
++			<string>token.debug-token</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#a289ec</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Apache Tag</string>
++			<key>scope</key>
++			<string>entity.tag.apacheconf</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#e97aa6</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>Preprocessor</string>
++			<key>scope</key>
++			<string>meta.preprocessor</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#67ddbd</string>
++			</dict>
++		</dict>
++		<dict>
++			<key>name</key>
++			<string>ENV value</string>
++			<key>scope</key>
++			<string>source.env</string>
++			<key>settings</key>
++			<dict>
++				<key>foreground</key>
++				<string>#78cfe9</string>
++			</dict>
++		</dict>
++	</array>
++	<key>uuid</key>
++	<string></string>
++	<key>license</key>
++	<string></string>
++</dict>
++</plist>
+\ No newline at end of file
+diff --git a/crates/codegen/xai-grok-pager-render/src/syntax.rs b/crates/codegen/xai-grok-pager-render/src/syntax.rs
+index 7de80cb..4d729b9 100644
+--- a/crates/codegen/xai-grok-pager-render/src/syntax.rs
++++ b/crates/codegen/xai-grok-pager-render/src/syntax.rs
+@@ -33,6 +33,7 @@ use crate::theme::ThemeKind;
+ static SYNTECT_GROKNIGHT: OnceLock<Syntect> = OnceLock::new();
+ static SYNTECT_TOKYONIGHT: OnceLock<Syntect> = OnceLock::new();
+ static SYNTECT_GROKDAY: OnceLock<Syntect> = OnceLock::new();
++static SYNTECT_SIGILNEON: OnceLock<Syntect> = OnceLock::new();
+ 
+ /// Convert syntect style to ratatui foreground-only style, quantized for
+ /// terminal color support (or polarity-safe under the terminal-native lock).
+@@ -152,6 +153,8 @@ pub fn get_syntect() -> &'static Syntect {
+             .get_or_init(|| Syntect::new(include_bytes!("../assets/grok-night.tmTheme"))),
+         ThemeKind::TokyoNight => SYNTECT_TOKYONIGHT
+             .get_or_init(|| Syntect::new(include_bytes!("../assets/tokyo-night.tmTheme"))),
++        ThemeKind::SigilNeon => SYNTECT_SIGILNEON
++            .get_or_init(|| Syntect::new(include_bytes!("../assets/sigil-neon.tmTheme"))),
+         ThemeKind::GrokDay => SYNTECT_GROKDAY
+             .get_or_init(|| Syntect::new(include_bytes!("../assets/grok-day.tmTheme"))),
+     }
+diff --git a/crates/codegen/xai-grok-pager-render/src/theme/cache.rs b/crates/codegen/xai-grok-pager-render/src/theme/cache.rs
+index 3a7b2f9..68e860f 100644
+--- a/crates/codegen/xai-grok-pager-render/src/theme/cache.rs
++++ b/crates/codegen/xai-grok-pager-render/src/theme/cache.rs
+@@ -48,6 +48,7 @@ fn theme_kind_from_u8(byte: u8) -> ThemeKind {
+         x if x == ThemeKind::TokyoNight as u8 => ThemeKind::TokyoNight,
+         x if x == ThemeKind::RosePineMoon as u8 => ThemeKind::RosePineMoon,
+         x if x == ThemeKind::OscuraMidnight as u8 => ThemeKind::OscuraMidnight,
++        x if x == ThemeKind::SigilNeon as u8 => ThemeKind::SigilNeon,
+         x if x == ThemeKind::Auto as u8 => ThemeKind::Auto,
+         _ => ThemeKind::GrokNight,
+     }
+@@ -264,6 +265,14 @@ pub fn resolve_auto() -> ThemeKind {
+ /// Checks `[ui].theme` first (the canonical location), then falls back
+ /// to a top-level `theme` key for backwards compatibility.
+ fn load_from_disk() -> Option<ThemeKind> {
++    // A host application that embeds the pager (Sigil) picks the theme for the
++    // window it draws into, and must not rewrite the user's own config to do
++    // it. `GROK_THEME` is that override, and it wins over the config file.
++    if let Ok(name) = std::env::var("GROK_THEME") {
++        if let Some(kind) = ThemeKind::from_name(name.trim()) {
++            return Some(kind);
++        }
++    }
+     let root = xai_grok_config::load_effective_config_disk_only().ok()?;
+     let table = root.as_table()?;
+     // Canonical: [ui] section
+diff --git a/crates/codegen/xai-grok-pager-render/src/theme/grokday.rs b/crates/codegen/xai-grok-pager-render/src/theme/grokday.rs
+index 8f14e09..b89b8e1 100644
+--- a/crates/codegen/xai-grok-pager-render/src/theme/grokday.rs
++++ b/crates/codegen/xai-grok-pager-render/src/theme/grokday.rs
+@@ -133,6 +133,7 @@ impl Theme {
+             md_code_bg: rgb(228, 228, 228),
+             md_text: FG_DARK,
+             link_fg: BLUE, // #2F64D2 -- deep blue for light bg
++            logo_shine: FG,
+         }
+     }
+ }
+diff --git a/crates/codegen/xai-grok-pager-render/src/theme/groknight.rs b/crates/codegen/xai-grok-pager-render/src/theme/groknight.rs
+index 35581b5..73a4d87 100644
+--- a/crates/codegen/xai-grok-pager-render/src/theme/groknight.rs
++++ b/crates/codegen/xai-grok-pager-render/src/theme/groknight.rs
+@@ -145,6 +145,7 @@ impl Theme {
+             md_code_bg: rgb(28, 28, 28),
+             md_text: FG_DARK,
+             link_fg: rgb(122, 166, 218), // #7aa6da -- soft blue for dark bg
++            logo_shine: FG,
+         }
+     }
+ }
+diff --git a/crates/codegen/xai-grok-pager-render/src/theme/mod.rs b/crates/codegen/xai-grok-pager-render/src/theme/mod.rs
+index fff8675..1e1da70 100644
+--- a/crates/codegen/xai-grok-pager-render/src/theme/mod.rs
++++ b/crates/codegen/xai-grok-pager-render/src/theme/mod.rs
+@@ -19,6 +19,7 @@ pub mod md_style;
+ pub mod osc11;
+ mod oscura;
+ mod rosepine;
++mod sigil;
+ pub mod system_appearance;
+ mod terminal_default;
+ pub mod tokyonight;
+@@ -34,6 +35,8 @@ pub enum ThemeKind {
+     TokyoNight = 2,
+     RosePineMoon = 3,
+     OscuraMidnight = 5,
++    /// Sigil Neon — neutral near-black ground, mint/cyan neon accents.
++    SigilNeon = 6,
+     /// Meta-variant: follow system dark/light appearance.
+     ///
+     /// Never stored in `cache::CURRENT` — resolved to a concrete
+@@ -52,6 +55,7 @@ impl ThemeKind {
+         ThemeKind::TokyoNight,
+         ThemeKind::RosePineMoon,
+         ThemeKind::OscuraMidnight,
++        ThemeKind::SigilNeon,
+     ];
+ 
+     /// Theme kinds available on the current terminal.
+@@ -79,6 +83,7 @@ impl ThemeKind {
+             Self::GrokDay => "grokday",
+             Self::RosePineMoon => "rosepine-moon",
+             Self::OscuraMidnight => "oscura-midnight",
++            Self::SigilNeon => "sigil-neon",
+             Self::Auto => "auto",
+         }
+     }
+@@ -95,6 +100,7 @@ impl ThemeKind {
+             Self::GrokDay => false,
+             Self::RosePineMoon => true,
+             Self::OscuraMidnight => true,
++            Self::SigilNeon => true,
+             // Auto is resolved to a concrete theme before rendering.
+             Self::Auto => false,
+         }
+@@ -113,6 +119,7 @@ impl ThemeKind {
+                 Some(Self::RosePineMoon)
+             }
+             "oscura" | "oscura-midnight" => Some(Self::OscuraMidnight),
++            "sigil" | "sigil-neon" | "neon" => Some(Self::SigilNeon),
+             _ => None,
+         }
+     }
+@@ -148,6 +155,8 @@ pub fn display_name_for_canonical(value: &str) -> &str {
+         "grokday" => "Grok Day",
+         "tokyonight" => "Tokyo Night",
+         "rosepine-moon" => "Rose Pine Moon",
++        "oscura-midnight" => "Oscura Midnight",
++        "sigil-neon" => "Sigil Neon",
+         other => other,
+     }
+ }
+@@ -248,6 +257,7 @@ impl Theme {
+             md_code_bg: q(self.md_code_bg),
+             md_text: q(self.md_text),
+             link_fg: q(self.link_fg),
++            logo_shine: q(self.logo_shine),
+         }
+     }
+ 
+@@ -274,6 +284,7 @@ impl Theme {
+             ThemeKind::GrokDay => Self::grokday(),
+             ThemeKind::RosePineMoon => Self::rosepine_moon(),
+             ThemeKind::OscuraMidnight => Self::oscura_midnight(),
++            ThemeKind::SigilNeon => Self::sigil(),
+             // Auto is resolved to a concrete theme before being stored;
+             // if reached, fall back to GrokNight.
+             ThemeKind::Auto => Self::groknight(),
+@@ -627,6 +638,7 @@ impl Theme {
+             md_task_checked: green,
+             md_task_unchecked: muted_fg,
+             link_fg: blue,
++            logo_shine: high_contrast_fg,
+             diff_equal_fg: muted_fg,
+             diff_gutter_fg: muted_fg,
+             ..self
+diff --git a/crates/codegen/xai-grok-pager-render/src/theme/oscura.rs b/crates/codegen/xai-grok-pager-render/src/theme/oscura.rs
+index 0971b0c..5fd7273 100644
+--- a/crates/codegen/xai-grok-pager-render/src/theme/oscura.rs
++++ b/crates/codegen/xai-grok-pager-render/src/theme/oscura.rs
+@@ -142,6 +142,7 @@ impl Theme {
+             md_code_bg: SURFACE,
+             md_text: TEXT,
+             link_fg: CYAN,
++            logo_shine: TEXT,
+         }
+     }
+ }
+diff --git a/crates/codegen/xai-grok-pager-render/src/theme/rosepine.rs b/crates/codegen/xai-grok-pager-render/src/theme/rosepine.rs
+index f07e0ba..d9aaf4c 100644
+--- a/crates/codegen/xai-grok-pager-render/src/theme/rosepine.rs
++++ b/crates/codegen/xai-grok-pager-render/src/theme/rosepine.rs
+@@ -110,6 +110,7 @@ impl Theme {
+             md_code_bg: SURFACE,
+             md_text: TEXT,
+             link_fg: FOAM, // #9ccfd8 -- teal/cyan for dark bg
++            logo_shine: TEXT,
+         }
+     }
+ }
+diff --git a/crates/codegen/xai-grok-pager-render/src/theme/sigil.rs b/crates/codegen/xai-grok-pager-render/src/theme/sigil.rs
+new file mode 100644
+index 0000000..5ac36fa
+--- /dev/null
++++ b/crates/codegen/xai-grok-pager-render/src/theme/sigil.rs
+@@ -0,0 +1,143 @@
++use ratatui::style::{Color, Modifier};
++
++use super::tokyonight::Theme;
++
++const fn rgb(r: u8, g: u8, b: u8) -> Color {
++    Color::Rgb(r, g, b)
++}
++
++/// Sigil Neon palette.
++///
++/// A near-black neutral ground with a two-hue neon accent family: mint for
++/// the agent's own voice and success, cyan for anything in motion (running
++/// tools, links, the model name). Violet marks the human's turn, amber is
++/// reserved for commands and warnings, and magenta for failure.
++///
++/// The rule that keeps it "subtle": the ground and every chrome grey are
++/// neutral — no hue at all — so the neon only ever appears on the small
++/// marks that carry state. Text is a cool near-white, never a neon colour.
++#[allow(dead_code)]
++mod palette {
++    use super::*;
++
++    // -- neutral ground ramp (no hue; the neon must never smear) -------------
++    pub const BASE: Color = rgb(8, 9, 11); // #08090B — the ground
++    pub const SURFACE: Color = rgb(12, 13, 16); // #0C0D10 — code blocks, paste
++    pub const ELEVATED: Color = rgb(20, 22, 26); // #14161A — highlight rows
++    pub const HOVER: Color = rgb(26, 29, 35); // #1A1D23 — mouse hover
++    pub const VISUAL: Color = rgb(31, 36, 44); // #1F242C — visual selection
++
++    // -- text ramp (cool neutral, three discrete steps) ----------------------
++    pub const TEXT: Color = rgb(230, 233, 239); // #E6E9EF — primary
++    pub const TEXT_DIM: Color = rgb(184, 191, 203); // #B8BFCB — secondary
++    pub const MUTED: Color = rgb(122, 130, 143); // #7A828F — meta text
++    pub const SUBTLE: Color = rgb(80, 88, 100); // #505864 — dimmest meta
++
++    // -- chrome lines (neutral, one step apart) ------------------------------
++    pub const LINE_LOW: Color = rgb(23, 26, 31); // #171A1F — scrollbar track
++    pub const LINE: Color = rgb(37, 42, 50); // #252A32 — idle borders
++    pub const LINE_HIGH: Color = rgb(56, 63, 74); // #383F4A — selection borders
++
++    // -- neon accents (small marks only) -------------------------------------
++    pub const MINT: Color = rgb(78, 240, 196); // #4EF0C4 — assistant, success
++    pub const MINT_DIM: Color = rgb(45, 138, 116); // #2D8A74 — idle prompt edge
++    pub const CYAN: Color = rgb(90, 217, 255); // #5AD9FF — running, links
++    pub const VIOLET: Color = rgb(169, 139, 255); // #A98BFF — the human's turn
++    pub const VIOLET_DIM: Color = rgb(104, 86, 158); // #68569E — thinking
++    pub const AMBER: Color = rgb(255, 196, 107); // #FFC46B — commands, warnings
++    pub const MAGENTA: Color = rgb(255, 95, 158); // #FF5F9E — failure
++    pub const LIME: Color = rgb(124, 255, 178); // #7CFFB2 — remember mode
++}
++use palette::*;
++
++impl Theme {
++    /// Sigil Neon — the theme the Sigil app ships with.
++    pub const fn sigil() -> Self {
++        Self {
++            bg_base: BASE,
++            bg_light: ELEVATED,
++            bg_dark: SURFACE,
++            bg_highlight: ELEVATED,
++            bg_hover: HOVER,
++            bg_terminal: SURFACE,
++
++            accent_user: VIOLET,
++            accent_assistant: MINT,
++            accent_thinking: VIOLET_DIM,
++            accent_tool: SUBTLE,
++            accent_system: CYAN,
++            accent_error: MAGENTA,
++            accent_success: MINT,
++            accent_running: CYAN,
++            accent_skill: MINT_DIM,
++
++            text_primary: TEXT,
++            text_secondary: TEXT_DIM,
++
++            gray_dim: SUBTLE,
++            gray: MUTED,
++            gray_bright: TEXT_DIM,
++
++            command: AMBER,
++            path: CYAN,
++            running: CYAN,
++            warning: AMBER,
++
++            fuzzy_accent: MINT,
++
++            accent_plan: AMBER,
++
++            accent_verify: VIOLET,
++
++            accent_remember: LIME,
++
++            // The prompt is the one place the neon touches chrome: a dim mint
++            // edge at rest that lights to full mint while the box has focus.
++            selection_border: LINE_HIGH,
++            hover_border: LINE,
++            prompt_border: LINE,
++            prompt_border_active: MINT_DIM,
++
++            accent_model: MINT,
++
++            // The thumb has to sit clearly above the track at this ground
++            // brightness, so it steps to the chrome line, not to a fill.
++            scrollbar_bg: LINE_LOW,
++            scrollbar_fg: LINE_HIGH,
++
++            diff_delete_bg: rgb(43, 12, 26),
++            diff_delete_fg: MAGENTA,
++            diff_insert_bg: rgb(6, 38, 32),
++            diff_insert_fg: MINT,
++            diff_equal_fg: MUTED,
++            diff_gutter_fg: SUBTLE,
++
++            bg_visual: VISUAL,
++
++            paste_bg: SURFACE,
++            paste_fg: TEXT_DIM,
++            paste_dim: MUTED,
++
++            md_heading_h1: TEXT,
++            md_heading_h1_mod: Modifier::BOLD,
++            md_heading_h2: MINT,
++            md_heading_h2_mod: Modifier::BOLD,
++            md_heading_h3: CYAN,
++            md_heading_h3_mod: Modifier::BOLD,
++            md_heading_h4: VIOLET,
++            md_heading_h4_mod: Modifier::BOLD,
++            md_heading_h5: AMBER,
++            md_heading_h5_mod: Modifier::BOLD,
++            md_heading_h6: TEXT_DIM,
++            md_heading_h6_mod: Modifier::BOLD,
++            md_code: MINT,
++            md_task_checked: MINT,
++            md_task_unchecked: MUTED,
++            md_muted: MUTED,
++            md_code_bg: SURFACE,
++            md_text: TEXT,
++            link_fg: CYAN,
++            logo_shine: MINT,
++        }
++    }
++}
+diff --git a/crates/codegen/xai-grok-pager-render/src/theme/terminal_default.rs b/crates/codegen/xai-grok-pager-render/src/theme/terminal_default.rs
+index 1b34df3..afd6b77 100644
+--- a/crates/codegen/xai-grok-pager-render/src/theme/terminal_default.rs
++++ b/crates/codegen/xai-grok-pager-render/src/theme/terminal_default.rs
+@@ -116,6 +116,7 @@ impl Theme {
+             md_code_bg: Color::Reset,
+             md_text: Color::Reset,
+             link_fg: Color::Blue,
++            logo_shine: Color::Reset,
+         }
+     }
+ }
+diff --git a/crates/codegen/xai-grok-pager-render/src/theme/tokyonight.rs b/crates/codegen/xai-grok-pager-render/src/theme/tokyonight.rs
+index 66920c9..cda4149 100644
+--- a/crates/codegen/xai-grok-pager-render/src/theme/tokyonight.rs
++++ b/crates/codegen/xai-grok-pager-render/src/theme/tokyonight.rs
+@@ -148,6 +148,10 @@ pub struct Theme {
+     pub md_code_bg: Color,           // Code block background
+     pub md_text: Color,              // Default body text (plain paragraphs, strong, emphasis)
+     pub link_fg: Color,              // Clickable link text color
++    /// Colour the welcome logo's shine sweeps toward. Every other theme lifts
++    /// the braille art toward its primary text; a themed accent here is what
++    /// makes the first screen belong to the theme instead of to the CLI.
++    pub logo_shine: Color,
+ }
+ 
+ impl Theme {
+@@ -235,6 +239,7 @@ impl Theme {
+             md_code_bg: BG_HIGHLIGHT,
+             md_text: FG,
+             link_fg: BLUE, // #7aa2f7
++            logo_shine: FG,
+         }
+     }
+ 
+diff --git a/crates/codegen/xai-grok-pager/src/settings/defs.rs b/crates/codegen/xai-grok-pager/src/settings/defs.rs
+index 02d724e..44eabc5 100644
+--- a/crates/codegen/xai-grok-pager/src/settings/defs.rs
++++ b/crates/codegen/xai-grok-pager/src/settings/defs.rs
+@@ -71,6 +71,11 @@ const THEME_CHOICES: &[EnumChoice] = &[
+         display: "Oscura Midnight",
+         description: "Deep dark with warm accents; needs truecolor.",
+     },
++    EnumChoice {
++        canonical: "sigil-neon",
++        display: "Sigil Neon",
++        description: "Near-black with mint/cyan neon accents; needs truecolor.",
++    },
+ ];
+ 
+ // ---------------------------------------------------------------------------
+@@ -518,6 +523,11 @@ const CONCRETE_THEME_CHOICES: &[EnumChoice] = &[
+         display: "Oscura Midnight",
+         description: "Deep dark with warm accents; needs truecolor.",
+     },
++    EnumChoice {
++        canonical: "sigil-neon",
++        display: "Sigil Neon",
++        description: "Near-black with mint/cyan neon accents; needs truecolor.",
++    },
+ ];
+ 
+ /// Child settings shown inside the "Show contextual hints" group sub-sheet.
+diff --git a/crates/codegen/xai-grok-pager/src/views/welcome/logo.rs b/crates/codegen/xai-grok-pager/src/views/welcome/logo.rs
+index da2fc19..6cefcbd 100644
+--- a/crates/codegen/xai-grok-pager/src/views/welcome/logo.rs
++++ b/crates/codegen/xai-grok-pager/src/views/welcome/logo.rs
+@@ -123,7 +123,7 @@ fn render_into(area: Rect, buf: &mut Buffer, theme: &Theme, logo: &str) {
+     // that land on the same blended color share one Span to hold down the
+     // per-frame allocation.
+     let base = theme.gray;
+-    let hilite = theme.text_primary;
++    let hilite = theme.logo_shine;
+     let logo_lines: Vec<Line> = lines
+         .iter()
+         .enumerate()
+-- 
+2.54.0
+

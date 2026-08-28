@@ -25,6 +25,9 @@ public struct GrokLaunchSpec: Sendable, Hashable {
     public var reasoningEffort: String?
     /// Anything the user typed into the advanced field, already split into arguments.
     public var extraArguments: [String]
+    /// The CLI theme this tab renders in, passed as `GROK_THEME`. It matches the
+    /// window's own theme, so the program and its frame read as one surface.
+    public var themeName: String?
     /// Identifies this tab to the `sigil-mcp` server grok launches. Both this and
     /// `bridgeSocketPath` must be set for tab messaging to reach the app.
     public var bridgeTabID: String?
@@ -37,6 +40,7 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         model: String? = nil,
         reasoningEffort: String? = nil,
         extraArguments: [String] = [],
+        themeName: String? = nil,
         bridgeTabID: String? = nil,
         bridgeSocketPath: String? = nil
     ) {
@@ -46,6 +50,7 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         self.model = model
         self.reasoningEffort = reasoningEffort
         self.extraArguments = extraArguments
+        self.themeName = themeName
         self.bridgeTabID = bridgeTabID
         self.bridgeSocketPath = bridgeSocketPath
     }
@@ -115,6 +120,9 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         env["COLORTERM"] = "truecolor"
         env["LANG"] = env["LANG"] ?? "en_US.UTF-8"
         env["GROK_WRAPPER"] = "Sigil.app"
+        if let themeName = themeName?.nilIfBlank {
+            env["GROK_THEME"] = themeName
+        }
         // The app bundle inherits a bare or duplicated PATH. Keep one copy of
         // each entry and put both the selected CLI directory and Grok bin first.
         let grokBin = GrokPaths.home.appendingPathComponent("bin").path

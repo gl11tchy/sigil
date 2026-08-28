@@ -409,7 +409,8 @@ final class AppModel {
             workingDirectory: directory,
             mode: .new(sessionID: UUID()),
             model: (model ?? settings.model).nilIfEmpty,
-            reasoningEffort: (effort ?? settings.effort).nilIfEmpty
+            reasoningEffort: (effort ?? settings.effort).nilIfEmpty,
+            themeName: settings.theme.grokThemeName
         )
         return add(spec)
     }
@@ -439,7 +440,8 @@ final class AppModel {
             workingDirectory: workingDirectory,
             mode: .resume(sessionID: session.id),
             model: settings.model.nilIfEmpty,
-            reasoningEffort: settings.effort.nilIfEmpty
+            reasoningEffort: settings.effort.nilIfEmpty,
+            themeName: settings.theme.grokThemeName
         )
         let tab = add(spec)
         tab.sessionTitle = session.title
@@ -1171,7 +1173,8 @@ final class AppModel {
                 workingDirectory: workingDirectory,
                 mode: .resume(sessionID: entry.sessionID),
                 model: settings.model.nilIfEmpty,
-                reasoningEffort: settings.effort.nilIfEmpty
+                reasoningEffort: settings.effort.nilIfEmpty,
+                themeName: settings.theme.grokThemeName
             )
             let tab = add(spec)
             if deferredSelectedEntry.map({ sameEntry($0, entry) }) == true

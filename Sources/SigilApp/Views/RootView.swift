@@ -55,7 +55,7 @@ struct RootView: View {
                 ZStack(alignment: .topTrailing) {
                     ForEach(model.tabs) { tab in
                         let isSelected = tab.id == model.selectedTab?.id
-                        TerminalPane(tab: tab, background: palette.groundNSColor)
+                        TerminalScreen(tab: tab)
                             .opacity(isSelected ? 1 : 0)
                             .allowsHitTesting(isSelected)
                             .accessibilityHidden(!isSelected)

@@ -87,6 +87,7 @@ In the thread list, `↑` and `↓` move the selection and `Return` opens it.
 
 - macOS 14 or later
 - The `grok` CLI at `~/.grok/bin/grok` (set another path in Settings)
+- Optional: `~/.grok/bin/grok-sigil`, the themed CLI build described below
 
 The app is deliberately **not** sandboxed: it starts `grok` as a child process, and
 that process needs the same access to your files and network that it has in a terminal.
@@ -176,6 +177,24 @@ Regenerate the app icon:
 ```sh
 Scripts/make-icon.sh
 ```
+
+## The themed CLI
+
+The detail column is a program someone else drew, so theming only the window
+would leave two designs on screen. `Scripts/build-grok-cli.sh` builds the
+open-source [Grok Build](https://github.com/xai-org/grok-build) CLI with one
+patch on top — a `sigil-neon` TUI theme and a `GROK_THEME` override — and
+installs it as `~/.grok/bin/grok-sigil`.
+
+```sh
+brew install protobuf   # once; the build also needs Rust
+Scripts/build-grok-cli.sh
+```
+
+The app prefers `grok-sigil` when it is there and starts each tab with
+`GROK_THEME` set to the window's theme. Delete the binary and the app falls
+back to the installed `grok`, which ignores the variable and runs as before.
+The patch is `Scripts/grok-cli/sigil-neon.patch`.
 
 ## Verify
 
