@@ -448,10 +448,28 @@ final class AppModel {
         commitRename(session, to: raw)
     }
 
+    /// Blur of the inline field. Also skipped when the row left the visible
+    /// list, so a filter/archive teardown can hand off to the fallback alert.
+    func commitInlineBlur(_ session: GrokSession, to raw: String) {
+        guard
+            Self.shouldCommitInlineBlur(
+                keyMatches: renamingSessionKey == sessionKey(session),
+                rowVisible: sidebarSessions.contains {
+                    sessionKey($0) == sessionKey(session)
+                }
+            )
+        else { return }
+        commitRename(session, to: raw)
+    }
+
     /// The fallback rename alert may set `isPresented` to false before the
     /// button action. Only cancel when that dismiss was not a completed commit.
     static func shouldCancelRenameAlert(didCommit: Bool) -> Bool {
         !didCommit
+    }
+
+    static func shouldCommitInlineBlur(keyMatches: Bool, rowVisible: Bool) -> Bool {
+        keyMatches && rowVisible
     }
 
     /// Where the rename UI should live after a key or visibility change.
@@ -468,6 +486,19 @@ final class AppModel {
     ) -> RenameSurface {
         guard isRenaming, sessionAvailable else { return .none }
         return rowVisible ? .inline : .prompt
+    }
+
+    /// List reshuffles must not re-arm the fallback alert. Only a key or
+    /// surface change (or a fresh rename) should reconfigure.
+    static func shouldReconfigureRename(
+        previousKey: String?,
+        previousSurface: RenameSurface,
+        nextKey: String?,
+        nextSurface: RenameSurface,
+        resetDraft: Bool
+    ) -> Bool {
+        if resetDraft { return true }
+        return previousKey != nextKey || previousSurface != nextSurface
     }
 
     /// The conversation on screen, when the store knows it. Menu-bar Rename uses this.

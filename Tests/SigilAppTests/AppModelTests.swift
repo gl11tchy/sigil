@@ -919,6 +919,106 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func renameIsNotReconfiguredWhenSurfaceAndKeyAreUnchanged() {
+        #expect(
+            !AppModel.shouldReconfigureRename(
+                previousKey: "s1",
+                previousSurface: .prompt,
+                nextKey: "s1",
+                nextSurface: .prompt,
+                resetDraft: false
+            ))
+        #expect(
+            !AppModel.shouldReconfigureRename(
+                previousKey: "s1",
+                previousSurface: .inline,
+                nextKey: "s1",
+                nextSurface: .inline,
+                resetDraft: false
+            ))
+        #expect(
+            AppModel.shouldReconfigureRename(
+                previousKey: "s1",
+                previousSurface: .prompt,
+                nextKey: "s1",
+                nextSurface: .inline,
+                resetDraft: false
+            ))
+        #expect(
+            AppModel.shouldReconfigureRename(
+                previousKey: "s1",
+                previousSurface: .inline,
+                nextKey: "s1",
+                nextSurface: .prompt,
+                resetDraft: false
+            ))
+        #expect(
+            AppModel.shouldReconfigureRename(
+                previousKey: "s1",
+                previousSurface: .prompt,
+                nextKey: "s2",
+                nextSurface: .prompt,
+                resetDraft: false
+            ))
+        #expect(
+            AppModel.shouldReconfigureRename(
+                previousKey: "s1",
+                previousSurface: .prompt,
+                nextKey: "s1",
+                nextSurface: .prompt,
+                resetDraft: true
+            ))
+    }
+
+    @Test @MainActor
+    func inlineBlurCommitsOnlyWhenKeyMatchesAndRowIsVisible() {
+        #expect(AppModel.shouldCommitInlineBlur(keyMatches: true, rowVisible: true))
+        #expect(!AppModel.shouldCommitInlineBlur(keyMatches: true, rowVisible: false))
+        #expect(!AppModel.shouldCommitInlineBlur(keyMatches: false, rowVisible: true))
+        #expect(!AppModel.shouldCommitInlineBlur(keyMatches: false, rowVisible: false))
+    }
+
+    @Test @MainActor
+    func inlineBlurAfterTheRowLeavesTheListDoesNotPersistOrClearTheKey() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.beginRename(session)
+        model.searchText = "no-such-name"
+        #expect(model.sidebarSessions.isEmpty)
+        #expect(model.renamingSessionKey == model.sessionKey(session))
+        model.commitInlineBlur(session, to: "Auth rewrite")
+        #expect(!model.hasCustomName(session))
+        #expect(model.renamingSessionKey == model.sessionKey(session))
+        #expect(model.title(for: session) == "CLI summary")
+        model.commitRename(session, to: "Auth rewrite")
+        #expect(model.title(for: session) == "Auth rewrite")
+    }
+
+    @Test @MainActor
+    func inlineBlurWhileVisibleStillWrites() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.beginRename(session)
+        model.commitInlineBlur(session, to: "Auth rewrite")
+        #expect(model.title(for: session) == "Auth rewrite")
+        #expect(model.renamingSessionKey == nil)
+    }
+
+    @Test @MainActor
     func alertCommitAfterCancelStillWritesWhenInlineWouldNot() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }

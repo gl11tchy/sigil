@@ -31,6 +31,8 @@ struct SidebarView: View {
     /// would clear that key) before the button action runs.
     @State private var renameAlertSession: GrokSession?
     @State private var renameAlertDidCommit = false
+    @State private var preparedRenameKey: String?
+    @State private var preparedRenameSurface: AppModel.RenameSurface = .none
     @Namespace private var modeUnderline
 
     /// F2. Unicode private-use scalar for `NSF2FunctionKey`.
@@ -353,8 +355,10 @@ struct SidebarView: View {
             toggleArchive: { model.toggleArchive(session) },
             beginRename: { beginInlineRename(session) },
             commitRename: { model.commitInlineRename(session, to: $0) },
+            commitBlur: { model.commitInlineBlur(session, to: $0) },
             cancelRename: { model.cancelRename() },
             resetName: { model.resetName(session) },
+            renameDraft: $renameDraft,
             focus: $focus
         )
         .id(model.sessionKey(session))
@@ -502,6 +506,10 @@ struct SidebarView: View {
 
     private func beginInlineRename(_ session: GrokSession) {
         keyboardSelectionID = model.sessionKey(session)
+        let key = model.sessionKey(session)
+        if model.renamingSessionKey != key {
+            renameDraft = model.title(for: session)
+        }
         model.beginRename(session)
         focus = .rename
     }
@@ -539,11 +547,23 @@ struct SidebarView: View {
         let key = model.renamingSessionKey
         let session = key.flatMap { sessionAnywhere(for: $0) }
         let rowVisible = key.map { visibleRowIDs().contains($0) } ?? false
-        switch AppModel.renameSurface(
+        let surface = AppModel.renameSurface(
             isRenaming: key != nil,
             sessionAvailable: session != nil,
             rowVisible: rowVisible
-        ) {
+        )
+        guard
+            AppModel.shouldReconfigureRename(
+                previousKey: preparedRenameKey,
+                previousSurface: preparedRenameSurface,
+                nextKey: key,
+                nextSurface: surface,
+                resetDraft: resetDraft
+            )
+        else { return }
+        preparedRenameKey = key
+        preparedRenameSurface = surface
+        switch surface {
         case .none:
             showRenameAlert = false
             if key != nil { model.cancelRename() }
@@ -837,13 +857,14 @@ private struct SessionRow: View {
     let toggleArchive: () -> Void
     let beginRename: () -> Void
     let commitRename: (String) -> Void
+    let commitBlur: (String) -> Void
     let cancelRename: () -> Void
     let resetName: () -> Void
+    @Binding var renameDraft: String
     @FocusState.Binding var focus: SidebarFocus?
 
     @Environment(\.palette) private var palette
     @SwiftUI.State private var isHovering = false
-    @SwiftUI.State private var renameDraft = ""
     @SwiftUI.State private var suppressBlurCommit = false
 
     var body: some View {
@@ -1001,7 +1022,6 @@ private struct SessionRow: View {
     private func focusRenameFieldIfNeeded() async {
         guard isRenaming else { return }
         suppressBlurCommit = true
-        renameDraft = title
         await Task.yield()
         focus = .rename
         suppressBlurCommit = false
@@ -1021,8 +1041,7 @@ private struct SessionRow: View {
 
     private func commitOnBlurIfNeeded() {
         guard !suppressBlurCommit else { return }
-        // Live key check is in `commitInlineRename`. `isRenaming` here can be
-        // stale after Reset Name, cancel, or another row taking the rename.
-        commitCurrentDraft(restoreListFocus: false)
+        suppressBlurCommit = true
+        commitBlur(renameDraft)
     }
 }
