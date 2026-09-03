@@ -560,6 +560,194 @@ struct AppModelTests {
         model.unarchive(session)
         #expect(model.pinnedProjects().map(\.name) == ["kept"])
     }
+
+    @Test @MainActor
+    func customNameShowsInTitleAndSearch() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+
+        #expect(model.title(for: session) == "CLI summary")
+        model.rename(session, to: "Auth rewrite")
+        #expect(model.title(for: session) == "Auth rewrite")
+        #expect(model.hasCustomName(session))
+
+        model.searchText = "Auth"
+        #expect(model.sidebarSessions.map(\.id) == ["s1"])
+        model.searchText = "rewrite"
+        #expect(model.sidebarSessions.map(\.id) == ["s1"])
+        model.searchText = "no-such-name"
+        #expect(model.sidebarSessions.isEmpty)
+    }
+
+    @Test @MainActor
+    func customNamePersistsAcrossRelaunch() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.rename(session, to: "Auth rewrite")
+
+        let relaunchedSettings = AppSettings(defaults: fixture.defaults)
+        relaunchedSettings.executablePath = fixture.executable.path
+        let relaunched = AppModel(
+            settings: relaunchedSettings,
+            store: fixture.store,
+            trashConversation: { _ in },
+            presentError: { _ in }
+        )
+        defer { relaunched.closeAllTabsAndWait() }
+        let again = try #require(relaunched.store.sessions.first)
+        #expect(relaunched.title(for: again) == "Auth rewrite")
+        #expect(relaunched.hasCustomName(again))
+        relaunched.searchText = "Auth"
+        #expect(relaunched.sidebarSessions.map(\.id) == ["s1"])
+    }
+
+    @Test @MainActor
+    func customNameSurvivesCLISummaryRewrite() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = "/Users/someone/Documents/project"
+        try fixture.writeListedSession(id: "s1", cwd: cwd, summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.rename(session, to: "Auth rewrite")
+
+        try fixture.writeListedSession(id: "s1", cwd: cwd, summary: "Totally new CLI summary")
+        await fixture.store.reload()
+
+        let rewritten = try #require(model.store.sessions.first)
+        #expect(rewritten.summary == "Totally new CLI summary")
+        #expect(rewritten.title == "Totally new CLI summary")
+        #expect(model.title(for: rewritten) == "Auth rewrite")
+        model.searchText = "Auth"
+        #expect(model.sidebarSessions.map(\.id) == ["s1"])
+    }
+
+    @Test @MainActor
+    func resetNameRestoresCLISummary() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.rename(session, to: "Auth rewrite")
+        model.resetName(session)
+        #expect(model.title(for: session) == "CLI summary")
+        #expect(!model.hasCustomName(session))
+        #expect(fixture.settings.conversationNames.isEmpty)
+    }
+
+    @Test @MainActor
+    func whitespaceRenameClearsTheCustomName() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.rename(session, to: "Auth rewrite")
+        model.rename(session, to: "  \n\t ")
+        #expect(model.title(for: session) == "CLI summary")
+        #expect(!model.hasCustomName(session))
+
+        model.rename(session, to: "Auth rewrite")
+        model.rename(session, to: "")
+        #expect(model.title(for: session) == "CLI summary")
+        #expect(fixture.settings.conversationNames.isEmpty)
+    }
+
+    @Test @MainActor
+    func customNameIsTheTabLabel() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        try fixture.writeListedSession(id: "s1", cwd: cwd.path, summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.rename(session, to: "Auth rewrite")
+        model.open(session)
+        let tab = try #require(model.selectedTab)
+        #expect(model.title(for: tab) == "Auth rewrite")
+    }
+
+    @Test @MainActor
+    func namedEmptySessionStaysListed() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "", messages: 0)
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        #expect(model.sidebarSessions.isEmpty)
+
+        model.rename(session, to: "Keep me")
+        #expect(model.sidebarSessions.map(\.id) == ["s1"])
+        #expect(model.title(for: session) == "Keep me")
+    }
+
+    @Test @MainActor
+    func deletingAConversationDropsItsName() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model(trashConversation: { _ in })
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.rename(session, to: "Auth rewrite")
+        #expect(model.deleteConversation(session))
+        #expect(fixture.settings.conversationNames.isEmpty)
+    }
+
+    @Test @MainActor
+    func namesDoNotCollideAcrossCopiedSessionIDs() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "same", cwd: "/Users/someone/Documents/one", summary: "One")
+        try fixture.writeListedSession(
+            id: "same", cwd: "/Users/someone/Documents/two", summary: "Two")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let one = try #require(model.store.sessions.first { $0.cwd.hasSuffix("/one") })
+        let two = try #require(model.store.sessions.first { $0.cwd.hasSuffix("/two") })
+        model.rename(one, to: "Alpha")
+        #expect(model.title(for: one) == "Alpha")
+        #expect(model.title(for: two) == "Two")
+    }
 }
 
 private enum TestFailure: Error {
@@ -577,6 +765,7 @@ private final class ModelFixture {
     let grokHome: URL
     let executable: URL
     let socketURL: URL
+    let defaults: UserDefaults
     let settings: AppSettings
     let store: SessionStore
 
@@ -592,7 +781,7 @@ private final class ModelFixture {
         executable = try makeExecutable(in: root, body: script)
         socketURL = URL(fileURLWithPath: "/tmp/s-\(UUID().uuidString.prefix(8)).sock")
         defaultsName = "SigilAppTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: defaultsName)!
+        defaults = UserDefaults(suiteName: defaultsName)!
         settings = AppSettings(defaults: defaults)
         settings.executablePath = executable.path
         store = SessionStore(root: grokHome.appendingPathComponent("sessions"))

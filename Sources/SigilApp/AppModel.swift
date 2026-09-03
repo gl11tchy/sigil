@@ -132,12 +132,14 @@ final class AppModel {
     var scopeToCurrentFolder = false
     /// Recents and Projects hide archived chats; this shows only those.
     var showingArchived = false
+    /// Session key (`id` + cwd) of the row being renamed inline. Nil when idle.
+    var renamingSessionKey: String?
 
     /// Conversations for the sidebar: newest first, one-shot noise filtered out,
     /// optionally scoped to the folder the current tab is working in. Archived
     /// chats are hidden unless `showingArchived` is on.
     var sidebarSessions: [GrokSession] {
-        var result = store.search(searchText)
+        var result = store.search(searchText) { title(for: $0) }
         if !settings.showEmptySessions {
             // A session you have open is always worth listing, even before the CLI
             // has written a summary for it. Otherwise the row marking the
@@ -162,10 +164,12 @@ final class AppModel {
         return result
     }
 
-    /// A session worth listing: it has a summary, or more than the opening exchange.
+    /// A session worth listing: it has a summary, a name the user chose, or more
+    /// than the opening exchange.
     private func isReal(_ session: GrokSession) -> Bool {
         !session.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || session.messageCount > 2
+            || hasCustomName(session)
     }
 
     func isOpen(_ session: GrokSession) -> Bool {
@@ -333,7 +337,7 @@ final class AppModel {
         settings.focusedProjectPath = ""
     }
 
-    /// Drops pins and archives whose conversations are gone, after a successful scan.
+    /// Drops pins, archives, and names whose conversations are gone, after a successful scan.
     func pruneMissingPins() {
         guard !store.isLoading, store.loadError == nil else { return }
         let remainingPins = pruningMissing(settings.pinnedConversations)
@@ -347,6 +351,10 @@ final class AppModel {
         let remainingArchives = pruningMissing(settings.archivedConversations)
         if remainingArchives != settings.archivedConversations {
             settings.archivedConversations = remainingArchives
+        }
+        let remainingNames = pruningMissingNames(settings.conversationNames)
+        if remainingNames != settings.conversationNames {
+            settings.conversationNames = remainingNames
         }
         if !settings.focusedProjectPath.isEmpty, focusedProject == nil {
             settings.focusedProjectPath = ""
@@ -367,6 +375,13 @@ final class AppModel {
         }
     }
 
+    private func pruningMissingNames(_ names: [ConversationName]) -> [ConversationName] {
+        names.filter { record in
+            store.sessions.contains { $0.id == record.sessionID && samePath($0.cwd, record.cwd) }
+                || tabs.contains { tabMatches($0, sessionID: record.sessionID, cwd: record.cwd) }
+        }
+    }
+
     /// The deleted conversation still sits in `store` until the next scan.
     private func dropOrphanedProjectPin(for session: GrokSession) {
         let othersRemain =
@@ -378,18 +393,88 @@ final class AppModel {
         }
     }
 
+    /// Sidebar, tab, tooltip, and search label. A user-chosen name wins over the CLI summary.
+    func title(for session: GrokSession) -> String {
+        ConversationNaming.displayedTitle(for: session, customName: customName(for: session))
+    }
+
+    func customName(for session: GrokSession) -> String? {
+        ConversationNaming.name(
+            for: session, in: settings.conversationNames, samePath: samePath)
+    }
+
+    func hasCustomName(_ session: GrokSession) -> Bool {
+        customName(for: session) != nil
+    }
+
+    /// Empty or whitespace clears the override so the CLI summary shows again.
+    func rename(_ session: GrokSession, to raw: String) {
+        settings.conversationNames = ConversationNaming.setting(
+            raw, on: session, onto: settings.conversationNames, samePath: samePath)
+        applyNameToOpenTabs(session)
+    }
+
+    func resetName(_ session: GrokSession) {
+        if renamingSessionKey == sessionKey(session) {
+            renamingSessionKey = nil
+        }
+        settings.conversationNames = ConversationNaming.removing(
+            session, from: settings.conversationNames, samePath: samePath)
+        applyNameToOpenTabs(session)
+    }
+
+    func beginRename(_ session: GrokSession) {
+        isSidebarVisible = true
+        renamingSessionKey = sessionKey(session)
+    }
+
+    func cancelRename() {
+        renamingSessionKey = nil
+    }
+
+    func commitRename(_ session: GrokSession, to raw: String) {
+        rename(session, to: raw)
+        if renamingSessionKey == sessionKey(session) {
+            renamingSessionKey = nil
+        }
+    }
+
+    /// The conversation on screen, when the store knows it. Menu-bar Rename uses this.
+    func sessionForSelectedTab() -> GrokSession? {
+        guard let tab = selectedTab, let id = tab.sessionID else { return nil }
+        return store.sessions.first {
+            $0.id == id && samePath($0.cwd, tab.workingDirectory.path)
+        }
+    }
+
     /// A tab's label. New sessions start out named after their folder; once the CLI
-    /// writes a summary for them, the store supplies the real conversation name.
+    /// writes a summary for them, the store supplies the conversation name. A
+    /// user-chosen name wins even when the CLI has not written a summary yet.
     func title(for tab: TerminalTab) -> String {
         if let id = tab.sessionID,
             let session = store.sessions.first(where: {
                 $0.id == id && samePath($0.cwd, tab.workingDirectory.path)
-            }),
-            !session.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            })
         {
-            return session.title
+            if hasCustomName(session) { return title(for: session) }
+            if !session.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return session.title
+            }
         }
         return tab.title
+    }
+
+    private func applyNameToOpenTabs(_ session: GrokSession) {
+        let nextTitle: String?
+        if hasCustomName(session) {
+            nextTitle = title(for: session)
+        } else {
+            let summary = session.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+            nextTitle = summary.isEmpty ? nil : session.title
+        }
+        for tab in tabs where tabMatches(tab, sessionID: session.id, cwd: session.cwd) {
+            tab.sessionTitle = nextTitle
+        }
     }
 
     // MARK: - Tabs
@@ -444,7 +529,7 @@ final class AppModel {
             themeName: settings.theme.grokThemeName
         )
         let tab = add(spec)
-        tab.sessionTitle = session.title
+        tab.sessionTitle = title(for: session)
     }
 
     @discardableResult
@@ -919,6 +1004,7 @@ final class AppModel {
             try trashConversation(session.directory)
             unpin(session)
             unarchive(session)
+            resetName(session)
             let removedIDs = Set(matchingTabs.map(\.id))
             for tab in matchingTabs where !stoppedTabs.contains(where: { $0.id == tab.id }) {
                 tabBridge?.noteTabClosed(id: tab.id)
@@ -973,7 +1059,7 @@ final class AppModel {
     func exportTranscript(_ session: GrokSession) {
         exportTranscript(
             sessionID: session.id,
-            title: session.title,
+            title: title(for: session),
             workingDirectory: URL(fileURLWithPath: session.cwd)
         )
     }

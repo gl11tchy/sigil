@@ -19,6 +19,7 @@ final class AppSettings {
         static let pinnedConversations = "sidebar.pinnedConversations"
         static let pinnedProjects = "sidebar.pinnedProjects"
         static let archivedConversations = "sidebar.archivedConversations"
+        static let conversationNames = "sidebar.conversationNames"
         static let isTabMessagingEnabled = "bridge.enabled"
         static let defaultDirectory = "session.defaultDirectory"
         static let openTabs = "session.openTabs"
@@ -80,6 +81,14 @@ final class AppSettings {
         didSet {
             if let data = try? JSONEncoder().encode(archivedConversations) {
                 defaults.set(data, forKey: Key.archivedConversations)
+            }
+        }
+    }
+    /// User-chosen conversation names. Identity is session id + working directory.
+    var conversationNames: [ConversationName] {
+        didSet {
+            if let data = try? JSONEncoder().encode(conversationNames) {
+                defaults.set(data, forKey: Key.conversationNames)
             }
         }
     }
@@ -159,6 +168,13 @@ final class AppSettings {
             archivedConversations = decoded
         } else {
             archivedConversations = []
+        }
+        if let data = defaults.data(forKey: Key.conversationNames),
+            let decoded = try? JSONDecoder().decode([ConversationName].self, from: data)
+        {
+            conversationNames = decoded
+        } else {
+            conversationNames = []
         }
         isTabMessagingEnabled = defaults.bool(forKey: Key.isTabMessagingEnabled)
         defaultDirectory =

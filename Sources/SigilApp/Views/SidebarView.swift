@@ -1,6 +1,12 @@
 import SigilKit
 import SwiftUI
 
+private enum SidebarFocus: Hashable {
+    case search
+    case list
+    case rename
+}
+
 /// The thread viewer: every Grok Build conversation on this machine.
 ///
 /// Recents is the time-ordered list. Projects is the same list grouped by
@@ -9,21 +15,21 @@ import SwiftUI
 /// header is turned on. The list is the product: find one conversation in a
 /// history of hundreds, without leaving the keyboard.
 struct SidebarView: View {
-    private enum Focus: Hashable {
-        case search
-        case list
-    }
-
     @Bindable var model: AppModel
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @FocusState private var focus: Focus?
+    @FocusState private var focus: SidebarFocus?
     /// Arrow-key highlight. Separate from open/active so those markers stay
     /// about the tab strip, not about where the keys are.
     @State private var keyboardSelectionID: String?
     @State private var pendingDelete: GrokSession?
     @State private var hoveredMode: SidebarMode?
+    @State private var renameDraft = ""
+    @State private var showRenameAlert = false
     @Namespace private var modeUnderline
+
+    /// F2. Unicode private-use scalar for `NSF2FunctionKey`.
+    private static let f2 = KeyEquivalent(Character("\u{F705}"))
 
     var body: some View {
         VStack(spacing: 0) {
@@ -57,6 +63,9 @@ struct SidebarView: View {
             await Task.yield()
             focus = .search
         }
+        .task(id: model.renamingSessionKey) {
+            await prepareRename()
+        }
         .onChange(of: model.searchText) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.scopeToCurrentFolder) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.showingArchived) { _, _ in clampKeyboardSelection() }
@@ -64,6 +73,7 @@ struct SidebarView: View {
         .onChange(of: model.settings.showWorktreeSessions) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.settings.showSubagentSessions) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.settings.archivedConversations) { _, _ in clampKeyboardSelection() }
+        .onChange(of: model.settings.conversationNames) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.settings.pinnedProjects) { _, _ in clampKeyboardSelection() }
         .onChange(of: model.store.isLoading) { _, loading in
             if !loading { model.pruneMissingPins() }
@@ -83,6 +93,7 @@ struct SidebarView: View {
                 .foregroundStyle(palette.text)
                 .focused($focus, equals: .search)
                 .onKeyPress(.downArrow) { moveFocusToList() }
+                .onKeyPress(Self.f2) { _ in renameKeyboardSelection() }
                 .onKeyPress(.escape) { handleEscape() }
                 .onExitCommand { _ = handleEscape() }
             if !model.searchText.isEmpty {
@@ -201,13 +212,49 @@ struct SidebarView: View {
             .focusable()
             .focusEffectDisabled()
             .focused($focus, equals: .list)
-            .onKeyPress(.upArrow) { moveKeyboardSelection(by: -1) }
-            .onKeyPress(.downArrow) { moveKeyboardSelection(by: 1) }
-            .onKeyPress(.return) { activateKeyboardSelection() }
+            .onKeyPress(.upArrow) {
+                if model.renamingSessionKey != nil { return .ignored }
+                return moveKeyboardSelection(by: -1)
+            }
+            .onKeyPress(.downArrow) {
+                if model.renamingSessionKey != nil { return .ignored }
+                return moveKeyboardSelection(by: 1)
+            }
+            .onKeyPress(.return) {
+                if model.renamingSessionKey != nil { return .ignored }
+                return activateKeyboardSelection()
+            }
+            .onKeyPress(Self.f2) { _ in renameKeyboardSelection() }
             .onKeyPress(.escape) { handleEscape() }
             .onChange(of: keyboardSelectionID) { _, id in
                 if let id { proxy.scrollTo(id, anchor: .center) }
             }
+            .onChange(of: model.renamingSessionKey) { _, id in
+                if let id { proxy.scrollTo(id, anchor: .center) }
+            }
+        }
+        .alert(
+            "Rename Conversation",
+            isPresented: Binding(
+                get: { showRenameAlert },
+                set: { newValue in
+                    showRenameAlert = newValue
+                    if !newValue { model.cancelRename() }
+                }
+            )
+        ) {
+            TextField("Name", text: $renameDraft)
+            Button("Rename") {
+                if let session = renamingSession {
+                    model.commitRename(session, to: renameDraft)
+                } else {
+                    model.cancelRename()
+                }
+            }
+            if let session = renamingSession, model.hasCustomName(session) {
+                Button("Reset Name") { model.resetName(session) }
+            }
+            Button("Cancel", role: .cancel) { model.cancelRename() }
         }
     }
 
@@ -290,23 +337,36 @@ struct SidebarView: View {
     private func sessionRow(_ session: GrokSession, showsProject: Bool) -> some View {
         SessionRow(
             session: session,
+            title: model.title(for: session),
             state: state(of: session),
             activity: model.activity(of: session),
             isPinned: model.isPinned(session),
             isArchived: model.isArchived(session),
             isKeyboardSelected: model.sessionKey(session) == keyboardSelectionID,
+            isRenaming: model.renamingSessionKey == model.sessionKey(session),
+            hasCustomName: model.hasCustomName(session),
             showsProject: showsProject,
             open: {
                 keyboardSelectionID = model.sessionKey(session)
                 model.open(session)
             },
             togglePin: { model.togglePin(session) },
-            toggleArchive: { model.toggleArchive(session) }
+            toggleArchive: { model.toggleArchive(session) },
+            beginRename: { beginInlineRename(session) },
+            commitRename: { model.commitRename(session, to: $0) },
+            cancelRename: { model.cancelRename() },
+            resetName: { model.resetName(session) },
+            focus: $focus
         )
         .id(model.sessionKey(session))
         .contextMenu {
             Button(model.isPinned(session) ? "Unpin" : "Pin") { model.togglePin(session) }
             Button(model.isArchived(session) ? "Unarchive" : "Archive") { model.toggleArchive(session) }
+            Divider()
+            Button("Rename") { beginInlineRename(session) }
+            if model.hasCustomName(session) {
+                Button("Reset Name") { model.resetName(session) }
+            }
             Divider()
             Button("Open in New Tab") { model.open(session) }
             Divider()
@@ -428,12 +488,63 @@ struct SidebarView: View {
     }
 
     private func handleEscape() -> KeyPress.Result {
+        if model.renamingSessionKey != nil {
+            model.cancelRename()
+            focus = .list
+            return .handled
+        }
         if !model.searchText.isEmpty {
             model.searchText = ""
             return .handled
         }
         focus = nil
         return .handled
+    }
+
+    private func beginInlineRename(_ session: GrokSession) {
+        keyboardSelectionID = model.sessionKey(session)
+        model.beginRename(session)
+        focus = .rename
+    }
+
+    private func renameKeyboardSelection() -> KeyPress.Result {
+        guard let id = keyboardSelectionID, let session = session(for: id) else {
+            return .ignored
+        }
+        beginInlineRename(session)
+        return .handled
+    }
+
+    private var renamingSession: GrokSession? {
+        guard let key = model.renamingSessionKey else { return nil }
+        return sessionAnywhere(for: key)
+    }
+
+    private func sessionAnywhere(for key: String) -> GrokSession? {
+        session(for: key)
+            ?? model.store.sessions.first { model.sessionKey($0) == key }
+    }
+
+    @MainActor
+    private func prepareRename() async {
+        guard let key = model.renamingSessionKey else {
+            showRenameAlert = false
+            return
+        }
+        guard let session = sessionAnywhere(for: key) else {
+            model.cancelRename()
+            showRenameAlert = false
+            return
+        }
+        renameDraft = model.title(for: session)
+        await Task.yield()
+        if visibleRowIDs().contains(key) {
+            keyboardSelectionID = key
+            showRenameAlert = false
+            focus = .rename
+        } else {
+            showRenameAlert = true
+        }
     }
 
     private func moveFocusToList() -> KeyPress.Result {
@@ -691,27 +802,33 @@ private struct SessionRow: View {
     }
 
     let session: GrokSession
+    let title: String
     let state: State
     let activity: TerminalTab.Activity?
     let isPinned: Bool
     let isArchived: Bool
     let isKeyboardSelected: Bool
+    let isRenaming: Bool
+    let hasCustomName: Bool
     let showsProject: Bool
     let open: () -> Void
     let togglePin: () -> Void
     let toggleArchive: () -> Void
+    let beginRename: () -> Void
+    let commitRename: (String) -> Void
+    let cancelRename: () -> Void
+    let resetName: () -> Void
+    @FocusState.Binding var focus: SidebarFocus?
 
     @Environment(\.palette) private var palette
     @SwiftUI.State private var isHovering = false
+    @SwiftUI.State private var renameDraft = ""
+    @SwiftUI.State private var suppressBlurCommit = false
 
     var body: some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.title)
-                    .font(.system(size: 12, weight: state == .active ? .medium : .regular))
-                    .foregroundStyle(palette.text)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                titleLine
                 Text(subtitle)
                     .font(.system(size: 9.5, design: .monospaced))
                     .foregroundStyle(palette.textFaint)
@@ -719,7 +836,7 @@ private struct SessionRow: View {
                     .truncationMode(.middle)
             }
             Spacer(minLength: 8)
-            if let activity, activity == .working {
+            if let activity, activity == .working, !isRenaming {
                 StatusDot(activity: activity)
             }
         }
@@ -740,22 +857,53 @@ private struct SessionRow: View {
         .overlay(alignment: .topTrailing) { trailingOverlay }
         .padding(.horizontal, 6)
         .contentShape(Rectangle())
-        .onTapGesture(perform: open)
+        .onTapGesture { if !isRenaming { open() } }
         .onHover { isHovering = $0 }
         .help(
-            "\(session.title)\n\(session.displayPath)\n"
+            "\(title)\n\(session.displayPath)\n"
                 + "\(session.messageCount) messages · \(session.updatedAt.longRelative)"
         )
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: isRenaming ? .contain : .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel(
-            "\(session.title), \(session.projectName), \(session.updatedAt.longRelative)"
+            "\(title), \(session.projectName), \(session.updatedAt.longRelative)"
                 + (isPinned ? ", pinned" : "")
                 + (isArchived ? ", archived" : "")
         )
         .accessibilityAction(named: isPinned ? "Unpin" : "Pin") { togglePin() }
         .accessibilityAction(named: isArchived ? "Unarchive" : "Archive") { toggleArchive() }
+        .accessibilityAction(named: "Rename") { beginRename() }
+        .accessibilityAction(named: "Reset Name") {
+            if hasCustomName { resetName() }
+        }
         .accessibilityAction { open() }
+        .task(id: isRenaming) { await focusRenameFieldIfNeeded() }
+    }
+
+    @ViewBuilder
+    private var titleLine: some View {
+        if isRenaming {
+            TextField(session.title, text: $renameDraft)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, weight: state == .active ? .medium : .regular))
+                .foregroundStyle(palette.text)
+                .focused($focus, equals: .rename)
+                .onSubmit { commitCurrentDraft(restoreListFocus: true) }
+                .onKeyPress(.escape) {
+                    abandonRename()
+                    return .handled
+                }
+                .onExitCommand { abandonRename() }
+                .onChange(of: focus) { _, newFocus in
+                    if newFocus != .rename { commitOnBlurIfNeeded() }
+                }
+        } else {
+            Text(title)
+                .font(.system(size: 12, weight: state == .active ? .medium : .regular))
+                .foregroundStyle(palette.text)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
     }
 
     private var subtitle: String {
@@ -767,7 +915,9 @@ private struct SessionRow: View {
 
     @ViewBuilder
     private var trailingOverlay: some View {
-        if isHovering || isKeyboardSelected {
+        if isRenaming {
+            EmptyView()
+        } else if isHovering || isKeyboardSelected {
             HStack(spacing: 0) {
                 LinearGradient(
                     colors: [fill.opacity(0), fill],
@@ -823,6 +973,33 @@ private struct SessionRow: View {
 
     private var fill: Color {
         if state == .active { return palette.selected }
-        return (isHovering || isKeyboardSelected) ? palette.raised : .clear
+        return (isHovering || isKeyboardSelected || isRenaming) ? palette.raised : .clear
+    }
+
+    @MainActor
+    private func focusRenameFieldIfNeeded() async {
+        guard isRenaming else { return }
+        suppressBlurCommit = true
+        renameDraft = title
+        await Task.yield()
+        focus = .rename
+        suppressBlurCommit = false
+    }
+
+    private func commitCurrentDraft(restoreListFocus: Bool) {
+        suppressBlurCommit = true
+        commitRename(renameDraft)
+        if restoreListFocus { focus = .list }
+    }
+
+    private func abandonRename() {
+        suppressBlurCommit = true
+        cancelRename()
+        focus = .list
+    }
+
+    private func commitOnBlurIfNeeded() {
+        guard isRenaming, !suppressBlurCommit else { return }
+        commitCurrentDraft(restoreListFocus: false)
     }
 }

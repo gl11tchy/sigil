@@ -22,6 +22,10 @@ By gl11tchy.
   reopen it; if it is already open, the app moves to that tab. Workflow and
   subagent children stay off the list unless you turn them on in Settings. They
   still run in the background.
+- **Rename.** Name a conversation from the row's context menu, `F2` in the
+  thread list, or `⌘⇧R` for the session on screen. The name is what the sidebar,
+  tabs, and search use, and it survives the CLI rewriting its own summary.
+  Reset Name, or a blank rename, brings that summary back.
 - **Pins.** Hover a row and pin a chat. Pinned chats stay at the top of Recents
   and Projects, in the order you pinned them. In Projects, hover a folder name
   to pin the folder; pinned folders stay at the top of that sort.
@@ -79,9 +83,10 @@ terminal itself.
 | `⌘B` | Hide or show the thread list |
 | `⌘+` / `⌘-` / `⌘0` | Font size |
 | `⌘R` | Reload the conversation list |
+| `⌘⇧R` | Rename the conversation on screen |
 | `⌘,` | Settings |
 
-In the thread list, `↑` and `↓` move the selection and `Return` opens it.
+In the thread list, `↑` and `↓` move the selection, `Return` opens it, and `F2` renames it.
 
 ## Requirements
 

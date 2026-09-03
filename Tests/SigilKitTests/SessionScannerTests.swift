@@ -65,6 +65,24 @@ struct SessionScannerTests {
         #expect(counter.count == 2)
     }
 
+    @Test func matchesDisplayedTitleWithoutRequiringCLISummary() {
+        let session = GrokSession(
+            id: "s1",
+            cwd: "/tmp/project",
+            summary: "CLI summary",
+            createdAt: Date(timeIntervalSince1970: 1),
+            updatedAt: Date(timeIntervalSince1970: 1),
+            messageCount: 4,
+            modelID: nil,
+            agentName: nil,
+            reasoningEffort: nil,
+            directory: URL(fileURLWithPath: "/tmp/project/s1")
+        )
+        #expect(SessionScanner.matches(session, query: "Auth", displayedTitle: "Auth rewrite"))
+        #expect(!SessionScanner.matches(session, query: "Auth"))
+        #expect(SessionScanner.matches(session, query: "project"))
+    }
+
     @Test func sessionKindIsReadFromSummary() throws {
         let fixture = try ScannerFixture()
         defer { fixture.tearDown() }

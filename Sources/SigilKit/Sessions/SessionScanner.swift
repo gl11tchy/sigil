@@ -184,12 +184,17 @@ enum SessionScanner: Sendable {
         return lhs.id < rhs.id
     }
 
-    static func matches(_ session: GrokSession, query: String) -> Bool {
+    static func matches(
+        _ session: GrokSession,
+        query: String,
+        displayedTitle: String? = nil
+    ) -> Bool {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return true }
         let needle = fold(trimmed)
-        return fold(session.title).contains(needle)
-            || fold(session.projectName).contains(needle)
+        if fold(displayedTitle ?? session.title).contains(needle) { return true }
+        if displayedTitle != nil, fold(session.title).contains(needle) { return true }
+        return fold(session.projectName).contains(needle)
             || fold(session.cwd).contains(needle)
     }
 
