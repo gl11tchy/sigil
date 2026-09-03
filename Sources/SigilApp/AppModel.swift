@@ -149,8 +149,8 @@ final class AppModel {
     var renameAlertDidCommit = false
     var preparedRenameKey: String?
     var preparedRenameSurface: RenameSurface = .none
-    /// False while the inline field is off-screen (LazyVStack) or the sidebar is gone.
-    var renameFieldMounted = false
+    /// Session key of the inline field currently in the tree. Nil if unmounted.
+    var renameFieldMountedKey: String?
     /// Bumped on every mount/unmount so a stale blur task cannot commit after remount.
     var renameFieldMountGeneration = 0
     /// Select-all only for a fresh beginRename (F2, ⌘⇧R, row menu). Restore must not.
@@ -479,7 +479,7 @@ final class AppModel {
         renameAlertDidCommit = false
         preparedRenameKey = nil
         preparedRenameSurface = .none
-        renameFieldMounted = false
+        renameFieldMountedKey = nil
         renameFieldMountGeneration += 1
         renameSelectAllPending = false
     }
@@ -507,10 +507,24 @@ final class AppModel {
         cancelRename()
     }
 
-    func noteRenameFieldMounted(_ mounted: Bool) {
-        if renameFieldMounted == mounted { return }
-        renameFieldMounted = mounted
-        renameFieldMountGeneration += 1
+    func noteRenameFieldMounted(_ mounted: Bool, key: String) {
+        if mounted {
+            guard Self.shouldApplyRenameFieldMount(
+                mountKey: key,
+                activeKey: renamingSessionKey,
+                mountedKey: renameFieldMountedKey
+            ) else { return }
+            renameFieldMountedKey = key
+            renameFieldMountGeneration += 1
+        } else {
+            guard Self.shouldApplyRenameFieldUnmount(
+                unmountKey: key,
+                activeKey: renamingSessionKey,
+                mountedKey: renameFieldMountedKey
+            ) else { return }
+            renameFieldMountedKey = nil
+            renameFieldMountGeneration += 1
+        }
     }
 
     func consumeRenameSelectAll() -> Bool {
@@ -545,7 +559,7 @@ final class AppModel {
                     sessionKey($0) == sessionKey(session)
                 },
                 sidebarVisible: isSidebarVisible,
-                fieldMounted: renameFieldMounted,
+                fieldMounted: renameFieldMountedKey == sessionKey(session),
                 expectedGeneration: mountGeneration,
                 currentGeneration: renameFieldMountGeneration
             )
@@ -566,6 +580,30 @@ final class AppModel {
         stillRenaming: Bool
     ) -> Bool {
         !isCancelled && sidebarVisible && !didCommit && stillRenaming
+    }
+
+    /// The live rename's field may mark itself mounted even if another row
+    /// still thinks it owns the flag.
+    static func shouldApplyRenameFieldMount(
+        mountKey: String, activeKey: String?, mountedKey: String?
+    ) -> Bool {
+        mountKey == activeKey && mountedKey != mountKey
+    }
+
+    /// Ignore unmounts that are not for the active key, or that do not match
+    /// the field currently tracked as mounted.
+    static func shouldApplyRenameFieldUnmount(
+        unmountKey: String, activeKey: String?, mountedKey: String?
+    ) -> Bool {
+        unmountKey == activeKey && mountedKey == unmountKey
+    }
+
+    static func renameRowUsesButtonTrait(isRenaming: Bool) -> Bool {
+        !isRenaming
+    }
+
+    static func renameRowOffersResetName(hasCustomName: Bool) -> Bool {
+        hasCustomName
     }
 
     static func shouldCommitInlineBlur(

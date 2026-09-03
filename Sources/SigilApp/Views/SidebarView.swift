@@ -358,7 +358,7 @@ struct SidebarView: View {
             commitBlur: { model.commitInlineBlur(session, to: $0, mountGeneration: $1) },
             cancelRename: { model.cancelRename() },
             resetName: { model.resetName(session) },
-            noteMounted: { model.noteRenameFieldMounted($0) },
+            noteMounted: { model.noteRenameFieldMounted($0, key: model.sessionKey(session)) },
             mountGeneration: { model.renameFieldMountGeneration },
             consumeSelectAll: { model.consumeRenameSelectAll() },
             clearSelectAll: { model.clearRenameSelectAllPending() },
@@ -944,7 +944,12 @@ private struct SessionRow: View {
                 + "\(session.messageCount) messages · \(session.updatedAt.longRelative)"
         )
         .accessibilityElement(children: isRenaming ? .contain : .combine)
-        .accessibilityAddTraits(.isButton)
+        .modifier(
+            SessionRowActivateTrait(
+                isButton: AppModel.renameRowUsesButtonTrait(isRenaming: isRenaming),
+                open: open
+            )
+        )
         .accessibilityLabel(
             "\(title), \(session.projectName), \(session.updatedAt.longRelative)"
                 + (isPinned ? ", pinned" : "")
@@ -953,10 +958,12 @@ private struct SessionRow: View {
         .accessibilityAction(named: isPinned ? "Unpin" : "Pin") { togglePin() }
         .accessibilityAction(named: isArchived ? "Unarchive" : "Archive") { toggleArchive() }
         .accessibilityAction(named: "Rename") { beginRename() }
-        .accessibilityAction(named: "Reset Name") {
-            if hasCustomName { resetName() }
-        }
-        .accessibilityAction { open() }
+        .modifier(
+            SessionRowResetNameAction(
+                enabled: AppModel.renameRowOffersResetName(hasCustomName: hasCustomName),
+                resetName: resetName
+            )
+        )
         .onAppear { if isRenaming { noteMounted(true) } }
         .onDisappear {
             blurCommitTask?.cancel()
@@ -1122,6 +1129,39 @@ private struct SessionRow: View {
             await Task.yield()
             guard !Task.isCancelled else { return }
             commitBlur(draft, generation)
+        }
+    }
+}
+
+/// VoiceOver/full-keyboard activate opens the thread. While the inline
+/// rename field is up, the row is not a button — activate would steal
+/// focus and can blur-commit.
+private struct SessionRowActivateTrait: ViewModifier {
+    let isButton: Bool
+    let open: () -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isButton {
+            content
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { open() }
+        } else {
+            content
+        }
+    }
+}
+
+private struct SessionRowResetNameAction: ViewModifier {
+    let enabled: Bool
+    let resetName: () -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            content.accessibilityAction(named: "Reset Name") { resetName() }
+        } else {
+            content
         }
     }
 }

@@ -1098,7 +1098,7 @@ struct AppModelTests {
         defer { model.closeAllTabsAndWait() }
         let session = try #require(model.store.sessions.first)
         model.beginRename(session)
-        model.noteRenameFieldMounted(true)
+        model.noteRenameFieldMounted(true, key: model.sessionKey(session))
         model.commitInlineBlur(
             session, to: "Auth rewrite", mountGeneration: model.renameFieldMountGeneration)
         #expect(model.title(for: session) == "Auth rewrite")
@@ -1219,16 +1219,92 @@ struct AppModelTests {
         let session = try #require(model.store.sessions.first)
         model.beginRename(session)
         model.renameDraft = "Half"
-        model.noteRenameFieldMounted(true)
+        let key = model.sessionKey(session)
+        model.noteRenameFieldMounted(true, key: key)
         let generation = model.renameFieldMountGeneration
-        model.noteRenameFieldMounted(false)
-        model.noteRenameFieldMounted(true)
+        model.noteRenameFieldMounted(false, key: key)
+        #expect(model.renameFieldMountedKey == nil)
+        model.noteRenameFieldMounted(true, key: key)
+        #expect(model.renameFieldMountedKey == key)
         model.commitInlineBlur(
             session, to: model.renameDraft, mountGeneration: generation)
         #expect(!model.hasCustomName(session))
         #expect(model.renameDraft == "Half")
-        #expect(model.renamingSessionKey == model.sessionKey(session))
+        #expect(model.renamingSessionKey == key)
         #expect(model.title(for: session) == "CLI summary")
+    }
+
+    @Test @MainActor
+    func renameFieldMountAppliesOnlyForTheActiveKey() {
+        #expect(
+            AppModel.shouldApplyRenameFieldMount(mountKey: "b", activeKey: "b", mountedKey: nil))
+        #expect(
+            AppModel.shouldApplyRenameFieldMount(mountKey: "b", activeKey: "b", mountedKey: "a"))
+        #expect(
+            !AppModel.shouldApplyRenameFieldMount(mountKey: "b", activeKey: "b", mountedKey: "b"))
+        #expect(
+            !AppModel.shouldApplyRenameFieldMount(mountKey: "b", activeKey: "a", mountedKey: "a"))
+        #expect(
+            !AppModel.shouldApplyRenameFieldMount(mountKey: "b", activeKey: nil, mountedKey: nil))
+        #expect(
+            AppModel.shouldApplyRenameFieldUnmount(unmountKey: "a", activeKey: "a", mountedKey: "a"))
+        #expect(
+            !AppModel.shouldApplyRenameFieldUnmount(unmountKey: "a", activeKey: "b", mountedKey: "b"))
+        #expect(
+            !AppModel.shouldApplyRenameFieldUnmount(unmountKey: "a", activeKey: "b", mountedKey: "a"))
+        #expect(
+            !AppModel.shouldApplyRenameFieldUnmount(unmountKey: "a", activeKey: "a", mountedKey: nil))
+        #expect(
+            !AppModel.shouldApplyRenameFieldUnmount(unmountKey: "a", activeKey: nil, mountedKey: "a"))
+    }
+
+    @Test @MainActor
+    func switchingRenameToAnOnScreenRowKeepsTheNewFieldMounted() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = "/Users/someone/Documents/project"
+        try fixture.writeListedSession(id: "s-a", cwd: cwd, summary: "Alpha CLI")
+        try fixture.writeListedSession(id: "s-b", cwd: cwd, summary: "Beta CLI")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let sessionA = try #require(model.store.sessions.first { $0.id == "s-a" })
+        let sessionB = try #require(model.store.sessions.first { $0.id == "s-b" })
+        let keyA = model.sessionKey(sessionA)
+        let keyB = model.sessionKey(sessionB)
+
+        model.beginRename(sessionA)
+        model.noteRenameFieldMounted(true, key: keyA)
+        #expect(model.renameFieldMountedKey == keyA)
+        let generationAfterA = model.renameFieldMountGeneration
+
+        model.beginRename(sessionB)
+        // B is earlier in the list, so its field reports mounted before A unmounts.
+        model.noteRenameFieldMounted(true, key: keyB)
+        model.noteRenameFieldMounted(false, key: keyA)
+        #expect(model.renameFieldMountedKey == keyB)
+        #expect(model.renamingSessionKey == keyB)
+        #expect(model.renameFieldMountGeneration == generationAfterA + 1)
+
+        model.commitInlineBlur(
+            sessionA, to: "Alpha typed", mountGeneration: model.renameFieldMountGeneration)
+        #expect(!model.hasCustomName(sessionA))
+        #expect(model.renamingSessionKey == keyB)
+
+        model.commitInlineBlur(
+            sessionB, to: "Beta typed", mountGeneration: model.renameFieldMountGeneration)
+        #expect(model.title(for: sessionB) == "Beta typed")
+        #expect(model.renamingSessionKey == nil)
+        #expect(model.renameFieldMountedKey == nil)
+    }
+
+    @Test @MainActor
+    func renamingRowIsNotAButtonAndResetNameRequiresAnOverlay() {
+        #expect(AppModel.renameRowUsesButtonTrait(isRenaming: false))
+        #expect(!AppModel.renameRowUsesButtonTrait(isRenaming: true))
+        #expect(AppModel.renameRowOffersResetName(hasCustomName: true))
+        #expect(!AppModel.renameRowOffersResetName(hasCustomName: false))
     }
 
     @Test @MainActor
