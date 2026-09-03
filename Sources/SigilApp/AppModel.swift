@@ -151,6 +151,10 @@ final class AppModel {
     var preparedRenameSurface: RenameSurface = .none
     /// False while the inline field is off-screen (LazyVStack) or the sidebar is gone.
     var renameFieldMounted = false
+    /// Bumped on every mount/unmount so a stale blur task cannot commit after remount.
+    var renameFieldMountGeneration = 0
+    /// Select-all only for a fresh beginRename (F2, ⌘⇧R, row menu). Restore must not.
+    var renameSelectAllPending = false
 
     /// Conversations for the sidebar: newest first, one-shot noise filtered out,
     /// optionally scoped to the folder the current tab is working in. Archived
@@ -449,6 +453,7 @@ final class AppModel {
             showRenameAlert = false
             renameAlertSession = nil
             renameAlertDidCommit = false
+            renameSelectAllPending = true
         }
         renamingSessionKey = key
     }
@@ -475,6 +480,8 @@ final class AppModel {
         preparedRenameKey = nil
         preparedRenameSurface = .none
         renameFieldMounted = false
+        renameFieldMountGeneration += 1
+        renameSelectAllPending = false
     }
 
     /// Snapshot the live draft before `endRenameSession` can wipe it. The
@@ -501,7 +508,19 @@ final class AppModel {
     }
 
     func noteRenameFieldMounted(_ mounted: Bool) {
+        if renameFieldMounted == mounted { return }
         renameFieldMounted = mounted
+        renameFieldMountGeneration += 1
+    }
+
+    func consumeRenameSelectAll() -> Bool {
+        let pending = renameSelectAllPending
+        renameSelectAllPending = false
+        return pending
+    }
+
+    func clearRenameSelectAllPending() {
+        renameSelectAllPending = false
     }
 
     /// Inline editor only. No-ops if this row is no longer the active rename
@@ -514,7 +533,11 @@ final class AppModel {
 
     /// Blur of the inline field. Skipped when the row left the visible list,
     /// the sidebar is hidden (⌘B), or LazyVStack unmounted the field.
-    func commitInlineBlur(_ session: GrokSession, to raw: String) {
+    func commitInlineBlur(
+        _ session: GrokSession,
+        to raw: String,
+        mountGeneration: Int
+    ) {
         guard
             Self.shouldCommitInlineBlur(
                 keyMatches: renamingSessionKey == sessionKey(session),
@@ -522,7 +545,9 @@ final class AppModel {
                     sessionKey($0) == sessionKey(session)
                 },
                 sidebarVisible: isSidebarVisible,
-                fieldMounted: renameFieldMounted
+                fieldMounted: renameFieldMounted,
+                expectedGeneration: mountGeneration,
+                currentGeneration: renameFieldMountGeneration
             )
         else { return }
         commitRename(session, to: raw)
@@ -547,9 +572,20 @@ final class AppModel {
         keyMatches: Bool,
         rowVisible: Bool,
         sidebarVisible: Bool,
-        fieldMounted: Bool
+        fieldMounted: Bool,
+        expectedGeneration: Int,
+        currentGeneration: Int
     ) -> Bool {
         keyMatches && rowVisible && sidebarVisible && fieldMounted
+            && expectedGeneration == currentGeneration
+    }
+
+    static func shouldSelectRenameDraft(
+        selectAllPending: Bool,
+        isCancelled: Bool,
+        isRenaming: Bool
+    ) -> Bool {
+        selectAllPending && !isCancelled && isRenaming
     }
 
     static func shouldForcePromptRepresent(

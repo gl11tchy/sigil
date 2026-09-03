@@ -1034,22 +1034,32 @@ struct AppModelTests {
     func inlineBlurCommitsOnlyWhenKeyMatchesAndRowIsVisible() {
         #expect(
             AppModel.shouldCommitInlineBlur(
-                keyMatches: true, rowVisible: true, sidebarVisible: true, fieldMounted: true))
+                keyMatches: true, rowVisible: true, sidebarVisible: true, fieldMounted: true,
+                expectedGeneration: 1, currentGeneration: 1))
         #expect(
             !AppModel.shouldCommitInlineBlur(
-                keyMatches: true, rowVisible: false, sidebarVisible: true, fieldMounted: true))
+                keyMatches: true, rowVisible: false, sidebarVisible: true, fieldMounted: true,
+                expectedGeneration: 1, currentGeneration: 1))
         #expect(
             !AppModel.shouldCommitInlineBlur(
-                keyMatches: false, rowVisible: true, sidebarVisible: true, fieldMounted: true))
+                keyMatches: false, rowVisible: true, sidebarVisible: true, fieldMounted: true,
+                expectedGeneration: 1, currentGeneration: 1))
         #expect(
             !AppModel.shouldCommitInlineBlur(
-                keyMatches: false, rowVisible: false, sidebarVisible: true, fieldMounted: true))
+                keyMatches: false, rowVisible: false, sidebarVisible: true, fieldMounted: true,
+                expectedGeneration: 1, currentGeneration: 1))
         #expect(
             !AppModel.shouldCommitInlineBlur(
-                keyMatches: true, rowVisible: true, sidebarVisible: false, fieldMounted: true))
+                keyMatches: true, rowVisible: true, sidebarVisible: false, fieldMounted: true,
+                expectedGeneration: 1, currentGeneration: 1))
         #expect(
             !AppModel.shouldCommitInlineBlur(
-                keyMatches: true, rowVisible: true, sidebarVisible: true, fieldMounted: false))
+                keyMatches: true, rowVisible: true, sidebarVisible: true, fieldMounted: false,
+                expectedGeneration: 1, currentGeneration: 1))
+        #expect(
+            !AppModel.shouldCommitInlineBlur(
+                keyMatches: true, rowVisible: true, sidebarVisible: true, fieldMounted: true,
+                expectedGeneration: 1, currentGeneration: 2))
     }
 
     @Test @MainActor
@@ -1067,7 +1077,8 @@ struct AppModelTests {
         model.searchText = "no-such-name"
         #expect(model.sidebarSessions.isEmpty)
         #expect(model.renamingSessionKey == model.sessionKey(session))
-        model.commitInlineBlur(session, to: "Auth rewrite")
+        model.commitInlineBlur(
+            session, to: "Auth rewrite", mountGeneration: model.renameFieldMountGeneration)
         #expect(!model.hasCustomName(session))
         #expect(model.renamingSessionKey == model.sessionKey(session))
         #expect(model.title(for: session) == "CLI summary")
@@ -1088,7 +1099,8 @@ struct AppModelTests {
         let session = try #require(model.store.sessions.first)
         model.beginRename(session)
         model.noteRenameFieldMounted(true)
-        model.commitInlineBlur(session, to: "Auth rewrite")
+        model.commitInlineBlur(
+            session, to: "Auth rewrite", mountGeneration: model.renameFieldMountGeneration)
         #expect(model.title(for: session) == "Auth rewrite")
         #expect(model.renamingSessionKey == nil)
     }
@@ -1208,24 +1220,45 @@ struct AppModelTests {
         model.beginRename(session)
         model.renameDraft = "Half"
         model.noteRenameFieldMounted(true)
+        let generation = model.renameFieldMountGeneration
         model.noteRenameFieldMounted(false)
-        model.commitInlineBlur(session, to: model.renameDraft)
+        model.noteRenameFieldMounted(true)
+        model.commitInlineBlur(
+            session, to: model.renameDraft, mountGeneration: generation)
         #expect(!model.hasCustomName(session))
         #expect(model.renameDraft == "Half")
         #expect(model.renamingSessionKey == model.sessionKey(session))
-        model.noteRenameFieldMounted(true)
-        #expect(model.renameDraft == "Half")
         #expect(model.title(for: session) == "CLI summary")
     }
 
     @Test @MainActor
-    func renameSelectAllUsesTheSamePostYieldGateAsFocus() {
+    func selectAllIsOnlyPendingOnFreshBeginRename() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.beginRename(session)
+        #expect(model.renameSelectAllPending)
         #expect(
-            AppModel.shouldStealRenameFocusAfterYield(isCancelled: false, isRenaming: true))
+            AppModel.shouldSelectRenameDraft(
+                selectAllPending: true, isCancelled: false, isRenaming: true))
+        #expect(model.consumeRenameSelectAll())
+        #expect(!model.renameSelectAllPending)
+        #expect(!model.consumeRenameSelectAll())
+
+        model.beginRename(session)
+        #expect(!model.renameSelectAllPending)
+        model.renameDraft = "Typed"
+        model.clearRenameSelectAllPending()
         #expect(
-            !AppModel.shouldStealRenameFocusAfterYield(isCancelled: true, isRenaming: true))
-        #expect(
-            !AppModel.shouldStealRenameFocusAfterYield(isCancelled: false, isRenaming: false))
+            !AppModel.shouldSelectRenameDraft(
+                selectAllPending: false, isCancelled: false, isRenaming: true))
+        #expect(model.renameDraft == "Typed")
     }
 
     @Test @MainActor
@@ -1245,7 +1278,8 @@ struct AppModelTests {
         model.preparedRenameSurface = .inline
 
         model.isSidebarVisible = false
-        model.commitInlineBlur(session, to: model.renameDraft)
+        model.commitInlineBlur(
+            session, to: model.renameDraft, mountGeneration: model.renameFieldMountGeneration)
 
         #expect(model.renamingSessionKey == model.sessionKey(session))
         #expect(model.renameDraft == "Typed name")
@@ -1273,7 +1307,8 @@ struct AppModelTests {
         model.beginRename(session)
         model.renameDraft = "Changing it"
         model.isSidebarVisible = false
-        model.commitInlineBlur(session, to: "Changing it")
+        model.commitInlineBlur(
+            session, to: "Changing it", mountGeneration: model.renameFieldMountGeneration)
 
         #expect(model.hasCustomName(session))
         #expect(model.title(for: session) == "Auth rewrite")

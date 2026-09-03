@@ -355,10 +355,13 @@ struct SidebarView: View {
             toggleArchive: { model.toggleArchive(session) },
             beginRename: { beginInlineRename(session) },
             commitRename: { model.commitInlineRename(session, to: $0) },
-            commitBlur: { model.commitInlineBlur(session, to: $0) },
+            commitBlur: { model.commitInlineBlur(session, to: $0, mountGeneration: $1) },
             cancelRename: { model.cancelRename() },
             resetName: { model.resetName(session) },
             noteMounted: { model.noteRenameFieldMounted($0) },
+            mountGeneration: { model.renameFieldMountGeneration },
+            consumeSelectAll: { model.consumeRenameSelectAll() },
+            clearSelectAll: { model.clearRenameSelectAllPending() },
             renameDraft: $model.renameDraft,
             focus: $focus
         )
@@ -887,16 +890,20 @@ private struct SessionRow: View {
     let toggleArchive: () -> Void
     let beginRename: () -> Void
     let commitRename: (String) -> Void
-    let commitBlur: (String) -> Void
+    let commitBlur: (String, Int) -> Void
     let cancelRename: () -> Void
     let resetName: () -> Void
     let noteMounted: (Bool) -> Void
+    let mountGeneration: () -> Int
+    let consumeSelectAll: () -> Bool
+    let clearSelectAll: () -> Void
     @Binding var renameDraft: String
     @FocusState.Binding var focus: SidebarFocus?
 
     @Environment(\.palette) private var palette
     @SwiftUI.State private var isHovering = false
     @SwiftUI.State private var suppressBlurCommit = false
+    @SwiftUI.State private var blurCommitTask: Task<Void, Never>?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -951,7 +958,14 @@ private struct SessionRow: View {
         }
         .accessibilityAction { open() }
         .onAppear { if isRenaming { noteMounted(true) } }
-        .onDisappear { if isRenaming { noteMounted(false) } }
+        .onDisappear {
+            blurCommitTask?.cancel()
+            blurCommitTask = nil
+            if isRenaming {
+                noteMounted(false)
+                clearSelectAll()
+            }
+        }
         .onChange(of: isRenaming) { _, renaming in noteMounted(renaming) }
         .task(id: isRenaming) { await focusRenameFieldIfNeeded() }
     }
@@ -1077,7 +1091,9 @@ private struct SessionRow: View {
             suppressBlurCommit = false
             return
         }
-        selectRenameDraft()
+        if consumeSelectAll() {
+            selectRenameDraft()
+        }
         suppressBlurCommit = false
     }
 
@@ -1100,10 +1116,12 @@ private struct SessionRow: View {
     private func commitOnBlurIfNeeded() {
         guard !suppressBlurCommit else { return }
         let draft = renameDraft
-        Task {
+        let generation = mountGeneration()
+        blurCommitTask?.cancel()
+        blurCommitTask = Task {
             await Task.yield()
             guard !Task.isCancelled else { return }
-            commitBlur(draft)
+            commitBlur(draft, generation)
         }
     }
 }
