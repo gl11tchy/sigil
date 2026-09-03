@@ -14,7 +14,8 @@ public struct ConversationName: Codable, Equatable, Sendable {
     }
 }
 
-/// Overlay a remembered name on the CLI summary. Empty or whitespace clears it.
+/// Overlay a remembered name on the CLI summary. Empty, whitespace, or a
+/// submit equal to the CLI title clears it.
 public enum ConversationNaming {
     /// `nil` means no override: show the CLI summary again.
     public static func normalized(_ raw: String?) -> String? {
@@ -46,28 +47,24 @@ public enum ConversationNaming {
         name(sessionID: session.id, cwd: session.cwd, in: names, samePath: samePath)
     }
 
-    /// Empty or whitespace removes the override. Otherwise upserts the trimmed name.
-    public static func setting(
-        _ raw: String,
-        sessionID: String,
-        cwd: String,
-        onto names: [ConversationName],
-        samePath: (String, String) -> Bool
-    ) -> [ConversationName] {
-        var next = removing(sessionID: sessionID, cwd: cwd, from: names, samePath: samePath)
-        if let name = normalized(raw) {
-            next.insert(ConversationName(sessionID: sessionID, cwd: cwd, name: name), at: 0)
-        }
-        return next
-    }
-
+    /// Empty, whitespace, or a name equal to the CLI title (`session.title`)
+    /// removes the override. A matching submit with no overlay is a no-op.
+    /// Otherwise upserts the trimmed name.
     public static func setting(
         _ raw: String,
         on session: GrokSession,
         onto names: [ConversationName],
         samePath: (String, String) -> Bool
     ) -> [ConversationName] {
-        setting(raw, sessionID: session.id, cwd: session.cwd, onto: names, samePath: samePath)
+        guard let submitted = normalized(raw), submitted != session.title else {
+            return removing(session, from: names, samePath: samePath)
+        }
+        var next = removing(session, from: names, samePath: samePath)
+        next.insert(
+            ConversationName(sessionID: session.id, cwd: session.cwd, name: submitted),
+            at: 0
+        )
+        return next
     }
 
     public static func removing(

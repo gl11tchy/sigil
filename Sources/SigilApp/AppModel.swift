@@ -407,7 +407,8 @@ final class AppModel {
         customName(for: session) != nil
     }
 
-    /// Empty or whitespace clears the override so the CLI summary shows again.
+    /// Empty, whitespace, or a name equal to the CLI title clears the override
+    /// (a matching submit with no overlay is a no-op). Otherwise stores the name.
     func rename(_ session: GrokSession, to raw: String) {
         settings.conversationNames = ConversationNaming.setting(
             raw, on: session, onto: settings.conversationNames, samePath: samePath)
@@ -437,6 +438,12 @@ final class AppModel {
         if renamingSessionKey == sessionKey(session) {
             renamingSessionKey = nil
         }
+    }
+
+    /// The fallback rename alert may set `isPresented` to false before the
+    /// button action. Only cancel when that dismiss was not a completed commit.
+    static func shouldCancelRenameAlert(didCommit: Bool) -> Bool {
+        !didCommit
     }
 
     /// The conversation on screen, when the store knows it. Menu-bar Rename uses this.

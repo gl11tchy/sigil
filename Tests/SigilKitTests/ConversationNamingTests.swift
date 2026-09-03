@@ -78,6 +78,40 @@ struct ConversationNamingTests {
         #expect(decoded == names)
     }
 
+    @Test func matchingCLITitleDoesNotWriteAnOverlay() {
+        let session = session(id: "s1", cwd: "/tmp/project", summary: "CLI summary")
+        var names: [ConversationName] = []
+        names = ConversationNaming.setting("CLI summary", on: session, onto: names, samePath: ==)
+        #expect(names.isEmpty)
+        #expect(ConversationNaming.name(for: session, in: names, samePath: ==) == nil)
+
+        names = ConversationNaming.setting("  CLI summary  ", on: session, onto: names, samePath: ==)
+        #expect(names.isEmpty)
+    }
+
+    @Test func matchingCLITitleClearsAnExistingOverlay() {
+        let session = session(id: "s1", cwd: "/tmp/project", summary: "CLI summary")
+        var names = ConversationNaming.setting(
+            "Auth rewrite", on: session, onto: [], samePath: ==)
+        #expect(ConversationNaming.name(for: session, in: names, samePath: ==) == "Auth rewrite")
+
+        names = ConversationNaming.setting("CLI summary", on: session, onto: names, samePath: ==)
+        #expect(names.isEmpty)
+        #expect(
+            ConversationNaming.displayedTitle(
+                for: session,
+                customName: ConversationNaming.name(for: session, in: names, samePath: ==)
+            ) == "CLI summary")
+    }
+
+    @Test func untitledFallbackIsNotPinnedAsACustomName() {
+        let session = session(id: "s1", cwd: "/tmp/project", summary: "")
+        #expect(session.title == "Untitled session in project")
+        let names = ConversationNaming.setting(
+            session.title, on: session, onto: [], samePath: ==)
+        #expect(names.isEmpty)
+    }
+
     @Test func searchUsesTheDisplayedTitle() {
         let session = session(id: "s1", cwd: "/tmp/project", summary: "CLI summary")
         #expect(

@@ -26,6 +26,11 @@ struct SidebarView: View {
     @State private var hoveredMode: SidebarMode?
     @State private var renameDraft = ""
     @State private var showRenameAlert = false
+    /// Captured when the fallback alert is shown. The live `renamingSessionKey`
+    /// is not used to commit: SwiftUI often dismisses the alert (and the setter
+    /// would clear that key) before the button action runs.
+    @State private var renameAlertSession: GrokSession?
+    @State private var renameAlertDidCommit = false
     @Namespace private var modeUnderline
 
     /// F2. Unicode private-use scalar for `NSF2FunctionKey`.
@@ -239,22 +244,21 @@ struct SidebarView: View {
                 get: { showRenameAlert },
                 set: { newValue in
                     showRenameAlert = newValue
-                    if !newValue { model.cancelRename() }
+                    if !newValue, AppModel.shouldCancelRenameAlert(didCommit: renameAlertDidCommit) {
+                        model.cancelRename()
+                    }
                 }
-            )
-        ) {
+            ),
+            presenting: renameAlertSession
+        ) { session in
             TextField("Name", text: $renameDraft)
             Button("Rename") {
-                if let session = renamingSession {
-                    model.commitRename(session, to: renameDraft)
-                } else {
-                    model.cancelRename()
-                }
+                commitRenameAlert(session)
             }
-            if let session = renamingSession, model.hasCustomName(session) {
-                Button("Reset Name") { model.resetName(session) }
+            if model.hasCustomName(session) {
+                Button("Reset Name") { resetNameAlert(session) }
             }
-            Button("Cancel", role: .cancel) { model.cancelRename() }
+            Button("Cancel", role: .cancel) { cancelRenameAlert() }
         }
     }
 
@@ -515,14 +519,24 @@ struct SidebarView: View {
         return .handled
     }
 
-    private var renamingSession: GrokSession? {
-        guard let key = model.renamingSessionKey else { return nil }
-        return sessionAnywhere(for: key)
-    }
-
     private func sessionAnywhere(for key: String) -> GrokSession? {
         session(for: key)
             ?? model.store.sessions.first { model.sessionKey($0) == key }
+    }
+
+    private func commitRenameAlert(_ session: GrokSession) {
+        renameAlertDidCommit = true
+        model.commitRename(session, to: renameDraft)
+    }
+
+    private func resetNameAlert(_ session: GrokSession) {
+        renameAlertDidCommit = true
+        model.resetName(session)
+    }
+
+    private func cancelRenameAlert() {
+        renameAlertDidCommit = true
+        model.cancelRename()
     }
 
     @MainActor
@@ -540,9 +554,14 @@ struct SidebarView: View {
         await Task.yield()
         if visibleRowIDs().contains(key) {
             keyboardSelectionID = key
+            // Dismissing the fallback alert must not cancel an inline rename.
+            renameAlertDidCommit = true
+            renameAlertSession = nil
             showRenameAlert = false
             focus = .rename
         } else {
+            renameAlertDidCommit = false
+            renameAlertSession = session
             showRenameAlert = true
         }
     }

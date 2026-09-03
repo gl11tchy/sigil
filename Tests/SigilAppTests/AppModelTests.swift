@@ -748,6 +748,94 @@ struct AppModelTests {
         #expect(model.title(for: one) == "Alpha")
         #expect(model.title(for: two) == "Two")
     }
+
+    @Test @MainActor
+    func renamingToCLITitleDoesNotPinAnOverlay() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = "/Users/someone/Documents/project"
+        try fixture.writeListedSession(id: "s1", cwd: cwd, summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.rename(session, to: "CLI summary")
+        #expect(!model.hasCustomName(session))
+        #expect(fixture.settings.conversationNames.isEmpty)
+
+        try fixture.writeListedSession(id: "s1", cwd: cwd, summary: "Totally new CLI summary")
+        await fixture.store.reload()
+        let rewritten = try #require(model.store.sessions.first)
+        #expect(model.title(for: rewritten) == "Totally new CLI summary")
+    }
+
+    @Test @MainActor
+    func renamingBackToCLITitleClearsTheOverlay() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.rename(session, to: "Auth rewrite")
+        model.rename(session, to: "CLI summary")
+        #expect(!model.hasCustomName(session))
+        #expect(model.title(for: session) == "CLI summary")
+        #expect(fixture.settings.conversationNames.isEmpty)
+    }
+
+    @Test @MainActor
+    func commitRenameAfterCancelStillSavesTheCapturedSession() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.beginRename(session)
+        #expect(model.renamingSessionKey == model.sessionKey(session))
+
+        // SwiftUI often runs the alert's isPresented setter (cancel) before
+        // the Rename button action. The view commits the captured session.
+        let captured = session
+        model.cancelRename()
+        #expect(model.renamingSessionKey == nil)
+        model.commitRename(captured, to: "Auth rewrite")
+        #expect(model.title(for: session) == "Auth rewrite")
+        #expect(model.hasCustomName(session))
+        #expect(model.renamingSessionKey == nil)
+    }
+
+    @Test @MainActor
+    func dismissAfterCommitDoesNotClearASavedName() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.beginRename(session)
+        model.commitRename(session, to: "Auth rewrite")
+        model.cancelRename()
+        #expect(model.title(for: session) == "Auth rewrite")
+        #expect(model.hasCustomName(session))
+    }
+
+    @Test @MainActor
+    func renameAlertCancelOnDismissOnlyWhenUncommitted() {
+        #expect(AppModel.shouldCancelRenameAlert(didCommit: false))
+        #expect(!AppModel.shouldCancelRenameAlert(didCommit: true))
+    }
 }
 
 private enum TestFailure: Error {
