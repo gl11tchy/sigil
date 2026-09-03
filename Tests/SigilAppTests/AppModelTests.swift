@@ -968,6 +968,15 @@ struct AppModelTests {
                 nextSurface: .prompt,
                 resetDraft: true
             ))
+        #expect(
+            AppModel.shouldReconfigureRename(
+                previousKey: "s1",
+                previousSurface: .prompt,
+                nextKey: "s1",
+                nextSurface: .prompt,
+                resetDraft: false,
+                forceRepresent: true
+            ))
     }
 
     @Test @MainActor
@@ -1025,19 +1034,22 @@ struct AppModelTests {
     func inlineBlurCommitsOnlyWhenKeyMatchesAndRowIsVisible() {
         #expect(
             AppModel.shouldCommitInlineBlur(
-                keyMatches: true, rowVisible: true, sidebarVisible: true))
+                keyMatches: true, rowVisible: true, sidebarVisible: true, fieldMounted: true))
         #expect(
             !AppModel.shouldCommitInlineBlur(
-                keyMatches: true, rowVisible: false, sidebarVisible: true))
+                keyMatches: true, rowVisible: false, sidebarVisible: true, fieldMounted: true))
         #expect(
             !AppModel.shouldCommitInlineBlur(
-                keyMatches: false, rowVisible: true, sidebarVisible: true))
+                keyMatches: false, rowVisible: true, sidebarVisible: true, fieldMounted: true))
         #expect(
             !AppModel.shouldCommitInlineBlur(
-                keyMatches: false, rowVisible: false, sidebarVisible: true))
+                keyMatches: false, rowVisible: false, sidebarVisible: true, fieldMounted: true))
         #expect(
             !AppModel.shouldCommitInlineBlur(
-                keyMatches: true, rowVisible: true, sidebarVisible: false))
+                keyMatches: true, rowVisible: true, sidebarVisible: false, fieldMounted: true))
+        #expect(
+            !AppModel.shouldCommitInlineBlur(
+                keyMatches: true, rowVisible: true, sidebarVisible: true, fieldMounted: false))
     }
 
     @Test @MainActor
@@ -1075,9 +1087,145 @@ struct AppModelTests {
         defer { model.closeAllTabsAndWait() }
         let session = try #require(model.store.sessions.first)
         model.beginRename(session)
+        model.noteRenameFieldMounted(true)
         model.commitInlineBlur(session, to: "Auth rewrite")
         #expect(model.title(for: session) == "Auth rewrite")
         #expect(model.renamingSessionKey == nil)
+    }
+
+    @Test @MainActor
+    func capturedRenameCommitsTheDraftEvenIfCancelWipesItFirst() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.rename(session, to: "Auth rewrite")
+        model.beginRename(session)
+        model.renameDraft = "Keep this"
+        model.commitCapturedRename(session)
+        #expect(model.title(for: session) == "Keep this")
+
+        model.rename(session, to: "Auth rewrite")
+        model.beginRename(session)
+        model.renameDraft = "Keep this"
+        let snapshot = model.renameDraft
+        model.cancelRename()
+        #expect(model.renameDraft.isEmpty)
+        model.commitRename(session, to: snapshot)
+        #expect(model.title(for: session) == "Keep this")
+    }
+
+    @Test @MainActor
+    func deferredAlertCancelSkipsOnceRenameHasCommitted() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.beginRename(session)
+        model.renameDraft = "Keep this"
+        let pending = Task { await model.deferCancelRenameAlert() }
+        model.commitCapturedRename(session)
+        await pending.value
+        #expect(model.title(for: session) == "Keep this")
+        #expect(model.renamingSessionKey == nil)
+    }
+
+    @Test @MainActor
+    func deferredAlertCancelRunsWhenStillUncommitted() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.beginRename(session)
+        model.renameDraft = "Typed"
+        await model.deferCancelRenameAlert()
+        #expect(model.renamingSessionKey == nil)
+        #expect(model.renameDraft.isEmpty)
+        #expect(!model.hasCustomName(session))
+    }
+
+    @Test @MainActor
+    func deferredAlertCancelPolicy() {
+        #expect(
+            AppModel.shouldCancelRenameAlertAfterYield(
+                isCancelled: false, sidebarVisible: true, didCommit: false, stillRenaming: true))
+        #expect(
+            !AppModel.shouldCancelRenameAlertAfterYield(
+                isCancelled: false, sidebarVisible: true, didCommit: true, stillRenaming: true))
+        #expect(
+            !AppModel.shouldCancelRenameAlertAfterYield(
+                isCancelled: true, sidebarVisible: true, didCommit: false, stillRenaming: true))
+        #expect(
+            !AppModel.shouldCancelRenameAlertAfterYield(
+                isCancelled: false, sidebarVisible: false, didCommit: false, stillRenaming: true))
+        #expect(
+            !AppModel.shouldCancelRenameAlertAfterYield(
+                isCancelled: false, sidebarVisible: true, didCommit: false, stillRenaming: false))
+    }
+
+    @Test @MainActor
+    func forcePromptRepresentWhenKeyIsLiveAndRowIsHidden() {
+        #expect(
+            AppModel.shouldForcePromptRepresent(
+                isRenaming: true, rowVisible: false, sidebarVisible: true))
+        #expect(
+            !AppModel.shouldForcePromptRepresent(
+                isRenaming: true, rowVisible: true, sidebarVisible: true))
+        #expect(
+            !AppModel.shouldForcePromptRepresent(
+                isRenaming: false, rowVisible: false, sidebarVisible: true))
+        #expect(
+            !AppModel.shouldForcePromptRepresent(
+                isRenaming: true, rowVisible: false, sidebarVisible: false))
+    }
+
+    @Test @MainActor
+    func lazyUnmountBlurDoesNotCommitAHalfTypedName() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.beginRename(session)
+        model.renameDraft = "Half"
+        model.noteRenameFieldMounted(true)
+        model.noteRenameFieldMounted(false)
+        model.commitInlineBlur(session, to: model.renameDraft)
+        #expect(!model.hasCustomName(session))
+        #expect(model.renameDraft == "Half")
+        #expect(model.renamingSessionKey == model.sessionKey(session))
+        model.noteRenameFieldMounted(true)
+        #expect(model.renameDraft == "Half")
+        #expect(model.title(for: session) == "CLI summary")
+    }
+
+    @Test @MainActor
+    func renameSelectAllUsesTheSamePostYieldGateAsFocus() {
+        #expect(
+            AppModel.shouldStealRenameFocusAfterYield(isCancelled: false, isRenaming: true))
+        #expect(
+            !AppModel.shouldStealRenameFocusAfterYield(isCancelled: true, isRenaming: true))
+        #expect(
+            !AppModel.shouldStealRenameFocusAfterYield(isCancelled: false, isRenaming: false))
     }
 
     @Test @MainActor

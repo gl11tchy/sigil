@@ -1,3 +1,4 @@
+import AppKit
 import SigilKit
 import SwiftUI
 
@@ -68,6 +69,9 @@ struct SidebarView: View {
         .task(id: visibleRowIDs()) {
             clampKeyboardSelection()
             await prepareRename(resetDraft: false)
+        }
+        .task {
+            await restorePromptOnAppear()
         }
         .onChange(of: model.store.isLoading) { _, loading in
             if !loading { model.pruneMissingPins() }
@@ -238,7 +242,7 @@ struct SidebarView: View {
                     if !newValue,
                         AppModel.shouldCancelRenameAlert(didCommit: model.renameAlertDidCommit)
                     {
-                        model.cancelRename()
+                        Task { await model.deferCancelRenameAlert() }
                     }
                 }
             ),
@@ -354,6 +358,7 @@ struct SidebarView: View {
             commitBlur: { model.commitInlineBlur(session, to: $0) },
             cancelRename: { model.cancelRename() },
             resetName: { model.resetName(session) },
+            noteMounted: { model.noteRenameFieldMounted($0) },
             renameDraft: $model.renameDraft,
             focus: $focus
         )
@@ -520,8 +525,7 @@ struct SidebarView: View {
     }
 
     private func commitRenameAlert(_ session: GrokSession) {
-        model.renameAlertDidCommit = true
-        model.commitRename(session, to: model.renameDraft)
+        model.commitCapturedRename(session)
     }
 
     private func resetNameAlert(_ session: GrokSession) {
@@ -535,7 +539,22 @@ struct SidebarView: View {
     }
 
     @MainActor
-    private func prepareRename(resetDraft: Bool) async {
+    private func restorePromptOnAppear() async {
+        let key = model.renamingSessionKey
+        guard let key else { return }
+        let rowVisible = visibleRowIDs().contains(key)
+        guard
+            AppModel.shouldForcePromptRepresent(
+                isRenaming: true,
+                rowVisible: rowVisible,
+                sidebarVisible: model.isSidebarVisible
+            )
+        else { return }
+        await prepareRename(resetDraft: false, forceRepresent: true)
+    }
+
+    @MainActor
+    private func prepareRename(resetDraft: Bool, forceRepresent: Bool = false) async {
         let key = model.renamingSessionKey
         let session = key.flatMap { sessionAnywhere(for: $0) }
         let rowVisible = key.map { visibleRowIDs().contains($0) } ?? false
@@ -550,7 +569,8 @@ struct SidebarView: View {
                 previousSurface: model.preparedRenameSurface,
                 nextKey: key,
                 nextSurface: surface,
-                resetDraft: resetDraft
+                resetDraft: resetDraft,
+                forceRepresent: forceRepresent
             )
         else { return }
         model.preparedRenameKey = key
@@ -870,6 +890,7 @@ private struct SessionRow: View {
     let commitBlur: (String) -> Void
     let cancelRename: () -> Void
     let resetName: () -> Void
+    let noteMounted: (Bool) -> Void
     @Binding var renameDraft: String
     @FocusState.Binding var focus: SidebarFocus?
 
@@ -929,6 +950,9 @@ private struct SessionRow: View {
             if hasCustomName { resetName() }
         }
         .accessibilityAction { open() }
+        .onAppear { if isRenaming { noteMounted(true) } }
+        .onDisappear { if isRenaming { noteMounted(false) } }
+        .onChange(of: isRenaming) { _, renaming in noteMounted(renaming) }
         .task(id: isRenaming) { await focusRenameFieldIfNeeded() }
     }
 
@@ -1043,7 +1067,22 @@ private struct SessionRow: View {
             return
         }
         focus = .rename
+        await Task.yield()
+        guard
+            AppModel.shouldStealRenameFocusAfterYield(
+                isCancelled: Task.isCancelled,
+                isRenaming: isRenaming
+            )
+        else {
+            suppressBlurCommit = false
+            return
+        }
+        selectRenameDraft()
         suppressBlurCommit = false
+    }
+
+    private func selectRenameDraft() {
+        NSApp.keyWindow?.fieldEditor(false, for: nil)?.selectAll(nil)
     }
 
     private func commitCurrentDraft(restoreListFocus: Bool) {
@@ -1060,7 +1099,11 @@ private struct SessionRow: View {
 
     private func commitOnBlurIfNeeded() {
         guard !suppressBlurCommit else { return }
-        suppressBlurCommit = true
-        commitBlur(renameDraft)
+        let draft = renameDraft
+        Task {
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            commitBlur(draft)
+        }
     }
 }

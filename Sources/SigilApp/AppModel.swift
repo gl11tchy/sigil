@@ -149,6 +149,8 @@ final class AppModel {
     var renameAlertDidCommit = false
     var preparedRenameKey: String?
     var preparedRenameSurface: RenameSurface = .none
+    /// False while the inline field is off-screen (LazyVStack) or the sidebar is gone.
+    var renameFieldMounted = false
 
     /// Conversations for the sidebar: newest first, one-shot noise filtered out,
     /// optionally scoped to the folder the current tab is working in. Archived
@@ -472,6 +474,34 @@ final class AppModel {
         renameAlertDidCommit = false
         preparedRenameKey = nil
         preparedRenameSurface = .none
+        renameFieldMounted = false
+    }
+
+    /// Snapshot the live draft before `endRenameSession` can wipe it. The
+    /// alert's isPresented setter may cancel before this button action runs.
+    func commitCapturedRename(_ session: GrokSession) {
+        let snapshot = renameDraft
+        renameAlertDidCommit = true
+        commitRename(session, to: snapshot)
+    }
+
+    /// Dismiss may fire before the Rename button. Wait a turn, then cancel
+    /// only if this is still an uncommitted, visible-sidebar rename.
+    func deferCancelRenameAlert() async {
+        await Task.yield()
+        guard
+            Self.shouldCancelRenameAlertAfterYield(
+                isCancelled: Task.isCancelled,
+                sidebarVisible: isSidebarVisible,
+                didCommit: renameAlertDidCommit,
+                stillRenaming: renamingSessionKey != nil
+            )
+        else { return }
+        cancelRename()
+    }
+
+    func noteRenameFieldMounted(_ mounted: Bool) {
+        renameFieldMounted = mounted
     }
 
     /// Inline editor only. No-ops if this row is no longer the active rename
@@ -482,8 +512,8 @@ final class AppModel {
         commitRename(session, to: raw)
     }
 
-    /// Blur of the inline field. Skipped when the row left the visible list
-    /// (hand off to the alert) or the sidebar is hidden (⌘B keeps the draft).
+    /// Blur of the inline field. Skipped when the row left the visible list,
+    /// the sidebar is hidden (⌘B), or LazyVStack unmounted the field.
     func commitInlineBlur(_ session: GrokSession, to raw: String) {
         guard
             Self.shouldCommitInlineBlur(
@@ -491,7 +521,8 @@ final class AppModel {
                 rowVisible: sidebarSessions.contains {
                     sessionKey($0) == sessionKey(session)
                 },
-                sidebarVisible: isSidebarVisible
+                sidebarVisible: isSidebarVisible,
+                fieldMounted: renameFieldMounted
             )
         else { return }
         commitRename(session, to: raw)
@@ -503,12 +534,30 @@ final class AppModel {
         !didCommit
     }
 
+    static func shouldCancelRenameAlertAfterYield(
+        isCancelled: Bool,
+        sidebarVisible: Bool,
+        didCommit: Bool,
+        stillRenaming: Bool
+    ) -> Bool {
+        !isCancelled && sidebarVisible && !didCommit && stillRenaming
+    }
+
     static func shouldCommitInlineBlur(
         keyMatches: Bool,
         rowVisible: Bool,
+        sidebarVisible: Bool,
+        fieldMounted: Bool
+    ) -> Bool {
+        keyMatches && rowVisible && sidebarVisible && fieldMounted
+    }
+
+    static func shouldForcePromptRepresent(
+        isRenaming: Bool,
+        rowVisible: Bool,
         sidebarVisible: Bool
     ) -> Bool {
-        keyMatches && rowVisible && sidebarVisible
+        isRenaming && !rowVisible && sidebarVisible
     }
 
     static func renameSurface(
@@ -527,8 +576,10 @@ final class AppModel {
         previousSurface: RenameSurface,
         nextKey: String?,
         nextSurface: RenameSurface,
-        resetDraft: Bool
+        resetDraft: Bool,
+        forceRepresent: Bool = false
     ) -> Bool {
+        if forceRepresent { return true }
         if resetDraft { return true }
         return previousKey != nextKey || previousSurface != nextSurface
     }
