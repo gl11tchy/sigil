@@ -69,17 +69,12 @@ struct SidebarView: View {
             focus = .search
         }
         .task(id: model.renamingSessionKey) {
-            await prepareRename()
+            await prepareRename(resetDraft: true)
         }
-        .onChange(of: model.searchText) { _, _ in clampKeyboardSelection() }
-        .onChange(of: model.scopeToCurrentFolder) { _, _ in clampKeyboardSelection() }
-        .onChange(of: model.showingArchived) { _, _ in clampKeyboardSelection() }
-        .onChange(of: model.settings.sidebarMode) { _, _ in clampKeyboardSelection() }
-        .onChange(of: model.settings.showWorktreeSessions) { _, _ in clampKeyboardSelection() }
-        .onChange(of: model.settings.showSubagentSessions) { _, _ in clampKeyboardSelection() }
-        .onChange(of: model.settings.archivedConversations) { _, _ in clampKeyboardSelection() }
-        .onChange(of: model.settings.conversationNames) { _, _ in clampKeyboardSelection() }
-        .onChange(of: model.settings.pinnedProjects) { _, _ in clampKeyboardSelection() }
+        .task(id: visibleRowIDs()) {
+            clampKeyboardSelection()
+            await prepareRename(resetDraft: false)
+        }
         .onChange(of: model.store.isLoading) { _, loading in
             if !loading { model.pruneMissingPins() }
         }
@@ -357,7 +352,7 @@ struct SidebarView: View {
             togglePin: { model.togglePin(session) },
             toggleArchive: { model.toggleArchive(session) },
             beginRename: { beginInlineRename(session) },
-            commitRename: { model.commitRename(session, to: $0) },
+            commitRename: { model.commitInlineRename(session, to: $0) },
             cancelRename: { model.cancelRename() },
             resetName: { model.resetName(session) },
             focus: $focus
@@ -540,26 +535,33 @@ struct SidebarView: View {
     }
 
     @MainActor
-    private func prepareRename() async {
-        guard let key = model.renamingSessionKey else {
+    private func prepareRename(resetDraft: Bool) async {
+        let key = model.renamingSessionKey
+        let session = key.flatMap { sessionAnywhere(for: $0) }
+        let rowVisible = key.map { visibleRowIDs().contains($0) } ?? false
+        switch AppModel.renameSurface(
+            isRenaming: key != nil,
+            sessionAvailable: session != nil,
+            rowVisible: rowVisible
+        ) {
+        case .none:
             showRenameAlert = false
-            return
-        }
-        guard let session = sessionAnywhere(for: key) else {
-            model.cancelRename()
-            showRenameAlert = false
-            return
-        }
-        renameDraft = model.title(for: session)
-        await Task.yield()
-        if visibleRowIDs().contains(key) {
-            keyboardSelectionID = key
+            if key != nil { model.cancelRename() }
+        case .inline:
+            if resetDraft, let session {
+                renameDraft = model.title(for: session)
+            }
+            if let key { keyboardSelectionID = key }
+            await Task.yield()
             // Dismissing the fallback alert must not cancel an inline rename.
             renameAlertDidCommit = true
             renameAlertSession = nil
             showRenameAlert = false
             focus = .rename
-        } else {
+        case .prompt:
+            if resetDraft, let session {
+                renameDraft = model.title(for: session)
+            }
             renameAlertDidCommit = false
             renameAlertSession = session
             showRenameAlert = true
@@ -1018,7 +1020,9 @@ private struct SessionRow: View {
     }
 
     private func commitOnBlurIfNeeded() {
-        guard isRenaming, !suppressBlurCommit else { return }
+        guard !suppressBlurCommit else { return }
+        // Live key check is in `commitInlineRename`. `isRenaming` here can be
+        // stale after Reset Name, cancel, or another row taking the rename.
         commitCurrentDraft(restoreListFocus: false)
     }
 }

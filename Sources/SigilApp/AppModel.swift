@@ -440,10 +440,34 @@ final class AppModel {
         }
     }
 
+    /// Inline editor only. No-ops if this row is no longer the active rename
+    /// (Reset Name, cancel, or another row started). The alert still uses
+    /// `commitRename` so a dismiss-before-action can commit the captured session.
+    func commitInlineRename(_ session: GrokSession, to raw: String) {
+        guard renamingSessionKey == sessionKey(session) else { return }
+        commitRename(session, to: raw)
+    }
+
     /// The fallback rename alert may set `isPresented` to false before the
     /// button action. Only cancel when that dismiss was not a completed commit.
     static func shouldCancelRenameAlert(didCommit: Bool) -> Bool {
         !didCommit
+    }
+
+    /// Where the rename UI should live after a key or visibility change.
+    enum RenameSurface: Equatable, Sendable {
+        case none
+        case inline
+        case prompt
+    }
+
+    static func renameSurface(
+        isRenaming: Bool,
+        sessionAvailable: Bool,
+        rowVisible: Bool
+    ) -> RenameSurface {
+        guard isRenaming, sessionAvailable else { return .none }
+        return rowVisible ? .inline : .prompt
     }
 
     /// The conversation on screen, when the store knows it. Menu-bar Rename uses this.

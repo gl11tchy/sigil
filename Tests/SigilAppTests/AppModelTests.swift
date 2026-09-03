@@ -836,6 +836,106 @@ struct AppModelTests {
         #expect(AppModel.shouldCancelRenameAlert(didCommit: false))
         #expect(!AppModel.shouldCancelRenameAlert(didCommit: true))
     }
+
+    @Test @MainActor
+    func renameSurfaceFollowsVisibilityIndependentOfTheKey() {
+        #expect(
+            AppModel.renameSurface(isRenaming: false, sessionAvailable: true, rowVisible: true)
+                == AppModel.RenameSurface.none)
+        #expect(
+            AppModel.renameSurface(isRenaming: true, sessionAvailable: false, rowVisible: false)
+                == AppModel.RenameSurface.none)
+        #expect(
+            AppModel.renameSurface(isRenaming: true, sessionAvailable: true, rowVisible: true)
+                == .inline)
+        #expect(
+            AppModel.renameSurface(isRenaming: true, sessionAvailable: true, rowVisible: false)
+                == .prompt)
+        #expect(
+            AppModel.renameSurface(isRenaming: true, sessionAvailable: true, rowVisible: true)
+                == .inline)
+    }
+
+    @Test @MainActor
+    func inlineCommitAfterResetDoesNotRestoreTheOverlay() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.rename(session, to: "Auth rewrite")
+        model.beginRename(session)
+        model.resetName(session)
+        #expect(model.renamingSessionKey == nil)
+        model.commitInlineRename(session, to: "Auth rewrite")
+        #expect(!model.hasCustomName(session))
+        #expect(model.title(for: session) == "CLI summary")
+    }
+
+    @Test @MainActor
+    func inlineCommitAfterCancelDoesNotWrite() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.beginRename(session)
+        model.cancelRename()
+        model.commitInlineRename(session, to: "Auth rewrite")
+        #expect(!model.hasCustomName(session))
+        #expect(fixture.settings.conversationNames.isEmpty)
+    }
+
+    @Test @MainActor
+    func inlineCommitOnAnotherRowDoesNotWriteTheOldRow() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "one", cwd: "/Users/someone/Documents/project", summary: "One")
+        try fixture.writeListedSession(
+            id: "two", cwd: "/Users/someone/Documents/project", summary: "Two")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let one = try #require(model.store.sessions.first { $0.id == "one" })
+        let two = try #require(model.store.sessions.first { $0.id == "two" })
+        model.beginRename(one)
+        model.beginRename(two)
+        model.commitInlineRename(one, to: "Old")
+        #expect(!model.hasCustomName(one))
+        #expect(model.renamingSessionKey == model.sessionKey(two))
+        model.commitInlineRename(two, to: "Keep me")
+        #expect(model.title(for: two) == "Keep me")
+        #expect(model.title(for: one) == "One")
+    }
+
+    @Test @MainActor
+    func alertCommitAfterCancelStillWritesWhenInlineWouldNot() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.beginRename(session)
+        model.cancelRename()
+        model.commitInlineRename(session, to: "From inline")
+        #expect(!model.hasCustomName(session))
+        model.commitRename(session, to: "From alert")
+        #expect(model.title(for: session) == "From alert")
+    }
 }
 
 private enum TestFailure: Error {
