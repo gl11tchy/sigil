@@ -24,15 +24,6 @@ struct SidebarView: View {
     @State private var keyboardSelectionID: String?
     @State private var pendingDelete: GrokSession?
     @State private var hoveredMode: SidebarMode?
-    @State private var renameDraft = ""
-    @State private var showRenameAlert = false
-    /// Captured when the fallback alert is shown. The live `renamingSessionKey`
-    /// is not used to commit: SwiftUI often dismisses the alert (and the setter
-    /// would clear that key) before the button action runs.
-    @State private var renameAlertSession: GrokSession?
-    @State private var renameAlertDidCommit = false
-    @State private var preparedRenameKey: String?
-    @State private var preparedRenameSurface: AppModel.RenameSurface = .none
     @Namespace private var modeUnderline
 
     /// F2. Unicode private-use scalar for `NSF2FunctionKey`.
@@ -71,7 +62,8 @@ struct SidebarView: View {
             focus = .search
         }
         .task(id: model.renamingSessionKey) {
-            await prepareRename(resetDraft: true)
+            await prepareRename(
+                resetDraft: model.renamingSessionKey != model.preparedRenameKey)
         }
         .task(id: visibleRowIDs()) {
             clampKeyboardSelection()
@@ -238,17 +230,21 @@ struct SidebarView: View {
         .alert(
             "Rename Conversation",
             isPresented: Binding(
-                get: { showRenameAlert },
+                get: { model.showRenameAlert },
                 set: { newValue in
-                    showRenameAlert = newValue
-                    if !newValue, AppModel.shouldCancelRenameAlert(didCommit: renameAlertDidCommit) {
+                    // Sidebar teardown (⌘B) must not cancel or wipe the draft.
+                    guard model.isSidebarVisible else { return }
+                    model.showRenameAlert = newValue
+                    if !newValue,
+                        AppModel.shouldCancelRenameAlert(didCommit: model.renameAlertDidCommit)
+                    {
                         model.cancelRename()
                     }
                 }
             ),
-            presenting: renameAlertSession
+            presenting: model.renameAlertSession
         ) { session in
-            TextField("Name", text: $renameDraft)
+            TextField("Name", text: $model.renameDraft)
             Button("Rename") {
                 commitRenameAlert(session)
             }
@@ -358,7 +354,7 @@ struct SidebarView: View {
             commitBlur: { model.commitInlineBlur(session, to: $0) },
             cancelRename: { model.cancelRename() },
             resetName: { model.resetName(session) },
-            renameDraft: $renameDraft,
+            renameDraft: $model.renameDraft,
             focus: $focus
         )
         .id(model.sessionKey(session))
@@ -506,10 +502,6 @@ struct SidebarView: View {
 
     private func beginInlineRename(_ session: GrokSession) {
         keyboardSelectionID = model.sessionKey(session)
-        let key = model.sessionKey(session)
-        if model.renamingSessionKey != key {
-            renameDraft = model.title(for: session)
-        }
         model.beginRename(session)
         focus = .rename
     }
@@ -528,17 +520,17 @@ struct SidebarView: View {
     }
 
     private func commitRenameAlert(_ session: GrokSession) {
-        renameAlertDidCommit = true
-        model.commitRename(session, to: renameDraft)
+        model.renameAlertDidCommit = true
+        model.commitRename(session, to: model.renameDraft)
     }
 
     private func resetNameAlert(_ session: GrokSession) {
-        renameAlertDidCommit = true
+        model.renameAlertDidCommit = true
         model.resetName(session)
     }
 
     private func cancelRenameAlert() {
-        renameAlertDidCommit = true
+        model.renameAlertDidCommit = true
         model.cancelRename()
     }
 
@@ -554,30 +546,30 @@ struct SidebarView: View {
         )
         guard
             AppModel.shouldReconfigureRename(
-                previousKey: preparedRenameKey,
-                previousSurface: preparedRenameSurface,
+                previousKey: model.preparedRenameKey,
+                previousSurface: model.preparedRenameSurface,
                 nextKey: key,
                 nextSurface: surface,
                 resetDraft: resetDraft
             )
         else { return }
-        preparedRenameKey = key
-        preparedRenameSurface = surface
+        model.preparedRenameKey = key
+        model.preparedRenameSurface = surface
         switch surface {
         case .none:
-            showRenameAlert = false
+            model.showRenameAlert = false
             if key != nil { model.cancelRename() }
         case .inline:
             if resetDraft, let session {
-                renameDraft = model.title(for: session)
+                model.renameDraft = model.title(for: session)
             }
             if let key { keyboardSelectionID = key }
             // Tear down the fallback alert before yielding so its binding
             // cannot cancelRename during the wait, and a sibling visibility
             // task cannot fight this handoff.
-            renameAlertDidCommit = true
-            renameAlertSession = nil
-            showRenameAlert = false
+            model.renameAlertDidCommit = true
+            model.renameAlertSession = nil
+            model.showRenameAlert = false
             await Task.yield()
             let currentKey = model.renamingSessionKey
             let currentSession = currentKey.flatMap { sessionAnywhere(for: $0) }
@@ -598,11 +590,11 @@ struct SidebarView: View {
             focus = .rename
         case .prompt:
             if resetDraft, let session {
-                renameDraft = model.title(for: session)
+                model.renameDraft = model.title(for: session)
             }
-            renameAlertDidCommit = false
-            renameAlertSession = session
-            showRenameAlert = true
+            model.renameAlertDidCommit = false
+            model.renameAlertSession = session
+            model.showRenameAlert = true
         }
     }
 

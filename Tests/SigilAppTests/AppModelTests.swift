@@ -1023,10 +1023,21 @@ struct AppModelTests {
 
     @Test @MainActor
     func inlineBlurCommitsOnlyWhenKeyMatchesAndRowIsVisible() {
-        #expect(AppModel.shouldCommitInlineBlur(keyMatches: true, rowVisible: true))
-        #expect(!AppModel.shouldCommitInlineBlur(keyMatches: true, rowVisible: false))
-        #expect(!AppModel.shouldCommitInlineBlur(keyMatches: false, rowVisible: true))
-        #expect(!AppModel.shouldCommitInlineBlur(keyMatches: false, rowVisible: false))
+        #expect(
+            AppModel.shouldCommitInlineBlur(
+                keyMatches: true, rowVisible: true, sidebarVisible: true))
+        #expect(
+            !AppModel.shouldCommitInlineBlur(
+                keyMatches: true, rowVisible: false, sidebarVisible: true))
+        #expect(
+            !AppModel.shouldCommitInlineBlur(
+                keyMatches: false, rowVisible: true, sidebarVisible: true))
+        #expect(
+            !AppModel.shouldCommitInlineBlur(
+                keyMatches: false, rowVisible: false, sidebarVisible: true))
+        #expect(
+            !AppModel.shouldCommitInlineBlur(
+                keyMatches: true, rowVisible: true, sidebarVisible: false))
     }
 
     @Test @MainActor
@@ -1067,6 +1078,59 @@ struct AppModelTests {
         model.commitInlineBlur(session, to: "Auth rewrite")
         #expect(model.title(for: session) == "Auth rewrite")
         #expect(model.renamingSessionKey == nil)
+    }
+
+    @Test @MainActor
+    func hidingSidebarMidRenamePreservesDraftAndDoesNotCommit() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.beginRename(session)
+        model.renameDraft = "Typed name"
+        model.preparedRenameKey = model.sessionKey(session)
+        model.preparedRenameSurface = .inline
+
+        model.isSidebarVisible = false
+        model.commitInlineBlur(session, to: model.renameDraft)
+
+        #expect(model.renamingSessionKey == model.sessionKey(session))
+        #expect(model.renameDraft == "Typed name")
+        #expect(!model.hasCustomName(session))
+        #expect(model.title(for: session) == "CLI summary")
+
+        model.isSidebarVisible = true
+        #expect(model.renameDraft == "Typed name")
+        #expect(model.renamingSessionKey == model.sessionKey(session))
+        #expect(!model.hasCustomName(session))
+    }
+
+    @Test @MainActor
+    func hidingSidebarDoesNotClearAnExistingOverride() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.rename(session, to: "Auth rewrite")
+        model.beginRename(session)
+        model.renameDraft = "Changing it"
+        model.isSidebarVisible = false
+        model.commitInlineBlur(session, to: "Changing it")
+
+        #expect(model.hasCustomName(session))
+        #expect(model.title(for: session) == "Auth rewrite")
+        #expect(model.renameDraft == "Changing it")
+        #expect(model.renamingSessionKey == model.sessionKey(session))
     }
 
     @Test @MainActor

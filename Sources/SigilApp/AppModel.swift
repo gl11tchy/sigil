@@ -128,12 +128,27 @@ final class AppModel {
 
     // MARK: - Sidebar
 
+    /// Where the rename UI should live after a key or visibility change.
+    enum RenameSurface: Equatable, Sendable {
+        case none
+        case inline
+        case prompt
+    }
+
     /// Restrict the sidebar to conversations started in the current tab's folder.
     var scopeToCurrentFolder = false
     /// Recents and Projects hide archived chats; this shows only those.
     var showingArchived = false
-    /// Session key (`id` + cwd) of the row being renamed inline. Nil when idle.
+    /// Session key (`id` + cwd) of the row being renamed. Nil when idle.
+    /// Lives on the model so ⌘B can hide the sidebar without dropping the draft.
     var renamingSessionKey: String?
+    /// In-progress rename text. Shared by the inline field and the fallback alert.
+    var renameDraft = ""
+    var showRenameAlert = false
+    var renameAlertSession: GrokSession?
+    var renameAlertDidCommit = false
+    var preparedRenameKey: String?
+    var preparedRenameSurface: RenameSurface = .none
 
     /// Conversations for the sidebar: newest first, one-shot noise filtered out,
     /// optionally scoped to the folder the current tab is working in. Archived
@@ -417,7 +432,7 @@ final class AppModel {
 
     func resetName(_ session: GrokSession) {
         if renamingSessionKey == sessionKey(session) {
-            renamingSessionKey = nil
+            endRenameSession()
         }
         settings.conversationNames = ConversationNaming.removing(
             session, from: settings.conversationNames, samePath: samePath)
@@ -426,18 +441,37 @@ final class AppModel {
 
     func beginRename(_ session: GrokSession) {
         isSidebarVisible = true
-        renamingSessionKey = sessionKey(session)
+        let key = sessionKey(session)
+        if renamingSessionKey != key {
+            renameDraft = title(for: session)
+            showRenameAlert = false
+            renameAlertSession = nil
+            renameAlertDidCommit = false
+        }
+        renamingSessionKey = key
     }
 
     func cancelRename() {
-        renamingSessionKey = nil
+        endRenameSession()
     }
 
     func commitRename(_ session: GrokSession, to raw: String) {
         rename(session, to: raw)
         if renamingSessionKey == sessionKey(session) {
-            renamingSessionKey = nil
+            endRenameSession()
         }
+    }
+
+    /// Drops in-progress rename UI. Not called when the sidebar hides — the
+    /// draft must survive ⌘B and come back with the typed text.
+    private func endRenameSession() {
+        renamingSessionKey = nil
+        renameDraft = ""
+        showRenameAlert = false
+        renameAlertSession = nil
+        renameAlertDidCommit = false
+        preparedRenameKey = nil
+        preparedRenameSurface = .none
     }
 
     /// Inline editor only. No-ops if this row is no longer the active rename
@@ -448,15 +482,16 @@ final class AppModel {
         commitRename(session, to: raw)
     }
 
-    /// Blur of the inline field. Also skipped when the row left the visible
-    /// list, so a filter/archive teardown can hand off to the fallback alert.
+    /// Blur of the inline field. Skipped when the row left the visible list
+    /// (hand off to the alert) or the sidebar is hidden (⌘B keeps the draft).
     func commitInlineBlur(_ session: GrokSession, to raw: String) {
         guard
             Self.shouldCommitInlineBlur(
                 keyMatches: renamingSessionKey == sessionKey(session),
                 rowVisible: sidebarSessions.contains {
                     sessionKey($0) == sessionKey(session)
-                }
+                },
+                sidebarVisible: isSidebarVisible
             )
         else { return }
         commitRename(session, to: raw)
@@ -468,15 +503,12 @@ final class AppModel {
         !didCommit
     }
 
-    static func shouldCommitInlineBlur(keyMatches: Bool, rowVisible: Bool) -> Bool {
-        keyMatches && rowVisible
-    }
-
-    /// Where the rename UI should live after a key or visibility change.
-    enum RenameSurface: Equatable, Sendable {
-        case none
-        case inline
-        case prompt
+    static func shouldCommitInlineBlur(
+        keyMatches: Bool,
+        rowVisible: Bool,
+        sidebarVisible: Bool
+    ) -> Bool {
+        keyMatches && rowVisible && sidebarVisible
     }
 
     static func renameSurface(
