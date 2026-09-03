@@ -572,11 +572,29 @@ struct SidebarView: View {
                 renameDraft = model.title(for: session)
             }
             if let key { keyboardSelectionID = key }
-            await Task.yield()
-            // Dismissing the fallback alert must not cancel an inline rename.
+            // Tear down the fallback alert before yielding so its binding
+            // cannot cancelRename during the wait, and a sibling visibility
+            // task cannot fight this handoff.
             renameAlertDidCommit = true
             renameAlertSession = nil
             showRenameAlert = false
+            await Task.yield()
+            let currentKey = model.renamingSessionKey
+            let currentSession = currentKey.flatMap { sessionAnywhere(for: $0) }
+            let currentVisible = currentKey.map { visibleRowIDs().contains($0) } ?? false
+            let currentSurface = AppModel.renameSurface(
+                isRenaming: currentKey != nil,
+                sessionAvailable: currentSession != nil,
+                rowVisible: currentVisible
+            )
+            guard
+                AppModel.shouldFinishInlineHandoff(
+                    isCancelled: Task.isCancelled,
+                    expectedKey: key,
+                    currentKey: currentKey,
+                    currentSurface: currentSurface
+                )
+            else { return }
             focus = .rename
         case .prompt:
             if resetDraft, let session {
@@ -1023,6 +1041,15 @@ private struct SessionRow: View {
         guard isRenaming else { return }
         suppressBlurCommit = true
         await Task.yield()
+        guard
+            AppModel.shouldStealRenameFocusAfterYield(
+                isCancelled: Task.isCancelled,
+                isRenaming: isRenaming
+            )
+        else {
+            suppressBlurCommit = false
+            return
+        }
         focus = .rename
         suppressBlurCommit = false
     }

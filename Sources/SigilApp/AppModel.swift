@@ -501,6 +501,27 @@ final class AppModel {
         return previousKey != nextKey || previousSurface != nextSurface
     }
 
+    /// After yielding to let the inline field mount, only steal focus if this
+    /// handoff is still the live inline rename.
+    static func shouldFinishInlineHandoff(
+        isCancelled: Bool,
+        expectedKey: String?,
+        currentKey: String?,
+        currentSurface: RenameSurface
+    ) -> Bool {
+        !isCancelled && expectedKey != nil && expectedKey == currentKey
+            && currentSurface == .inline
+    }
+
+    /// After yielding to focus the inline field, skip if the row task was
+    /// cancelled or the row is no longer renaming.
+    static func shouldStealRenameFocusAfterYield(
+        isCancelled: Bool,
+        isRenaming: Bool
+    ) -> Bool {
+        !isCancelled && isRenaming
+    }
+
     /// The conversation on screen, when the store knows it. Menu-bar Rename uses this.
     func sessionForSelectedTab() -> GrokSession? {
         guard let tab = selectedTab, let id = tab.sessionID else { return nil }

@@ -971,6 +971,57 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func inlineHandoffAfterYieldRequiresLiveInlineSurface() {
+        #expect(
+            AppModel.shouldFinishInlineHandoff(
+                isCancelled: false,
+                expectedKey: "s1",
+                currentKey: "s1",
+                currentSurface: .inline
+            ))
+        #expect(
+            !AppModel.shouldFinishInlineHandoff(
+                isCancelled: true,
+                expectedKey: "s1",
+                currentKey: "s1",
+                currentSurface: .inline
+            ))
+        #expect(
+            !AppModel.shouldFinishInlineHandoff(
+                isCancelled: false,
+                expectedKey: "s1",
+                currentKey: nil,
+                currentSurface: .none
+            ))
+        #expect(
+            !AppModel.shouldFinishInlineHandoff(
+                isCancelled: false,
+                expectedKey: "s1",
+                currentKey: "s1",
+                currentSurface: .prompt
+            ))
+        #expect(
+            !AppModel.shouldFinishInlineHandoff(
+                isCancelled: false,
+                expectedKey: "s1",
+                currentKey: "s2",
+                currentSurface: .inline
+            ))
+    }
+
+    @Test @MainActor
+    func renameFocusAfterYieldRequiresActiveUncancelledRow() {
+        #expect(
+            AppModel.shouldStealRenameFocusAfterYield(isCancelled: false, isRenaming: true))
+        #expect(
+            !AppModel.shouldStealRenameFocusAfterYield(isCancelled: true, isRenaming: true))
+        #expect(
+            !AppModel.shouldStealRenameFocusAfterYield(isCancelled: false, isRenaming: false))
+        #expect(
+            !AppModel.shouldStealRenameFocusAfterYield(isCancelled: true, isRenaming: false))
+    }
+
+    @Test @MainActor
     func inlineBlurCommitsOnlyWhenKeyMatchesAndRowIsVisible() {
         #expect(AppModel.shouldCommitInlineBlur(keyMatches: true, rowVisible: true))
         #expect(!AppModel.shouldCommitInlineBlur(keyMatches: true, rowVisible: false))
