@@ -198,6 +198,7 @@ enum SessionScanner: Sendable {
             return true
         }
         return SearchMatchHighlight.contains(session.projectName, query: trimmed)
+            || SearchMatchHighlight.contains(session.displayPath, query: trimmed)
             || SearchMatchHighlight.contains(session.cwd, query: trimmed)
     }
 

@@ -162,4 +162,29 @@ enum SidebarOrganization {
             )
         }
     }
+
+    /// Unique name and path spellings for search paint, sample first, then each row.
+    /// A canonical group can still list `/var/…` and `/private/var/…` together.
+    static func pathHaystacks(
+        name: String,
+        displayPath: String,
+        cwd: String,
+        sessions: [GrokSession]
+    ) -> [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+        func add(_ value: String) {
+            guard !value.isEmpty, seen.insert(value).inserted else { return }
+            ordered.append(value)
+        }
+        add(name)
+        add(displayPath)
+        add(cwd)
+        for session in sessions {
+            add(session.projectName)
+            add(session.displayPath)
+            add(session.cwd)
+        }
+        return ordered
+    }
 }

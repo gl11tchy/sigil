@@ -139,7 +139,7 @@ public enum SearchMatchHighlight: Sendable {
     /// subtitle reuses the project name, a matching path, or the CLI summary
     /// so a listed row still has an accent run. In Projects sort the folder
     /// cue lives on the section header, so a project/cwd-only hit leaves the
-    /// row subtitle as the timestamp.
+    /// row subtitle as the timestamp unless `headerCoversQuery` is false.
     public static func row(
         displayedTitle: String,
         cliTitle: String,
@@ -148,19 +148,24 @@ public enum SearchMatchHighlight: Sendable {
         displayPath: String,
         relativeTime: String,
         showsProject: Bool,
+        headerCoversQuery: Bool = true,
         query: String
     ) -> RowPaint {
         let titleRuns = runs(in: displayedTitle, query: query)
-        let prefix: String?
-        if showsProject, let path = matchingPath(projectName, displayPath, cwd, query: query) {
-            prefix = path
+        let pathHit = matchingPath(in: [projectName, displayPath, cwd], query: query)
+        let chosen: String?
+        if showsProject, let pathHit {
+            chosen = pathHit
         } else if !contains(displayedTitle, query: query), contains(cliTitle, query: query) {
-            prefix = cliTitle
+            chosen = cliTitle
+        } else if !showsProject, !headerCoversQuery, let pathHit {
+            chosen = pathHit
         } else if showsProject {
-            prefix = projectName
+            chosen = projectName
         } else {
-            prefix = nil
+            chosen = nil
         }
+        let prefix = chosen.map { keepingMatchVisible($0, query: query) }
         let subtitle = subtitleText(prefix: prefix, relativeTime: relativeTime)
         let ranges: [Range<String.Index>] =
             if let prefix, !prefix.isEmpty {
@@ -176,7 +181,21 @@ public enum SearchMatchHighlight: Sendable {
     }
 
     /// Projects header. A cwd-only hit swaps the short name for the matching path
-    /// so the accent run has a substring to sit on.
+    /// so the accent run has a substring to sit on. `paths` should include every
+    /// member spelling (displayPath and cwd) so a symlink alias still paints.
+    public static func projectHeader(
+        name: String,
+        paths: [String],
+        count: Int,
+        query: String
+    ) -> HeaderPaint {
+        let raw = matchingPath(in: [name] + paths, query: query) ?? name
+        let prefix = keepingMatchVisible(raw, query: query)
+        let text = "\(prefix) (\(count))"
+        let ranges = ranges(in: prefix, query: query, asPrefixOf: text)
+        return HeaderPaint(text: text, runs: runs(in: text, matching: ranges))
+    }
+
     public static func projectHeader(
         name: String,
         displayPath: String,
@@ -184,23 +203,38 @@ public enum SearchMatchHighlight: Sendable {
         count: Int,
         query: String
     ) -> HeaderPaint {
-        let prefix = matchingPath(name, displayPath, cwd, query: query) ?? name
-        let text = "\(prefix) (\(count))"
-        let ranges = ranges(in: prefix, query: query, asPrefixOf: text)
-        return HeaderPaint(text: text, runs: runs(in: text, matching: ranges))
+        projectHeader(name: name, paths: [displayPath, cwd], count: count, query: query)
     }
 
-    /// First visible path string that contains `query`: short name, then `~` path, then cwd.
-    static func matchingPath(
-        _ projectName: String,
-        _ displayPath: String,
-        _ cwd: String,
+    /// VoiceOver text for a Projects header. While searching, speak the painted
+    /// string so a path-swapped match is heard, not only the short folder name.
+    public static func headerAccessibilityLabel(
+        paint: HeaderPaint,
+        shortName: String,
+        count: Int,
+        isPinned: Bool,
         query: String
-    ) -> String? {
-        if contains(projectName, query: query) { return projectName }
-        if contains(displayPath, query: query) { return displayPath }
-        if contains(cwd, query: query) { return cwd }
-        return nil
+    ) -> String {
+        let searching = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let base = searching ? paint.text : "\(shortName), \(count) conversations"
+        return base + (isPinned ? ", pinned" : "")
+    }
+
+    /// Drop a leading path so the first match sits at the start of the visible
+    /// string. Tail truncation can then keep the accent run on-screen.
+    public static func keepingMatchVisible(_ string: String, query: String) -> String {
+        guard let first = ranges(in: string, query: query).first else { return string }
+        let lead = string.distance(from: string.startIndex, to: first.lowerBound)
+        if lead <= 2 { return string }
+        let leading = string[string.startIndex..<first.lowerBound]
+        let restStart = leading.lastIndex(of: "/") ?? first.lowerBound
+        if restStart == string.startIndex { return string }
+        return "…" + String(string[restStart...])
+    }
+
+    /// First candidate that contains `query`. Empty strings are skipped.
+    static func matchingPath(in candidates: [String], query: String) -> String? {
+        candidates.first { !$0.isEmpty && contains($0, query: query) }
     }
 
     private static func subtitleText(prefix: String?, relativeTime: String) -> String {

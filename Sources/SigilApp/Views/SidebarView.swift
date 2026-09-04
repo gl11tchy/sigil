@@ -324,15 +324,26 @@ struct SidebarView: View {
     private func projectSection(
         _ project: SidebarProject, rows: [GrokSession], isFirst: Bool
     ) -> some View {
+        let paths = SidebarOrganization.pathHaystacks(
+            name: project.name,
+            displayPath: project.displayPath,
+            cwd: project.cwd,
+            sessions: rows
+        )
+        let headerCovers = SearchMatchHighlight.projectHeader(
+            name: project.name,
+            paths: paths,
+            count: rows.count,
+            query: model.searchText
+        ).paints
         Section {
             ForEach(rows, id: \.directory) { session in
-                sessionRow(session, showsProject: false)
+                sessionRow(session, showsProject: false, headerCoversQuery: headerCovers)
             }
         } header: {
             ProjectSectionHeader(
                 title: project.name,
-                displayPath: project.displayPath,
-                cwd: project.cwd,
+                paths: paths,
                 count: rows.count,
                 searchQuery: model.searchText,
                 isFirst: isFirst,
@@ -350,7 +361,9 @@ struct SidebarView: View {
         model.sidebarSessions.isEmpty
     }
 
-    private func sessionRow(_ session: GrokSession, showsProject: Bool) -> some View {
+    private func sessionRow(
+        _ session: GrokSession, showsProject: Bool, headerCoversQuery: Bool = true
+    ) -> some View {
         SessionRow(
             session: session,
             title: model.title(for: session),
@@ -363,6 +376,7 @@ struct SidebarView: View {
             isRenaming: model.renamingSessionKey == model.sessionKey(session),
             hasCustomName: model.hasCustomName(session),
             showsProject: showsProject,
+            headerCoversQuery: headerCoversQuery,
             open: {
                 keyboardSelectionID = model.sessionKey(session)
                 model.open(session)
@@ -798,8 +812,7 @@ private struct ProjectRows: Identifiable {
 
 private struct ProjectSectionHeader: View {
     let title: String
-    let displayPath: String
-    let cwd: String
+    let paths: [String]
     let count: Int
     let searchQuery: String
     let isFirst: Bool
@@ -812,8 +825,7 @@ private struct ProjectSectionHeader: View {
     var body: some View {
         let paint = SearchMatchHighlight.projectHeader(
             name: title,
-            displayPath: displayPath,
-            cwd: cwd,
+            paths: paths,
             count: count,
             query: searchQuery
         )
@@ -824,7 +836,7 @@ private struct ProjectSectionHeader: View {
         )
         .font(.system(size: 10, weight: .medium, design: .monospaced))
         .lineLimit(1)
-        .truncationMode(.middle)
+        .truncationMode(.tail)
         .padding(.horizontal, 14)
         .padding(.top, isFirst ? 10 : 18)
         .padding(.bottom, 4)
@@ -840,7 +852,13 @@ private struct ProjectSectionHeader: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
         .accessibilityLabel(
-            "\(title), \(count) conversations" + (isPinned ? ", pinned" : "")
+            SearchMatchHighlight.headerAccessibilityLabel(
+                paint: paint,
+                shortName: title,
+                count: count,
+                isPinned: isPinned,
+                query: searchQuery
+            )
         )
         .accessibilityAction(named: isPinned ? "Unpin Project" : "Pin Project") {
             togglePin()
@@ -974,6 +992,7 @@ private struct SessionRow: View {
     let isRenaming: Bool
     let hasCustomName: Bool
     let showsProject: Bool
+    let headerCoversQuery: Bool
     let open: () -> Void
     let togglePin: () -> Void
     let toggleArchive: () -> Void
@@ -1065,7 +1084,7 @@ private struct SessionRow: View {
                 )
                 .font(.system(size: 9.5, design: .monospaced))
                 .lineLimit(1)
-                .truncationMode(.middle)
+                .truncationMode(.tail)
             }
             Spacer(minLength: 8)
             if let activity, activity == .working, !isRenaming {
@@ -1139,6 +1158,7 @@ private struct SessionRow: View {
             displayPath: session.displayPath,
             relativeTime: session.updatedAt.shortRelative,
             showsProject: showsProject,
+            headerCoversQuery: headerCoversQuery,
             query: searchQuery
         )
     }

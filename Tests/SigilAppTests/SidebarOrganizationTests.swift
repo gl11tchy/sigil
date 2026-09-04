@@ -87,6 +87,20 @@ struct SidebarOrganizationTests {
         #expect(grouped[0].count == 2)
         #expect(grouped[1].sessions.map(\.id) == ["p"])
     }
+
+    @Test func pathHaystacksIncludeEveryMemberSpelling() {
+        let sample = session(id: "a", cwd: "/var/folders/x", name: "n", updated: 2)
+        let sibling = session(id: "b", cwd: "/private/var/folders/x", name: "n", updated: 1)
+        let hay = SidebarOrganization.pathHaystacks(
+            name: "x",
+            displayPath: "/var/folders/x",
+            cwd: "/var/folders/x",
+            sessions: [sample, sibling]
+        )
+        #expect(hay.contains("/var/folders/x"))
+        #expect(hay.contains("/private/var/folders/x"))
+        #expect(hay.first == "x")
+    }
 }
 
 private func session(

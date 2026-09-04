@@ -236,11 +236,7 @@ struct SearchMatchHighlightTests {
         let displayed = "Auth rewrite"
         for query in queries {
             let listed = SessionScanner.matches(session, query: query, displayedTitle: displayed)
-            let painted =
-                SearchMatchHighlight.contains(displayed, query: query)
-                || SearchMatchHighlight.contains(session.title, query: query)
-                || SearchMatchHighlight.contains(session.projectName, query: query)
-                || SearchMatchHighlight.contains(session.cwd, query: query)
+            let painted = paintHaystacksContain(session, displayed: displayed, query: query)
             let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty {
                 #expect(listed)
@@ -248,6 +244,32 @@ struct SearchMatchHighlightTests {
                 #expect(listed == painted)
             }
         }
+    }
+
+    @Test func listingMatchesTildeDisplayPathTheSameAsPaint() {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let session = session(title: "CLI summary", cwd: home + "/repos/sigil")
+        #expect(session.displayPath == "~/repos/sigil")
+        let displayed = "Auth rewrite"
+        for query in ["~", "~/repos", "repos", "sigil", "CLI", "Auth", "nope"] {
+            let listed = SessionScanner.matches(session, query: query, displayedTitle: displayed)
+            let painted = paintHaystacksContain(session, displayed: displayed, query: query)
+            #expect(listed == painted, "query \(query.debugDescription)")
+        }
+        #expect(SessionScanner.matches(session, query: "~"))
+        #expect(SessionScanner.matches(session, query: "~/repos"))
+        let paint = SearchMatchHighlight.row(
+            displayedTitle: displayed,
+            cliTitle: session.title,
+            projectName: session.projectName,
+            cwd: session.cwd,
+            displayPath: session.displayPath,
+            relativeTime: "14m",
+            showsProject: true,
+            query: "~/repos"
+        )
+        #expect(paint.paints)
+        #expect(paint.subtitle.hasPrefix("~/repos"))
     }
 
     @Test func matchedRunsCoverTheWholeHaystack() {
@@ -385,12 +407,121 @@ struct SearchMatchHighlightTests {
             #expect(paint.subtitleRuns.map(\.text).joined() == paint.subtitle)
         }
     }
+
+    @Test func keepingMatchVisibleCollapsesALongPrefixAndKeepsTheHit() {
+        let long =
+            "/Users/me/Library/Developer/Xcode/DerivedData/sigil-abc/SourcePackages/checkouts"
+        let visible = SearchMatchHighlight.keepingMatchVisible(long, query: "DerivedData")
+        #expect(visible.hasPrefix("…"))
+        #expect(visible.count < long.count)
+        #expect(SearchMatchHighlight.contains(visible, query: "DerivedData"))
+        #expect(!visible.hasPrefix("/Users/me/Library"))
+        let runs = SearchMatchHighlight.runs(in: visible, query: "DerivedData")
+        #expect(matched(runs) == ["DerivedData"])
+    }
+
+    @Test func keepingMatchVisibleLeavesAHitNearTheStartAlone() {
+        #expect(
+            SearchMatchHighlight.keepingMatchVisible("~/repos/sigil", query: "repos")
+                == "~/repos/sigil")
+        #expect(SearchMatchHighlight.keepingMatchVisible("~/repos/sigil", query: "~") == "~/repos/sigil")
+        #expect(SearchMatchHighlight.keepingMatchVisible("/tmp/project", query: "/tmp") == "/tmp/project")
+    }
+
+    @Test func longPathRowStartsTheSubtitleAtTheMatch() {
+        let paint = SearchMatchHighlight.row(
+            displayedTitle: "Auth rewrite",
+            cliTitle: "CLI summary",
+            projectName: "checkouts",
+            cwd: "/Users/me/Library/Developer/Xcode/DerivedData/sigil-abc/SourcePackages/checkouts",
+            displayPath: "~/Library/Developer/Xcode/DerivedData/sigil-abc/SourcePackages/checkouts",
+            relativeTime: "14m",
+            showsProject: true,
+            query: "DerivedData"
+        )
+        #expect(paint.subtitle.hasPrefix("…"))
+        #expect(paint.subtitle.contains("DerivedData"))
+        #expect(matched(paint.subtitleRuns) == ["DerivedData"])
+        #expect(paint.paints)
+    }
+
+    @Test func projectHeaderUsesAMemberPathTheSampleDoesNotHave() {
+        let header = SearchMatchHighlight.projectHeader(
+            name: "x",
+            paths: ["/var/folders/x", "/private/var/folders/x"],
+            count: 2,
+            query: "private"
+        )
+        #expect(header.text.hasPrefix("/private/var/folders/x"))
+        #expect(matched(header.runs) == ["private"])
+        #expect(header.paints)
+    }
+
+    @Test func projectsRowPaintsItsPathWhenTheHeaderDoesNotCover() {
+        let paint = SearchMatchHighlight.row(
+            displayedTitle: "Auth rewrite",
+            cliTitle: "CLI summary",
+            projectName: "x",
+            cwd: "/private/var/folders/x",
+            displayPath: "/private/var/folders/x",
+            relativeTime: "14m",
+            showsProject: false,
+            headerCoversQuery: false,
+            query: "private"
+        )
+        #expect(paint.paints)
+        #expect(paint.subtitle.hasPrefix("/private/var/folders/x"))
+        #expect(matched(paint.subtitleRuns) == ["private"])
+    }
+
+    @Test func projectsRowSkipsPathWhenHeaderAlreadyCovers() {
+        let paint = SearchMatchHighlight.row(
+            displayedTitle: "Auth rewrite",
+            cliTitle: "CLI summary",
+            projectName: "x",
+            cwd: "/private/var/folders/x",
+            displayPath: "/private/var/folders/x",
+            relativeTime: "14m",
+            showsProject: false,
+            headerCoversQuery: true,
+            query: "private"
+        )
+        #expect(paint.subtitle == "14m")
+        #expect(!paint.paints)
+    }
+
+    @Test func pathSwappedHeaderSpeaksThePaintedPath() {
+        let paint = SearchMatchHighlight.projectHeader(
+            name: "sigil",
+            displayPath: "~/repos/sigil",
+            cwd: "/Users/me/repos/sigil",
+            count: 4,
+            query: "repos"
+        )
+        let searching = SearchMatchHighlight.headerAccessibilityLabel(
+            paint: paint, shortName: "sigil", count: 4, isPinned: false, query: "repos")
+        #expect(searching == paint.text)
+        #expect(searching.contains("repos"))
+        let idle = SearchMatchHighlight.headerAccessibilityLabel(
+            paint: paint, shortName: "sigil", count: 4, isPinned: true, query: "")
+        #expect(idle == "sigil, 4 conversations, pinned")
+    }
 }
 
 private let namedSession = session(title: "CLI summary", cwd: "/tmp/project")
 
 private func slices(_ haystack: String, query: String) -> [String] {
     SearchMatchHighlight.ranges(in: haystack, query: query).map { String(haystack[$0]) }
+}
+
+private func paintHaystacksContain(
+    _ session: GrokSession, displayed: String, query: String
+) -> Bool {
+    SearchMatchHighlight.contains(displayed, query: query)
+        || SearchMatchHighlight.contains(session.title, query: query)
+        || SearchMatchHighlight.contains(session.projectName, query: query)
+        || SearchMatchHighlight.contains(session.displayPath, query: query)
+        || SearchMatchHighlight.contains(session.cwd, query: query)
 }
 
 private func matched(_ runs: [SearchMatchHighlight.Run]) -> [String] {
