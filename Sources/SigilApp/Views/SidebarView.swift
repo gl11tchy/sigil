@@ -1171,10 +1171,15 @@ private struct SessionRow: View {
                 )
             else { return }
         }
-        if AppModel.shouldCommitRenameIfFocusStealMissed(
-            isRenaming: isRenaming, focusIsRename: focus == .rename
-        ) {
+        // Two yields are not a miss — wait for the field editor (same timeout
+        // as select-all) so a later .rename FocusState still reaches select-all.
+        switch await waitForRenameFocusStealFollowUp() {
+        case .miss:
             commitOnBlurIfNeeded()
+            return
+        case .selectAll:
+            break
+        case .abort, .wait:
             return
         }
         await consumeRenameSelectAllWhenEditorReady(
@@ -1193,6 +1198,30 @@ private struct SessionRow: View {
             },
             consume: consumeSelectAll
         )
+    }
+
+    /// First check is immediate so F2/⌘⇧R stay instant when the editor is ready.
+    @MainActor
+    private func waitForRenameFocusStealFollowUp() async -> AppModel.RenameFocusStealFollowUp {
+        let started = ContinuousClock.now
+        while true {
+            let editor = currentRenameFieldEditor()
+            let isFirstResponder = editor.map { $0.window?.firstResponder === $0 } ?? false
+            let ready = AppModel.isRenameFieldEditorReady(
+                fieldEditorExists: editor != nil,
+                fieldEditorIsFirstResponder: isFirstResponder,
+                isEditingRenameField: focus == .rename
+            )
+            let followUp = AppModel.renameFocusStealFollowUp(
+                fieldEditorReady: ready,
+                focusIsRename: focus == .rename,
+                isCancelled: Task.isCancelled,
+                isRenaming: isRenaming,
+                elapsed: ContinuousClock.now - started
+            )
+            if followUp != .wait { return followUp }
+            try? await Task.sleep(for: AppModel.renameSelectAllRetryInterval)
+        }
     }
 
     private func commitCurrentDraft(restoreListFocus: Bool) {

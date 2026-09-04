@@ -143,6 +143,15 @@ final class AppModel {
         case prompt
     }
 
+    /// After a focus steal: wait for the field, fall through to select-all,
+    /// blur-commit on timeout, or stop.
+    enum RenameFocusStealFollowUp: Equatable, Sendable {
+        case selectAll
+        case wait
+        case miss
+        case abort
+    }
+
     /// Restrict the sidebar to conversations started in the current tab's folder.
     var scopeToCurrentFolder = false
     /// Recents and Projects hide archived chats; this shows only those.
@@ -936,12 +945,34 @@ final class AppModel {
         true
     }
 
-    /// After the focus steal, a still-live rename whose field is not focused
-    /// is a stuck session — commit as if the field blurred.
+    /// After the focus-steal wait times out, a still-live rename whose field
+    /// is not focused is a stuck session — commit as if the field blurred.
+    /// Two yields alone are not a miss.
     static func shouldCommitRenameIfFocusStealMissed(
         isRenaming: Bool, focusIsRename: Bool
     ) -> Bool {
         isRenaming && !focusIsRename
+    }
+
+    /// Wait with the same interval/timeout as select-all. Ready or `.rename`
+    /// focus falls through immediately (F2/⌘⇧R stay instant). A miss is only
+    /// a timeout while still renaming with focus off the field.
+    static func renameFocusStealFollowUp(
+        fieldEditorReady: Bool,
+        focusIsRename: Bool,
+        isCancelled: Bool,
+        isRenaming: Bool,
+        elapsed: Duration
+    ) -> RenameFocusStealFollowUp {
+        if fieldEditorReady || focusIsRename { return .selectAll }
+        guard
+            shouldStealRenameFocusAfterYield(
+                isCancelled: isCancelled, isRenaming: isRenaming)
+        else { return .abort }
+        if shouldContinueRenameSelectAllRetry(elapsed: elapsed) { return .wait }
+        return shouldCommitRenameIfFocusStealMissed(
+            isRenaming: isRenaming, focusIsRename: focusIsRename)
+            ? .miss : .abort
     }
 
     /// The conversation on screen, when the store knows it. Menu-bar Rename uses this.

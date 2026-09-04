@@ -1358,6 +1358,78 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func renameFocusStealMissWaitsForFieldReadinessBeforeBlurCommit() {
+        // Keyboard: editor already ready after the steal — select-all, no wait.
+        #expect(
+            AppModel.renameFocusStealFollowUp(
+                fieldEditorReady: true, focusIsRename: true,
+                isCancelled: false, isRenaming: true, elapsed: .zero) == .selectAll)
+        #expect(
+            AppModel.renameFocusStealFollowUp(
+                fieldEditorReady: true, focusIsRename: false,
+                isCancelled: false, isRenaming: true, elapsed: .zero) == .selectAll)
+
+        // FocusState landed on a later turn — fall through to select-all.
+        #expect(
+            AppModel.renameFocusStealFollowUp(
+                fieldEditorReady: false, focusIsRename: true,
+                isCancelled: false, isRenaming: true, elapsed: .milliseconds(16))
+                == .selectAll)
+        #expect(
+            AppModel.renameFocusStealFollowUp(
+                fieldEditorReady: false, focusIsRename: true,
+                isCancelled: false, isRenaming: true,
+                elapsed: AppModel.renameSelectAllRetryTimeout) == .selectAll)
+
+        // Two yields / short elapsed, focus still off — wait, do not miss.
+        #expect(
+            AppModel.renameFocusStealFollowUp(
+                fieldEditorReady: false, focusIsRename: false,
+                isCancelled: false, isRenaming: true, elapsed: .zero) == .wait)
+        #expect(
+            AppModel.renameFocusStealFollowUp(
+                fieldEditorReady: false, focusIsRename: false,
+                isCancelled: false, isRenaming: true, elapsed: .milliseconds(16))
+                == .wait)
+        #expect(
+            AppModel.renameFocusStealFollowUp(
+                fieldEditorReady: false, focusIsRename: false,
+                isCancelled: false, isRenaming: true, elapsed: .milliseconds(399))
+                == .wait)
+
+        // Same timeout as select-all: still renaming, focus off → blur-commit.
+        #expect(
+            AppModel.renameFocusStealFollowUp(
+                fieldEditorReady: false, focusIsRename: false,
+                isCancelled: false, isRenaming: true,
+                elapsed: AppModel.renameSelectAllRetryTimeout) == .miss)
+        #expect(
+            AppModel.renameFocusStealFollowUp(
+                fieldEditorReady: false, focusIsRename: false,
+                isCancelled: false, isRenaming: true, elapsed: .seconds(2))
+                == .miss)
+        #expect(
+            AppModel.shouldCommitRenameIfFocusStealMissed(
+                isRenaming: true, focusIsRename: false))
+
+        // Timeout is not a miss if the row ended or the task was cancelled.
+        #expect(
+            AppModel.renameFocusStealFollowUp(
+                fieldEditorReady: false, focusIsRename: false,
+                isCancelled: true, isRenaming: true, elapsed: .milliseconds(400))
+                == .abort)
+        #expect(
+            AppModel.renameFocusStealFollowUp(
+                fieldEditorReady: false, focusIsRename: false,
+                isCancelled: false, isRenaming: false, elapsed: .milliseconds(400))
+                == .abort)
+        #expect(
+            AppModel.renameFocusStealFollowUp(
+                fieldEditorReady: false, focusIsRename: false,
+                isCancelled: true, isRenaming: true, elapsed: .zero) == .abort)
+    }
+
+    @Test @MainActor
     func inlineBlurCommitsOnlyWhenKeyMatchesAndRowIsVisible() {
         #expect(
             AppModel.shouldCommitInlineBlur(
