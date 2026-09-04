@@ -705,12 +705,29 @@ final class AppModel {
         true
     }
 
+    /// ⌘B restore of an in-progress prompt. A fresh beginRename that merely
+    /// opens a hidden sidebar is not a restore — select-all must still fire.
     static func shouldForcePromptRepresent(
         isRenaming: Bool,
         rowVisible: Bool,
-        sidebarVisible: Bool
+        sidebarVisible: Bool,
+        showRenameAlert: Bool,
+        preparedSurface: RenameSurface
     ) -> Bool {
         isRenaming && !rowVisible && sidebarVisible
+            && (showRenameAlert || preparedSurface == .prompt)
+    }
+
+    static func shouldPrepareRename(isCancelled: Bool) -> Bool {
+        !isCancelled
+    }
+
+    /// Only a true forceRepresent restore may drop select-all. A cancelled
+    /// sibling prepareRename must not wipe a newer beginRename's pending flag.
+    static func shouldClearRenameSelectAllOnPrepare(
+        forceRepresent: Bool, isCancelled: Bool
+    ) -> Bool {
+        forceRepresent && !isCancelled
     }
 
     static func renameSurface(

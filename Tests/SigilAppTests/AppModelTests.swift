@@ -1365,16 +1365,63 @@ struct AppModelTests {
     func forcePromptRepresentWhenKeyIsLiveAndRowIsHidden() {
         #expect(
             AppModel.shouldForcePromptRepresent(
-                isRenaming: true, rowVisible: false, sidebarVisible: true))
+                isRenaming: true, rowVisible: false, sidebarVisible: true,
+                showRenameAlert: true, preparedSurface: .none))
+        #expect(
+            AppModel.shouldForcePromptRepresent(
+                isRenaming: true, rowVisible: false, sidebarVisible: true,
+                showRenameAlert: false, preparedSurface: .prompt))
         #expect(
             !AppModel.shouldForcePromptRepresent(
-                isRenaming: true, rowVisible: true, sidebarVisible: true))
+                isRenaming: true, rowVisible: false, sidebarVisible: true,
+                showRenameAlert: false, preparedSurface: .none))
         #expect(
             !AppModel.shouldForcePromptRepresent(
-                isRenaming: false, rowVisible: false, sidebarVisible: true))
+                isRenaming: true, rowVisible: false, sidebarVisible: true,
+                showRenameAlert: false, preparedSurface: .inline))
         #expect(
             !AppModel.shouldForcePromptRepresent(
-                isRenaming: true, rowVisible: false, sidebarVisible: false))
+                isRenaming: true, rowVisible: true, sidebarVisible: true,
+                showRenameAlert: true, preparedSurface: .prompt))
+        #expect(
+            !AppModel.shouldForcePromptRepresent(
+                isRenaming: false, rowVisible: false, sidebarVisible: true,
+                showRenameAlert: true, preparedSurface: .prompt))
+        #expect(
+            !AppModel.shouldForcePromptRepresent(
+                isRenaming: true, rowVisible: false, sidebarVisible: false,
+                showRenameAlert: true, preparedSurface: .prompt))
+    }
+
+    @Test @MainActor
+    func freshBeginRenameThatOpensTheSidebarIsNotAPromptRestore() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        model.isSidebarVisible = false
+        let session = try #require(model.store.sessions.first)
+        model.beginRename(session)
+        #expect(model.isSidebarVisible)
+        #expect(model.renameSelectAllPending)
+        #expect(!model.showRenameAlert)
+        #expect(model.preparedRenameSurface == .none)
+        #expect(
+            !AppModel.shouldForcePromptRepresent(
+                isRenaming: true,
+                rowVisible: false,
+                sidebarVisible: true,
+                showRenameAlert: model.showRenameAlert,
+                preparedSurface: model.preparedRenameSurface))
+        #expect(model.renameSelectAllPending)
+        #expect(
+            AppModel.shouldSelectRenameAlertDraft(
+                selectAllPending: true, isCancelled: false, isRenaming: true,
+                forceRepresent: false))
     }
 
     @Test @MainActor
@@ -1677,6 +1724,20 @@ struct AppModelTests {
             !AppModel.shouldSelectRenameAlertDraft(
                 selectAllPending: true, isCancelled: false, isRenaming: false,
                 forceRepresent: false))
+        #expect(AppModel.shouldPrepareRename(isCancelled: false))
+        #expect(!AppModel.shouldPrepareRename(isCancelled: true))
+        #expect(
+            AppModel.shouldClearRenameSelectAllOnPrepare(
+                forceRepresent: true, isCancelled: false))
+        #expect(
+            !AppModel.shouldClearRenameSelectAllOnPrepare(
+                forceRepresent: true, isCancelled: true))
+        #expect(
+            !AppModel.shouldClearRenameSelectAllOnPrepare(
+                forceRepresent: false, isCancelled: false))
+        #expect(
+            !AppModel.shouldClearRenameSelectAllOnPrepare(
+                forceRepresent: false, isCancelled: true))
 
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }

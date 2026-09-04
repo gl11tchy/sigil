@@ -560,7 +560,9 @@ struct SidebarView: View {
             AppModel.shouldForcePromptRepresent(
                 isRenaming: true,
                 rowVisible: rowVisible,
-                sidebarVisible: model.isSidebarVisible
+                sidebarVisible: model.isSidebarVisible,
+                showRenameAlert: model.showRenameAlert,
+                preparedSurface: model.preparedRenameSurface
             )
         else { return }
         await prepareRename(resetDraft: false, forceRepresent: true)
@@ -568,6 +570,7 @@ struct SidebarView: View {
 
     @MainActor
     private func prepareRename(resetDraft: Bool, forceRepresent: Bool = false) async {
+        guard AppModel.shouldPrepareRename(isCancelled: Task.isCancelled) else { return }
         let key = model.renamingSessionKey
         let session = key.flatMap { sessionAnywhere(for: $0) }
         let rowVisible = key.map { visibleRowIDs().contains($0) } ?? false
@@ -668,7 +671,10 @@ struct SidebarView: View {
                 if model.consumeRenameSelectAll() {
                     selectRenameFieldEditor()
                 }
-            } else {
+            } else if AppModel.shouldClearRenameSelectAllOnPrepare(
+                forceRepresent: forceRepresent,
+                isCancelled: Task.isCancelled
+            ) {
                 model.clearRenameSelectAllPending()
             }
         }
