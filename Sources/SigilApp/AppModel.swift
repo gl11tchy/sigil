@@ -484,12 +484,13 @@ final class AppModel {
         let isFreshKey = renamingSessionKey != key
         renameAlertDismissGeneration += 1
         if isFreshKey {
+            // Keep didCommit true across teardown so the alert Binding cannot
+            // treat this as a click-out (same as pulseRenameAlertOff).
             renameAlertDidCommit = true
             renameDraft = title(for: session)
             showRenameAlert = false
             renameAlertSession = nil
             renameAlertIsPulsing = false
-            renameAlertDidCommit = false
         }
         renameSelectAllPending = Self.shouldArmRenameSelectAllOnBegin(isFreshKey: isFreshKey)
         renamingSessionKey = key
