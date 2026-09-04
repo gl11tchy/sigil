@@ -184,7 +184,7 @@ final class AppModel {
     /// optionally scoped to the folder the current tab is working in. Archived
     /// chats are hidden unless `showingArchived` is on.
     var sidebarSessions: [GrokSession] {
-        var result = store.search(searchText) { title(for: $0) }
+        var result = store.search(searchText) { self.title(for: $0) }
         if !settings.showEmptySessions {
             // A session you have open is always worth listing, even before the CLI
             // has written a summary for it. Otherwise the row marking the
@@ -1707,7 +1707,7 @@ final class AppModel {
                     timedOut: false
                 )
             }
-            guard rename(temporaryOutput.path, output.path) == 0 else {
+            guard Darwin.rename(temporaryOutput.path, output.path) == 0 else {
                 let code = POSIXErrorCode(rawValue: errno) ?? .EIO
                 throw POSIXError(code)
             }

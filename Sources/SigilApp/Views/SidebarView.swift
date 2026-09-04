@@ -91,7 +91,7 @@ struct SidebarView: View {
                 .foregroundStyle(palette.text)
                 .focused($focus, equals: .search)
                 .onKeyPress(.downArrow) { moveFocusToList() }
-                .onKeyPress(Self.f2) { _ in renameKeyboardSelection() }
+                .onKeyPress(Self.f2) { renameKeyboardSelection() }
                 .onKeyPress(.escape) { handleEscape() }
                 .onExitCommand { _ = handleEscape() }
             if !model.searchText.isEmpty {
@@ -222,7 +222,7 @@ struct SidebarView: View {
                 if model.renamingSessionKey != nil { return .ignored }
                 return activateKeyboardSelection()
             }
-            .onKeyPress(Self.f2) { _ in renameKeyboardSelection() }
+            .onKeyPress(Self.f2) { renameKeyboardSelection() }
             .onKeyPress(.escape) { handleEscape() }
             .onChange(of: keyboardSelectionID) { _, id in
                 if let id { proxy.scrollTo(id, anchor: .center) }
@@ -649,7 +649,7 @@ struct SidebarView: View {
                 await consumeRenameSelectAllWhenEditorReady(
                     shouldProceed: {
                         let handoff = currentRenameHandoff()
-                        AppModel.shouldConsumeRenameAlertSelectAll(
+                        return AppModel.shouldConsumeRenameAlertSelectAll(
                             expectedKey: key,
                             currentKey: handoff.key,
                             currentSurface: handoff.surface,
@@ -974,6 +974,66 @@ private struct SessionRow: View {
     @SwiftUI.State private var blurCommitTask: Task<Void, Never>?
 
     var body: some View {
+        accessibleRow
+            .onAppear { if isRenaming { noteMounted(true) } }
+            .onDisappear {
+                blurCommitTask?.cancel()
+                blurCommitTask = nil
+                if isRenaming {
+                    noteMounted(false)
+                }
+            }
+            .onChange(of: isRenaming) { _, renaming in
+                if renaming {
+                    blurCommitTask?.cancel()
+                    blurCommitTask = nil
+                    suppressBlurCommit = false
+                }
+                noteMounted(renaming)
+            }
+            .onChange(of: focus) { _, newFocus in
+                if AppModel.shouldCancelPendingBlurCommit(focusIsRename: newFocus == .rename) {
+                    blurCommitTask?.cancel()
+                    blurCommitTask = nil
+                }
+            }
+            .task(id: isRenaming) { await focusRenameFieldIfNeeded() }
+    }
+
+    @ViewBuilder
+    private var accessibleRow: some View {
+        interactiveRow
+            .accessibilityElement(children: isRenaming ? .contain : .combine)
+            .modifier(
+                SessionRowActivateTrait(
+                    isButton: AppModel.renameRowUsesButtonTrait(isRenaming: isRenaming),
+                    open: open
+                )
+            )
+            .accessibilityLabel(rowAccessibilityLabel)
+            .accessibilityAction(named: isPinned ? "Unpin" : "Pin") { togglePin() }
+            .accessibilityAction(named: isArchived ? "Unarchive" : "Archive") {
+                toggleArchive()
+            }
+            .accessibilityAction(named: "Rename") { beginRename() }
+            .modifier(
+                SessionRowResetNameAction(
+                    enabled: AppModel.renameRowOffersResetName(hasCustomName: hasCustomName),
+                    resetName: resetName
+                )
+            )
+    }
+
+    @ViewBuilder
+    private var interactiveRow: some View {
+        rowChrome
+            .onTapGesture { if !isRenaming { open() } }
+            .onHover { isHovering = $0 }
+            .help(rowHelpText)
+    }
+
+    @ViewBuilder
+    private var rowChrome: some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 titleLine
@@ -991,70 +1051,34 @@ private struct SessionRow: View {
         .padding(.leading, 8)
         .padding(.trailing, 10)
         .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(fill)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(
-                            isKeyboardSelected && state != .active ? palette.hairline : Color.clear,
-                            lineWidth: 1
-                        )
-                )
-        )
+        .background(rowFill)
         .overlay(alignment: .topTrailing) { trailingOverlay }
         .padding(.horizontal, 6)
         .contentShape(Rectangle())
-        .onTapGesture { if !isRenaming { open() } }
-        .onHover { isHovering = $0 }
-        .help(
-            "\(title)\n\(session.displayPath)\n"
-                + "\(session.messageCount) messages · \(session.updatedAt.longRelative)"
-        )
-        .accessibilityElement(children: isRenaming ? .contain : .combine)
-        .modifier(
-            SessionRowActivateTrait(
-                isButton: AppModel.renameRowUsesButtonTrait(isRenaming: isRenaming),
-                open: open
+    }
+
+    @ViewBuilder
+    private var rowFill: some View {
+        RoundedRectangle(cornerRadius: 6)
+            .fill(fill)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(
+                        isKeyboardSelected && state != .active ? palette.hairline : Color.clear,
+                        lineWidth: 1
+                    )
             )
-        )
-        .accessibilityLabel(
-            "\(title), \(session.projectName), \(session.updatedAt.longRelative)"
-                + (isPinned ? ", pinned" : "")
-                + (isArchived ? ", archived" : "")
-        )
-        .accessibilityAction(named: isPinned ? "Unpin" : "Pin") { togglePin() }
-        .accessibilityAction(named: isArchived ? "Unarchive" : "Archive") { toggleArchive() }
-        .accessibilityAction(named: "Rename") { beginRename() }
-        .modifier(
-            SessionRowResetNameAction(
-                enabled: AppModel.renameRowOffersResetName(hasCustomName: hasCustomName),
-                resetName: resetName
-            )
-        )
-        .onAppear { if isRenaming { noteMounted(true) } }
-        .onDisappear {
-            blurCommitTask?.cancel()
-            blurCommitTask = nil
-            if isRenaming {
-                noteMounted(false)
-            }
-        }
-        .onChange(of: isRenaming) { _, renaming in
-            if renaming {
-                blurCommitTask?.cancel()
-                blurCommitTask = nil
-                suppressBlurCommit = false
-            }
-            noteMounted(renaming)
-        }
-        .onChange(of: focus) { _, newFocus in
-            if AppModel.shouldCancelPendingBlurCommit(focusIsRename: newFocus == .rename) {
-                blurCommitTask?.cancel()
-                blurCommitTask = nil
-            }
-        }
-        .task(id: isRenaming) { await focusRenameFieldIfNeeded() }
+    }
+
+    private var rowHelpText: String {
+        "\(title)\n\(session.displayPath)\n"
+            + "\(session.messageCount) messages · \(session.updatedAt.longRelative)"
+    }
+
+    private var rowAccessibilityLabel: String {
+        "\(title), \(session.projectName), \(session.updatedAt.longRelative)"
+            + (isPinned ? ", pinned" : "")
+            + (isArchived ? ", archived" : "")
     }
 
     @ViewBuilder
@@ -1261,10 +1285,12 @@ private struct SessionRow: View {
     }
 }
 
+@MainActor
 private func currentRenameFieldEditor() -> NSText? {
     NSApp.keyWindow?.fieldEditor(false, for: nil)
 }
 
+@MainActor
 private func isEditingRenameAlertField(draft: String) -> Bool {
     guard let key = NSApp.keyWindow else { return false }
     return AppModel.isEditingRenameAlertField(
@@ -1344,7 +1370,7 @@ private struct SessionRenameField: View {
                 onAbandon()
                 return .handled
             }
-            .onExitCommand(onAbandon)
+            .onExitCommand(perform: onAbandon)
             .onChange(of: focus) { _, newFocus in
                 if newFocus != .rename { onBlur() }
             }
