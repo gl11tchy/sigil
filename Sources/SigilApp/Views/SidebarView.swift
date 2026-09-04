@@ -372,7 +372,6 @@ struct SidebarView: View {
             noteMounted: { model.noteRenameFieldMounted($0, key: model.sessionKey(session)) },
             mountGeneration: { model.renameFieldMountGeneration },
             consumeSelectAll: { model.consumeRenameSelectAll() },
-            clearSelectAll: { model.clearRenameSelectAllPending() },
             renameDraft: $model.renameDraft,
             focus: $focus
         )
@@ -595,9 +594,6 @@ struct SidebarView: View {
             model.showRenameAlert = false
             if key != nil { model.cancelRename() }
         case .inline:
-            if resetDraft, let session {
-                model.renameDraft = model.title(for: session)
-            }
             if let key { keyboardSelectionID = key }
             // Tear down the fallback alert before yielding so its binding
             // cannot cancelRename during the wait, and a sibling visibility
@@ -625,9 +621,6 @@ struct SidebarView: View {
             else { return }
             focus = .rename
         case .prompt:
-            if resetDraft, let session {
-                model.renameDraft = model.title(for: session)
-            }
             var presentedSession = session
             if AppModel.shouldPulseRenameAlert(
                 forceRepresent: forceRepresent,
@@ -956,7 +949,6 @@ private struct SessionRow: View {
     let noteMounted: (Bool) -> Void
     let mountGeneration: () -> Int
     let consumeSelectAll: () -> Bool
-    let clearSelectAll: () -> Void
     @Binding var renameDraft: String
     @FocusState.Binding var focus: SidebarFocus?
 
@@ -1030,7 +1022,6 @@ private struct SessionRow: View {
             blurCommitTask = nil
             if isRenaming {
                 noteMounted(false)
-                clearSelectAll()
             }
         }
         .onChange(of: isRenaming) { _, renaming in noteMounted(renaming) }

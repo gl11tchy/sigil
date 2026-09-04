@@ -35,7 +35,15 @@ final class AppModel {
     var findMatchIndex = 0
     var findMatchCount = 0
     /// The thread viewer can be collapsed for a full-width terminal.
-    var isSidebarVisible = true
+    var isSidebarVisible = true {
+        didSet {
+            if Self.shouldClearRenameSelectAllOnSidebarHide(
+                wasVisible: oldValue, isVisible: isSidebarVisible
+            ) {
+                renameSelectAllPending = false
+            }
+        }
+    }
     /// Bumped by Find Conversations so the search field takes focus even when
     /// the sidebar just became visible, or already had it.
     private(set) var searchFocusToken = 0
@@ -447,6 +455,9 @@ final class AppModel {
         applyNameToOpenTabs(session)
     }
 
+    /// Single draft owner for a fresh key. prepareRename only hands off the
+    /// surface — it must not rewrite `renameDraft`, or typing that lands
+    /// before that task runs is clobbered.
     func beginRename(_ session: GrokSession) {
         isSidebarVisible = true
         let key = sessionKey(session)
@@ -663,6 +674,14 @@ final class AppModel {
         isRenaming: Bool
     ) -> Bool {
         selectAllPending && !isCancelled && isRenaming
+    }
+
+    /// ⌘B restore must not select-all. LazyVStack recycle must not clear
+    /// pending before the fresh begin can consume it.
+    static func shouldClearRenameSelectAllOnSidebarHide(
+        wasVisible: Bool, isVisible: Bool
+    ) -> Bool {
+        wasVisible && !isVisible
     }
 
     /// Fallback alert: select-all only on a fresh beginRename, never on ⌘B

@@ -1563,6 +1563,98 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func fieldUnmountDoesNotClearSelectAllPending() async throws {
+        #expect(
+            AppModel.shouldClearRenameSelectAllOnSidebarHide(wasVisible: true, isVisible: false))
+        #expect(
+            !AppModel.shouldClearRenameSelectAllOnSidebarHide(wasVisible: true, isVisible: true))
+        #expect(
+            !AppModel.shouldClearRenameSelectAllOnSidebarHide(wasVisible: false, isVisible: true))
+        #expect(
+            !AppModel.shouldClearRenameSelectAllOnSidebarHide(wasVisible: false, isVisible: false))
+
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        let key = model.sessionKey(session)
+        model.beginRename(session)
+        model.noteRenameFieldMounted(true, key: key)
+        #expect(model.renameSelectAllPending)
+        model.noteRenameFieldMounted(false, key: key)
+        #expect(model.renameSelectAllPending)
+        model.noteRenameFieldMounted(true, key: key)
+        #expect(model.renameSelectAllPending)
+        #expect(model.consumeRenameSelectAll())
+        #expect(!model.renameSelectAllPending)
+    }
+
+    @Test @MainActor
+    func hidingSidebarClearsSelectAllPendingAndRestoreDoesNotSelectAll() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.beginRename(session)
+        model.renameDraft = "Typed"
+        #expect(model.renameSelectAllPending)
+
+        model.isSidebarVisible = false
+        #expect(!model.renameSelectAllPending)
+        #expect(model.renameDraft == "Typed")
+        #expect(model.renamingSessionKey == model.sessionKey(session))
+
+        model.isSidebarVisible = true
+        #expect(!model.renameSelectAllPending)
+        #expect(model.renameDraft == "Typed")
+        #expect(
+            !AppModel.shouldSelectRenameDraft(
+                selectAllPending: model.renameSelectAllPending,
+                isCancelled: false,
+                isRenaming: true))
+    }
+
+    @Test @MainActor
+    func beginRenameSeedsDraftOnAFreshKeyAndDoesNotClobberLaterTyping() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s-a", cwd: "/Users/someone/Documents/project", summary: "Alpha CLI")
+        try fixture.writeListedSession(
+            id: "s-b", cwd: "/Users/someone/Documents/project", summary: "Beta CLI")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let sessionA = try #require(model.store.sessions.first { $0.id == "s-a" })
+        let sessionB = try #require(model.store.sessions.first { $0.id == "s-b" })
+
+        model.beginRename(sessionA)
+        #expect(model.renameDraft == "Alpha CLI")
+        model.renameDraft = "Typed on A"
+        model.beginRename(sessionA)
+        #expect(model.renameDraft == "Typed on A")
+
+        model.beginRename(sessionB)
+        #expect(model.renameDraft == "Beta CLI")
+        model.renameDraft = "Typed on B"
+        #expect(model.renameSelectAllPending)
+        model.beginRename(sessionB)
+        #expect(model.renameDraft == "Typed on B")
+        #expect(!model.renameSelectAllPending)
+    }
+
+    @Test @MainActor
     func alertSelectAllIsOnlyOnFreshBeginNotForceRepresent() async throws {
         #expect(AppModel.renameAlertCommitUsesDefaultAction())
         #expect(
@@ -1642,12 +1734,14 @@ struct AppModelTests {
 
         #expect(model.renamingSessionKey == model.sessionKey(session))
         #expect(model.renameDraft == "Typed name")
+        #expect(!model.renameSelectAllPending)
         #expect(!model.hasCustomName(session))
         #expect(model.title(for: session) == "CLI summary")
 
         model.isSidebarVisible = true
         #expect(model.renameDraft == "Typed name")
         #expect(model.renamingSessionKey == model.sessionKey(session))
+        #expect(!model.renameSelectAllPending)
         #expect(!model.hasCustomName(session))
     }
 
