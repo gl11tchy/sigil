@@ -887,14 +887,10 @@ final class AppModel {
         return tab.title
     }
 
+    /// Same label `open` writes: the sidebar name, including the empty-summary
+    /// fallback. A nil `sessionTitle` would fall through to the folder name.
     private func applyNameToOpenTabs(_ session: GrokSession) {
-        let nextTitle: String?
-        if hasCustomName(session) {
-            nextTitle = title(for: session)
-        } else {
-            let summary = session.summary.trimmingCharacters(in: .whitespacesAndNewlines)
-            nextTitle = summary.isEmpty ? nil : session.title
-        }
+        let nextTitle = title(for: session)
         for tab in tabs where tabMatches(tab, sessionID: session.id, cwd: session.cwd) {
             tab.sessionTitle = nextTitle
         }

@@ -745,6 +745,60 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func resetNameOnOpenEmptySessionKeepsUntitledTabTitle() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        try fixture.writeListedSession(id: "s1", cwd: cwd.path, summary: "", messages: 0)
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.open(session)
+        let tab = try #require(model.selectedTab)
+        let untitled = "Untitled session in project"
+        #expect(model.title(for: session) == untitled)
+        #expect(tab.sessionTitle == untitled)
+        #expect(model.sidebarSessions.map(\.id) == ["s1"])
+
+        model.rename(session, to: "Keep me")
+        #expect(tab.sessionTitle == "Keep me")
+        #expect(model.title(for: tab) == "Keep me")
+        model.resetName(session)
+        #expect(!model.hasCustomName(session))
+        #expect(model.title(for: session) == untitled)
+        #expect(tab.sessionTitle == untitled)
+        #expect(model.title(for: tab) == untitled)
+        #expect(tab.title == untitled)
+        #expect(model.sidebarSessions.map(\.id) == ["s1"])
+    }
+
+    @Test @MainActor
+    func blankClearOnOpenEmptySessionKeepsUntitledTabTitle() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        try fixture.writeListedSession(id: "s1", cwd: cwd.path, summary: "", messages: 0)
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.open(session)
+        let tab = try #require(model.selectedTab)
+        let untitled = "Untitled session in project"
+        model.rename(session, to: "Keep me")
+        model.rename(session, to: "")
+        #expect(!model.hasCustomName(session))
+        #expect(model.title(for: session) == untitled)
+        #expect(tab.sessionTitle == untitled)
+        #expect(model.title(for: tab) == untitled)
+        #expect(tab.title == untitled)
+        #expect(model.sidebarSessions.map(\.id) == ["s1"])
+    }
+
+    @Test @MainActor
     func deletingAConversationDropsItsName() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
