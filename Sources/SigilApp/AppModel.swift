@@ -40,7 +40,7 @@ final class AppModel {
             if Self.shouldClearRenameSelectAllOnSidebarHide(
                 wasVisible: oldValue, isVisible: isSidebarVisible
             ) {
-                renameSelectAllPending = false
+                clearRenameSelectAllPending()
             }
         }
     }
@@ -168,6 +168,8 @@ final class AppModel {
     var renameFieldMountGeneration = 0
     /// Select-all only for a fresh beginRename (F2, ⌘⇧R, row menu). Restore must not.
     var renameSelectAllPending = false
+    /// Draft at arm time. Select-all is skipped if the user already edited.
+    var renameSelectAllBaseline: String?
 
     /// Conversations for the sidebar: newest first, one-shot noise filtered out,
     /// optionally scoped to the folder the current tab is working in. Archived
@@ -492,7 +494,12 @@ final class AppModel {
             renameAlertSession = nil
             renameAlertIsPulsing = false
         }
-        renameSelectAllPending = Self.shouldArmRenameSelectAllOnBegin(isFreshKey: isFreshKey)
+        if Self.shouldArmRenameSelectAllOnBegin(isFreshKey: isFreshKey) {
+            renameSelectAllPending = true
+            renameSelectAllBaseline = renameDraft
+        } else {
+            clearRenameSelectAllPending()
+        }
         renamingSessionKey = key
     }
 
@@ -520,7 +527,7 @@ final class AppModel {
         preparedRenameSurface = .none
         renameFieldMountedKey = nil
         renameFieldMountGeneration += 1
-        renameSelectAllPending = false
+        clearRenameSelectAllPending()
     }
 
     /// Snapshot the live draft before `endRenameSession` can wipe it. The
@@ -607,12 +614,13 @@ final class AppModel {
 
     func consumeRenameSelectAll() -> Bool {
         let pending = renameSelectAllPending
-        renameSelectAllPending = false
+        clearRenameSelectAllPending()
         return pending
     }
 
     func clearRenameSelectAllPending() {
         renameSelectAllPending = false
+        renameSelectAllBaseline = nil
     }
 
     /// Inline editor only. No-ops if this row is no longer the active rename
@@ -697,6 +705,15 @@ final class AppModel {
     ) -> Bool {
         keyMatches && rowVisible && sidebarVisible && fieldMounted
             && expectedGeneration == currentGeneration
+    }
+
+    /// After the blur-task yield, skip if FocusState landed on the field.
+    static func shouldCommitInlineBlurAfterYield(focusIsRename: Bool) -> Bool {
+        !focusIsRename
+    }
+
+    static func shouldCancelPendingBlurCommit(focusIsRename: Bool) -> Bool {
+        focusIsRename
     }
 
     static func shouldSelectRenameDraft(
@@ -785,6 +802,14 @@ final class AppModel {
         fieldEditorReady: Bool, selectAllPending: Bool
     ) -> Bool {
         fieldEditorReady && selectAllPending
+    }
+
+    /// Skip select-all when the user already edited past the armed draft.
+    static func shouldSelectRenameDraftIfUnedited(
+        currentDraft: String, baseline: String?
+    ) -> Bool {
+        guard let baseline else { return false }
+        return currentDraft == baseline
     }
 
     /// Same-key F2/⌘⇧R must not re-arm select-all; a late select would wipe typing.

@@ -659,6 +659,12 @@ struct SidebarView: View {
                         )
                     },
                     isEditingRenameField: { isEditingRenameAlertField(draft: model.renameDraft) },
+                    isDraftUnedited: {
+                        AppModel.shouldSelectRenameDraftIfUnedited(
+                            currentDraft: model.renameDraft,
+                            baseline: model.renameSelectAllBaseline
+                        )
+                    },
                     consume: { model.consumeRenameSelectAll() }
                 )
             } else if AppModel.shouldClearRenameSelectAllOnPrepare(
@@ -1042,6 +1048,12 @@ private struct SessionRow: View {
             }
             noteMounted(renaming)
         }
+        .onChange(of: focus) { _, newFocus in
+            if AppModel.shouldCancelPendingBlurCommit(focusIsRename: newFocus == .rename) {
+                blurCommitTask?.cancel()
+                blurCommitTask = nil
+            }
+        }
         .task(id: isRenaming) { await focusRenameFieldIfNeeded() }
     }
 
@@ -1173,6 +1185,12 @@ private struct SessionRow: View {
                 )
             },
             isEditingRenameField: { focus == .rename },
+            isDraftUnedited: {
+                AppModel.shouldSelectRenameDraftIfUnedited(
+                    currentDraft: model.renameDraft,
+                    baseline: model.renameSelectAllBaseline
+                )
+            },
             consume: consumeSelectAll
         )
     }
@@ -1207,6 +1225,8 @@ private struct SessionRow: View {
         blurCommitTask = Task {
             await Task.yield()
             guard !Task.isCancelled else { return }
+            guard AppModel.shouldCommitInlineBlurAfterYield(focusIsRename: focus == .rename)
+            else { return }
             commitBlur(draft, generation)
         }
     }
@@ -1229,11 +1249,12 @@ private func isEditingRenameAlertField(draft: String) -> Bool {
 /// Select-all only when the rename field editor is first responder.
 /// A leftover search or dormant editor must not consume pending.
 /// First check is immediate; later retries sleep, then stop at the timeout
-/// and clear pending without selecting.
+/// and clear pending without selecting. Skip select-all if the draft was edited.
 @MainActor
 private func consumeRenameSelectAllWhenEditorReady(
     shouldProceed: @escaping () -> Bool,
     isEditingRenameField: @escaping () -> Bool,
+    isDraftUnedited: @escaping () -> Bool,
     consume: @escaping () -> Bool
 ) async {
     let started = ContinuousClock.now
@@ -1246,10 +1267,11 @@ private func consumeRenameSelectAllWhenEditorReady(
             isEditingRenameField: isEditingRenameField()
         )
         if ready {
+            let unedited = isDraftUnedited()
             if AppModel.shouldConsumeRenameSelectAll(
                 fieldEditorReady: true,
                 selectAllPending: consume()
-            ) {
+            ), unedited {
                 editor?.selectAll(nil)
             }
             return

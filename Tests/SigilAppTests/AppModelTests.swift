@@ -1351,6 +1351,10 @@ struct AppModelTests {
         #expect(
             !AppModel.shouldCommitRenameIfFocusStealMissed(
                 isRenaming: false, focusIsRename: true))
+        #expect(AppModel.shouldCommitInlineBlurAfterYield(focusIsRename: false))
+        #expect(!AppModel.shouldCommitInlineBlurAfterYield(focusIsRename: true))
+        #expect(AppModel.shouldCancelPendingBlurCommit(focusIsRename: true))
+        #expect(!AppModel.shouldCancelPendingBlurCommit(focusIsRename: false))
     }
 
     @Test @MainActor
@@ -1968,6 +1972,13 @@ struct AppModelTests {
         let session = try #require(model.store.sessions.first)
         model.beginRename(session)
         #expect(model.renameSelectAllPending)
+        #expect(model.renameSelectAllBaseline == "CLI summary")
+        #expect(
+            AppModel.shouldSelectRenameDraftIfUnedited(
+                currentDraft: model.renameDraft, baseline: model.renameSelectAllBaseline))
+        #expect(
+            !AppModel.shouldSelectRenameDraftIfUnedited(
+                currentDraft: "CLI summary", baseline: nil))
         #expect(AppModel.shouldArmRenameSelectAllOnBegin(isFreshKey: true))
         #expect(!AppModel.shouldArmRenameSelectAllOnBegin(isFreshKey: false))
         #expect(
@@ -1975,10 +1986,12 @@ struct AppModelTests {
                 selectAllPending: true, isCancelled: false, isRenaming: true))
         #expect(model.consumeRenameSelectAll())
         #expect(!model.renameSelectAllPending)
+        #expect(model.renameSelectAllBaseline == nil)
         #expect(!model.consumeRenameSelectAll())
 
         model.beginRename(session)
         #expect(!model.renameSelectAllPending)
+        #expect(model.renameSelectAllBaseline == nil)
         model.renameDraft = "Typed"
         model.clearRenameSelectAllPending()
         #expect(
@@ -2072,8 +2085,12 @@ struct AppModelTests {
 
         model.beginRename(sessionB)
         #expect(model.renameDraft == "Beta CLI")
+        #expect(model.renameSelectAllBaseline == "Beta CLI")
         model.renameDraft = "Typed on B"
         #expect(model.renameSelectAllPending)
+        #expect(
+            !AppModel.shouldSelectRenameDraftIfUnedited(
+                currentDraft: model.renameDraft, baseline: model.renameSelectAllBaseline))
         model.beginRename(sessionB)
         #expect(model.renameDraft == "Typed on B")
         #expect(!model.renameSelectAllPending)
@@ -2093,7 +2110,11 @@ struct AppModelTests {
         let session = try #require(model.store.sessions.first)
         model.beginRename(session)
         #expect(model.renameSelectAllPending)
+        #expect(model.renameSelectAllBaseline == "CLI summary")
         model.renameDraft = "Typed"
+        #expect(
+            !AppModel.shouldSelectRenameDraftIfUnedited(
+                currentDraft: "Typed", baseline: model.renameSelectAllBaseline))
         model.beginRename(session)
         #expect(!model.renameSelectAllPending)
         #expect(model.renameDraft == "Typed")
