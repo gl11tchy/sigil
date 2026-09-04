@@ -49,6 +49,7 @@ struct AppSettingsTests {
         first.focusedProjectPath = "/tmp/sigil"
         first.pinnedConversations = [.init(sessionID: "abc", cwd: "/tmp/sigil")]
         first.pinnedProjects = ["/tmp/sigil"]
+        first.conversationNames = [.init(sessionID: "abc", cwd: "/tmp/sigil", name: "Auth rewrite")]
         first.showWorktreeSessions = true
         first.showSubagentSessions = true
 
@@ -57,6 +58,10 @@ struct AppSettingsTests {
         #expect(second.focusedProjectPath == "/tmp/sigil")
         #expect(second.pinnedConversations == [.init(sessionID: "abc", cwd: "/tmp/sigil")])
         #expect(second.pinnedProjects == ["/tmp/sigil"])
+        #expect(
+            second.conversationNames == [
+                .init(sessionID: "abc", cwd: "/tmp/sigil", name: "Auth rewrite")
+            ])
         #expect(second.showWorktreeSessions)
         #expect(second.showSubagentSessions)
     }

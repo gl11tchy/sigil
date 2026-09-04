@@ -35,7 +35,15 @@ final class AppModel {
     var findMatchIndex = 0
     var findMatchCount = 0
     /// The thread viewer can be collapsed for a full-width terminal.
-    var isSidebarVisible = true
+    var isSidebarVisible = true {
+        didSet {
+            if Self.shouldClearRenameSelectAllOnSidebarHide(
+                wasVisible: oldValue, isVisible: isSidebarVisible
+            ) {
+                clearRenameSelectAllPending()
+            }
+        }
+    }
     /// Bumped by Find Conversations so the search field takes focus even when
     /// the sidebar just became visible, or already had it.
     private(set) var searchFocusToken = 0
@@ -128,16 +136,70 @@ final class AppModel {
 
     // MARK: - Sidebar
 
+    /// Where the rename UI should live after a key or visibility change.
+    enum RenameSurface: Equatable, Sendable {
+        case none
+        case inline
+        case prompt
+    }
+
+    /// After a focus steal: wait for the field, fall through to select-all,
+    /// blur-commit on timeout, or stop.
+    enum RenameFocusStealFollowUp: Equatable, Sendable {
+        case selectAll
+        case wait
+        case miss
+        case abort
+    }
+
+    /// `.task` identity for prepareRename. Token bumps on beginRename so a
+    /// same-key F2/⌘⇧R re-runs prepare even when the session key is unchanged.
+    struct RenamePrepareTaskID: Hashable {
+        var key: String?
+        var token: Int
+    }
+
     /// Restrict the sidebar to conversations started in the current tab's folder.
     var scopeToCurrentFolder = false
     /// Recents and Projects hide archived chats; this shows only those.
     var showingArchived = false
+    /// Session key (`id` + cwd) of the row being renamed. Nil when idle.
+    /// Lives on the model so ⌘B can hide the sidebar without dropping the draft.
+    var renamingSessionKey: String?
+    /// In-progress rename text. Shared by the inline field and the fallback alert.
+    var renameDraft = ""
+    var showRenameAlert = false
+    var renameAlertSession: GrokSession?
+    var renameAlertDidCommit = false
+    /// True between the off and on edges of a forceRepresent pulse.
+    var renameAlertIsPulsing = false
+    /// Bumped on beginRename so a deferred click-out cancel cannot tear down
+    /// a newer rename after the yield.
+    var renameAlertDismissGeneration = 0
+    var preparedRenameKey: String?
+    var preparedRenameSurface: RenameSurface = .none
+    /// Bumped on beginRename so prepareRename re-runs for a same-key F2/⌘⇧R.
+    private(set) var renamePrepareToken = 0
+    var renamePrepareTaskID: RenamePrepareTaskID {
+        RenamePrepareTaskID(key: renamingSessionKey, token: renamePrepareToken)
+    }
+    /// Session key of the inline field currently in the tree. Nil if unmounted.
+    var renameFieldMountedKey: String?
+    /// Bumped on every mount/unmount so a stale blur task cannot commit after remount.
+    var renameFieldMountGeneration = 0
+    /// Select-all only for a fresh beginRename (F2, ⌘⇧R, row menu). Restore must not.
+    var renameSelectAllPending = false
+    /// Draft at arm time. Select-all is skipped if the user already edited.
+    var renameSelectAllBaseline: String?
+    /// Displayed title at fresh begin. Unedited Return/blur is a no-op even if
+    /// the CLI summary moved. Same-key begin must not clear this.
+    var renameCommitBaseline: String?
 
     /// Conversations for the sidebar: newest first, one-shot noise filtered out,
     /// optionally scoped to the folder the current tab is working in. Archived
     /// chats are hidden unless `showingArchived` is on.
     var sidebarSessions: [GrokSession] {
-        var result = store.search(searchText)
+        var result = store.search(searchText) { self.title(for: $0) }
         if !settings.showEmptySessions {
             // A session you have open is always worth listing, even before the CLI
             // has written a summary for it. Otherwise the row marking the
@@ -162,10 +224,12 @@ final class AppModel {
         return result
     }
 
-    /// A session worth listing: it has a summary, or more than the opening exchange.
+    /// A session worth listing: it has a summary, a name the user chose, or more
+    /// than the opening exchange.
     private func isReal(_ session: GrokSession) -> Bool {
         !session.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || session.messageCount > 2
+            || hasCustomName(session)
     }
 
     func isOpen(_ session: GrokSession) -> Bool {
@@ -333,7 +397,7 @@ final class AppModel {
         settings.focusedProjectPath = ""
     }
 
-    /// Drops pins and archives whose conversations are gone, after a successful scan.
+    /// Drops pins, archives, and names whose conversations are gone, after a successful scan.
     func pruneMissingPins() {
         guard !store.isLoading, store.loadError == nil else { return }
         let remainingPins = pruningMissing(settings.pinnedConversations)
@@ -347,6 +411,10 @@ final class AppModel {
         let remainingArchives = pruningMissing(settings.archivedConversations)
         if remainingArchives != settings.archivedConversations {
             settings.archivedConversations = remainingArchives
+        }
+        let remainingNames = pruningMissingNames(settings.conversationNames)
+        if remainingNames != settings.conversationNames {
+            settings.conversationNames = remainingNames
         }
         if !settings.focusedProjectPath.isEmpty, focusedProject == nil {
             settings.focusedProjectPath = ""
@@ -367,6 +435,13 @@ final class AppModel {
         }
     }
 
+    private func pruningMissingNames(_ names: [ConversationName]) -> [ConversationName] {
+        names.filter { record in
+            store.sessions.contains { $0.id == record.sessionID && samePath($0.cwd, record.cwd) }
+                || tabs.contains { tabMatches($0, sessionID: record.sessionID, cwd: record.cwd) }
+        }
+    }
+
     /// The deleted conversation still sits in `store` until the next scan.
     private func dropOrphanedProjectPin(for session: GrokSession) {
         let othersRemain =
@@ -378,18 +453,622 @@ final class AppModel {
         }
     }
 
+    /// Sidebar, tab, tooltip, and search label. A user-chosen name wins over the CLI summary.
+    func title(for session: GrokSession) -> String {
+        ConversationNaming.displayedTitle(for: session, customName: customName(for: session))
+    }
+
+    func customName(for session: GrokSession) -> String? {
+        ConversationNaming.name(
+            for: session, in: settings.conversationNames, samePath: samePath)
+    }
+
+    func hasCustomName(_ session: GrokSession) -> Bool {
+        customName(for: session) != nil
+    }
+
+    /// Empty, whitespace, or a name equal to the CLI title clears the override
+    /// (a matching submit with no overlay is a no-op). Otherwise stores the name.
+    func rename(_ session: GrokSession, to raw: String) {
+        let next = ConversationNaming.setting(
+            raw, on: session, onto: settings.conversationNames, samePath: samePath)
+        guard
+            Self.shouldPersistConversationNames(
+                next: next, current: settings.conversationNames)
+        else { return }
+        settings.conversationNames = next
+        applyNameToOpenTabs(session)
+    }
+
+    /// Finder-style blur/Return that matches the CLI title with no overlay
+    /// must not JSON-encode an unchanged list into UserDefaults.
+    static func shouldPersistConversationNames(
+        next: [ConversationName], current: [ConversationName]
+    ) -> Bool {
+        next != current
+    }
+
+    /// Unedited Return/blur is a no-op even if the CLI summary changed after
+    /// beginRename. Nil baseline means this commit was not an in-session edit.
+    static func shouldNoOpRenameCommit(draft: String, baseline: String?) -> Bool {
+        guard let baseline else { return false }
+        return draft == baseline
+    }
+
+    func resetName(_ session: GrokSession) {
+        let live = freshSession(matching: session)
+        if renamingSessionKey == sessionKey(live) {
+            endRenameSession()
+        }
+        let next = ConversationNaming.removing(
+            live, from: settings.conversationNames, samePath: samePath)
+        guard
+            Self.shouldPersistConversationNames(
+                next: next, current: settings.conversationNames)
+        else { return }
+        settings.conversationNames = next
+        applyNameToOpenTabs(live)
+    }
+
+    /// Single draft owner for a fresh key. prepareRename only hands off the
+    /// surface — it must not rewrite `renameDraft`, or typing that lands
+    /// before that task runs is clobbered.
+    func beginRename(_ session: GrokSession) {
+        isSidebarVisible = true
+        let key = sessionKey(session)
+        let isFreshKey = renamingSessionKey != key
+        renameAlertDismissGeneration += 1
+        let representPrompt = Self.shouldRepresentRenamePromptOnSameKeyBegin(
+            isFreshKey: isFreshKey,
+            showRenameAlert: showRenameAlert,
+            preparedSurface: preparedRenameSurface
+        )
+        if isFreshKey {
+            // Keep didCommit true across teardown so the alert Binding cannot
+            // treat this as a click-out (same as pulseRenameAlertOff).
+            renameAlertDidCommit = true
+            renameDraft = title(for: session)
+            renameCommitBaseline = renameDraft
+            showRenameAlert = false
+            renameAlertSession = nil
+            renameAlertIsPulsing = false
+        }
+        if Self.shouldArmRenameSelectAllOnBegin(isFreshKey: isFreshKey) {
+            renameSelectAllPending = true
+            renameSelectAllBaseline = renameDraft
+        } else {
+            clearRenameSelectAllPending()
+        }
+        if Self.shouldInvalidatePreparedRenameOnBegin() {
+            preparedRenameKey = nil
+            preparedRenameSurface = .none
+            renamePrepareToken += 1
+        }
+        renamingSessionKey = key
+        if representPrompt {
+            revealRenameAlert(session)
+        }
+    }
+
+    func cancelRename() {
+        endRenameSession()
+    }
+
+    func commitRename(_ session: GrokSession, to raw: String) {
+        if !Self.shouldNoOpRenameCommit(draft: raw, baseline: renameCommitBaseline) {
+            rename(session, to: raw)
+        }
+        if renamingSessionKey == sessionKey(session) {
+            endRenameSession()
+        }
+    }
+
+    /// Drops in-progress rename UI. Not called when the sidebar hides — the
+    /// draft must survive ⌘B and come back with the typed text.
+    private func endRenameSession() {
+        renamingSessionKey = nil
+        renameDraft = ""
+        showRenameAlert = false
+        renameAlertSession = nil
+        renameAlertDidCommit = false
+        renameAlertIsPulsing = false
+        preparedRenameKey = nil
+        preparedRenameSurface = .none
+        renameFieldMountedKey = nil
+        renameFieldMountGeneration += 1
+        clearRenameSelectAllPending()
+        renameCommitBaseline = nil
+    }
+
+    /// Snapshot the live draft before `endRenameSession` can wipe it. The
+    /// alert's isPresented setter may cancel before this button action runs.
+    /// Unedited draft (equal to the begin-time baseline) is a no-op even if
+    /// the CLI summary moved; an edited draft still matches the live title.
+    func commitCapturedRename(_ session: GrokSession) {
+        let snapshot = renameDraft
+        renameAlertDidCommit = true
+        commitRename(freshSession(matching: session), to: snapshot)
+    }
+
+    /// Store row for this id+cwd, or the snapshot if the session is gone.
+    func freshSession(matching session: GrokSession) -> GrokSession {
+        store.sessions.first { sessionKey($0) == sessionKey(session) } ?? session
+    }
+
+    /// ⌘B teardown leaves `showRenameAlert` true. Assigning true again is not
+    /// a presentation change, so SwiftUI never re-shows the alert.
+    static func shouldPulseRenameAlert(forceRepresent: Bool, currentlyShown: Bool) -> Bool {
+        forceRepresent && currentlyShown
+    }
+
+    /// Off-edge of the pulse. `renameAlertDidCommit` stays true so the alert
+    /// binding cannot cancel the live draft while we yield.
+    func pulseRenameAlertOff() {
+        renameAlertDidCommit = true
+        renameAlertIsPulsing = true
+        showRenameAlert = false
+    }
+
+    func revealRenameAlert(_ session: GrokSession?) {
+        renameAlertSession = session
+        showRenameAlert = true
+        renameAlertIsPulsing = false
+        renameAlertDidCommit = false
+    }
+
+    /// Sidebar hide and the forceRepresent pulse must not run the dismiss setter.
+    static func shouldApplyRenameAlertPresentedChange(
+        sidebarVisible: Bool, pulsing: Bool
+    ) -> Bool {
+        sidebarVisible && !pulsing
+    }
+
+    /// Dismiss may fire before the Rename button. `expectedGeneration` is the
+    /// dismiss generation at schedule time (the Binding), not at Task entry —
+    /// a later beginRename on this turn must not be cancelled.
+    func deferCancelRenameAlert(expectedGeneration: Int) async {
+        await Task.yield()
+        guard
+            Self.shouldCancelRenameAlertAfterYield(
+                isCancelled: Task.isCancelled,
+                sidebarVisible: isSidebarVisible,
+                didCommit: renameAlertDidCommit,
+                stillRenaming: renamingSessionKey != nil,
+                expectedGeneration: expectedGeneration,
+                currentGeneration: renameAlertDismissGeneration
+            )
+        else { return }
+        cancelRename()
+    }
+
+    func noteRenameFieldMounted(_ mounted: Bool, key: String) {
+        if mounted {
+            guard
+                Self.shouldApplyRenameFieldMount(
+                    mountKey: key,
+                    activeKey: renamingSessionKey,
+                    mountedKey: renameFieldMountedKey
+                )
+            else { return }
+            renameFieldMountedKey = key
+            renameFieldMountGeneration += 1
+        } else {
+            guard
+                Self.shouldApplyRenameFieldUnmount(
+                    unmountKey: key,
+                    activeKey: renamingSessionKey,
+                    mountedKey: renameFieldMountedKey
+                )
+            else { return }
+            renameFieldMountedKey = nil
+            renameFieldMountGeneration += 1
+        }
+    }
+
+    func consumeRenameSelectAll() -> Bool {
+        let pending = renameSelectAllPending
+        clearRenameSelectAllPending()
+        return pending
+    }
+
+    func clearRenameSelectAllPending() {
+        renameSelectAllPending = false
+        renameSelectAllBaseline = nil
+    }
+
+    /// Inline editor only. No-ops if this row is no longer the active rename
+    /// (Reset Name, cancel, or another row started). Unedited draft matches
+    /// the begin-time baseline first; otherwise the live title.
+    func commitInlineRename(_ session: GrokSession, to raw: String) {
+        guard renamingSessionKey == sessionKey(session) else { return }
+        commitRename(freshSession(matching: session), to: raw)
+    }
+
+    /// Blur of the inline field. Skipped when the row left the visible list,
+    /// the sidebar is hidden (⌘B), or LazyVStack unmounted the field.
+    func commitInlineBlur(
+        _ session: GrokSession,
+        to raw: String,
+        mountGeneration: Int
+    ) {
+        guard
+            Self.shouldCommitInlineBlur(
+                keyMatches: renamingSessionKey == sessionKey(session),
+                rowVisible: sidebarSessions.contains {
+                    sessionKey($0) == sessionKey(session)
+                },
+                sidebarVisible: isSidebarVisible,
+                fieldMounted: renameFieldMountedKey == sessionKey(session),
+                expectedGeneration: mountGeneration,
+                currentGeneration: renameFieldMountGeneration
+            )
+        else { return }
+        commitRename(freshSession(matching: session), to: raw)
+    }
+
+    /// The fallback rename alert may set `isPresented` to false before the
+    /// button action. Only cancel when that dismiss was not a completed commit.
+    static func shouldCancelRenameAlert(didCommit: Bool) -> Bool {
+        !didCommit
+    }
+
+    /// `expectedGeneration` is captured when the dismiss Task is scheduled.
+    /// A later beginRename bumps the current generation and poisons this cancel.
+    static func shouldCancelRenameAlertAfterYield(
+        isCancelled: Bool,
+        sidebarVisible: Bool,
+        didCommit: Bool,
+        stillRenaming: Bool,
+        expectedGeneration: Int,
+        currentGeneration: Int
+    ) -> Bool {
+        !isCancelled && sidebarVisible && !didCommit && stillRenaming
+            && expectedGeneration == currentGeneration
+    }
+
+    /// The live rename's field may mark itself mounted even if another row
+    /// still thinks it owns the flag.
+    static func shouldApplyRenameFieldMount(
+        mountKey: String, activeKey: String?, mountedKey: String?
+    ) -> Bool {
+        mountKey == activeKey && mountedKey != mountKey
+    }
+
+    /// Ignore unmounts that are not for the active key, or that do not match
+    /// the field currently tracked as mounted.
+    static func shouldApplyRenameFieldUnmount(
+        unmountKey: String, activeKey: String?, mountedKey: String?
+    ) -> Bool {
+        unmountKey == activeKey && mountedKey == unmountKey
+    }
+
+    static func renameRowUsesButtonTrait(isRenaming: Bool) -> Bool {
+        !isRenaming
+    }
+
+    static func renameRowOffersResetName(hasCustomName: Bool) -> Bool {
+        hasCustomName
+    }
+
+    static func shouldCommitInlineBlur(
+        keyMatches: Bool,
+        rowVisible: Bool,
+        sidebarVisible: Bool,
+        fieldMounted: Bool,
+        expectedGeneration: Int,
+        currentGeneration: Int
+    ) -> Bool {
+        keyMatches && rowVisible && sidebarVisible && fieldMounted
+            && expectedGeneration == currentGeneration
+    }
+
+    /// After the blur-task yield, skip if FocusState landed on the field.
+    static func shouldCommitInlineBlurAfterYield(focusIsRename: Bool) -> Bool {
+        !focusIsRename
+    }
+
+    static func shouldCancelPendingBlurCommit(focusIsRename: Bool) -> Bool {
+        focusIsRename
+    }
+
+    static func shouldSelectRenameDraft(
+        selectAllPending: Bool,
+        isCancelled: Bool,
+        isRenaming: Bool
+    ) -> Bool {
+        selectAllPending && !isCancelled && isRenaming
+    }
+
+    /// ⌘B restore must not select-all. LazyVStack recycle must not clear
+    /// pending before the fresh begin can consume it.
+    static func shouldClearRenameSelectAllOnSidebarHide(
+        wasVisible: Bool, isVisible: Bool
+    ) -> Bool {
+        wasVisible && !isVisible
+    }
+
+    /// Fallback alert: select-all only on a fresh beginRename, never on ⌘B
+    /// restore or any other remount that continues a typed draft.
+    static func shouldSelectRenameAlertDraft(
+        selectAllPending: Bool,
+        isCancelled: Bool,
+        isRenaming: Bool,
+        forceRepresent: Bool
+    ) -> Bool {
+        !forceRepresent
+            && shouldSelectRenameDraft(
+                selectAllPending: selectAllPending,
+                isCancelled: isCancelled,
+                isRenaming: isRenaming
+            )
+    }
+
+    /// After the alert select-all yield, consume only if this prepare is still
+    /// the live prompt. `.task(id: visibleRowIDs)` is not cancelled on key
+    /// change, so a stale prepare must not steal a newer beginRename's pending.
+    static func shouldConsumeRenameAlertSelectAll(
+        expectedKey: String?,
+        currentKey: String?,
+        currentSurface: RenameSurface,
+        selectAllPending: Bool,
+        isCancelled: Bool,
+        forceRepresent: Bool
+    ) -> Bool {
+        shouldFinishPromptHandoff(
+            isCancelled: isCancelled,
+            expectedKey: expectedKey,
+            currentKey: currentKey,
+            currentSurface: currentSurface
+        )
+            && shouldSelectRenameAlertDraft(
+                selectAllPending: selectAllPending,
+                isCancelled: isCancelled,
+                isRenaming: currentKey != nil,
+                forceRepresent: forceRepresent
+            )
+    }
+
+    /// Ready means the field editor is first responder and is editing the
+    /// rename field. A leftover search or dormant editor is not ready.
+    static func isRenameFieldEditorReady(
+        fieldEditorExists: Bool,
+        fieldEditorIsFirstResponder: Bool,
+        isEditingRenameField: Bool
+    ) -> Bool {
+        fieldEditorExists && fieldEditorIsFirstResponder && isEditingRenameField
+    }
+
+    /// Alert draft is the rename field when the alert window is key and the
+    /// editor string is the live draft. revealRenameAlert leaves the main
+    /// window key, so a leftover search editor must not count.
+    static func isEditingRenameAlertField(
+        hasKeyWindow: Bool,
+        keyWindowIsMain: Bool,
+        keyWindowIsSheet: Bool,
+        editorStringMatchesDraft: Bool
+    ) -> Bool {
+        guard hasKeyWindow, editorStringMatchesDraft else { return false }
+        return keyWindowIsSheet || !keyWindowIsMain
+    }
+
+    /// Consume pending only when the rename field editor is ready so a
+    /// leftover search or dormant editor cannot steal select-all.
+    static func shouldConsumeRenameSelectAll(
+        fieldEditorReady: Bool, selectAllPending: Bool
+    ) -> Bool {
+        fieldEditorReady && selectAllPending
+    }
+
+    /// Skip select-all when the user already edited past the armed draft.
+    static func shouldSelectRenameDraftIfUnedited(
+        currentDraft: String, baseline: String?
+    ) -> Bool {
+        guard let baseline else { return false }
+        return currentDraft == baseline
+    }
+
+    /// Same-key F2/⌘⇧R must not re-arm select-all; a late select would wipe typing.
+    static func shouldArmRenameSelectAllOnBegin(isFreshKey: Bool) -> Bool {
+        isFreshKey
+    }
+
+    /// Clear prepared surface on every begin so a same-key F2 after dismiss
+    /// is not treated as an already-configured prompt/inline handoff.
+    static func shouldInvalidatePreparedRenameOnBegin() -> Bool {
+        true
+    }
+
+    /// Click-out leaves the prompt prepared but hidden. Same-key begin must
+    /// show it again without reseeding the draft.
+    static func shouldRepresentRenamePromptOnSameKeyBegin(
+        isFreshKey: Bool,
+        showRenameAlert: Bool,
+        preparedSurface: RenameSurface
+    ) -> Bool {
+        !isFreshKey && !showRenameAlert && preparedSurface == .prompt
+    }
+
+    /// Focus steal may suppress blur-commit; the select-all wait must not.
+    static func shouldSuppressBlurCommitDuringRenameSelectAllWait() -> Bool {
+        false
+    }
+
+    /// One frame between retries. The first ready check is immediate.
+    static let renameSelectAllRetryInterval: Duration = .milliseconds(16)
+
+    /// Stop waiting so a never-ready editor cannot spin the MainActor.
+    static let renameSelectAllRetryTimeout: Duration = .milliseconds(400)
+
+    static func shouldContinueRenameSelectAllRetry(elapsed: Duration) -> Bool {
+        elapsed < renameSelectAllRetryTimeout
+    }
+
+    /// A never-ready editor must drop the fresh-begin flag so a later remount
+    /// or prompt→inline handoff cannot selectAll and wipe typed text.
+    static func shouldClearRenameSelectAllOnRetryTimeout() -> Bool {
+        true
+    }
+
+    static func shouldSelectRenameDraftOnRetryTimeout() -> Bool {
+        false
+    }
+
+    /// Return commits the fallback alert, matching the inline field's onSubmit.
+    static func renameAlertCommitUsesDefaultAction() -> Bool {
+        true
+    }
+
+    /// ⌘B restore of an in-progress prompt. A fresh beginRename that merely
+    /// opens a hidden sidebar is not a restore — select-all must still fire.
+    static func shouldForcePromptRepresent(
+        isRenaming: Bool,
+        rowVisible: Bool,
+        sidebarVisible: Bool,
+        showRenameAlert: Bool,
+        preparedSurface: RenameSurface
+    ) -> Bool {
+        isRenaming && !rowVisible && sidebarVisible
+            && (showRenameAlert || preparedSurface == .prompt)
+    }
+
+    static func shouldPrepareRename(isCancelled: Bool) -> Bool {
+        !isCancelled
+    }
+
+    /// Only a true forceRepresent restore may drop select-all. A cancelled
+    /// sibling prepareRename must not wipe a newer beginRename's pending flag.
+    static func shouldClearRenameSelectAllOnPrepare(
+        forceRepresent: Bool, isCancelled: Bool
+    ) -> Bool {
+        forceRepresent && !isCancelled
+    }
+
+    static func renameSurface(
+        isRenaming: Bool,
+        sessionAvailable: Bool,
+        rowVisible: Bool
+    ) -> RenameSurface {
+        guard isRenaming, sessionAvailable else { return .none }
+        return rowVisible ? .inline : .prompt
+    }
+
+    /// List reshuffles must not re-arm the fallback alert. Only a key or
+    /// surface change (or a fresh rename) should reconfigure.
+    /// `forceReconfigure` is not a draft write — beginRename owns the draft.
+    static func shouldReconfigureRename(
+        previousKey: String?,
+        previousSurface: RenameSurface,
+        nextKey: String?,
+        nextSurface: RenameSurface,
+        forceReconfigure: Bool,
+        forceRepresent: Bool = false
+    ) -> Bool {
+        if forceRepresent { return true }
+        if forceReconfigure { return true }
+        return previousKey != nextKey || previousSurface != nextSurface
+    }
+
+    /// After yielding to let the inline field mount, only steal focus if this
+    /// handoff is still the live inline rename.
+    static func shouldFinishInlineHandoff(
+        isCancelled: Bool,
+        expectedKey: String?,
+        currentKey: String?,
+        currentSurface: RenameSurface
+    ) -> Bool {
+        !isCancelled && expectedKey != nil && expectedKey == currentKey
+            && currentSurface == .inline
+    }
+
+    /// After the forceRepresent pulse yield, only re-present the fallback
+    /// alert if this task is still the live prompt rename. A sibling
+    /// visibility task may have switched to inline during the wait.
+    static func shouldFinishPromptHandoff(
+        isCancelled: Bool,
+        expectedKey: String?,
+        currentKey: String?,
+        currentSurface: RenameSurface
+    ) -> Bool {
+        !isCancelled && expectedKey != nil && expectedKey == currentKey
+            && currentSurface == .prompt
+    }
+
+    /// After yielding to focus the inline field, skip if the row task was
+    /// cancelled or the row is no longer renaming.
+    static func shouldStealRenameFocusAfterYield(
+        isCancelled: Bool,
+        isRenaming: Bool
+    ) -> Bool {
+        !isCancelled && isRenaming
+    }
+
+    /// Return/Escape must not leave blur suppression armed for the next click-away.
+    static func shouldClearBlurSuppressionAfterCommitOrAbandon() -> Bool {
+        true
+    }
+
+    /// After the focus-steal wait times out, a still-live rename whose field
+    /// is not focused is a stuck session — commit as if the field blurred.
+    /// Two yields alone are not a miss.
+    static func shouldCommitRenameIfFocusStealMissed(
+        isRenaming: Bool, focusIsRename: Bool
+    ) -> Bool {
+        isRenaming && !focusIsRename
+    }
+
+    /// Wait with the same interval/timeout as select-all. Ready or `.rename`
+    /// focus falls through immediately (F2/⌘⇧R stay instant). A miss is only
+    /// a timeout while still renaming with focus off the field.
+    static func renameFocusStealFollowUp(
+        fieldEditorReady: Bool,
+        focusIsRename: Bool,
+        isCancelled: Bool,
+        isRenaming: Bool,
+        elapsed: Duration
+    ) -> RenameFocusStealFollowUp {
+        if fieldEditorReady || focusIsRename { return .selectAll }
+        guard
+            shouldStealRenameFocusAfterYield(
+                isCancelled: isCancelled, isRenaming: isRenaming)
+        else { return .abort }
+        if shouldContinueRenameSelectAllRetry(elapsed: elapsed) { return .wait }
+        return shouldCommitRenameIfFocusStealMissed(
+            isRenaming: isRenaming, focusIsRename: focusIsRename)
+            ? .miss : .abort
+    }
+
+    /// The conversation on screen, when the store knows it. Menu-bar Rename uses this.
+    func sessionForSelectedTab() -> GrokSession? {
+        guard let tab = selectedTab, let id = tab.sessionID else { return nil }
+        return store.sessions.first {
+            $0.id == id && samePath($0.cwd, tab.workingDirectory.path)
+        }
+    }
+
     /// A tab's label. New sessions start out named after their folder; once the CLI
-    /// writes a summary for them, the store supplies the real conversation name.
+    /// writes a summary for them, the store supplies the conversation name. A
+    /// user-chosen name wins even when the CLI has not written a summary yet.
     func title(for tab: TerminalTab) -> String {
         if let id = tab.sessionID,
             let session = store.sessions.first(where: {
                 $0.id == id && samePath($0.cwd, tab.workingDirectory.path)
-            }),
-            !session.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            })
         {
-            return session.title
+            if hasCustomName(session) { return title(for: session) }
+            if !session.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return session.title
+            }
         }
         return tab.title
+    }
+
+    /// Same label `open` writes: the sidebar name, including the empty-summary
+    /// fallback. A nil `sessionTitle` would fall through to the folder name.
+    private func applyNameToOpenTabs(_ session: GrokSession) {
+        let nextTitle = title(for: session)
+        for tab in tabs where tabMatches(tab, sessionID: session.id, cwd: session.cwd) {
+            tab.sessionTitle = nextTitle
+        }
     }
 
     // MARK: - Tabs
@@ -444,7 +1123,7 @@ final class AppModel {
             themeName: settings.theme.grokThemeName
         )
         let tab = add(spec)
-        tab.sessionTitle = session.title
+        tab.sessionTitle = title(for: session)
     }
 
     @discardableResult
@@ -919,6 +1598,7 @@ final class AppModel {
             try trashConversation(session.directory)
             unpin(session)
             unarchive(session)
+            resetName(session)
             let removedIDs = Set(matchingTabs.map(\.id))
             for tab in matchingTabs where !stoppedTabs.contains(where: { $0.id == tab.id }) {
                 tabBridge?.noteTabClosed(id: tab.id)
@@ -973,7 +1653,7 @@ final class AppModel {
     func exportTranscript(_ session: GrokSession) {
         exportTranscript(
             sessionID: session.id,
-            title: session.title,
+            title: title(for: session),
             workingDirectory: URL(fileURLWithPath: session.cwd)
         )
     }
@@ -1089,7 +1769,7 @@ final class AppModel {
                     timedOut: false
                 )
             }
-            guard rename(temporaryOutput.path, output.path) == 0 else {
+            guard Darwin.rename(temporaryOutput.path, output.path) == 0 else {
                 let code = POSIXErrorCode(rawValue: errno) ?? .EIO
                 throw POSIXError(code)
             }

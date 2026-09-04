@@ -49,7 +49,8 @@ public struct GrokSession: Identifiable, Hashable, Sendable {
         kind == "subagent"
     }
 
-    /// What the sidebar shows. Falls back to the folder name when the CLI wrote no summary.
+    /// The CLI summary, or a folder fallback when the CLI wrote none.
+    /// The sidebar may show a user-chosen name instead; see `ConversationNaming`.
     public var title: String {
         let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { return trimmed }

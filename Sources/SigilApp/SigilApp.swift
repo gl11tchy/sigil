@@ -74,6 +74,13 @@ struct GrokCommands: Commands {
                 model.exportSelectedTranscript()
             }
             .disabled(!model.canExportSelectedTranscript)
+            Button("Rename Conversation") {
+                if let session = model.sessionForSelectedTab() {
+                    model.beginRename(session)
+                }
+            }
+            .keyboardShortcut("r", modifiers: [.command, .shift])
+            .disabled(model.sessionForSelectedTab() == nil)
         }
 
         CommandGroup(replacing: .pasteboard) {
