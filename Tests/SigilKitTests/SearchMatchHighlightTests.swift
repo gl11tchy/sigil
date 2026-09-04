@@ -256,12 +256,171 @@ struct SearchMatchHighlightTests {
         #expect(runs.map(\.text).joined() == hay)
         #expect(runs.filter(\.isMatch).map(\.text) == ["Café", "CAFE", "cafe"])
     }
+
+    @Test func runsAsPrefixOfUsesTheSameSplitAsRanges() {
+        let subtitle = "sigil · 14m"
+        let runs = SearchMatchHighlight.runs(in: "sigil", query: "sig", asPrefixOf: subtitle)
+        #expect(runs.map(\.text).joined() == subtitle)
+        #expect(matched(runs) == ["sig"])
+        let miss = SearchMatchHighlight.runs(in: "sigil", query: "14", asPrefixOf: subtitle)
+        #expect(miss == [.init(text: subtitle, isMatch: false)])
+    }
+
+    @Test func emptyQueryRowKeepsDefaultSubtitleAndDoesNotPaint() {
+        let recents = recentsRow(displayed: "Auth rewrite", cli: "CLI summary", query: "")
+        #expect(!recents.paints)
+        #expect(recents.subtitle == "project · 14m")
+        #expect(recents.subtitleRuns == [.init(text: "project · 14m", isMatch: false)])
+        let projects = projectsRow(displayed: "Auth rewrite", cli: "CLI summary", query: "")
+        #expect(!projects.paints)
+        #expect(projects.subtitle == "14m")
+    }
+
+    @Test func displayedTitleHitPaintsTitleAndLeavesDefaultSubtitle() {
+        let paint = recentsRow(displayed: "Auth rewrite", cli: "CLI summary", query: "Auth")
+        #expect(matched(paint.titleRuns) == ["Auth"])
+        #expect(paint.subtitle == "project · 14m")
+        #expect(matched(paint.subtitleRuns).isEmpty)
+        #expect(paint.paints)
+    }
+
+    @Test func cliTitleOnlyHitPaintsTheCliSummaryOnTheSubtitle() {
+        let paint = recentsRow(displayed: "Auth rewrite", cli: "CLI summary", query: "CLI")
+        #expect(matched(paint.titleRuns).isEmpty)
+        #expect(paint.subtitle == "CLI summary · 14m")
+        #expect(matched(paint.subtitleRuns) == ["CLI"])
+        #expect(paint.subtitleRuns.map(\.text).joined() == paint.subtitle)
+        #expect(paint.paints)
+        #expect(SessionScanner.matches(namedSession, query: "CLI", displayedTitle: "Auth rewrite"))
+    }
+
+    @Test func cwdOnlyHitPaintsTheVisiblePathOnTheSubtitle() {
+        let paint = recentsRow(displayed: "Auth rewrite", cli: "CLI summary", query: "/tmp")
+        #expect(matched(paint.titleRuns).isEmpty)
+        #expect(paint.subtitle.hasPrefix("/tmp/project"))
+        #expect(matched(paint.subtitleRuns) == ["/tmp"])
+        #expect(paint.paints)
+    }
+
+    @Test func displayPathHitIsPreferredOverRawCwd() {
+        let paint = SearchMatchHighlight.row(
+            displayedTitle: "Auth rewrite",
+            cliTitle: "CLI summary",
+            projectName: "sigil",
+            cwd: "/Users/me/repos/sigil",
+            displayPath: "~/repos/sigil",
+            relativeTime: "14m",
+            showsProject: true,
+            query: "repos"
+        )
+        #expect(paint.subtitle == "~/repos/sigil · 14m")
+        #expect(matched(paint.subtitleRuns) == ["repos"])
+        #expect(matched(paint.titleRuns).isEmpty)
+    }
+
+    @Test func projectNameHitPaintsTheShortNameNotTheTimestamp() {
+        let paint = recentsRow(displayed: "Auth rewrite", cli: "CLI summary", query: "project")
+        #expect(paint.subtitle == "project · 14m")
+        #expect(matched(paint.subtitleRuns) == ["project"])
+        #expect(!paint.subtitleRuns.contains { $0.isMatch && $0.text.contains("14") })
+    }
+
+    @Test func projectsSortLeavesFolderHitsToTheHeader() {
+        let row = projectsRow(displayed: "Auth rewrite", cli: "CLI summary", query: "project")
+        #expect(matched(row.titleRuns).isEmpty)
+        #expect(row.subtitle == "14m")
+        #expect(!row.paints)
+        let header = SearchMatchHighlight.projectHeader(
+            name: "project",
+            displayPath: "/tmp/project",
+            cwd: "/tmp/project",
+            count: 3,
+            query: "project"
+        )
+        #expect(header.text == "project (3)")
+        #expect(matched(header.runs) == ["project"])
+        #expect(header.paints)
+    }
+
+    @Test func projectsHeaderCwdOnlyHitShowsTheMatchingPath() {
+        let header = SearchMatchHighlight.projectHeader(
+            name: "sigil",
+            displayPath: "~/repos/sigil",
+            cwd: "/Users/me/repos/sigil",
+            count: 4,
+            query: "repos"
+        )
+        #expect(header.text == "~/repos/sigil (4)")
+        #expect(matched(header.runs) == ["repos"])
+        #expect(header.paints)
+    }
+
+    @Test func projectsRowStillPaintsACliOnlyHit() {
+        let paint = projectsRow(displayed: "Auth rewrite", cli: "CLI summary", query: "CLI")
+        #expect(matched(paint.titleRuns).isEmpty)
+        #expect(paint.subtitle == "CLI summary · 14m")
+        #expect(matched(paint.subtitleRuns) == ["CLI"])
+        #expect(paint.paints)
+    }
+
+    @Test func emptyQueryHeaderKeepsTheShortName() {
+        let header = SearchMatchHighlight.projectHeader(
+            name: "sigil",
+            displayPath: "~/repos/sigil",
+            cwd: "/Users/me/repos/sigil",
+            count: 2,
+            query: "  "
+        )
+        #expect(header.text == "sigil (2)")
+        #expect(!header.paints)
+    }
+
+    @Test func recentsListedRowsPaintWhenTheQueryIsNonEmpty() {
+        let displayed = "Auth rewrite"
+        let queries = ["Auth", "CLI", "project", "/tmp", "  rewrite "]
+        for query in queries {
+            #expect(SessionScanner.matches(namedSession, query: query, displayedTitle: displayed))
+            let paint = recentsRow(displayed: displayed, cli: "CLI summary", query: query)
+            #expect(paint.paints, "silent Recents match for \(query.debugDescription)")
+            #expect(paint.subtitleRuns.map(\.text).joined() == paint.subtitle)
+        }
+    }
 }
 
 private let namedSession = session(title: "CLI summary", cwd: "/tmp/project")
 
 private func slices(_ haystack: String, query: String) -> [String] {
     SearchMatchHighlight.ranges(in: haystack, query: query).map { String(haystack[$0]) }
+}
+
+private func matched(_ runs: [SearchMatchHighlight.Run]) -> [String] {
+    runs.filter(\.isMatch).map(\.text)
+}
+
+private func recentsRow(displayed: String, cli: String, query: String) -> SearchMatchHighlight.RowPaint {
+    SearchMatchHighlight.row(
+        displayedTitle: displayed,
+        cliTitle: cli,
+        projectName: "project",
+        cwd: "/tmp/project",
+        displayPath: "/tmp/project",
+        relativeTime: "14m",
+        showsProject: true,
+        query: query
+    )
+}
+
+private func projectsRow(displayed: String, cli: String, query: String) -> SearchMatchHighlight.RowPaint {
+    SearchMatchHighlight.row(
+        displayedTitle: displayed,
+        cliTitle: cli,
+        projectName: "project",
+        cwd: "/tmp/project",
+        displayPath: "/tmp/project",
+        relativeTime: "14m",
+        showsProject: false,
+        query: query
+    )
 }
 
 private func session(title: String, cwd: String) -> GrokSession {

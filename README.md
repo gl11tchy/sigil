@@ -23,7 +23,8 @@ By gl11tchy.
   subagent children stay off the list unless you turn them on in Settings. They
   still run in the background.
 - **Search highlight.** Matches from the sidebar Search field (`⌘⇧F`) light up in
-  each visible title, and in the project name on the subtitle.
+  each visible title, in the project name or path on the subtitle, and in the
+  Projects header. A hit on the CLI summary or a path still paints a visible run.
 - **Rename.** Name a conversation from the row's context menu, `F2` in the
   thread list, or `⌘⇧R` for the session on screen. The name is what the sidebar,
   tabs, and search use, and it survives the CLI rewriting its own summary.

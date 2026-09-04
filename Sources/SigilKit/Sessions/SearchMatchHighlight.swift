@@ -79,7 +79,23 @@ public enum SearchMatchHighlight: Sendable {
 
     /// Title or subtitle broken into unmatched / matched runs, in order.
     public static func runs(in haystack: String, query: String) -> [Run] {
-        let matchRanges = ranges(in: haystack, query: query)
+        runs(in: haystack, matching: ranges(in: haystack, query: query))
+    }
+
+    /// `runs(in:query:)` relocated onto `container`, which must start with `haystack`.
+    public static func runs(
+        in haystack: String,
+        query: String,
+        asPrefixOf container: String
+    ) -> [Run] {
+        runs(in: container, matching: ranges(in: haystack, query: query, asPrefixOf: container))
+    }
+
+    /// Split `haystack` on already-computed ranges. The ranges must belong to `haystack`.
+    public static func runs(
+        in haystack: String,
+        matching matchRanges: [Range<String.Index>]
+    ) -> [Run] {
         guard !haystack.isEmpty else { return [] }
         guard !matchRanges.isEmpty else { return [Run(text: haystack, isMatch: false)] }
         var result: [Run] = []
@@ -95,6 +111,101 @@ public enum SearchMatchHighlight: Sendable {
             result.append(Run(text: String(haystack[current...]), isMatch: false))
         }
         return result
+    }
+
+    /// What a conversation row should paint: title runs plus one subtitle string
+    /// whose runs were built from that same instance.
+    public struct RowPaint: Equatable, Sendable {
+        public var titleRuns: [Run]
+        public var subtitle: String
+        public var subtitleRuns: [Run]
+
+        public var paints: Bool {
+            titleRuns.contains(where: \.isMatch) || subtitleRuns.contains(where: \.isMatch)
+        }
+    }
+
+    /// What a Projects section header should paint.
+    public struct HeaderPaint: Equatable, Sendable {
+        public var text: String
+        public var runs: [Run]
+
+        public var paints: Bool { runs.contains(where: \.isMatch) }
+    }
+
+    /// Visible title/subtitle paint for one sidebar row.
+    ///
+    /// Displayed title is always the title line. When that has no hit, the
+    /// subtitle reuses the project name, a matching path, or the CLI summary
+    /// so a listed row still has an accent run. In Projects sort the folder
+    /// cue lives on the section header, so a project/cwd-only hit leaves the
+    /// row subtitle as the timestamp.
+    public static func row(
+        displayedTitle: String,
+        cliTitle: String,
+        projectName: String,
+        cwd: String,
+        displayPath: String,
+        relativeTime: String,
+        showsProject: Bool,
+        query: String
+    ) -> RowPaint {
+        let titleRuns = runs(in: displayedTitle, query: query)
+        let prefix: String?
+        if showsProject, let path = matchingPath(projectName, displayPath, cwd, query: query) {
+            prefix = path
+        } else if !contains(displayedTitle, query: query), contains(cliTitle, query: query) {
+            prefix = cliTitle
+        } else if showsProject {
+            prefix = projectName
+        } else {
+            prefix = nil
+        }
+        let subtitle = subtitleText(prefix: prefix, relativeTime: relativeTime)
+        let ranges: [Range<String.Index>] =
+            if let prefix, !prefix.isEmpty {
+                self.ranges(in: prefix, query: query, asPrefixOf: subtitle)
+            } else {
+                []
+            }
+        return RowPaint(
+            titleRuns: titleRuns,
+            subtitle: subtitle,
+            subtitleRuns: runs(in: subtitle, matching: ranges)
+        )
+    }
+
+    /// Projects header. A cwd-only hit swaps the short name for the matching path
+    /// so the accent run has a substring to sit on.
+    public static func projectHeader(
+        name: String,
+        displayPath: String,
+        cwd: String,
+        count: Int,
+        query: String
+    ) -> HeaderPaint {
+        let prefix = matchingPath(name, displayPath, cwd, query: query) ?? name
+        let text = "\(prefix) (\(count))"
+        let ranges = ranges(in: prefix, query: query, asPrefixOf: text)
+        return HeaderPaint(text: text, runs: runs(in: text, matching: ranges))
+    }
+
+    /// First visible path string that contains `query`: short name, then `~` path, then cwd.
+    static func matchingPath(
+        _ projectName: String,
+        _ displayPath: String,
+        _ cwd: String,
+        query: String
+    ) -> String? {
+        if contains(projectName, query: query) { return projectName }
+        if contains(displayPath, query: query) { return displayPath }
+        if contains(cwd, query: query) { return cwd }
+        return nil
+    }
+
+    private static func subtitleText(prefix: String?, relativeTime: String) -> String {
+        guard let prefix, !prefix.isEmpty else { return relativeTime }
+        return "\(prefix) · \(relativeTime)"
     }
 
     /// Per-grapheme fold plus the original cluster that produced each folded character.

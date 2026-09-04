@@ -331,7 +331,10 @@ struct SidebarView: View {
         } header: {
             ProjectSectionHeader(
                 title: project.name,
+                displayPath: project.displayPath,
+                cwd: project.cwd,
                 count: rows.count,
+                searchQuery: model.searchText,
                 isFirst: isFirst,
                 isPinned: model.isPinned(project),
                 togglePin: { model.togglePin(project) }
@@ -795,7 +798,10 @@ private struct ProjectRows: Identifiable {
 
 private struct ProjectSectionHeader: View {
     let title: String
+    let displayPath: String
+    let cwd: String
     let count: Int
+    let searchQuery: String
     let isFirst: Bool
     let isPinned: Bool
     let togglePin: () -> Void
@@ -804,30 +810,41 @@ private struct ProjectSectionHeader: View {
     @State private var isHovering = false
 
     var body: some View {
-        let label = "\(title) (\(count))"
-        Text(label)
-            .font(.system(size: 10, weight: .medium, design: .monospaced))
-            .foregroundStyle(palette.textFaint)
-            .padding(.horizontal, 14)
-            .padding(.top, isFirst ? 10 : 18)
-            .padding(.bottom, 4)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(palette.sidebar)
-            .overlay(alignment: .topTrailing) { trailing }
-            .contentShape(Rectangle())
-            .onHover { isHovering = $0 }
-            .contextMenu {
-                Button(isPinned ? "Unpin Project" : "Pin Project", action: togglePin)
-            }
-            .help(isPinned ? "Unpin this project" : "Pin this project")
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.isHeader)
-            .accessibilityLabel(
-                "\(title), \(count) conversations" + (isPinned ? ", pinned" : "")
-            )
-            .accessibilityAction(named: isPinned ? "Unpin Project" : "Pin Project") {
-                togglePin()
-            }
+        let paint = SearchMatchHighlight.projectHeader(
+            name: title,
+            displayPath: displayPath,
+            cwd: cwd,
+            count: count,
+            query: searchQuery
+        )
+        SearchHighlightedText(
+            runs: paint.runs,
+            match: palette.accent,
+            rest: palette.textFaint
+        )
+        .font(.system(size: 10, weight: .medium, design: .monospaced))
+        .lineLimit(1)
+        .truncationMode(.middle)
+        .padding(.horizontal, 14)
+        .padding(.top, isFirst ? 10 : 18)
+        .padding(.bottom, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.sidebar)
+        .overlay(alignment: .topTrailing) { trailing }
+        .contentShape(Rectangle())
+        .onHover { isHovering = $0 }
+        .contextMenu {
+            Button(isPinned ? "Unpin Project" : "Pin Project", action: togglePin)
+        }
+        .help(isPinned ? "Unpin this project" : "Pin this project")
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityLabel(
+            "\(title), \(count) conversations" + (isPinned ? ", pinned" : "")
+        )
+        .accessibilityAction(named: isPinned ? "Unpin Project" : "Pin Project") {
+            togglePin()
+        }
     }
 
     @ViewBuilder
@@ -1037,12 +1054,12 @@ private struct SessionRow: View {
 
     @ViewBuilder
     private var rowChrome: some View {
+        let paint = rowPaint
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                titleLine
+                titleLine(runs: paint.titleRuns)
                 SearchHighlightedText(
-                    text: subtitle,
-                    ranges: subtitleMatchRanges,
+                    runs: paint.subtitleRuns,
                     match: palette.accent,
                     rest: palette.textFaint
                 )
@@ -1089,7 +1106,7 @@ private struct SessionRow: View {
     }
 
     @ViewBuilder
-    private var titleLine: some View {
+    private func titleLine(runs: [SearchMatchHighlight.Run]) -> some View {
         if isRenaming {
             SessionRenameField(
                 model: model,
@@ -1102,8 +1119,7 @@ private struct SessionRow: View {
             )
         } else {
             SearchHighlightedText(
-                text: title,
-                ranges: SearchMatchHighlight.ranges(in: title, query: searchQuery),
+                runs: runs,
                 match: palette.accent,
                 rest: palette.text
             )
@@ -1113,18 +1129,18 @@ private struct SessionRow: View {
         }
     }
 
-    private var subtitle: String {
-        if showsProject {
-            return "\(session.projectName) · \(session.updatedAt.shortRelative)"
-        }
-        return session.updatedAt.shortRelative
-    }
-
-    /// Project name (or path, if that is what the subtitle shows). Never the timestamp.
-    private var subtitleMatchRanges: [Range<String.Index>] {
-        guard showsProject else { return [] }
-        return SearchMatchHighlight.ranges(
-            in: session.projectName, query: searchQuery, asPrefixOf: subtitle)
+    /// One subtitle string; its runs are built from that same instance.
+    private var rowPaint: SearchMatchHighlight.RowPaint {
+        SearchMatchHighlight.row(
+            displayedTitle: title,
+            cliTitle: session.title,
+            projectName: session.projectName,
+            cwd: session.cwd,
+            displayPath: session.displayPath,
+            relativeTime: session.updatedAt.shortRelative,
+            showsProject: showsProject,
+            query: searchQuery
+        )
     }
 
     @ViewBuilder
@@ -1368,45 +1384,31 @@ private func consumeRenameSelectAllWhenEditorReady(
 
 /// Accent on matched runs only. Empty query (or no hit in this string) is plain `Text`.
 private struct SearchHighlightedText: View {
-    let text: String
-    let ranges: [Range<String.Index>]
+    let runs: [SearchMatchHighlight.Run]
     let match: Color
     let rest: Color
 
     var body: some View {
-        if ranges.isEmpty {
-            Text(text)
-                .foregroundStyle(rest)
+        if runs.contains(where: \.isMatch) {
+            Text(Self.attributed(runs, match: match, rest: rest))
         } else {
-            Text(Self.attributed(text, ranges: ranges, match: match, rest: rest))
+            Text(runs.map(\.text).joined())
+                .foregroundStyle(rest)
         }
     }
 
     private static func attributed(
-        _ text: String,
-        ranges: [Range<String.Index>],
+        _ runs: [SearchMatchHighlight.Run],
         match: Color,
         rest: Color
     ) -> AttributedString {
         var result = AttributedString()
-        var current = text.startIndex
-        for range in ranges {
-            if current < range.lowerBound {
-                result += colored(text[current..<range.lowerBound], rest)
-            }
-            result += colored(text[range], match)
-            current = range.upperBound
-        }
-        if current < text.endIndex {
-            result += colored(text[current...], rest)
+        for run in runs {
+            var piece = AttributedString(run.text)
+            piece.foregroundColor = run.isMatch ? match : rest
+            result += piece
         }
         return result
-    }
-
-    private static func colored(_ s: Substring, _ color: Color) -> AttributedString {
-        var piece = AttributedString(s)
-        piece.foregroundColor = color
-        return piece
     }
 }
 
