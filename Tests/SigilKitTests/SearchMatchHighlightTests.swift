@@ -491,13 +491,9 @@ struct SearchMatchHighlightTests {
         let idle = recentsRow(displayed: "Auth rewrite", cli: "CLI summary", query: "")
         #expect(idle.titleTruncation == .tail)
 
-        let titleHit = recentsRow(
-            displayed: "Rewrite the authentication handshake in the session list",
-            cli: "Rewrite the authentication handshake in the session list",
-            query: "handshake"
-        )
-        #expect(matched(titleHit.titleRuns) == ["handshake"])
-        #expect(titleHit.titleTruncation == .middle)
+        let startHit = recentsRow(displayed: "Auth rewrite", cli: "CLI summary", query: "Auth")
+        #expect(matched(startHit.titleRuns) == ["Auth"])
+        #expect(startHit.titleTruncation == .middle)
 
         let cliOnly = recentsRow(
             displayed: "Auth rewrite",
@@ -506,6 +502,18 @@ struct SearchMatchHighlightTests {
         )
         #expect(matched(cliOnly.titleRuns).isEmpty)
         #expect(cliOnly.titleTruncation == .tail)
+    }
+
+    @Test func lateTitleHitExcerptsAroundTheMatch() {
+        let displayed = "Rewrite the authentication handshake in the session list"
+        let paint = recentsRow(displayed: displayed, cli: displayed, query: "handshake")
+        let visible = paint.titleRuns.map(\.text).joined()
+        #expect(visible.hasPrefix("…"))
+        #expect(visible.contains("handshake"))
+        #expect(!visible.hasPrefix("Rewrite the"))
+        #expect(matched(paint.titleRuns) == ["handshake"])
+        #expect(paint.titleTruncation == .tail)
+        #expect(SearchMatchHighlight.excerptAroundMatch(displayed, query: "handshake").hasPrefix("…"))
     }
 
     @Test func lateCliHitExcerptsTheSubtitleAroundTheMatch() {
@@ -610,6 +618,33 @@ struct SearchMatchHighlightTests {
         let idle = SearchMatchHighlight.headerAccessibilityLabel(
             paint: paint, shortName: "sigil", count: 4, isPinned: true, query: "")
         #expect(idle == "sigil, 4 conversations, pinned")
+    }
+
+    @Test func headerLabelKeepsConversationCountWhenTheQueryIsUnrelated() {
+        let paint = SearchMatchHighlight.projectHeader(
+            name: "sigil",
+            displayPath: "~/repos/sigil",
+            cwd: "/Users/me/repos/sigil",
+            count: 4,
+            query: "Auth"
+        )
+        #expect(!paint.paints)
+        let label = SearchMatchHighlight.headerAccessibilityLabel(
+            paint: paint, shortName: "sigil", count: 4, isPinned: false, query: "Auth")
+        #expect(label == "sigil, 4 conversations")
+
+        let nameHit = SearchMatchHighlight.projectHeader(
+            name: "sigil",
+            displayPath: "~/repos/sigil",
+            cwd: "/Users/me/repos/sigil",
+            count: 4,
+            query: "sigil"
+        )
+        #expect(nameHit.paints)
+        #expect(nameHit.text == "sigil (4)")
+        let nameLabel = SearchMatchHighlight.headerAccessibilityLabel(
+            paint: nameHit, shortName: "sigil", count: 4, isPinned: false, query: "sigil")
+        #expect(nameLabel == "sigil, 4 conversations")
     }
 
     @Test func idleRowLabelKeepsProjectAndLongRelative() {

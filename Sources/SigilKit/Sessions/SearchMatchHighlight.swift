@@ -140,10 +140,11 @@ public enum SearchMatchHighlight: Sendable {
             SearchMatchHighlight.truncation(forVisible: subtitle)
         }
 
-        /// Displayed titles are never path-collapsed. `.middle` while a title
-        /// run is painted so a late hit stays on-screen; `.tail` when idle.
+        /// Idle titles stay `.tail`. A painted title uses `.tail` after a leading
+        /// `…` excerpt so the hit sits on-screen; otherwise `.middle`.
         public var titleTruncation: Truncation {
-            titleRuns.contains(where: \.isMatch) ? .middle : .tail
+            guard titleRuns.contains(where: \.isMatch) else { return .tail }
+            return SearchMatchHighlight.truncation(forVisible: titleRuns.map(\.text).joined())
         }
     }
 
@@ -175,7 +176,8 @@ public enum SearchMatchHighlight: Sendable {
         headerCoversQuery: Bool = true,
         query: String
     ) -> RowPaint {
-        let titleRuns = runs(in: displayedTitle, query: query)
+        let visibleTitle = excerptAroundMatch(displayedTitle, query: query)
+        let titleRuns = runs(in: visibleTitle, query: query)
         let pathHit = matchingPath(in: [projectName, displayPath, cwd], query: query)
         let prefix: String?
         if showsProject, let pathHit {
@@ -229,8 +231,9 @@ public enum SearchMatchHighlight: Sendable {
         projectHeader(name: name, paths: [displayPath, cwd], count: count, query: query)
     }
 
-    /// VoiceOver text for a Projects header. While searching, speak the painted
-    /// string so a path-swapped match is heard, not only the short folder name.
+    /// VoiceOver text for a Projects header. Speak `paint.text` only when the
+    /// visible header was swapped or collapsed to show a path match; otherwise
+    /// keep `project, N conversations`.
     public static func headerAccessibilityLabel(
         paint: HeaderPaint,
         shortName: String,
@@ -238,8 +241,10 @@ public enum SearchMatchHighlight: Sendable {
         isPinned: Bool,
         query: String
     ) -> String {
+        let normal = "\(shortName), \(count) conversations"
         let searching = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let base = searching ? paint.text : "\(shortName), \(count) conversations"
+        let swapped = searching && paint.text != "\(shortName) (\(count))"
+        let base = swapped ? paint.text : normal
         return base + (isPinned ? ", pinned" : "")
     }
 
