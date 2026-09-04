@@ -591,6 +591,7 @@ struct SidebarView: View {
         model.preparedRenameSurface = surface
         switch surface {
         case .none:
+            model.renameAlertIsPulsing = false
             model.showRenameAlert = false
             if key != nil { model.cancelRename() }
         case .inline:
@@ -601,6 +602,7 @@ struct SidebarView: View {
             // Tear down the fallback alert before yielding so its binding
             // cannot cancelRename during the wait, and a sibling visibility
             // task cannot fight this handoff.
+            model.renameAlertIsPulsing = false
             model.renameAlertDidCommit = true
             model.renameAlertSession = nil
             model.showRenameAlert = false
@@ -626,15 +628,35 @@ struct SidebarView: View {
             if resetDraft, let session {
                 model.renameDraft = model.title(for: session)
             }
+            var presentedSession = session
             if AppModel.shouldPulseRenameAlert(
                 forceRepresent: forceRepresent,
                 currentlyShown: model.showRenameAlert
             ) {
                 model.pulseRenameAlertOff()
                 await Task.yield()
-                guard model.renamingSessionKey != nil else { return }
+                let currentKey = model.renamingSessionKey
+                let currentSession = currentKey.flatMap { sessionAnywhere(for: $0) }
+                let currentVisible = currentKey.map { visibleRowIDs().contains($0) } ?? false
+                let currentSurface = AppModel.renameSurface(
+                    isRenaming: currentKey != nil,
+                    sessionAvailable: currentSession != nil,
+                    rowVisible: currentVisible
+                )
+                guard
+                    AppModel.shouldFinishPromptHandoff(
+                        isCancelled: Task.isCancelled,
+                        expectedKey: key,
+                        currentKey: currentKey,
+                        currentSurface: currentSurface
+                    )
+                else {
+                    model.renameAlertIsPulsing = false
+                    return
+                }
+                presentedSession = currentSession
             }
-            model.revealRenameAlert(session)
+            model.revealRenameAlert(presentedSession)
             if AppModel.shouldSelectRenameAlertDraft(
                 selectAllPending: model.renameSelectAllPending,
                 isCancelled: Task.isCancelled,

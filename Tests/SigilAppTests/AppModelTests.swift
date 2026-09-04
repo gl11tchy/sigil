@@ -1019,6 +1019,52 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func promptHandoffAfterPulseYieldRequiresLivePromptSurface() {
+        #expect(
+            AppModel.shouldFinishPromptHandoff(
+                isCancelled: false,
+                expectedKey: "s1",
+                currentKey: "s1",
+                currentSurface: .prompt
+            ))
+        #expect(
+            !AppModel.shouldFinishPromptHandoff(
+                isCancelled: true,
+                expectedKey: "s1",
+                currentKey: "s1",
+                currentSurface: .prompt
+            ))
+        #expect(
+            !AppModel.shouldFinishPromptHandoff(
+                isCancelled: false,
+                expectedKey: "s1",
+                currentKey: nil,
+                currentSurface: .none
+            ))
+        #expect(
+            !AppModel.shouldFinishPromptHandoff(
+                isCancelled: false,
+                expectedKey: "s1",
+                currentKey: "s1",
+                currentSurface: .inline
+            ))
+        #expect(
+            !AppModel.shouldFinishPromptHandoff(
+                isCancelled: false,
+                expectedKey: "s1",
+                currentKey: "s2",
+                currentSurface: .prompt
+            ))
+        #expect(
+            !AppModel.shouldFinishPromptHandoff(
+                isCancelled: false,
+                expectedKey: nil,
+                currentKey: nil,
+                currentSurface: .prompt
+            ))
+    }
+
+    @Test @MainActor
     func renameFocusAfterYieldRequiresActiveUncancelledRow() {
         #expect(
             AppModel.shouldStealRenameFocusAfterYield(isCancelled: false, isRenaming: true))
@@ -1186,6 +1232,75 @@ struct AppModelTests {
         model.commitCapturedRename(ghost)
         #expect(model.title(for: ghost) == "Keep this")
         #expect(model.hasCustomName(ghost))
+    }
+
+    @Test @MainActor
+    func inlineRenameUsesTheLiveStoreSessionNotTheRowSnapshot() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = "/Users/someone/Documents/project"
+        try fixture.writeListedSession(id: "s1", cwd: cwd, summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let stale = try #require(model.store.sessions.first)
+        model.beginRename(stale)
+        #expect(stale.title == "CLI summary")
+
+        try fixture.writeListedSession(id: "s1", cwd: cwd, summary: "Totally new CLI summary")
+        await fixture.store.reload()
+        let live = try #require(model.store.sessions.first)
+        #expect(model.freshSession(matching: stale).title == "Totally new CLI summary")
+
+        model.commitInlineRename(stale, to: "Totally new CLI summary")
+        #expect(!model.hasCustomName(stale))
+        #expect(model.title(for: live) == "Totally new CLI summary")
+        #expect(fixture.settings.conversationNames.isEmpty)
+
+        model.beginRename(live)
+        model.commitInlineRename(stale, to: "Auth rewrite")
+        #expect(model.title(for: live) == "Auth rewrite")
+        #expect(model.hasCustomName(live))
+
+        model.beginRename(live)
+        model.commitInlineRename(stale, to: "Totally new CLI summary")
+        #expect(!model.hasCustomName(live))
+        #expect(model.title(for: live) == "Totally new CLI summary")
+    }
+
+    @Test @MainActor
+    func inlineBlurUsesTheLiveStoreSessionNotTheRowSnapshot() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = "/Users/someone/Documents/project"
+        try fixture.writeListedSession(id: "s1", cwd: cwd, summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let stale = try #require(model.store.sessions.first)
+        model.beginRename(stale)
+        model.noteRenameFieldMounted(true, key: model.sessionKey(stale))
+
+        try fixture.writeListedSession(id: "s1", cwd: cwd, summary: "Totally new CLI summary")
+        await fixture.store.reload()
+        let live = try #require(model.store.sessions.first)
+
+        model.commitInlineBlur(
+            stale, to: "Totally new CLI summary",
+            mountGeneration: model.renameFieldMountGeneration)
+        #expect(!model.hasCustomName(stale))
+        #expect(model.title(for: live) == "Totally new CLI summary")
+        #expect(fixture.settings.conversationNames.isEmpty)
+
+        model.beginRename(live)
+        model.noteRenameFieldMounted(true, key: model.sessionKey(live))
+        model.commitInlineBlur(
+            stale, to: "Auth rewrite",
+            mountGeneration: model.renameFieldMountGeneration)
+        #expect(model.title(for: live) == "Auth rewrite")
+        #expect(model.hasCustomName(live))
     }
 
     @Test @MainActor

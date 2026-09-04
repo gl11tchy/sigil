@@ -577,11 +577,11 @@ final class AppModel {
     }
 
     /// Inline editor only. No-ops if this row is no longer the active rename
-    /// (Reset Name, cancel, or another row started). The alert still uses
-    /// `commitRename` so a dismiss-before-action can commit the captured session.
+    /// (Reset Name, cancel, or another row started). Compare against the live
+    /// store session so a CLI summary rewrite cannot pin a stale title.
     func commitInlineRename(_ session: GrokSession, to raw: String) {
         guard renamingSessionKey == sessionKey(session) else { return }
-        commitRename(session, to: raw)
+        commitRename(freshSession(matching: session), to: raw)
     }
 
     /// Blur of the inline field. Skipped when the row left the visible list,
@@ -603,7 +603,7 @@ final class AppModel {
                 currentGeneration: renameFieldMountGeneration
             )
         else { return }
-        commitRename(session, to: raw)
+        commitRename(freshSession(matching: session), to: raw)
     }
 
     /// The fallback rename alert may set `isPresented` to false before the
@@ -728,6 +728,19 @@ final class AppModel {
     ) -> Bool {
         !isCancelled && expectedKey != nil && expectedKey == currentKey
             && currentSurface == .inline
+    }
+
+    /// After the forceRepresent pulse yield, only re-present the fallback
+    /// alert if this task is still the live prompt rename. A sibling
+    /// visibility task may have switched to inline during the wait.
+    static func shouldFinishPromptHandoff(
+        isCancelled: Bool,
+        expectedKey: String?,
+        currentKey: String?,
+        currentSurface: RenameSurface
+    ) -> Bool {
+        !isCancelled && expectedKey != nil && expectedKey == currentKey
+            && currentSurface == .prompt
     }
 
     /// After yielding to focus the inline field, skip if the row task was
