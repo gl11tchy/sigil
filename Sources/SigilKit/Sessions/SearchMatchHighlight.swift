@@ -139,6 +139,12 @@ public enum SearchMatchHighlight: Sendable {
         public var subtitleTruncation: Truncation {
             SearchMatchHighlight.truncation(forVisible: subtitle)
         }
+
+        /// Displayed titles are never path-collapsed. `.middle` while a title
+        /// run is painted so a late hit stays on-screen; `.tail` when idle.
+        public var titleTruncation: Truncation {
+            titleRuns.contains(where: \.isMatch) ? .middle : .tail
+        }
     }
 
     /// What a Projects section header should paint.

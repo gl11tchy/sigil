@@ -1076,7 +1076,7 @@ private struct SessionRow: View {
         let paint = rowPaint
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                titleLine(runs: paint.titleRuns)
+                titleLine(runs: paint.titleRuns, truncation: paint.titleTruncation)
                 SearchHighlightedText(
                     runs: paint.subtitleRuns,
                     match: palette.accent,
@@ -1131,7 +1131,9 @@ private struct SessionRow: View {
     }
 
     @ViewBuilder
-    private func titleLine(runs: [SearchMatchHighlight.Run]) -> some View {
+    private func titleLine(
+        runs: [SearchMatchHighlight.Run], truncation: SearchMatchHighlight.Truncation
+    ) -> some View {
         if isRenaming {
             SessionRenameField(
                 model: model,
@@ -1150,7 +1152,7 @@ private struct SessionRow: View {
             )
             .font(.system(size: 12, weight: state == .active ? .medium : .regular))
             .lineLimit(1)
-            .truncationMode(.tail)
+            .truncationMode(truncationMode(truncation))
         }
     }
 

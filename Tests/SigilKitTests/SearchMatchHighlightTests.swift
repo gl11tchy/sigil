@@ -482,6 +482,29 @@ struct SearchMatchHighlightTests {
         )
         #expect(pathHeader.text.hasPrefix("…"))
         #expect(pathHeader.visibleTruncation == .tail)
+        #expect(collapsed.titleTruncation == .tail)
+        #expect(cli.titleTruncation == .tail)
+    }
+
+    @Test func titleTruncationIsMiddleOnlyWhileTheTitleHasAMatch() {
+        let idle = recentsRow(displayed: "Auth rewrite", cli: "CLI summary", query: "")
+        #expect(idle.titleTruncation == .tail)
+
+        let titleHit = recentsRow(
+            displayed: "Rewrite the authentication handshake in the session list",
+            cli: "Rewrite the authentication handshake in the session list",
+            query: "handshake"
+        )
+        #expect(matched(titleHit.titleRuns) == ["handshake"])
+        #expect(titleHit.titleTruncation == .middle)
+
+        let cliOnly = recentsRow(
+            displayed: "Auth rewrite",
+            cli: "Rewrite the authentication handshake",
+            query: "handshake"
+        )
+        #expect(matched(cliOnly.titleRuns).isEmpty)
+        #expect(cliOnly.titleTruncation == .tail)
     }
 
     @Test func cliOnlySubtitleKeepsTheFullSlashFreeSummary() {
