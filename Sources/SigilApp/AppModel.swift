@@ -906,6 +906,19 @@ final class AppModel {
         !isCancelled && isRenaming
     }
 
+    /// Return/Escape must not leave blur suppression armed for the next click-away.
+    static func shouldClearBlurSuppressionAfterCommitOrAbandon() -> Bool {
+        true
+    }
+
+    /// After the focus steal, a still-live rename whose field is not focused
+    /// is a stuck session — commit as if the field blurred.
+    static func shouldCommitRenameIfFocusStealMissed(
+        isRenaming: Bool, focusIsRename: Bool
+    ) -> Bool {
+        isRenaming && !focusIsRename
+    }
+
     /// The conversation on screen, when the store knows it. Menu-bar Rename uses this.
     func sessionForSelectedTab() -> GrokSession? {
         guard let tab = selectedTab, let id = tab.sessionID else { return nil }

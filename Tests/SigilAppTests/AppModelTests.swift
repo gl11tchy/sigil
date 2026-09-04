@@ -1338,6 +1338,19 @@ struct AppModelTests {
             !AppModel.shouldStealRenameFocusAfterYield(isCancelled: false, isRenaming: false))
         #expect(
             !AppModel.shouldStealRenameFocusAfterYield(isCancelled: true, isRenaming: false))
+        #expect(AppModel.shouldClearBlurSuppressionAfterCommitOrAbandon())
+        #expect(
+            AppModel.shouldCommitRenameIfFocusStealMissed(
+                isRenaming: true, focusIsRename: false))
+        #expect(
+            !AppModel.shouldCommitRenameIfFocusStealMissed(
+                isRenaming: true, focusIsRename: true))
+        #expect(
+            !AppModel.shouldCommitRenameIfFocusStealMissed(
+                isRenaming: false, focusIsRename: false))
+        #expect(
+            !AppModel.shouldCommitRenameIfFocusStealMissed(
+                isRenaming: false, focusIsRename: true))
     }
 
     @Test @MainActor

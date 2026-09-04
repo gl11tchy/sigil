@@ -1034,7 +1034,14 @@ private struct SessionRow: View {
                 noteMounted(false)
             }
         }
-        .onChange(of: isRenaming) { _, renaming in noteMounted(renaming) }
+        .onChange(of: isRenaming) { _, renaming in
+            if renaming {
+                blurCommitTask?.cancel()
+                blurCommitTask = nil
+                suppressBlurCommit = false
+            }
+            noteMounted(renaming)
+        }
         .task(id: isRenaming) { await focusRenameFieldIfNeeded() }
     }
 
@@ -1152,6 +1159,12 @@ private struct SessionRow: View {
                 )
             else { return }
         }
+        if AppModel.shouldCommitRenameIfFocusStealMissed(
+            isRenaming: isRenaming, focusIsRename: focus == .rename
+        ) {
+            commitOnBlurIfNeeded()
+            return
+        }
         await consumeRenameSelectAllWhenEditorReady(
             shouldProceed: {
                 AppModel.shouldStealRenameFocusAfterYield(
@@ -1166,14 +1179,24 @@ private struct SessionRow: View {
 
     private func commitCurrentDraft(restoreListFocus: Bool) {
         suppressBlurCommit = true
+        blurCommitTask?.cancel()
+        blurCommitTask = nil
         commitRename(model.renameDraft)
         if restoreListFocus { focus = .list }
+        if AppModel.shouldClearBlurSuppressionAfterCommitOrAbandon() {
+            suppressBlurCommit = false
+        }
     }
 
     private func abandonRename() {
         suppressBlurCommit = true
+        blurCommitTask?.cancel()
+        blurCommitTask = nil
         cancelRename()
         focus = .list
+        if AppModel.shouldClearBlurSuppressionAfterCommitOrAbandon() {
+            suppressBlurCommit = false
+        }
     }
 
     private func commitOnBlurIfNeeded() {
