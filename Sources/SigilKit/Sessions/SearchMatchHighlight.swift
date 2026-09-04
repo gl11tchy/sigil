@@ -285,9 +285,13 @@ public enum SearchMatchHighlight: Sendable {
         return "…" + String(string[restStart...])
     }
 
-    /// Slash-free CLI summaries are not path-collapsed. Pull a late match to the
-    /// start of the visible prefix so tail truncation keeps the accent on-screen.
+    /// Slash-free CLI summaries and titles are not path-collapsed. Pull a late
+    /// match to the start of a *long* string so tail truncation keeps the accent
+    /// on-screen. Short strings already fit; excerpting them only drops context.
+    static let excerptMinimumCount = 32
+
     public static func excerptAroundMatch(_ string: String, query: String) -> String {
+        guard string.count > excerptMinimumCount else { return string }
         guard let first = ranges(in: string, query: query).first else { return string }
         let lead = string.distance(from: string.startIndex, to: first.lowerBound)
         if lead <= 2 { return string }

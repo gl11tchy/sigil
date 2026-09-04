@@ -529,6 +529,22 @@ struct SearchMatchHighlightTests {
         #expect(SearchMatchHighlight.excerptAroundMatch("CLI summary", query: "CLI") == "CLI summary")
     }
 
+    @Test func excerptAroundMatchLeavesShortStringsIntact() {
+        #expect(SearchMatchHighlight.excerptAroundMatch("Fix bug", query: "bug") == "Fix bug")
+        #expect(
+            SearchMatchHighlight.excerptAroundMatch("Authentication", query: "tication")
+                == "Authentication")
+        let shortCLI = recentsRow(displayed: "Auth rewrite", cli: "Fix bug", query: "bug")
+        #expect(shortCLI.subtitle == "Fix bug · 14m")
+        #expect(!shortCLI.subtitle.hasPrefix("…"))
+        #expect(matched(shortCLI.subtitleRuns) == ["bug"])
+        let shortTitle = recentsRow(
+            displayed: "Authentication", cli: "CLI summary", query: "tication")
+        #expect(shortTitle.titleRuns.map(\.text).joined() == "Authentication")
+        #expect(matched(shortTitle.titleRuns) == ["tication"])
+        #expect(shortTitle.titleTruncation == .middle)
+    }
+
     @Test func slashFreeProjectNameHeaderStaysFull() {
         let header = SearchMatchHighlight.projectHeader(
             name: "Authentication",
