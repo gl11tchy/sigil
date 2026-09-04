@@ -83,6 +83,26 @@ struct SessionScannerTests {
         #expect(SessionScanner.matches(session, query: "project"))
     }
 
+    @Test func matchesTildeDisplayPathWithoutRequiringRawCwd() {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let session = GrokSession(
+            id: "s1",
+            cwd: home + "/repos/sigil",
+            summary: "CLI summary",
+            createdAt: Date(timeIntervalSince1970: 1),
+            updatedAt: Date(timeIntervalSince1970: 1),
+            messageCount: 4,
+            modelID: nil,
+            agentName: nil,
+            reasoningEffort: nil,
+            directory: URL(fileURLWithPath: home + "/repos/sigil/s1")
+        )
+        #expect(session.displayPath == "~/repos/sigil")
+        #expect(SessionScanner.matches(session, query: "~"))
+        #expect(SessionScanner.matches(session, query: "~/repos"))
+        #expect(!SessionScanner.matches(session, query: "~/nope"))
+    }
+
     @Test func sessionKindIsReadFromSummary() throws {
         let fixture = try ScannerFixture()
         defer { fixture.tearDown() }

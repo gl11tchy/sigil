@@ -142,7 +142,7 @@ public final class SessionStore {
         refreshWatcher()
     }
 
-    /// Sessions whose title, project name or path match `query`, newest first.
+    /// Sessions whose title, project name, `~` path, or cwd match `query`, newest first.
     /// An empty or whitespace-only query returns every session without
     /// evaluating `displayedTitle`.
     /// Pass `displayedTitle` so a user-chosen name is searched; the CLI summary
