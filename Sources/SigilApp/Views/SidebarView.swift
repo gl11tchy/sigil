@@ -248,7 +248,8 @@ struct SidebarView: View {
                     if !newValue,
                         AppModel.shouldCancelRenameAlert(didCommit: model.renameAlertDidCommit)
                     {
-                        Task { await model.deferCancelRenameAlert() }
+                        let generation = model.renameAlertDismissGeneration
+                        Task { await model.deferCancelRenameAlert(expectedGeneration: generation) }
                     }
                 }
             ),

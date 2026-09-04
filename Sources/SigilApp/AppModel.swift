@@ -582,11 +582,10 @@ final class AppModel {
         sidebarVisible && !pulsing
     }
 
-    /// Dismiss may fire before the Rename button. Wait a turn, then cancel
-    /// only if this is still an uncommitted, visible-sidebar rename whose
-    /// dismiss generation has not been poisoned by a newer beginRename.
-    func deferCancelRenameAlert() async {
-        let generation = renameAlertDismissGeneration
+    /// Dismiss may fire before the Rename button. `expectedGeneration` is the
+    /// dismiss generation at schedule time (the Binding), not at Task entry —
+    /// a later beginRename on this turn must not be cancelled.
+    func deferCancelRenameAlert(expectedGeneration: Int) async {
         await Task.yield()
         guard
             Self.shouldCancelRenameAlertAfterYield(
@@ -594,7 +593,7 @@ final class AppModel {
                 sidebarVisible: isSidebarVisible,
                 didCommit: renameAlertDidCommit,
                 stillRenaming: renamingSessionKey != nil,
-                expectedGeneration: generation,
+                expectedGeneration: expectedGeneration,
                 currentGeneration: renameAlertDismissGeneration
             )
         else { return }
@@ -668,6 +667,8 @@ final class AppModel {
         !didCommit
     }
 
+    /// `expectedGeneration` is captured when the dismiss Task is scheduled.
+    /// A later beginRename bumps the current generation and poisons this cancel.
     static func shouldCancelRenameAlertAfterYield(
         isCancelled: Bool,
         sidebarVisible: Bool,

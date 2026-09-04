@@ -1670,7 +1670,8 @@ struct AppModelTests {
         model.beginRename(session)
         model.revealRenameAlert(session)
         model.renameDraft = "Keep this"
-        let pending = Task { await model.deferCancelRenameAlert() }
+        let generation = model.renameAlertDismissGeneration
+        let pending = Task { await model.deferCancelRenameAlert(expectedGeneration: generation) }
         model.commitCapturedRename(session)
         await pending.value
         #expect(model.title(for: session) == "Keep this")
@@ -1692,7 +1693,8 @@ struct AppModelTests {
         model.revealRenameAlert(session)
         model.renameDraft = "Typed"
         #expect(!model.renameAlertDidCommit)
-        await model.deferCancelRenameAlert()
+        await model.deferCancelRenameAlert(
+            expectedGeneration: model.renameAlertDismissGeneration)
         #expect(model.renamingSessionKey == nil)
         #expect(model.renameDraft.isEmpty)
         #expect(!model.hasCustomName(session))
@@ -1743,7 +1745,8 @@ struct AppModelTests {
         model.beginRename(sessionA)
         model.revealRenameAlert(sessionA)
         model.renameDraft = "Typed on A"
-        let pending = Task { await model.deferCancelRenameAlert() }
+        let generation = model.renameAlertDismissGeneration
+        let pending = Task { await model.deferCancelRenameAlert(expectedGeneration: generation) }
         model.beginRename(sessionB)
         await pending.value
         #expect(model.renamingSessionKey == model.sessionKey(sessionB))
@@ -1767,12 +1770,39 @@ struct AppModelTests {
         model.revealRenameAlert(session)
         model.renameDraft = "Typed"
         let generation = model.renameAlertDismissGeneration
-        let pending = Task { await model.deferCancelRenameAlert() }
+        let pending = Task {
+            await model.deferCancelRenameAlert(expectedGeneration: generation)
+        }
         model.beginRename(session)
         #expect(model.renameAlertDismissGeneration == generation + 1)
         await pending.value
         #expect(model.renamingSessionKey == model.sessionKey(session))
         #expect(model.renameDraft == "Typed")
+        #expect(!model.renameAlertDidCommit)
+    }
+
+    @Test @MainActor
+    func clickOutAfterSameKeyBeginRenameStillCancels() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.beginRename(session)
+        model.revealRenameAlert(session)
+        model.renameDraft = "Typed"
+        #expect(!model.renameAlertDidCommit)
+        model.beginRename(session)
+        #expect(!model.renameAlertDidCommit)
+        #expect(model.renameDraft == "Typed")
+        await model.deferCancelRenameAlert(
+            expectedGeneration: model.renameAlertDismissGeneration)
+        #expect(model.renamingSessionKey == nil)
+        #expect(model.renameDraft.isEmpty)
     }
 
     @Test @MainActor
@@ -1802,7 +1832,7 @@ struct AppModelTests {
         #expect(model.renamingSessionKey == model.sessionKey(sessionB))
 
         let generation = model.renameAlertDismissGeneration
-        await model.deferCancelRenameAlert()
+        await model.deferCancelRenameAlert(expectedGeneration: generation)
         #expect(model.renameAlertDismissGeneration == generation)
         #expect(model.renamingSessionKey == model.sessionKey(sessionB))
         #expect(model.renameDraft == "Beta CLI")
