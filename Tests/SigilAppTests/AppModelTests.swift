@@ -1610,19 +1610,75 @@ struct AppModelTests {
     func deferredAlertCancelPolicy() {
         #expect(
             AppModel.shouldCancelRenameAlertAfterYield(
-                isCancelled: false, sidebarVisible: true, didCommit: false, stillRenaming: true))
+                isCancelled: false, sidebarVisible: true, didCommit: false, stillRenaming: true,
+                expectedGeneration: 1, currentGeneration: 1))
         #expect(
             !AppModel.shouldCancelRenameAlertAfterYield(
-                isCancelled: false, sidebarVisible: true, didCommit: true, stillRenaming: true))
+                isCancelled: false, sidebarVisible: true, didCommit: true, stillRenaming: true,
+                expectedGeneration: 1, currentGeneration: 1))
         #expect(
             !AppModel.shouldCancelRenameAlertAfterYield(
-                isCancelled: true, sidebarVisible: true, didCommit: false, stillRenaming: true))
+                isCancelled: true, sidebarVisible: true, didCommit: false, stillRenaming: true,
+                expectedGeneration: 1, currentGeneration: 1))
         #expect(
             !AppModel.shouldCancelRenameAlertAfterYield(
-                isCancelled: false, sidebarVisible: false, didCommit: false, stillRenaming: true))
+                isCancelled: false, sidebarVisible: false, didCommit: false, stillRenaming: true,
+                expectedGeneration: 1, currentGeneration: 1))
         #expect(
             !AppModel.shouldCancelRenameAlertAfterYield(
-                isCancelled: false, sidebarVisible: true, didCommit: false, stillRenaming: false))
+                isCancelled: false, sidebarVisible: true, didCommit: false, stillRenaming: false,
+                expectedGeneration: 1, currentGeneration: 1))
+        #expect(
+            !AppModel.shouldCancelRenameAlertAfterYield(
+                isCancelled: false, sidebarVisible: true, didCommit: false, stillRenaming: true,
+                expectedGeneration: 1, currentGeneration: 2))
+    }
+
+    @Test @MainActor
+    func beginRenamePoisonsInFlightAlertCancel() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s-a", cwd: "/Users/someone/Documents/project", summary: "Alpha CLI")
+        try fixture.writeListedSession(
+            id: "s-b", cwd: "/Users/someone/Documents/project", summary: "Beta CLI")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let sessionA = try #require(model.store.sessions.first { $0.id == "s-a" })
+        let sessionB = try #require(model.store.sessions.first { $0.id == "s-b" })
+        model.beginRename(sessionA)
+        model.renameDraft = "Typed on A"
+        let pending = Task { await model.deferCancelRenameAlert() }
+        model.beginRename(sessionB)
+        await pending.value
+        #expect(model.renamingSessionKey == model.sessionKey(sessionB))
+        #expect(model.renameDraft == "Beta CLI")
+        #expect(!model.hasCustomName(sessionA))
+        #expect(!model.hasCustomName(sessionB))
+    }
+
+    @Test @MainActor
+    func sameKeyBeginRenamePoisonsInFlightAlertCancel() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.beginRename(session)
+        model.renameDraft = "Typed"
+        let generation = model.renameAlertDismissGeneration
+        let pending = Task { await model.deferCancelRenameAlert() }
+        model.beginRename(session)
+        #expect(model.renameAlertDismissGeneration == generation + 1)
+        await pending.value
+        #expect(model.renamingSessionKey == model.sessionKey(session))
+        #expect(model.renameDraft == "Typed")
     }
 
     @Test @MainActor

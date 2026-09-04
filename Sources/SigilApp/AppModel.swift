@@ -157,6 +157,9 @@ final class AppModel {
     var renameAlertDidCommit = false
     /// True between the off and on edges of a forceRepresent pulse.
     var renameAlertIsPulsing = false
+    /// Bumped on beginRename so a deferred click-out cancel cannot tear down
+    /// a newer rename after the yield.
+    var renameAlertDismissGeneration = 0
     var preparedRenameKey: String?
     var preparedRenameSurface: RenameSurface = .none
     /// Session key of the inline field currently in the tree. Nil if unmounted.
@@ -479,12 +482,14 @@ final class AppModel {
         isSidebarVisible = true
         let key = sessionKey(session)
         let isFreshKey = renamingSessionKey != key
+        renameAlertDismissGeneration += 1
         if isFreshKey {
+            renameAlertDidCommit = true
             renameDraft = title(for: session)
             showRenameAlert = false
             renameAlertSession = nil
-            renameAlertDidCommit = false
             renameAlertIsPulsing = false
+            renameAlertDidCommit = false
         }
         renameSelectAllPending = Self.shouldArmRenameSelectAllOnBegin(isFreshKey: isFreshKey)
         renamingSessionKey = key
@@ -561,15 +566,19 @@ final class AppModel {
     }
 
     /// Dismiss may fire before the Rename button. Wait a turn, then cancel
-    /// only if this is still an uncommitted, visible-sidebar rename.
+    /// only if this is still an uncommitted, visible-sidebar rename whose
+    /// dismiss generation has not been poisoned by a newer beginRename.
     func deferCancelRenameAlert() async {
+        let generation = renameAlertDismissGeneration
         await Task.yield()
         guard
             Self.shouldCancelRenameAlertAfterYield(
                 isCancelled: Task.isCancelled,
                 sidebarVisible: isSidebarVisible,
                 didCommit: renameAlertDidCommit,
-                stillRenaming: renamingSessionKey != nil
+                stillRenaming: renamingSessionKey != nil,
+                expectedGeneration: generation,
+                currentGeneration: renameAlertDismissGeneration
             )
         else { return }
         cancelRename()
@@ -645,9 +654,12 @@ final class AppModel {
         isCancelled: Bool,
         sidebarVisible: Bool,
         didCommit: Bool,
-        stillRenaming: Bool
+        stillRenaming: Bool,
+        expectedGeneration: Int,
+        currentGeneration: Int
     ) -> Bool {
         !isCancelled && sidebarVisible && !didCommit && stillRenaming
+            && expectedGeneration == currentGeneration
     }
 
     /// The live rename's field may mark itself mounted even if another row
