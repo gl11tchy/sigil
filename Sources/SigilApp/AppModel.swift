@@ -794,6 +794,16 @@ final class AppModel {
         elapsed < renameSelectAllRetryTimeout
     }
 
+    /// A never-ready editor must drop the fresh-begin flag so a later remount
+    /// or prompt→inline handoff cannot selectAll and wipe typed text.
+    static func shouldClearRenameSelectAllOnRetryTimeout() -> Bool {
+        true
+    }
+
+    static func shouldSelectRenameDraftOnRetryTimeout() -> Bool {
+        false
+    }
+
     /// Return commits the fallback alert, matching the inline field's onSubmit.
     static func renameAlertCommitUsesDefaultAction() -> Bool {
         true

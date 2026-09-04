@@ -1320,6 +1320,12 @@ struct AppModelTests {
         #expect(!AppModel.shouldContinueRenameSelectAllRetry(elapsed: .milliseconds(400)))
         #expect(!AppModel.shouldContinueRenameSelectAllRetry(elapsed: .seconds(2)))
         #expect(AppModel.renameSelectAllRetryInterval < AppModel.renameSelectAllRetryTimeout)
+        #expect(AppModel.shouldClearRenameSelectAllOnRetryTimeout())
+        #expect(!AppModel.shouldSelectRenameDraftOnRetryTimeout())
+        #expect(
+            !AppModel.shouldConsumeRenameSelectAll(
+                fieldEditorReady: AppModel.shouldSelectRenameDraftOnRetryTimeout(),
+                selectAllPending: true))
     }
 
     @Test @MainActor

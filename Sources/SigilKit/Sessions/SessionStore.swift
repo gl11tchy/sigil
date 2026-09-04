@@ -143,14 +143,18 @@ public final class SessionStore {
     }
 
     /// Sessions whose title, project name or path match `query`, newest first.
-    /// An empty or whitespace-only query returns every session.
+    /// An empty or whitespace-only query returns every session without
+    /// evaluating `displayedTitle`.
     /// Pass `displayedTitle` so a user-chosen name is searched; the CLI summary
     /// still matches after a rename.
     public func search(
         _ query: String,
         displayedTitle: ((GrokSession) -> String)? = nil
     ) -> [GrokSession] {
-        sessions.filter { session in
+        if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return sessions
+        }
+        return sessions.filter { session in
             SessionScanner.matches(
                 session,
                 query: query,

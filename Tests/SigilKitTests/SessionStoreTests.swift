@@ -306,6 +306,32 @@ struct SessionStoreTests {
         #expect(groups.map { $0.sessions.map(\.id) } == queryCase.expectedGroupedIDs)
     }
 
+    @Test func emptySearchDoesNotComputeDisplayedTitle() async throws {
+        let harness = try FixtureHarness()
+        defer { harness.tearDown() }
+        try harness.installOrderingFixtures()
+        await harness.store.scan(ignoringCache: false)
+
+        var displayedTitleCalls = 0
+        let displayedTitle: (GrokSession) -> String = { session in
+            displayedTitleCalls += 1
+            return session.title
+        }
+
+        let empty = harness.store.search("", displayedTitle: displayedTitle)
+        #expect(empty.map(\.id) == harness.store.sessions.map(\.id))
+        #expect(displayedTitleCalls == 0)
+
+        displayedTitleCalls = 0
+        let whitespace = harness.store.search("  \n\t ", displayedTitle: displayedTitle)
+        #expect(whitespace.map(\.id) == harness.store.sessions.map(\.id))
+        #expect(displayedTitleCalls == 0)
+
+        displayedTitleCalls = 0
+        _ = harness.store.search("alpha", displayedTitle: displayedTitle)
+        #expect(displayedTitleCalls == harness.store.sessions.count)
+    }
+
     @Test func incrementalRescanReparsesChangedAndDropsDeleted() async throws {
         let harness = try FixtureHarness()
         defer { harness.tearDown() }

@@ -1205,7 +1205,8 @@ private func isEditingRenameAlertField(draft: String) -> Bool {
 
 /// Select-all only when the rename field editor is first responder.
 /// A leftover search or dormant editor must not consume pending.
-/// First check is immediate; later retries sleep, then stop at the timeout.
+/// First check is immediate; later retries sleep, then stop at the timeout
+/// and clear pending without selecting.
 @MainActor
 private func consumeRenameSelectAllWhenEditorReady(
     shouldProceed: @escaping () -> Bool,
@@ -1231,7 +1232,18 @@ private func consumeRenameSelectAllWhenEditorReady(
             return
         }
         let elapsed = ContinuousClock.now - started
-        guard AppModel.shouldContinueRenameSelectAllRetry(elapsed: elapsed) else { return }
+        guard AppModel.shouldContinueRenameSelectAllRetry(elapsed: elapsed) else {
+            if AppModel.shouldClearRenameSelectAllOnRetryTimeout() {
+                let pending = consume()
+                if AppModel.shouldConsumeRenameSelectAll(
+                    fieldEditorReady: AppModel.shouldSelectRenameDraftOnRetryTimeout(),
+                    selectAllPending: pending
+                ) {
+                    editor?.selectAll(nil)
+                }
+            }
+            return
+        }
         try? await Task.sleep(for: AppModel.renameSelectAllRetryInterval)
     }
 }
