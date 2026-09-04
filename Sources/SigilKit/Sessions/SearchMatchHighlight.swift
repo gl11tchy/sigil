@@ -59,8 +59,8 @@ public enum SearchMatchHighlight: Sendable {
         var searchFrom = mapped.folded.startIndex
         while let hit = mapped.folded.range(of: needle, range: searchFrom..<mapped.folded.endIndex) {
             searchFrom = hit.upperBound
-            let startOffset = mapped.folded.distance(from: mapped.folded.startIndex, to: hit.lowerBound)
-            let endOffset = mapped.folded.distance(from: mapped.folded.startIndex, to: hit.upperBound)
+            let startOffset = hit.lowerBound.utf16Offset(in: mapped.folded)
+            let endOffset = hit.upperBound.utf16Offset(in: mapped.folded)
             guard startOffset < endOffset, endOffset <= mapped.origins.count else { continue }
             let original = mapped.origins[startOffset].lowerBound..<mapped.origins[endOffset - 1].upperBound
             if let last = result.last, last.upperBound >= original.lowerBound {
@@ -181,7 +181,7 @@ public enum SearchMatchHighlight: Sendable {
         if showsProject, let pathHit {
             prefix = keepingMatchVisible(pathHit, query: query)
         } else if !contains(displayedTitle, query: query), contains(cliTitle, query: query) {
-            prefix = cliTitle
+            prefix = excerptAroundMatch(cliTitle, query: query)
         } else if !showsProject, !headerCoversQuery, let pathHit {
             prefix = keepingMatchVisible(pathHit, query: query)
         } else if showsProject {
@@ -243,8 +243,8 @@ public enum SearchMatchHighlight: Sendable {
         return base + (isPinned ? ", pinned" : "")
     }
 
-    /// VoiceOver text for a conversation row. While searching, speak the painted
-    /// subtitle so a path-only or CLI-only hit is heard, not only the folder name.
+    /// VoiceOver text for a conversation row. Speak the painted subtitle only
+    /// when it contains a match; title-only hits keep project and long relative time.
     public static func rowAccessibilityLabel(
         title: String,
         projectName: String,
@@ -255,8 +255,9 @@ public enum SearchMatchHighlight: Sendable {
         query: String
     ) -> String {
         let searching = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let subtitleHasMatch = paint.subtitleRuns.contains(where: \.isMatch)
         var label =
-            searching
+            searching && subtitleHasMatch
             ? "\(title), \(paint.subtitle)"
             : "\(title), \(projectName), \(longRelative)"
         if isPinned { label += ", pinned" }
@@ -279,6 +280,23 @@ public enum SearchMatchHighlight: Sendable {
         return "…" + String(string[restStart...])
     }
 
+    /// Slash-free CLI summaries are not path-collapsed. Pull a late match to the
+    /// start of the visible prefix so tail truncation keeps the accent on-screen.
+    public static func excerptAroundMatch(_ string: String, query: String) -> String {
+        guard let first = ranges(in: string, query: query).first else { return string }
+        let lead = string.distance(from: string.startIndex, to: first.lowerBound)
+        if lead <= 2 { return string }
+        let leading = string[string.startIndex..<first.lowerBound]
+        let restStart: String.Index
+        if let space = leading.lastIndex(where: { $0.isWhitespace }) {
+            restStart = string.index(after: space)
+        } else {
+            restStart = first.lowerBound
+        }
+        if restStart == string.startIndex { return string }
+        return "…" + String(string[restStart...])
+    }
+
     /// First candidate that contains `query`. Empty strings are skipped.
     static func matchingPath(in candidates: [String], query: String) -> String? {
         candidates.first { !$0.isEmpty && contains($0, query: query) }
@@ -289,19 +307,22 @@ public enum SearchMatchHighlight: Sendable {
         return "\(prefix) · \(relativeTime)"
     }
 
-    /// Per-grapheme fold plus the original cluster that produced each folded character.
-    /// One original cluster that expands (`ß` → `ss`) occupies several origin slots.
+    /// Per-cluster fold plus the original cluster for each UTF-16 unit of the
+    /// concatenated folded string. Concatenation can merge graphemes (Hangul
+    /// Jamo, regional indicators); UTF-16 offsets stay stable, Character
+    /// distance does not.
     static func foldMap(_ string: String) -> (folded: String, origins: [Range<String.Index>]) {
         var folded = ""
         var origins: [Range<String.Index>] = []
-        origins.reserveCapacity(string.count)
+        origins.reserveCapacity(string.utf16.count)
         var index = string.startIndex
         while index < string.endIndex {
             let next = string.index(after: index)
             let foldedCluster = fold(String(string[index..<next]))
             if !foldedCluster.isEmpty {
-                for _ in foldedCluster {
-                    origins.append(index..<next)
+                let original = index..<next
+                for _ in 0..<foldedCluster.utf16.count {
+                    origins.append(original)
                 }
                 folded += foldedCluster
             }

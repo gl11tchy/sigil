@@ -461,8 +461,9 @@ struct SearchMatchHighlightTests {
             cli: "Rewrite the authentication handshake",
             query: "handshake"
         )
-        #expect(!cli.subtitle.hasPrefix("…"))
-        #expect(cli.subtitleTruncation == .middle)
+        #expect(cli.subtitle.hasPrefix("…"))
+        #expect(cli.subtitle.contains("handshake"))
+        #expect(cli.subtitleTruncation == .tail)
 
         let header = SearchMatchHighlight.projectHeader(
             name: "Authentication",
@@ -507,12 +508,17 @@ struct SearchMatchHighlightTests {
         #expect(cliOnly.titleTruncation == .tail)
     }
 
-    @Test func cliOnlySubtitleKeepsTheFullSlashFreeSummary() {
+    @Test func lateCliHitExcerptsTheSubtitleAroundTheMatch() {
         let summary = "Rewrite the authentication handshake"
         let paint = recentsRow(displayed: "Auth rewrite", cli: summary, query: "handshake")
-        #expect(paint.subtitle == "\(summary) · 14m")
-        #expect(!paint.subtitle.hasPrefix("…"))
+        #expect(paint.subtitle.hasPrefix("…"))
+        #expect(paint.subtitle.contains("handshake"))
+        #expect(!paint.subtitle.contains("Rewrite the"))
         #expect(matched(paint.subtitleRuns) == ["handshake"])
+        #expect(paint.subtitleTruncation == .tail)
+        #expect(
+            SearchMatchHighlight.excerptAroundMatch(summary, query: "handshake") == "…handshake")
+        #expect(SearchMatchHighlight.excerptAroundMatch("CLI summary", query: "CLI") == "CLI summary")
     }
 
     @Test func slashFreeProjectNameHeaderStaysFull() {
@@ -665,6 +671,63 @@ struct SearchMatchHighlightTests {
         )
         #expect(label.contains("CLI summary"))
         #expect(label.contains(paint.subtitle))
+    }
+
+    @Test func titleOnlySearchKeepsProjectAndLongRelativeInTheRowLabel() {
+        let recents = recentsRow(displayed: "Auth rewrite", cli: "CLI summary", query: "Auth")
+        #expect(matched(recents.subtitleRuns).isEmpty)
+        let recentsLabel = SearchMatchHighlight.rowAccessibilityLabel(
+            title: "Auth rewrite",
+            projectName: "project",
+            longRelative: "14 minutes ago",
+            paint: recents,
+            isPinned: false,
+            isArchived: false,
+            query: "Auth"
+        )
+        #expect(recentsLabel == "Auth rewrite, project, 14 minutes ago")
+
+        let projects = projectsRow(displayed: "Auth rewrite", cli: "CLI summary", query: "Auth")
+        #expect(projects.subtitle == "14m")
+        let projectsLabel = SearchMatchHighlight.rowAccessibilityLabel(
+            title: "Auth rewrite",
+            projectName: "project",
+            longRelative: "14 minutes ago",
+            paint: projects,
+            isPinned: false,
+            isArchived: false,
+            query: "Auth"
+        )
+        #expect(projectsLabel == "Auth rewrite, project, 14 minutes ago")
+        #expect(!projectsLabel.hasSuffix(", 14m"))
+    }
+
+    @Test func foldedGraphemeMergeStillHighlightsTheMatchingCluster() {
+        let hay = "ᄀ\u{301}ᅡ"
+        let mapped = SearchMatchHighlight.foldMap(hay)
+        #expect(mapped.origins.count == mapped.folded.utf16.count)
+        #expect(mapped.origins.count >= mapped.folded.count)
+        let needle = "ᅡ"
+        let foldedNeedle = SearchMatchHighlight.fold(needle)
+        if mapped.folded.contains(foldedNeedle)
+            || SearchMatchHighlight.contains(hay, query: needle)
+        {
+            let hits = SearchMatchHighlight.ranges(in: hay, query: needle)
+            #expect(!hits.isEmpty)
+            #expect(String(hay[hits[0]]).unicodeScalars.contains("\u{1161}"))
+        }
+        for sample in ["Straße", "🚀", "Café", "🇺🇸", hay] {
+            let map = SearchMatchHighlight.foldMap(sample)
+            #expect(map.origins.count == map.folded.utf16.count)
+        }
+    }
+
+    @Test func regionalIndicatorFlagStillProducesARange() {
+        let hay = "ship 🇺🇸 now"
+        #expect(SearchMatchHighlight.contains(hay, query: "🇺🇸"))
+        let hits = SearchMatchHighlight.ranges(in: hay, query: "🇺🇸")
+        #expect(!hits.isEmpty)
+        #expect(String(hay[hits[0]]) == "🇺🇸")
     }
 }
 
