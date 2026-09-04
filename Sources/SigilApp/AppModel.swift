@@ -441,9 +441,21 @@ final class AppModel {
     /// Empty, whitespace, or a name equal to the CLI title clears the override
     /// (a matching submit with no overlay is a no-op). Otherwise stores the name.
     func rename(_ session: GrokSession, to raw: String) {
-        settings.conversationNames = ConversationNaming.setting(
+        let next = ConversationNaming.setting(
             raw, on: session, onto: settings.conversationNames, samePath: samePath)
+        guard Self.shouldPersistConversationNames(
+            next: next, current: settings.conversationNames)
+        else { return }
+        settings.conversationNames = next
         applyNameToOpenTabs(session)
+    }
+
+    /// Finder-style blur/Return that matches the CLI title with no overlay
+    /// must not JSON-encode an unchanged list into UserDefaults.
+    static func shouldPersistConversationNames(
+        next: [ConversationName], current: [ConversationName]
+    ) -> Bool {
+        next != current
     }
 
     func resetName(_ session: GrokSession) {
@@ -726,6 +738,14 @@ final class AppModel {
             )
     }
 
+    /// Consume pending only when the field editor exists so a nil editor
+    /// cannot clear select-all for a fresh begin that never selected.
+    static func shouldConsumeRenameSelectAll(
+        fieldEditorReady: Bool, selectAllPending: Bool
+    ) -> Bool {
+        fieldEditorReady && selectAllPending
+    }
+
     /// Return commits the fallback alert, matching the inline field's onSubmit.
     static func renameAlertCommitUsesDefaultAction() -> Bool {
         true
@@ -767,16 +787,17 @@ final class AppModel {
 
     /// List reshuffles must not re-arm the fallback alert. Only a key or
     /// surface change (or a fresh rename) should reconfigure.
+    /// `forceReconfigure` is not a draft write — beginRename owns the draft.
     static func shouldReconfigureRename(
         previousKey: String?,
         previousSurface: RenameSurface,
         nextKey: String?,
         nextSurface: RenameSurface,
-        resetDraft: Bool,
+        forceReconfigure: Bool,
         forceRepresent: Bool = false
     ) -> Bool {
         if forceRepresent { return true }
-        if resetDraft { return true }
+        if forceReconfigure { return true }
         return previousKey != nextKey || previousSurface != nextSurface
     }
 

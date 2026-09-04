@@ -64,11 +64,11 @@ struct SidebarView: View {
         }
         .task(id: model.renamingSessionKey) {
             await prepareRename(
-                resetDraft: model.renamingSessionKey != model.preparedRenameKey)
+                forceReconfigure: model.renamingSessionKey != model.preparedRenameKey)
         }
         .task(id: visibleRowIDs()) {
             clampKeyboardSelection()
-            await prepareRename(resetDraft: false)
+            await prepareRename(forceReconfigure: false)
         }
         .task {
             await restorePromptOnAppear()
@@ -565,11 +565,12 @@ struct SidebarView: View {
                 preparedSurface: model.preparedRenameSurface
             )
         else { return }
-        await prepareRename(resetDraft: false, forceRepresent: true)
+        await prepareRename(forceReconfigure: false, forceRepresent: true)
     }
 
+    /// beginRename owns `renameDraft`. This only hands off inline vs prompt.
     @MainActor
-    private func prepareRename(resetDraft: Bool, forceRepresent: Bool = false) async {
+    private func prepareRename(forceReconfigure: Bool, forceRepresent: Bool = false) async {
         guard AppModel.shouldPrepareRename(isCancelled: Task.isCancelled) else { return }
         let key = model.renamingSessionKey
         let session = key.flatMap { sessionAnywhere(for: $0) }
@@ -585,7 +586,7 @@ struct SidebarView: View {
                 previousSurface: model.preparedRenameSurface,
                 nextKey: key,
                 nextSurface: surface,
-                resetDraft: resetDraft,
+                forceReconfigure: forceReconfigure,
                 forceRepresent: forceRepresent
             )
         else { return }
@@ -606,20 +607,13 @@ struct SidebarView: View {
             model.renameAlertSession = nil
             model.showRenameAlert = false
             await Task.yield()
-            let currentKey = model.renamingSessionKey
-            let currentSession = currentKey.flatMap { sessionAnywhere(for: $0) }
-            let currentVisible = currentKey.map { visibleRowIDs().contains($0) } ?? false
-            let currentSurface = AppModel.renameSurface(
-                isRenaming: currentKey != nil,
-                sessionAvailable: currentSession != nil,
-                rowVisible: currentVisible
-            )
+            let handoff = currentRenameHandoff()
             guard
                 AppModel.shouldFinishInlineHandoff(
                     isCancelled: Task.isCancelled,
                     expectedKey: key,
-                    currentKey: currentKey,
-                    currentSurface: currentSurface
+                    currentKey: handoff.key,
+                    currentSurface: handoff.surface
                 )
             else { return }
             focus = .rename
@@ -631,26 +625,19 @@ struct SidebarView: View {
             ) {
                 model.pulseRenameAlertOff()
                 await Task.yield()
-                let currentKey = model.renamingSessionKey
-                let currentSession = currentKey.flatMap { sessionAnywhere(for: $0) }
-                let currentVisible = currentKey.map { visibleRowIDs().contains($0) } ?? false
-                let currentSurface = AppModel.renameSurface(
-                    isRenaming: currentKey != nil,
-                    sessionAvailable: currentSession != nil,
-                    rowVisible: currentVisible
-                )
+                let handoff = currentRenameHandoff()
                 guard
                     AppModel.shouldFinishPromptHandoff(
                         isCancelled: Task.isCancelled,
                         expectedKey: key,
-                        currentKey: currentKey,
-                        currentSurface: currentSurface
+                        currentKey: handoff.key,
+                        currentSurface: handoff.surface
                     )
                 else {
                     model.renameAlertIsPulsing = false
                     return
                 }
-                presentedSession = currentSession
+                presentedSession = handoff.session
             }
             model.revealRenameAlert(presentedSession)
             if AppModel.shouldSelectRenameAlertDraft(
@@ -659,28 +646,20 @@ struct SidebarView: View {
                 isRenaming: model.renamingSessionKey != nil,
                 forceRepresent: forceRepresent
             ) {
-                await Task.yield()
-                let currentKey = model.renamingSessionKey
-                let currentSession = currentKey.flatMap { sessionAnywhere(for: $0) }
-                let currentVisible = currentKey.map { visibleRowIDs().contains($0) } ?? false
-                let currentSurface = AppModel.renameSurface(
-                    isRenaming: currentKey != nil,
-                    sessionAvailable: currentSession != nil,
-                    rowVisible: currentVisible
+                await consumeRenameSelectAllWhenEditorReady(
+                    shouldProceed: {
+                        let handoff = currentRenameHandoff()
+                        AppModel.shouldConsumeRenameAlertSelectAll(
+                            expectedKey: key,
+                            currentKey: handoff.key,
+                            currentSurface: handoff.surface,
+                            selectAllPending: model.renameSelectAllPending,
+                            isCancelled: Task.isCancelled,
+                            forceRepresent: forceRepresent
+                        )
+                    },
+                    consume: { model.consumeRenameSelectAll() }
                 )
-                guard
-                    AppModel.shouldConsumeRenameAlertSelectAll(
-                        expectedKey: key,
-                        currentKey: currentKey,
-                        currentSurface: currentSurface,
-                        selectAllPending: model.renameSelectAllPending,
-                        isCancelled: Task.isCancelled,
-                        forceRepresent: forceRepresent
-                    )
-                else { return }
-                if model.consumeRenameSelectAll() {
-                    selectRenameFieldEditor()
-                }
             } else if AppModel.shouldClearRenameSelectAllOnPrepare(
                 forceRepresent: forceRepresent,
                 isCancelled: Task.isCancelled
@@ -688,6 +667,20 @@ struct SidebarView: View {
                 model.clearRenameSelectAllPending()
             }
         }
+    }
+
+    private func currentRenameHandoff() -> (
+        key: String?, session: GrokSession?, surface: AppModel.RenameSurface
+    ) {
+        let key = model.renamingSessionKey
+        let session = key.flatMap { sessionAnywhere(for: $0) }
+        let visible = key.map { visibleRowIDs().contains($0) } ?? false
+        let surface = AppModel.renameSurface(
+            isRenaming: key != nil,
+            sessionAvailable: session != nil,
+            rowVisible: visible
+        )
+        return (key, session, surface)
     }
 
     private func moveFocusToList() -> KeyPress.Result {
@@ -1160,9 +1153,15 @@ private struct SessionRow: View {
             suppressBlurCommit = false
             return
         }
-        if consumeSelectAll() {
-            selectRenameFieldEditor()
-        }
+        await consumeRenameSelectAllWhenEditorReady(
+            shouldProceed: {
+                AppModel.shouldStealRenameFocusAfterYield(
+                    isCancelled: Task.isCancelled,
+                    isRenaming: isRenaming
+                )
+            },
+            consume: consumeSelectAll
+        )
         suppressBlurCommit = false
     }
 
@@ -1191,8 +1190,30 @@ private struct SessionRow: View {
     }
 }
 
-private func selectRenameFieldEditor() {
-    NSApp.keyWindow?.fieldEditor(false, for: nil)?.selectAll(nil)
+private func currentRenameFieldEditor() -> NSText? {
+    NSApp.keyWindow?.fieldEditor(false, for: nil)
+}
+
+/// Select-all only when the field editor exists, so a nil editor cannot
+/// consume pending for a fresh begin that never selected. Retries until
+/// the editor is ready or `shouldProceed` fails (cancelled / key change).
+@MainActor
+private func consumeRenameSelectAllWhenEditorReady(
+    shouldProceed: @escaping () -> Bool,
+    consume: @escaping () -> Bool
+) async {
+    while shouldProceed() {
+        if let editor = currentRenameFieldEditor() {
+            if AppModel.shouldConsumeRenameSelectAll(
+                fieldEditorReady: true,
+                selectAllPending: consume()
+            ) {
+                editor.selectAll(nil)
+            }
+            return
+        }
+        await Task.yield()
+    }
 }
 
 /// Owns the Bindable `renameDraft` read so keystrokes do not rebuild the sidebar.

@@ -788,14 +788,32 @@ struct AppModelTests {
         let model = fixture.model()
         defer { model.closeAllTabsAndWait() }
         let session = try #require(model.store.sessions.first)
+        #expect(
+            !AppModel.shouldPersistConversationNames(
+                next: fixture.settings.conversationNames,
+                current: fixture.settings.conversationNames))
+        let namesBefore = fixture.defaults.data(forKey: "sidebar.conversationNames")
         model.rename(session, to: "CLI summary")
         #expect(!model.hasCustomName(session))
         #expect(fixture.settings.conversationNames.isEmpty)
+        #expect(fixture.defaults.data(forKey: "sidebar.conversationNames") == namesBefore)
 
         try fixture.writeListedSession(id: "s1", cwd: cwd, summary: "Totally new CLI summary")
         await fixture.store.reload()
         let rewritten = try #require(model.store.sessions.first)
         #expect(model.title(for: rewritten) == "Totally new CLI summary")
+    }
+
+    @Test @MainActor
+    func finderNoOpRenameDoesNotPersistUnchangedConversationNames() {
+        let empty: [ConversationName] = []
+        #expect(!AppModel.shouldPersistConversationNames(next: empty, current: empty))
+        let named = [
+            ConversationName(sessionID: "s1", cwd: "/tmp/project", name: "Auth rewrite")
+        ]
+        #expect(AppModel.shouldPersistConversationNames(next: named, current: empty))
+        #expect(AppModel.shouldPersistConversationNames(next: empty, current: named))
+        #expect(!AppModel.shouldPersistConversationNames(next: named, current: named))
     }
 
     @Test @MainActor
@@ -954,7 +972,7 @@ struct AppModelTests {
                 previousSurface: .prompt,
                 nextKey: "s1",
                 nextSurface: .prompt,
-                resetDraft: false
+                forceReconfigure: false
             ))
         #expect(
             !AppModel.shouldReconfigureRename(
@@ -962,7 +980,7 @@ struct AppModelTests {
                 previousSurface: .inline,
                 nextKey: "s1",
                 nextSurface: .inline,
-                resetDraft: false
+                forceReconfigure: false
             ))
         #expect(
             AppModel.shouldReconfigureRename(
@@ -970,7 +988,7 @@ struct AppModelTests {
                 previousSurface: .prompt,
                 nextKey: "s1",
                 nextSurface: .inline,
-                resetDraft: false
+                forceReconfigure: false
             ))
         #expect(
             AppModel.shouldReconfigureRename(
@@ -978,7 +996,7 @@ struct AppModelTests {
                 previousSurface: .inline,
                 nextKey: "s1",
                 nextSurface: .prompt,
-                resetDraft: false
+                forceReconfigure: false
             ))
         #expect(
             AppModel.shouldReconfigureRename(
@@ -986,7 +1004,7 @@ struct AppModelTests {
                 previousSurface: .prompt,
                 nextKey: "s2",
                 nextSurface: .prompt,
-                resetDraft: false
+                forceReconfigure: false
             ))
         #expect(
             AppModel.shouldReconfigureRename(
@@ -994,7 +1012,7 @@ struct AppModelTests {
                 previousSurface: .prompt,
                 nextKey: "s1",
                 nextSurface: .prompt,
-                resetDraft: true
+                forceReconfigure: true
             ))
         #expect(
             AppModel.shouldReconfigureRename(
@@ -1002,7 +1020,7 @@ struct AppModelTests {
                 previousSurface: .prompt,
                 nextKey: "s1",
                 nextSurface: .prompt,
-                resetDraft: false,
+                forceReconfigure: false,
                 forceRepresent: true
             ))
     }
@@ -1118,6 +1136,18 @@ struct AppModelTests {
             !AppModel.shouldConsumeRenameAlertSelectAll(
                 expectedKey: "s1", currentKey: "s1", currentSurface: .prompt,
                 selectAllPending: false, isCancelled: false, forceRepresent: false))
+        #expect(
+            AppModel.shouldConsumeRenameSelectAll(
+                fieldEditorReady: true, selectAllPending: true))
+        #expect(
+            !AppModel.shouldConsumeRenameSelectAll(
+                fieldEditorReady: false, selectAllPending: true))
+        #expect(
+            !AppModel.shouldConsumeRenameSelectAll(
+                fieldEditorReady: true, selectAllPending: false))
+        #expect(
+            !AppModel.shouldConsumeRenameSelectAll(
+                fieldEditorReady: false, selectAllPending: false))
     }
 
     @Test @MainActor
