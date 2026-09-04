@@ -447,12 +447,13 @@ final class AppModel {
     }
 
     func resetName(_ session: GrokSession) {
-        if renamingSessionKey == sessionKey(session) {
+        let live = freshSession(matching: session)
+        if renamingSessionKey == sessionKey(live) {
             endRenameSession()
         }
         settings.conversationNames = ConversationNaming.removing(
-            session, from: settings.conversationNames, samePath: samePath)
-        applyNameToOpenTabs(session)
+            live, from: settings.conversationNames, samePath: samePath)
+        applyNameToOpenTabs(live)
     }
 
     /// Single draft owner for a fresh key. prepareRename only hands off the
@@ -697,6 +698,31 @@ final class AppModel {
                 selectAllPending: selectAllPending,
                 isCancelled: isCancelled,
                 isRenaming: isRenaming
+            )
+    }
+
+    /// After the alert select-all yield, consume only if this prepare is still
+    /// the live prompt. `.task(id: visibleRowIDs)` is not cancelled on key
+    /// change, so a stale prepare must not steal a newer beginRename's pending.
+    static func shouldConsumeRenameAlertSelectAll(
+        expectedKey: String?,
+        currentKey: String?,
+        currentSurface: RenameSurface,
+        selectAllPending: Bool,
+        isCancelled: Bool,
+        forceRepresent: Bool
+    ) -> Bool {
+        shouldFinishPromptHandoff(
+            isCancelled: isCancelled,
+            expectedKey: expectedKey,
+            currentKey: currentKey,
+            currentSurface: currentSurface
+        )
+            && shouldSelectRenameAlertDraft(
+                selectAllPending: selectAllPending,
+                isCancelled: isCancelled,
+                isRenaming: currentKey != nil,
+                forceRepresent: forceRepresent
             )
     }
 

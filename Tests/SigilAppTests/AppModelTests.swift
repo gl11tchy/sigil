@@ -658,6 +658,34 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func resetNameUsesTheLiveStoreSessionForOpenTabs() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        try fixture.writeListedSession(id: "s1", cwd: cwd.path, summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let stale = try #require(model.store.sessions.first)
+        model.rename(stale, to: "Auth rewrite")
+        model.open(stale)
+        let tab = try #require(model.selectedTab)
+        #expect(tab.sessionTitle == "Auth rewrite")
+
+        try fixture.writeListedSession(id: "s1", cwd: cwd.path, summary: "Totally new CLI summary")
+        await fixture.store.reload()
+        let live = try #require(model.store.sessions.first)
+        #expect(stale.title == "CLI summary")
+        #expect(live.title == "Totally new CLI summary")
+
+        model.resetName(stale)
+        #expect(!model.hasCustomName(stale))
+        #expect(model.title(for: live) == "Totally new CLI summary")
+        #expect(tab.sessionTitle == "Totally new CLI summary")
+    }
+
+    @Test @MainActor
     func whitespaceRenameClearsTheCustomName() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
@@ -1062,6 +1090,34 @@ struct AppModelTests {
                 currentKey: nil,
                 currentSurface: .prompt
             ))
+    }
+
+    @Test @MainActor
+    func alertSelectAllAfterYieldRequiresTheSamePromptKey() {
+        #expect(
+            AppModel.shouldConsumeRenameAlertSelectAll(
+                expectedKey: "s1", currentKey: "s1", currentSurface: .prompt,
+                selectAllPending: true, isCancelled: false, forceRepresent: false))
+        #expect(
+            !AppModel.shouldConsumeRenameAlertSelectAll(
+                expectedKey: "s1", currentKey: "s2", currentSurface: .prompt,
+                selectAllPending: true, isCancelled: false, forceRepresent: false))
+        #expect(
+            !AppModel.shouldConsumeRenameAlertSelectAll(
+                expectedKey: "s1", currentKey: "s1", currentSurface: .inline,
+                selectAllPending: true, isCancelled: false, forceRepresent: false))
+        #expect(
+            !AppModel.shouldConsumeRenameAlertSelectAll(
+                expectedKey: "s1", currentKey: "s1", currentSurface: .prompt,
+                selectAllPending: true, isCancelled: true, forceRepresent: false))
+        #expect(
+            !AppModel.shouldConsumeRenameAlertSelectAll(
+                expectedKey: "s1", currentKey: "s1", currentSurface: .prompt,
+                selectAllPending: true, isCancelled: false, forceRepresent: true))
+        #expect(
+            !AppModel.shouldConsumeRenameAlertSelectAll(
+                expectedKey: "s1", currentKey: "s1", currentSurface: .prompt,
+                selectAllPending: false, isCancelled: false, forceRepresent: false))
     }
 
     @Test @MainActor

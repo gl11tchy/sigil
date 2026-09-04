@@ -254,7 +254,7 @@ struct SidebarView: View {
             ),
             presenting: model.renameAlertSession
         ) { session in
-            TextField("Name", text: $model.renameDraft)
+            RenameAlertDraftField(model: model)
             Button("Rename") {
                 commitRenameAlert(session)
             }
@@ -372,7 +372,7 @@ struct SidebarView: View {
             noteMounted: { model.noteRenameFieldMounted($0, key: model.sessionKey(session)) },
             mountGeneration: { model.renameFieldMountGeneration },
             consumeSelectAll: { model.consumeRenameSelectAll() },
-            renameDraft: $model.renameDraft,
+            model: model,
             focus: $focus
         )
         .id(model.sessionKey(session))
@@ -660,11 +660,21 @@ struct SidebarView: View {
                 forceRepresent: forceRepresent
             ) {
                 await Task.yield()
+                let currentKey = model.renamingSessionKey
+                let currentSession = currentKey.flatMap { sessionAnywhere(for: $0) }
+                let currentVisible = currentKey.map { visibleRowIDs().contains($0) } ?? false
+                let currentSurface = AppModel.renameSurface(
+                    isRenaming: currentKey != nil,
+                    sessionAvailable: currentSession != nil,
+                    rowVisible: currentVisible
+                )
                 guard
-                    AppModel.shouldSelectRenameAlertDraft(
+                    AppModel.shouldConsumeRenameAlertSelectAll(
+                        expectedKey: key,
+                        currentKey: currentKey,
+                        currentSurface: currentSurface,
                         selectAllPending: model.renameSelectAllPending,
                         isCancelled: Task.isCancelled,
-                        isRenaming: model.renamingSessionKey != nil,
                         forceRepresent: forceRepresent
                     )
                 else { return }
@@ -955,7 +965,7 @@ private struct SessionRow: View {
     let noteMounted: (Bool) -> Void
     let mountGeneration: () -> Int
     let consumeSelectAll: () -> Bool
-    @Binding var renameDraft: String
+    let model: AppModel
     @FocusState.Binding var focus: SidebarFocus?
 
     @Environment(\.palette) private var palette
@@ -1037,20 +1047,15 @@ private struct SessionRow: View {
     @ViewBuilder
     private var titleLine: some View {
         if isRenaming {
-            TextField(session.title, text: $renameDraft)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12, weight: state == .active ? .medium : .regular))
-                .foregroundStyle(palette.text)
-                .focused($focus, equals: .rename)
-                .onSubmit { commitCurrentDraft(restoreListFocus: true) }
-                .onKeyPress(.escape) {
-                    abandonRename()
-                    return .handled
-                }
-                .onExitCommand { abandonRename() }
-                .onChange(of: focus) { _, newFocus in
-                    if newFocus != .rename { commitOnBlurIfNeeded() }
-                }
+            SessionRenameField(
+                model: model,
+                placeholder: session.title,
+                emphasize: state == .active,
+                focus: $focus,
+                onSubmit: { commitCurrentDraft(restoreListFocus: true) },
+                onAbandon: abandonRename,
+                onBlur: commitOnBlurIfNeeded
+            )
         } else {
             Text(title)
                 .font(.system(size: 12, weight: state == .active ? .medium : .regular))
@@ -1163,7 +1168,7 @@ private struct SessionRow: View {
 
     private func commitCurrentDraft(restoreListFocus: Bool) {
         suppressBlurCommit = true
-        commitRename(renameDraft)
+        commitRename(model.renameDraft)
         if restoreListFocus { focus = .list }
     }
 
@@ -1175,7 +1180,7 @@ private struct SessionRow: View {
 
     private func commitOnBlurIfNeeded() {
         guard !suppressBlurCommit else { return }
-        let draft = renameDraft
+        let draft = model.renameDraft
         let generation = mountGeneration()
         blurCommitTask?.cancel()
         blurCommitTask = Task {
@@ -1188,6 +1193,44 @@ private struct SessionRow: View {
 
 private func selectRenameFieldEditor() {
     NSApp.keyWindow?.fieldEditor(false, for: nil)?.selectAll(nil)
+}
+
+/// Owns the Bindable `renameDraft` read so keystrokes do not rebuild the sidebar.
+private struct SessionRenameField: View {
+    @Bindable var model: AppModel
+    let placeholder: String
+    let emphasize: Bool
+    @FocusState.Binding var focus: SidebarFocus?
+    let onSubmit: () -> Void
+    let onAbandon: () -> Void
+    let onBlur: () -> Void
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        TextField(placeholder, text: $model.renameDraft)
+            .textFieldStyle(.plain)
+            .font(.system(size: 12, weight: emphasize ? .medium : .regular))
+            .foregroundStyle(palette.text)
+            .focused($focus, equals: .rename)
+            .onSubmit(onSubmit)
+            .onKeyPress(.escape) {
+                onAbandon()
+                return .handled
+            }
+            .onExitCommand(onAbandon)
+            .onChange(of: focus) { _, newFocus in
+                if newFocus != .rename { onBlur() }
+            }
+    }
+}
+
+/// Owns the alert field's Bindable `renameDraft` read, same isolation as inline.
+private struct RenameAlertDraftField: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        TextField("Name", text: $model.renameDraft)
+    }
 }
 
 /// Return commits the fallback alert, matching the inline field's onSubmit.
