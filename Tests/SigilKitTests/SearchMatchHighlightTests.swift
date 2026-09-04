@@ -428,6 +428,35 @@ struct SearchMatchHighlightTests {
         #expect(SearchMatchHighlight.keepingMatchVisible("/tmp/project", query: "/tmp") == "/tmp/project")
     }
 
+    @Test func keepingMatchVisibleLeavesSlashFreeNamesAndSummariesIntact() {
+        #expect(
+            SearchMatchHighlight.keepingMatchVisible("Authentication", query: "tication")
+                == "Authentication")
+        let summary = "Rewrite the authentication handshake"
+        #expect(SearchMatchHighlight.keepingMatchVisible(summary, query: "auth") == summary)
+        #expect(!SearchMatchHighlight.keepingMatchVisible(summary, query: "handshake").hasPrefix("…"))
+    }
+
+    @Test func cliOnlySubtitleKeepsTheFullSlashFreeSummary() {
+        let summary = "Rewrite the authentication handshake"
+        let paint = recentsRow(displayed: "Auth rewrite", cli: summary, query: "handshake")
+        #expect(paint.subtitle == "\(summary) · 14m")
+        #expect(!paint.subtitle.hasPrefix("…"))
+        #expect(matched(paint.subtitleRuns) == ["handshake"])
+    }
+
+    @Test func slashFreeProjectNameHeaderStaysFull() {
+        let header = SearchMatchHighlight.projectHeader(
+            name: "Authentication",
+            paths: ["~/repos/Authentication"],
+            count: 2,
+            query: "tication"
+        )
+        #expect(header.text == "Authentication (2)")
+        #expect(!header.text.hasPrefix("…"))
+        #expect(matched(header.runs) == ["tication"])
+    }
+
     @Test func longPathRowStartsTheSubtitleAtTheMatch() {
         let paint = SearchMatchHighlight.row(
             displayedTitle: "Auth rewrite",

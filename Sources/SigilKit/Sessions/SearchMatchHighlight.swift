@@ -153,19 +153,18 @@ public enum SearchMatchHighlight: Sendable {
     ) -> RowPaint {
         let titleRuns = runs(in: displayedTitle, query: query)
         let pathHit = matchingPath(in: [projectName, displayPath, cwd], query: query)
-        let chosen: String?
+        let prefix: String?
         if showsProject, let pathHit {
-            chosen = pathHit
+            prefix = keepingMatchVisible(pathHit, query: query)
         } else if !contains(displayedTitle, query: query), contains(cliTitle, query: query) {
-            chosen = cliTitle
+            prefix = cliTitle
         } else if !showsProject, !headerCoversQuery, let pathHit {
-            chosen = pathHit
+            prefix = keepingMatchVisible(pathHit, query: query)
         } else if showsProject {
-            chosen = projectName
+            prefix = projectName
         } else {
-            chosen = nil
+            prefix = nil
         }
-        let prefix = chosen.map { keepingMatchVisible($0, query: query) }
         let subtitle = subtitleText(prefix: prefix, relativeTime: relativeTime)
         let ranges: [Range<String.Index>] =
             if let prefix, !prefix.isEmpty {
@@ -243,7 +242,10 @@ public enum SearchMatchHighlight: Sendable {
 
     /// Drop a leading path so the first match sits at the start of the visible
     /// string. Tail truncation can then keep the accent run on-screen.
+    /// Only rewrites strings that contain `/` (cwd / displayPath). Slash-free
+    /// project names and CLI summaries stay intact, even for a mid-string hit.
     public static func keepingMatchVisible(_ string: String, query: String) -> String {
+        guard string.contains("/") else { return string }
         guard let first = ranges(in: string, query: query).first else { return string }
         let lead = string.distance(from: string.startIndex, to: first.lowerBound)
         if lead <= 2 { return string }
