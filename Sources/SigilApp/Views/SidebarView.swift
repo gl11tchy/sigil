@@ -236,8 +236,14 @@ struct SidebarView: View {
             isPresented: Binding(
                 get: { model.showRenameAlert },
                 set: { newValue in
-                    // Sidebar teardown (⌘B) must not cancel or wipe the draft.
-                    guard model.isSidebarVisible else { return }
+                    // Sidebar teardown (⌘B) and the forceRepresent pulse must
+                    // not cancel or wipe the draft.
+                    guard
+                        AppModel.shouldApplyRenameAlertPresentedChange(
+                            sidebarVisible: model.isSidebarVisible,
+                            pulsing: model.renameAlertIsPulsing
+                        )
+                    else { return }
                     model.showRenameAlert = newValue
                     if !newValue,
                         AppModel.shouldCancelRenameAlert(didCommit: model.renameAlertDidCommit)
@@ -252,6 +258,11 @@ struct SidebarView: View {
             Button("Rename") {
                 commitRenameAlert(session)
             }
+            .modifier(
+                RenameAlertDefaultCommit(
+                    enabled: AppModel.renameAlertCommitUsesDefaultAction()
+                )
+            )
             if model.hasCustomName(session) {
                 Button("Reset Name") { resetNameAlert(session) }
             }
@@ -615,9 +626,36 @@ struct SidebarView: View {
             if resetDraft, let session {
                 model.renameDraft = model.title(for: session)
             }
-            model.renameAlertDidCommit = false
-            model.renameAlertSession = session
-            model.showRenameAlert = true
+            if AppModel.shouldPulseRenameAlert(
+                forceRepresent: forceRepresent,
+                currentlyShown: model.showRenameAlert
+            ) {
+                model.pulseRenameAlertOff()
+                await Task.yield()
+                guard model.renamingSessionKey != nil else { return }
+            }
+            model.revealRenameAlert(session)
+            if AppModel.shouldSelectRenameAlertDraft(
+                selectAllPending: model.renameSelectAllPending,
+                isCancelled: Task.isCancelled,
+                isRenaming: model.renamingSessionKey != nil,
+                forceRepresent: forceRepresent
+            ) {
+                await Task.yield()
+                guard
+                    AppModel.shouldSelectRenameAlertDraft(
+                        selectAllPending: model.renameSelectAllPending,
+                        isCancelled: Task.isCancelled,
+                        isRenaming: model.renamingSessionKey != nil,
+                        forceRepresent: forceRepresent
+                    )
+                else { return }
+                if model.consumeRenameSelectAll() {
+                    selectRenameFieldEditor()
+                }
+            } else {
+                model.clearRenameSelectAllPending()
+            }
         }
     }
 
@@ -1099,13 +1137,9 @@ private struct SessionRow: View {
             return
         }
         if consumeSelectAll() {
-            selectRenameDraft()
+            selectRenameFieldEditor()
         }
         suppressBlurCommit = false
-    }
-
-    private func selectRenameDraft() {
-        NSApp.keyWindow?.fieldEditor(false, for: nil)?.selectAll(nil)
     }
 
     private func commitCurrentDraft(restoreListFocus: Bool) {
@@ -1129,6 +1163,24 @@ private struct SessionRow: View {
             await Task.yield()
             guard !Task.isCancelled else { return }
             commitBlur(draft, generation)
+        }
+    }
+}
+
+private func selectRenameFieldEditor() {
+    NSApp.keyWindow?.fieldEditor(false, for: nil)?.selectAll(nil)
+}
+
+/// Return commits the fallback alert, matching the inline field's onSubmit.
+private struct RenameAlertDefaultCommit: ViewModifier {
+    let enabled: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            content.keyboardShortcut(.defaultAction)
+        } else {
+            content
         }
     }
 }

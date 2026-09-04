@@ -147,6 +147,8 @@ final class AppModel {
     var showRenameAlert = false
     var renameAlertSession: GrokSession?
     var renameAlertDidCommit = false
+    /// True between the off and on edges of a forceRepresent pulse.
+    var renameAlertIsPulsing = false
     var preparedRenameKey: String?
     var preparedRenameSurface: RenameSurface = .none
     /// Session key of the inline field currently in the tree. Nil if unmounted.
@@ -453,6 +455,7 @@ final class AppModel {
             showRenameAlert = false
             renameAlertSession = nil
             renameAlertDidCommit = false
+            renameAlertIsPulsing = false
             renameSelectAllPending = true
         }
         renamingSessionKey = key
@@ -477,6 +480,7 @@ final class AppModel {
         showRenameAlert = false
         renameAlertSession = nil
         renameAlertDidCommit = false
+        renameAlertIsPulsing = false
         preparedRenameKey = nil
         preparedRenameSurface = .none
         renameFieldMountedKey = nil
@@ -486,10 +490,45 @@ final class AppModel {
 
     /// Snapshot the live draft before `endRenameSession` can wipe it. The
     /// alert's isPresented setter may cancel before this button action runs.
+    /// Compare against the store's current session so a CLI summary rewrite
+    /// while the alert is up cannot pin a stale title.
     func commitCapturedRename(_ session: GrokSession) {
         let snapshot = renameDraft
         renameAlertDidCommit = true
-        commitRename(session, to: snapshot)
+        commitRename(freshSession(matching: session), to: snapshot)
+    }
+
+    /// Store row for this id+cwd, or the snapshot if the session is gone.
+    func freshSession(matching session: GrokSession) -> GrokSession {
+        store.sessions.first { sessionKey($0) == sessionKey(session) } ?? session
+    }
+
+    /// ⌘B teardown leaves `showRenameAlert` true. Assigning true again is not
+    /// a presentation change, so SwiftUI never re-shows the alert.
+    static func shouldPulseRenameAlert(forceRepresent: Bool, currentlyShown: Bool) -> Bool {
+        forceRepresent && currentlyShown
+    }
+
+    /// Off-edge of the pulse. `renameAlertDidCommit` stays true so the alert
+    /// binding cannot cancel the live draft while we yield.
+    func pulseRenameAlertOff() {
+        renameAlertDidCommit = true
+        renameAlertIsPulsing = true
+        showRenameAlert = false
+    }
+
+    func revealRenameAlert(_ session: GrokSession?) {
+        renameAlertSession = session
+        showRenameAlert = true
+        renameAlertIsPulsing = false
+        renameAlertDidCommit = false
+    }
+
+    /// Sidebar hide and the forceRepresent pulse must not run the dismiss setter.
+    static func shouldApplyRenameAlertPresentedChange(
+        sidebarVisible: Bool, pulsing: Bool
+    ) -> Bool {
+        sidebarVisible && !pulsing
     }
 
     /// Dismiss may fire before the Rename button. Wait a turn, then cancel
@@ -624,6 +663,27 @@ final class AppModel {
         isRenaming: Bool
     ) -> Bool {
         selectAllPending && !isCancelled && isRenaming
+    }
+
+    /// Fallback alert: select-all only on a fresh beginRename, never on ⌘B
+    /// restore or any other remount that continues a typed draft.
+    static func shouldSelectRenameAlertDraft(
+        selectAllPending: Bool,
+        isCancelled: Bool,
+        isRenaming: Bool,
+        forceRepresent: Bool
+    ) -> Bool {
+        !forceRepresent
+            && shouldSelectRenameDraft(
+                selectAllPending: selectAllPending,
+                isCancelled: isCancelled,
+                isRenaming: isRenaming
+            )
+    }
+
+    /// Return commits the fallback alert, matching the inline field's onSubmit.
+    static func renameAlertCommitUsesDefaultAction() -> Bool {
+        true
     }
 
     static func shouldForcePromptRepresent(

@@ -1133,6 +1133,62 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func capturedRenameUsesTheLiveStoreSessionNotTheAlertSnapshot() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = "/Users/someone/Documents/project"
+        try fixture.writeListedSession(id: "s1", cwd: cwd, summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let stale = try #require(model.store.sessions.first)
+        model.beginRename(stale)
+        model.renameAlertSession = stale
+        #expect(stale.title == "CLI summary")
+
+        try fixture.writeListedSession(id: "s1", cwd: cwd, summary: "Totally new CLI summary")
+        await fixture.store.reload()
+        let live = try #require(model.store.sessions.first)
+        #expect(live.title == "Totally new CLI summary")
+        #expect(model.freshSession(matching: stale).title == "Totally new CLI summary")
+
+        model.renameDraft = "Totally new CLI summary"
+        model.commitCapturedRename(stale)
+        #expect(!model.hasCustomName(stale))
+        #expect(model.title(for: live) == "Totally new CLI summary")
+        #expect(fixture.settings.conversationNames.isEmpty)
+
+        model.beginRename(live)
+        model.renameDraft = "Auth rewrite"
+        model.commitCapturedRename(stale)
+        #expect(model.title(for: live) == "Auth rewrite")
+        #expect(model.hasCustomName(live))
+
+        model.beginRename(live)
+        model.renameDraft = "Totally new CLI summary"
+        model.commitCapturedRename(stale)
+        #expect(!model.hasCustomName(live))
+        #expect(model.title(for: live) == "Totally new CLI summary")
+    }
+
+    @Test @MainActor
+    func capturedRenameFallsBackToTheSnapshotWhenTheSessionIsGone() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let ghost = makeSession(id: "gone", cwd: cwd)
+        #expect(!model.store.sessions.contains { $0.id == ghost.id })
+        #expect(model.freshSession(matching: ghost).id == ghost.id)
+        model.renameDraft = "Keep this"
+        model.commitCapturedRename(ghost)
+        #expect(model.title(for: ghost) == "Keep this")
+        #expect(model.hasCustomName(ghost))
+    }
+
+    @Test @MainActor
     func deferredAlertCancelSkipsOnceRenameHasCommitted() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
@@ -1204,6 +1260,60 @@ struct AppModelTests {
         #expect(
             !AppModel.shouldForcePromptRepresent(
                 isRenaming: true, rowVisible: false, sidebarVisible: false))
+    }
+
+    @Test @MainActor
+    func forceRepresentPulsesAStuckAlertAndRefreshesTheSession() async throws {
+        #expect(
+            AppModel.shouldPulseRenameAlert(forceRepresent: true, currentlyShown: true))
+        #expect(
+            !AppModel.shouldPulseRenameAlert(forceRepresent: true, currentlyShown: false))
+        #expect(
+            !AppModel.shouldPulseRenameAlert(forceRepresent: false, currentlyShown: true))
+        #expect(
+            AppModel.shouldApplyRenameAlertPresentedChange(sidebarVisible: true, pulsing: false))
+        #expect(
+            !AppModel.shouldApplyRenameAlertPresentedChange(sidebarVisible: true, pulsing: true))
+        #expect(
+            !AppModel.shouldApplyRenameAlertPresentedChange(
+                sidebarVisible: false, pulsing: false))
+
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.beginRename(session)
+        model.renameDraft = "Typed"
+        model.showRenameAlert = true
+        model.renameAlertSession = session
+        model.renameAlertDidCommit = false
+
+        #expect(
+            AppModel.shouldPulseRenameAlert(
+                forceRepresent: true, currentlyShown: model.showRenameAlert))
+        model.pulseRenameAlertOff()
+        #expect(!model.showRenameAlert)
+        #expect(model.renameAlertIsPulsing)
+        #expect(model.renameAlertDidCommit)
+        #expect(model.renameDraft == "Typed")
+        #expect(model.renamingSessionKey == model.sessionKey(session))
+
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project",
+            summary: "Totally new CLI summary")
+        await fixture.store.reload()
+        let live = try #require(model.store.sessions.first)
+        model.revealRenameAlert(live)
+        #expect(model.showRenameAlert)
+        #expect(!model.renameAlertIsPulsing)
+        #expect(!model.renameAlertDidCommit)
+        #expect(model.renameAlertSession?.title == "Totally new CLI summary")
+        #expect(model.renameDraft == "Typed")
     }
 
     @Test @MainActor
@@ -1335,6 +1445,64 @@ struct AppModelTests {
             !AppModel.shouldSelectRenameDraft(
                 selectAllPending: false, isCancelled: false, isRenaming: true))
         #expect(model.renameDraft == "Typed")
+    }
+
+    @Test @MainActor
+    func alertSelectAllIsOnlyOnFreshBeginNotForceRepresent() async throws {
+        #expect(AppModel.renameAlertCommitUsesDefaultAction())
+        #expect(
+            AppModel.shouldSelectRenameAlertDraft(
+                selectAllPending: true, isCancelled: false, isRenaming: true,
+                forceRepresent: false))
+        #expect(
+            !AppModel.shouldSelectRenameAlertDraft(
+                selectAllPending: true, isCancelled: false, isRenaming: true,
+                forceRepresent: true))
+        #expect(
+            !AppModel.shouldSelectRenameAlertDraft(
+                selectAllPending: false, isCancelled: false, isRenaming: true,
+                forceRepresent: false))
+        #expect(
+            !AppModel.shouldSelectRenameAlertDraft(
+                selectAllPending: true, isCancelled: true, isRenaming: true,
+                forceRepresent: false))
+        #expect(
+            !AppModel.shouldSelectRenameAlertDraft(
+                selectAllPending: true, isCancelled: false, isRenaming: false,
+                forceRepresent: false))
+
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.beginRename(session)
+        #expect(model.renameSelectAllPending)
+        #expect(
+            AppModel.shouldSelectRenameAlertDraft(
+                selectAllPending: model.renameSelectAllPending,
+                isCancelled: false,
+                isRenaming: true,
+                forceRepresent: false))
+        #expect(model.consumeRenameSelectAll())
+        #expect(!model.renameSelectAllPending)
+
+        model.beginRename(session)
+        model.renameDraft = "Typed"
+        #expect(!model.renameSelectAllPending)
+        #expect(
+            !AppModel.shouldSelectRenameAlertDraft(
+                selectAllPending: model.renameSelectAllPending,
+                isCancelled: false,
+                isRenaming: true,
+                forceRepresent: true))
+        model.clearRenameSelectAllPending()
+        #expect(model.renameDraft == "Typed")
+        #expect(!model.renameSelectAllPending)
     }
 
     @Test @MainActor
