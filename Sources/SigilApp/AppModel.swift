@@ -457,8 +457,9 @@ final class AppModel {
     func rename(_ session: GrokSession, to raw: String) {
         let next = ConversationNaming.setting(
             raw, on: session, onto: settings.conversationNames, samePath: samePath)
-        guard Self.shouldPersistConversationNames(
-            next: next, current: settings.conversationNames)
+        guard
+            Self.shouldPersistConversationNames(
+                next: next, current: settings.conversationNames)
         else { return }
         settings.conversationNames = next
         applyNameToOpenTabs(session)
@@ -479,8 +480,9 @@ final class AppModel {
         }
         let next = ConversationNaming.removing(
             live, from: settings.conversationNames, samePath: samePath)
-        guard Self.shouldPersistConversationNames(
-            next: next, current: settings.conversationNames)
+        guard
+            Self.shouldPersistConversationNames(
+                next: next, current: settings.conversationNames)
         else { return }
         settings.conversationNames = next
         applyNameToOpenTabs(live)
@@ -602,19 +604,23 @@ final class AppModel {
 
     func noteRenameFieldMounted(_ mounted: Bool, key: String) {
         if mounted {
-            guard Self.shouldApplyRenameFieldMount(
-                mountKey: key,
-                activeKey: renamingSessionKey,
-                mountedKey: renameFieldMountedKey
-            ) else { return }
+            guard
+                Self.shouldApplyRenameFieldMount(
+                    mountKey: key,
+                    activeKey: renamingSessionKey,
+                    mountedKey: renameFieldMountedKey
+                )
+            else { return }
             renameFieldMountedKey = key
             renameFieldMountGeneration += 1
         } else {
-            guard Self.shouldApplyRenameFieldUnmount(
-                unmountKey: key,
-                activeKey: renamingSessionKey,
-                mountedKey: renameFieldMountedKey
-            ) else { return }
+            guard
+                Self.shouldApplyRenameFieldUnmount(
+                    unmountKey: key,
+                    activeKey: renamingSessionKey,
+                    mountedKey: renameFieldMountedKey
+                )
+            else { return }
             renameFieldMountedKey = nil
             renameFieldMountGeneration += 1
         }
