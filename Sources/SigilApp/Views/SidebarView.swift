@@ -321,6 +321,7 @@ struct SidebarView: View {
         }
     }
 
+    @ViewBuilder
     private func projectSection(
         _ project: SidebarProject, rows: [GrokSession], isFirst: Bool
     ) -> some View {
@@ -836,7 +837,7 @@ private struct ProjectSectionHeader: View {
         )
         .font(.system(size: 10, weight: .medium, design: .monospaced))
         .lineLimit(1)
-        .truncationMode(truncationMode(paint.visibleTruncation))
+        .truncationMode(textTruncationMode(paint.visibleTruncation))
         .padding(.horizontal, 14)
         .padding(.top, isFirst ? 10 : 18)
         .padding(.bottom, 4)
@@ -1084,7 +1085,7 @@ private struct SessionRow: View {
                 )
                 .font(.system(size: 9.5, design: .monospaced))
                 .lineLimit(1)
-                .truncationMode(truncationMode(paint.subtitleTruncation))
+                .truncationMode(textTruncationMode(paint.subtitleTruncation))
             }
             Spacer(minLength: 8)
             if let activity, activity == .working, !isRenaming {
@@ -1152,7 +1153,7 @@ private struct SessionRow: View {
             )
             .font(.system(size: 12, weight: state == .active ? .medium : .regular))
             .lineLimit(1)
-            .truncationMode(truncationMode(truncation))
+            .truncationMode(textTruncationMode(truncation))
         }
     }
 
@@ -1410,7 +1411,7 @@ private func consumeRenameSelectAllWhenEditorReady(
     }
 }
 
-private func truncationMode(_ truncation: SearchMatchHighlight.Truncation) -> Text.TruncationMode {
+private func textTruncationMode(_ truncation: SearchMatchHighlight.Truncation) -> Text.TruncationMode {
     switch truncation {
     case .tail: return .tail
     case .middle: return .middle
