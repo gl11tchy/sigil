@@ -220,6 +220,27 @@ public enum SearchMatchHighlight: Sendable {
         return base + (isPinned ? ", pinned" : "")
     }
 
+    /// VoiceOver text for a conversation row. While searching, speak the painted
+    /// subtitle so a path-only or CLI-only hit is heard, not only the folder name.
+    public static func rowAccessibilityLabel(
+        title: String,
+        projectName: String,
+        longRelative: String,
+        paint: RowPaint,
+        isPinned: Bool,
+        isArchived: Bool,
+        query: String
+    ) -> String {
+        let searching = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        var label =
+            searching
+            ? "\(title), \(paint.subtitle)"
+            : "\(title), \(projectName), \(longRelative)"
+        if isPinned { label += ", pinned" }
+        if isArchived { label += ", archived" }
+        return label
+    }
+
     /// Drop a leading path so the first match sits at the start of the visible
     /// string. Tail truncation can then keep the accent run on-screen.
     public static func keepingMatchVisible(_ string: String, query: String) -> String {

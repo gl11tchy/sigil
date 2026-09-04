@@ -1119,9 +1119,15 @@ private struct SessionRow: View {
     }
 
     private var rowAccessibilityLabel: String {
-        "\(title), \(session.projectName), \(session.updatedAt.longRelative)"
-            + (isPinned ? ", pinned" : "")
-            + (isArchived ? ", archived" : "")
+        SearchMatchHighlight.rowAccessibilityLabel(
+            title: title,
+            projectName: session.projectName,
+            longRelative: session.updatedAt.longRelative,
+            paint: rowPaint,
+            isPinned: isPinned,
+            isArchived: isArchived,
+            query: searchQuery
+        )
     }
 
     @ViewBuilder

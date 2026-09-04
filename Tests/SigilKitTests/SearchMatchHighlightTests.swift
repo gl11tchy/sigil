@@ -506,6 +506,67 @@ struct SearchMatchHighlightTests {
             paint: paint, shortName: "sigil", count: 4, isPinned: true, query: "")
         #expect(idle == "sigil, 4 conversations, pinned")
     }
+
+    @Test func idleRowLabelKeepsProjectAndLongRelative() {
+        let paint = recentsRow(displayed: "Auth rewrite", cli: "CLI summary", query: "")
+        let label = SearchMatchHighlight.rowAccessibilityLabel(
+            title: "Auth rewrite",
+            projectName: "project",
+            longRelative: "14 minutes ago",
+            paint: paint,
+            isPinned: true,
+            isArchived: true,
+            query: ""
+        )
+        #expect(label == "Auth rewrite, project, 14 minutes ago, pinned, archived")
+    }
+
+    @Test func searchingRowLabelSpeaksACliOnlySubtitle() {
+        let paint = recentsRow(displayed: "Auth rewrite", cli: "CLI summary", query: "CLI")
+        let label = SearchMatchHighlight.rowAccessibilityLabel(
+            title: "Auth rewrite",
+            projectName: "project",
+            longRelative: "14 minutes ago",
+            paint: paint,
+            isPinned: false,
+            isArchived: false,
+            query: "CLI"
+        )
+        #expect(label == "Auth rewrite, \(paint.subtitle)")
+        #expect(label.contains("CLI summary"))
+        #expect(!label.contains("14 minutes ago"))
+    }
+
+    @Test func searchingRowLabelSpeaksAPathOnlySubtitle() {
+        let paint = recentsRow(displayed: "Auth rewrite", cli: "CLI summary", query: "/tmp")
+        let label = SearchMatchHighlight.rowAccessibilityLabel(
+            title: "Auth rewrite",
+            projectName: "project",
+            longRelative: "14 minutes ago",
+            paint: paint,
+            isPinned: false,
+            isArchived: false,
+            query: "/tmp"
+        )
+        #expect(label.contains(paint.subtitle))
+        #expect(label.contains("/tmp"))
+        #expect(!label.contains("14 minutes ago"))
+    }
+
+    @Test func searchingProjectsRowLabelSpeaksACliOnlySubtitle() {
+        let paint = projectsRow(displayed: "Auth rewrite", cli: "CLI summary", query: "CLI")
+        let label = SearchMatchHighlight.rowAccessibilityLabel(
+            title: "Auth rewrite",
+            projectName: "project",
+            longRelative: "14 minutes ago",
+            paint: paint,
+            isPinned: false,
+            isArchived: false,
+            query: "CLI"
+        )
+        #expect(label.contains("CLI summary"))
+        #expect(label.contains(paint.subtitle))
+    }
 }
 
 private let namedSession = session(title: "CLI summary", cwd: "/tmp/project")
