@@ -870,6 +870,9 @@ struct AppModelTests {
         #expect(AppModel.shouldPersistConversationNames(next: named, current: empty))
         #expect(AppModel.shouldPersistConversationNames(next: empty, current: named))
         #expect(!AppModel.shouldPersistConversationNames(next: named, current: named))
+        #expect(AppModel.shouldNoOpRenameCommit(draft: "CLI summary", baseline: "CLI summary"))
+        #expect(!AppModel.shouldNoOpRenameCommit(draft: "Typed", baseline: "CLI summary"))
+        #expect(!AppModel.shouldNoOpRenameCommit(draft: "CLI summary", baseline: nil))
     }
 
     @Test @MainActor
@@ -1678,6 +1681,82 @@ struct AppModelTests {
             mountGeneration: model.renameFieldMountGeneration)
         #expect(model.title(for: live) == "Auth rewrite")
         #expect(model.hasCustomName(live))
+    }
+
+    @Test @MainActor
+    func uneditedCommitAfterCLISummaryRewriteDoesNotPinTheStaleDraft() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = "/Users/someone/Documents/project"
+        try fixture.writeListedSession(id: "s1", cwd: cwd, summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let stale = try #require(model.store.sessions.first)
+        model.beginRename(stale)
+        #expect(model.renameDraft == "CLI summary")
+        #expect(model.renameCommitBaseline == "CLI summary")
+        let namesBefore = fixture.defaults.data(forKey: "sidebar.conversationNames")
+
+        try fixture.writeListedSession(id: "s1", cwd: cwd, summary: "Totally new CLI summary")
+        await fixture.store.reload()
+        let live = try #require(model.store.sessions.first)
+        #expect(model.renameDraft == "CLI summary")
+        #expect(model.renameCommitBaseline == "CLI summary")
+        model.commitCapturedRename(stale)
+        #expect(!model.hasCustomName(live))
+        #expect(model.title(for: live) == "Totally new CLI summary")
+        #expect(fixture.settings.conversationNames.isEmpty)
+        #expect(fixture.defaults.data(forKey: "sidebar.conversationNames") == namesBefore)
+        #expect(model.renamingSessionKey == nil)
+        #expect(model.renameCommitBaseline == nil)
+
+        model.beginRename(live)
+        #expect(model.renameDraft == "Totally new CLI summary")
+        #expect(model.renameCommitBaseline == "Totally new CLI summary")
+        try fixture.writeListedSession(id: "s1", cwd: cwd, summary: "Third CLI summary")
+        await fixture.store.reload()
+        let live2 = try #require(model.store.sessions.first)
+        model.commitInlineRename(stale, to: model.renameDraft)
+        #expect(!model.hasCustomName(live2))
+        #expect(model.title(for: live2) == "Third CLI summary")
+        #expect(fixture.settings.conversationNames.isEmpty)
+
+        model.beginRename(live2)
+        model.noteRenameFieldMounted(true, key: model.sessionKey(live2))
+        #expect(model.renameCommitBaseline == "Third CLI summary")
+        try fixture.writeListedSession(id: "s1", cwd: cwd, summary: "Fourth CLI summary")
+        await fixture.store.reload()
+        let live3 = try #require(model.store.sessions.first)
+        model.commitInlineBlur(
+            stale, to: model.renameDraft, mountGeneration: model.renameFieldMountGeneration)
+        #expect(!model.hasCustomName(live3))
+        #expect(model.title(for: live3) == "Fourth CLI summary")
+        #expect(fixture.settings.conversationNames.isEmpty)
+        #expect(model.renamingSessionKey == nil)
+    }
+
+    @Test @MainActor
+    func sameKeyBeginRenameKeepsCommitBaselineSoTypingStillSaves() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.beginRename(session)
+        model.renameDraft = "Typed"
+        #expect(model.renameCommitBaseline == "CLI summary")
+        model.beginRename(session)
+        #expect(model.renameCommitBaseline == "CLI summary")
+        #expect(model.renameSelectAllBaseline == nil)
+        model.commitCapturedRename(session)
+        #expect(model.title(for: session) == "Typed")
+        #expect(model.hasCustomName(session))
     }
 
     @Test @MainActor

@@ -191,6 +191,9 @@ final class AppModel {
     var renameSelectAllPending = false
     /// Draft at arm time. Select-all is skipped if the user already edited.
     var renameSelectAllBaseline: String?
+    /// Displayed title at fresh begin. Unedited Return/blur is a no-op even if
+    /// the CLI summary moved. Same-key begin must not clear this.
+    var renameCommitBaseline: String?
 
     /// Conversations for the sidebar: newest first, one-shot noise filtered out,
     /// optionally scoped to the folder the current tab is working in. Archived
@@ -485,6 +488,13 @@ final class AppModel {
         next != current
     }
 
+    /// Unedited Return/blur is a no-op even if the CLI summary changed after
+    /// beginRename. Nil baseline means this commit was not an in-session edit.
+    static func shouldNoOpRenameCommit(draft: String, baseline: String?) -> Bool {
+        guard let baseline else { return false }
+        return draft == baseline
+    }
+
     func resetName(_ session: GrokSession) {
         let live = freshSession(matching: session)
         if renamingSessionKey == sessionKey(live) {
@@ -518,6 +528,7 @@ final class AppModel {
             // treat this as a click-out (same as pulseRenameAlertOff).
             renameAlertDidCommit = true
             renameDraft = title(for: session)
+            renameCommitBaseline = renameDraft
             showRenameAlert = false
             renameAlertSession = nil
             renameAlertIsPulsing = false
@@ -544,7 +555,9 @@ final class AppModel {
     }
 
     func commitRename(_ session: GrokSession, to raw: String) {
-        rename(session, to: raw)
+        if !Self.shouldNoOpRenameCommit(draft: raw, baseline: renameCommitBaseline) {
+            rename(session, to: raw)
+        }
         if renamingSessionKey == sessionKey(session) {
             endRenameSession()
         }
@@ -564,12 +577,13 @@ final class AppModel {
         renameFieldMountedKey = nil
         renameFieldMountGeneration += 1
         clearRenameSelectAllPending()
+        renameCommitBaseline = nil
     }
 
     /// Snapshot the live draft before `endRenameSession` can wipe it. The
     /// alert's isPresented setter may cancel before this button action runs.
-    /// Compare against the store's current session so a CLI summary rewrite
-    /// while the alert is up cannot pin a stale title.
+    /// Unedited draft (equal to the begin-time baseline) is a no-op even if
+    /// the CLI summary moved; an edited draft still matches the live title.
     func commitCapturedRename(_ session: GrokSession) {
         let snapshot = renameDraft
         renameAlertDidCommit = true
@@ -663,8 +677,8 @@ final class AppModel {
     }
 
     /// Inline editor only. No-ops if this row is no longer the active rename
-    /// (Reset Name, cancel, or another row started). Compare against the live
-    /// store session so a CLI summary rewrite cannot pin a stale title.
+    /// (Reset Name, cancel, or another row started). Unedited draft matches
+    /// the begin-time baseline first; otherwise the live title.
     func commitInlineRename(_ session: GrokSession, to raw: String) {
         guard renamingSessionKey == sessionKey(session) else { return }
         commitRename(freshSession(matching: session), to: raw)
