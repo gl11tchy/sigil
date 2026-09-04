@@ -651,10 +651,12 @@ struct AppModelTests {
         defer { model.closeAllTabsAndWait() }
         let session = try #require(model.store.sessions.first)
         model.rename(session, to: "Auth rewrite")
+        let namedData = try #require(fixture.defaults.data(forKey: "sidebar.conversationNames"))
         model.resetName(session)
         #expect(model.title(for: session) == "CLI summary")
         #expect(!model.hasCustomName(session))
         #expect(fixture.settings.conversationNames.isEmpty)
+        #expect(fixture.defaults.data(forKey: "sidebar.conversationNames") != namedData)
     }
 
     @Test @MainActor
@@ -814,6 +816,47 @@ struct AppModelTests {
         #expect(AppModel.shouldPersistConversationNames(next: named, current: empty))
         #expect(AppModel.shouldPersistConversationNames(next: empty, current: named))
         #expect(!AppModel.shouldPersistConversationNames(next: named, current: named))
+    }
+
+    @Test @MainActor
+    func resetNameWithoutOverlayDoesNotPersistConversationNames() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        try fixture.writeListedSession(id: "s1", cwd: cwd.path, summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.open(session)
+        let tab = try #require(model.selectedTab)
+        let titleBefore = tab.sessionTitle
+        #expect(fixture.settings.conversationNames.isEmpty)
+        let namesBefore = fixture.defaults.data(forKey: "sidebar.conversationNames")
+        model.resetName(session)
+        #expect(fixture.settings.conversationNames.isEmpty)
+        #expect(fixture.defaults.data(forKey: "sidebar.conversationNames") == namesBefore)
+        #expect(tab.sessionTitle == titleBefore)
+        #expect(model.title(for: session) == "CLI summary")
+    }
+
+    @Test @MainActor
+    func deletingAConversationWithoutANameDoesNotPersistConversationNames() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model(trashConversation: { _ in })
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        #expect(fixture.settings.conversationNames.isEmpty)
+        let namesBefore = fixture.defaults.data(forKey: "sidebar.conversationNames")
+        #expect(model.deleteConversation(session))
+        #expect(fixture.settings.conversationNames.isEmpty)
+        #expect(fixture.defaults.data(forKey: "sidebar.conversationNames") == namesBefore)
     }
 
     @Test @MainActor
@@ -1148,6 +1191,72 @@ struct AppModelTests {
         #expect(
             !AppModel.shouldConsumeRenameSelectAll(
                 fieldEditorReady: false, selectAllPending: false))
+    }
+
+    @Test @MainActor
+    func renameSelectAllRequiresTheRenameFieldEditorAsFirstResponder() {
+        #expect(
+            AppModel.isRenameFieldEditorReady(
+                fieldEditorExists: true, fieldEditorIsFirstResponder: true,
+                isEditingRenameField: true))
+        #expect(
+            !AppModel.isRenameFieldEditorReady(
+                fieldEditorExists: true, fieldEditorIsFirstResponder: false,
+                isEditingRenameField: true))
+        #expect(
+            !AppModel.isRenameFieldEditorReady(
+                fieldEditorExists: true, fieldEditorIsFirstResponder: true,
+                isEditingRenameField: false))
+        #expect(
+            !AppModel.isRenameFieldEditorReady(
+                fieldEditorExists: false, fieldEditorIsFirstResponder: false,
+                isEditingRenameField: true))
+        #expect(
+            !AppModel.isRenameFieldEditorReady(
+                fieldEditorExists: false, fieldEditorIsFirstResponder: true,
+                isEditingRenameField: true))
+        #expect(
+            !AppModel.isRenameFieldEditorReady(
+                fieldEditorExists: true, fieldEditorIsFirstResponder: false,
+                isEditingRenameField: false))
+
+        #expect(
+            !AppModel.isEditingRenameAlertField(
+                hasKeyWindow: true, keyWindowIsMain: true, keyWindowIsSheet: false,
+                editorStringMatchesDraft: true))
+        #expect(
+            AppModel.isEditingRenameAlertField(
+                hasKeyWindow: true, keyWindowIsMain: false, keyWindowIsSheet: false,
+                editorStringMatchesDraft: true))
+        #expect(
+            AppModel.isEditingRenameAlertField(
+                hasKeyWindow: true, keyWindowIsMain: true, keyWindowIsSheet: true,
+                editorStringMatchesDraft: true))
+        #expect(
+            !AppModel.isEditingRenameAlertField(
+                hasKeyWindow: true, keyWindowIsMain: false, keyWindowIsSheet: false,
+                editorStringMatchesDraft: false))
+        #expect(
+            !AppModel.isEditingRenameAlertField(
+                hasKeyWindow: false, keyWindowIsMain: false, keyWindowIsSheet: false,
+                editorStringMatchesDraft: true))
+        #expect(
+            !AppModel.isEditingRenameAlertField(
+                hasKeyWindow: true, keyWindowIsMain: false, keyWindowIsSheet: true,
+                editorStringMatchesDraft: false))
+
+        #expect(
+            !AppModel.shouldConsumeRenameSelectAll(
+                fieldEditorReady: AppModel.isRenameFieldEditorReady(
+                    fieldEditorExists: true, fieldEditorIsFirstResponder: false,
+                    isEditingRenameField: true),
+                selectAllPending: true))
+        #expect(
+            AppModel.shouldConsumeRenameSelectAll(
+                fieldEditorReady: AppModel.isRenameFieldEditorReady(
+                    fieldEditorExists: true, fieldEditorIsFirstResponder: true,
+                    isEditingRenameField: true),
+                selectAllPending: true))
     }
 
     @Test @MainActor

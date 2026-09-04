@@ -658,6 +658,7 @@ struct SidebarView: View {
                             forceRepresent: forceRepresent
                         )
                     },
+                    isEditingRenameField: { isEditingRenameAlertField(draft: model.renameDraft) },
                     consume: { model.consumeRenameSelectAll() }
                 )
             } else if AppModel.shouldClearRenameSelectAllOnPrepare(
@@ -1160,6 +1161,7 @@ private struct SessionRow: View {
                     isRenaming: isRenaming
                 )
             },
+            isEditingRenameField: { focus == .rename },
             consume: consumeSelectAll
         )
         suppressBlurCommit = false
@@ -1194,25 +1196,44 @@ private func currentRenameFieldEditor() -> NSText? {
     NSApp.keyWindow?.fieldEditor(false, for: nil)
 }
 
-/// Select-all only when the field editor exists, so a nil editor cannot
-/// consume pending for a fresh begin that never selected. Retries until
-/// the editor is ready or `shouldProceed` fails (cancelled / key change).
+private func isEditingRenameAlertField(draft: String) -> Bool {
+    guard let key = NSApp.keyWindow else { return false }
+    return AppModel.isEditingRenameAlertField(
+        hasKeyWindow: true,
+        keyWindowIsMain: key.isMainWindow,
+        keyWindowIsSheet: key.isSheet,
+        editorStringMatchesDraft: currentRenameFieldEditor()?.string == draft
+    )
+}
+
+/// Select-all only when the rename field editor is first responder.
+/// A leftover search or dormant editor must not consume pending.
+/// Retries without consuming until ready or `shouldProceed` fails.
 @MainActor
 private func consumeRenameSelectAllWhenEditorReady(
     shouldProceed: @escaping () -> Bool,
+    isEditingRenameField: @escaping () -> Bool,
     consume: @escaping () -> Bool
 ) async {
     while shouldProceed() {
-        if let editor = currentRenameFieldEditor() {
-            if AppModel.shouldConsumeRenameSelectAll(
-                fieldEditorReady: true,
-                selectAllPending: consume()
-            ) {
-                editor.selectAll(nil)
-            }
-            return
+        let editor = currentRenameFieldEditor()
+        let isFirstResponder = editor.map { $0.window?.firstResponder === $0 } ?? false
+        let ready = AppModel.isRenameFieldEditorReady(
+            fieldEditorExists: editor != nil,
+            fieldEditorIsFirstResponder: isFirstResponder,
+            isEditingRenameField: isEditingRenameField()
+        )
+        guard ready else {
+            await Task.yield()
+            continue
         }
-        await Task.yield()
+        if AppModel.shouldConsumeRenameSelectAll(
+            fieldEditorReady: true,
+            selectAllPending: consume()
+        ) {
+            editor?.selectAll(nil)
+        }
+        return
     }
 }
 

@@ -463,8 +463,12 @@ final class AppModel {
         if renamingSessionKey == sessionKey(live) {
             endRenameSession()
         }
-        settings.conversationNames = ConversationNaming.removing(
+        let next = ConversationNaming.removing(
             live, from: settings.conversationNames, samePath: samePath)
+        guard Self.shouldPersistConversationNames(
+            next: next, current: settings.conversationNames)
+        else { return }
+        settings.conversationNames = next
         applyNameToOpenTabs(live)
     }
 
@@ -738,8 +742,31 @@ final class AppModel {
             )
     }
 
-    /// Consume pending only when the field editor exists so a nil editor
-    /// cannot clear select-all for a fresh begin that never selected.
+    /// Ready means the field editor is first responder and is editing the
+    /// rename field. A leftover search or dormant editor is not ready.
+    static func isRenameFieldEditorReady(
+        fieldEditorExists: Bool,
+        fieldEditorIsFirstResponder: Bool,
+        isEditingRenameField: Bool
+    ) -> Bool {
+        fieldEditorExists && fieldEditorIsFirstResponder && isEditingRenameField
+    }
+
+    /// Alert draft is the rename field when the alert window is key and the
+    /// editor string is the live draft. revealRenameAlert leaves the main
+    /// window key, so a leftover search editor must not count.
+    static func isEditingRenameAlertField(
+        hasKeyWindow: Bool,
+        keyWindowIsMain: Bool,
+        keyWindowIsSheet: Bool,
+        editorStringMatchesDraft: Bool
+    ) -> Bool {
+        guard hasKeyWindow, editorStringMatchesDraft else { return false }
+        return keyWindowIsSheet || !keyWindowIsMain
+    }
+
+    /// Consume pending only when the rename field editor is ready so a
+    /// leftover search or dormant editor cannot steal select-all.
     static func shouldConsumeRenameSelectAll(
         fieldEditorReady: Bool, selectAllPending: Bool
     ) -> Bool {
