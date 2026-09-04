@@ -191,11 +191,14 @@ enum SessionScanner: Sendable {
     ) -> Bool {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return true }
-        let needle = fold(trimmed)
-        if fold(displayedTitle ?? session.title).contains(needle) { return true }
-        if displayedTitle != nil, fold(session.title).contains(needle) { return true }
-        return fold(session.projectName).contains(needle)
-            || fold(session.cwd).contains(needle)
+        if SearchMatchHighlight.contains(displayedTitle ?? session.title, query: trimmed) {
+            return true
+        }
+        if displayedTitle != nil, SearchMatchHighlight.contains(session.title, query: trimmed) {
+            return true
+        }
+        return SearchMatchHighlight.contains(session.projectName, query: trimmed)
+            || SearchMatchHighlight.contains(session.cwd, query: trimmed)
     }
 
     static func grouped(_ sessions: [GrokSession]) -> [(cwd: String, sessions: [GrokSession])] {
@@ -210,10 +213,6 @@ enum SessionScanner: Sendable {
             }
         }
         return order.map { (cwd: $0, sessions: groups[$0] ?? []) }
-    }
-
-    private static func fold(_ string: String) -> String {
-        string.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
     }
 
     private static func isDir(_ url: URL) -> Bool {

@@ -351,6 +351,7 @@ struct SidebarView: View {
         SessionRow(
             session: session,
             title: model.title(for: session),
+            searchQuery: model.searchText,
             state: state(of: session),
             activity: model.activity(of: session),
             isPinned: model.isPinned(session),
@@ -947,6 +948,7 @@ private struct SessionRow: View {
 
     let session: GrokSession
     let title: String
+    let searchQuery: String
     let state: State
     let activity: TerminalTab.Activity?
     let isPinned: Bool
@@ -1038,11 +1040,15 @@ private struct SessionRow: View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 titleLine
-                Text(subtitle)
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundStyle(palette.textFaint)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                SearchHighlightedText(
+                    text: subtitle,
+                    ranges: subtitleMatchRanges,
+                    match: palette.accent,
+                    rest: palette.textFaint
+                )
+                .font(.system(size: 9.5, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.middle)
             }
             Spacer(minLength: 8)
             if let activity, activity == .working, !isRenaming {
@@ -1095,11 +1101,15 @@ private struct SessionRow: View {
                 onBlur: commitOnBlurIfNeeded
             )
         } else {
-            Text(title)
-                .font(.system(size: 12, weight: state == .active ? .medium : .regular))
-                .foregroundStyle(palette.text)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            SearchHighlightedText(
+                text: title,
+                ranges: SearchMatchHighlight.ranges(in: title, query: searchQuery),
+                match: palette.accent,
+                rest: palette.text
+            )
+            .font(.system(size: 12, weight: state == .active ? .medium : .regular))
+            .lineLimit(1)
+            .truncationMode(.tail)
         }
     }
 
@@ -1108,6 +1118,13 @@ private struct SessionRow: View {
             return "\(session.projectName) · \(session.updatedAt.shortRelative)"
         }
         return session.updatedAt.shortRelative
+    }
+
+    /// Project name (or path, if that is what the subtitle shows). Never the timestamp.
+    private var subtitleMatchRanges: [Range<String.Index>] {
+        guard showsProject else { return [] }
+        return SearchMatchHighlight.ranges(
+            in: session.projectName, query: searchQuery, asPrefixOf: subtitle)
     }
 
     @ViewBuilder
@@ -1346,6 +1363,50 @@ private func consumeRenameSelectAllWhenEditorReady(
             return
         }
         try? await Task.sleep(for: AppModel.renameSelectAllRetryInterval)
+    }
+}
+
+/// Accent on matched runs only. Empty query (or no hit in this string) is plain `Text`.
+private struct SearchHighlightedText: View {
+    let text: String
+    let ranges: [Range<String.Index>]
+    let match: Color
+    let rest: Color
+
+    var body: some View {
+        if ranges.isEmpty {
+            Text(text)
+                .foregroundStyle(rest)
+        } else {
+            Text(Self.attributed(text, ranges: ranges, match: match, rest: rest))
+        }
+    }
+
+    private static func attributed(
+        _ text: String,
+        ranges: [Range<String.Index>],
+        match: Color,
+        rest: Color
+    ) -> AttributedString {
+        var result = AttributedString()
+        var current = text.startIndex
+        for range in ranges {
+            if current < range.lowerBound {
+                result += colored(text[current..<range.lowerBound], rest)
+            }
+            result += colored(text[range], match)
+            current = range.upperBound
+        }
+        if current < text.endIndex {
+            result += colored(text[current...], rest)
+        }
+        return result
+    }
+
+    private static func colored(_ s: Substring, _ color: Color) -> AttributedString {
+        var piece = AttributedString(s)
+        piece.foregroundColor = color
+        return piece
     }
 }
 
