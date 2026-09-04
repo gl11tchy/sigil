@@ -181,13 +181,13 @@ public enum SearchMatchHighlight: Sendable {
         let pathHit = matchingPath(in: [projectName, displayPath, cwd], query: query)
         let prefix: String?
         if showsProject, let pathHit {
-            prefix = keepingMatchVisible(pathHit, query: query)
+            prefix = visiblePrefix(pathHit, query: query)
         } else if !contains(displayedTitle, query: query), contains(cliTitle, query: query) {
             prefix = excerptAroundMatch(cliTitle, query: query)
         } else if !showsProject, !headerCoversQuery, let pathHit {
-            prefix = keepingMatchVisible(pathHit, query: query)
+            prefix = visiblePrefix(pathHit, query: query)
         } else if showsProject {
-            prefix = projectName
+            prefix = excerptAroundMatch(projectName, query: query)
         } else {
             prefix = nil
         }
@@ -215,7 +215,7 @@ public enum SearchMatchHighlight: Sendable {
         query: String
     ) -> HeaderPaint {
         let raw = matchingPath(in: [name] + paths, query: query) ?? name
-        let prefix = keepingMatchVisible(raw, query: query)
+        let prefix = visiblePrefix(raw, query: query)
         let text = "\(prefix) (\(count))"
         let ranges = ranges(in: prefix, query: query, asPrefixOf: text)
         return HeaderPaint(text: text, runs: runs(in: text, matching: ranges))
@@ -304,6 +304,11 @@ public enum SearchMatchHighlight: Sendable {
         }
         if restStart == string.startIndex { return string }
         return "…" + String(string[restStart...])
+    }
+
+    /// Path collapse first, then a length-gated excerpt for long slash-free names.
+    private static func visiblePrefix(_ string: String, query: String) -> String {
+        excerptAroundMatch(keepingMatchVisible(string, query: query), query: query)
     }
 
     /// First candidate that contains `query`. Empty strings are skipped.

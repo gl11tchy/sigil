@@ -340,6 +340,38 @@ struct SearchMatchHighlightTests {
         #expect(matched(paint.titleRuns).isEmpty)
     }
 
+    @Test func longSlashFreeProjectNameExcerptsAroundTheMatch() {
+        let name = "authentication-handshake-session-folder"
+        #expect(name.count > SearchMatchHighlight.excerptMinimumCount)
+        #expect(!name.contains("/"))
+        let paint = SearchMatchHighlight.row(
+            displayedTitle: "Auth rewrite",
+            cliTitle: "CLI summary",
+            projectName: name,
+            cwd: "/tmp/\(name)",
+            displayPath: "~/\(name)",
+            relativeTime: "14m",
+            showsProject: true,
+            query: "handshake"
+        )
+        #expect(paint.subtitle.hasPrefix("…"))
+        #expect(paint.subtitle.contains("handshake"))
+        #expect(matched(paint.subtitleRuns) == ["handshake"])
+        #expect(paint.subtitleTruncation == .tail)
+
+        let header = SearchMatchHighlight.projectHeader(
+            name: name,
+            displayPath: "~/\(name)",
+            cwd: "/tmp/\(name)",
+            count: 2,
+            query: "handshake"
+        )
+        #expect(header.text.hasPrefix("…"))
+        #expect(header.text.contains("handshake"))
+        #expect(matched(header.runs) == ["handshake"])
+        #expect(header.visibleTruncation == .tail)
+    }
+
     @Test func projectNameHitPaintsTheShortNameNotTheTimestamp() {
         let paint = recentsRow(displayed: "Auth rewrite", cli: "CLI summary", query: "project")
         #expect(paint.subtitle == "project · 14m")
