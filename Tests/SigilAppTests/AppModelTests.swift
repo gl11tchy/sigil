@@ -1311,6 +1311,15 @@ struct AppModelTests {
                     fieldEditorExists: true, fieldEditorIsFirstResponder: true,
                     isEditingRenameField: true),
                 selectAllPending: true))
+        #expect(!AppModel.shouldSuppressBlurCommitDuringRenameSelectAllWait())
+        #expect(AppModel.renameSelectAllRetryInterval == .milliseconds(16))
+        #expect(AppModel.renameSelectAllRetryTimeout == .milliseconds(400))
+        #expect(AppModel.shouldContinueRenameSelectAllRetry(elapsed: .zero))
+        #expect(AppModel.shouldContinueRenameSelectAllRetry(elapsed: .milliseconds(16)))
+        #expect(AppModel.shouldContinueRenameSelectAllRetry(elapsed: .milliseconds(399)))
+        #expect(!AppModel.shouldContinueRenameSelectAllRetry(elapsed: .milliseconds(400)))
+        #expect(!AppModel.shouldContinueRenameSelectAllRetry(elapsed: .seconds(2)))
+        #expect(AppModel.renameSelectAllRetryInterval < AppModel.renameSelectAllRetryTimeout)
     }
 
     @Test @MainActor
@@ -1841,6 +1850,8 @@ struct AppModelTests {
         let session = try #require(model.store.sessions.first)
         model.beginRename(session)
         #expect(model.renameSelectAllPending)
+        #expect(AppModel.shouldArmRenameSelectAllOnBegin(isFreshKey: true))
+        #expect(!AppModel.shouldArmRenameSelectAllOnBegin(isFreshKey: false))
         #expect(
             AppModel.shouldSelectRenameDraft(
                 selectAllPending: true, isCancelled: false, isRenaming: true))
@@ -1948,6 +1959,31 @@ struct AppModelTests {
         model.beginRename(sessionB)
         #expect(model.renameDraft == "Typed on B")
         #expect(!model.renameSelectAllPending)
+        #expect(!AppModel.shouldArmRenameSelectAllOnBegin(isFreshKey: false))
+    }
+
+    @Test @MainActor
+    func sameKeyBeginRenameClearsSelectAllPendingWithoutRearming() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.beginRename(session)
+        #expect(model.renameSelectAllPending)
+        model.renameDraft = "Typed"
+        model.beginRename(session)
+        #expect(!model.renameSelectAllPending)
+        #expect(model.renameDraft == "Typed")
+        #expect(
+            !AppModel.shouldSelectRenameDraft(
+                selectAllPending: model.renameSelectAllPending,
+                isCancelled: false,
+                isRenaming: true))
     }
 
     @Test @MainActor

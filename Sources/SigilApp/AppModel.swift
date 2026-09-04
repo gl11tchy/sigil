@@ -478,14 +478,15 @@ final class AppModel {
     func beginRename(_ session: GrokSession) {
         isSidebarVisible = true
         let key = sessionKey(session)
-        if renamingSessionKey != key {
+        let isFreshKey = renamingSessionKey != key
+        if isFreshKey {
             renameDraft = title(for: session)
             showRenameAlert = false
             renameAlertSession = nil
             renameAlertDidCommit = false
             renameAlertIsPulsing = false
-            renameSelectAllPending = true
         }
+        renameSelectAllPending = Self.shouldArmRenameSelectAllOnBegin(isFreshKey: isFreshKey)
         renamingSessionKey = key
     }
 
@@ -771,6 +772,26 @@ final class AppModel {
         fieldEditorReady: Bool, selectAllPending: Bool
     ) -> Bool {
         fieldEditorReady && selectAllPending
+    }
+
+    /// Same-key F2/⌘⇧R must not re-arm select-all; a late select would wipe typing.
+    static func shouldArmRenameSelectAllOnBegin(isFreshKey: Bool) -> Bool {
+        isFreshKey
+    }
+
+    /// Focus steal may suppress blur-commit; the select-all wait must not.
+    static func shouldSuppressBlurCommitDuringRenameSelectAllWait() -> Bool {
+        false
+    }
+
+    /// One frame between retries. The first ready check is immediate.
+    static let renameSelectAllRetryInterval: Duration = .milliseconds(16)
+
+    /// Stop waiting so a never-ready editor cannot spin the MainActor.
+    static let renameSelectAllRetryTimeout: Duration = .milliseconds(400)
+
+    static func shouldContinueRenameSelectAllRetry(elapsed: Duration) -> Bool {
+        elapsed < renameSelectAllRetryTimeout
     }
 
     /// Return commits the fallback alert, matching the inline field's onSubmit.

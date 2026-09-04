@@ -1132,27 +1132,25 @@ private struct SessionRow: View {
     @MainActor
     private func focusRenameFieldIfNeeded() async {
         guard isRenaming else { return }
-        suppressBlurCommit = true
-        await Task.yield()
-        guard
-            AppModel.shouldStealRenameFocusAfterYield(
-                isCancelled: Task.isCancelled,
-                isRenaming: isRenaming
-            )
-        else {
-            suppressBlurCommit = false
-            return
-        }
-        focus = .rename
-        await Task.yield()
-        guard
-            AppModel.shouldStealRenameFocusAfterYield(
-                isCancelled: Task.isCancelled,
-                isRenaming: isRenaming
-            )
-        else {
-            suppressBlurCommit = false
-            return
+        // Suppress only the focus steal. Click-away must commit during the wait.
+        do {
+            suppressBlurCommit = true
+            defer { suppressBlurCommit = false }
+            await Task.yield()
+            guard
+                AppModel.shouldStealRenameFocusAfterYield(
+                    isCancelled: Task.isCancelled,
+                    isRenaming: isRenaming
+                )
+            else { return }
+            focus = .rename
+            await Task.yield()
+            guard
+                AppModel.shouldStealRenameFocusAfterYield(
+                    isCancelled: Task.isCancelled,
+                    isRenaming: isRenaming
+                )
+            else { return }
         }
         await consumeRenameSelectAllWhenEditorReady(
             shouldProceed: {
@@ -1164,7 +1162,6 @@ private struct SessionRow: View {
             isEditingRenameField: { focus == .rename },
             consume: consumeSelectAll
         )
-        suppressBlurCommit = false
     }
 
     private func commitCurrentDraft(restoreListFocus: Bool) {
@@ -1208,13 +1205,14 @@ private func isEditingRenameAlertField(draft: String) -> Bool {
 
 /// Select-all only when the rename field editor is first responder.
 /// A leftover search or dormant editor must not consume pending.
-/// Retries without consuming until ready or `shouldProceed` fails.
+/// First check is immediate; later retries sleep, then stop at the timeout.
 @MainActor
 private func consumeRenameSelectAllWhenEditorReady(
     shouldProceed: @escaping () -> Bool,
     isEditingRenameField: @escaping () -> Bool,
     consume: @escaping () -> Bool
 ) async {
+    let started = ContinuousClock.now
     while shouldProceed() {
         let editor = currentRenameFieldEditor()
         let isFirstResponder = editor.map { $0.window?.firstResponder === $0 } ?? false
@@ -1223,17 +1221,18 @@ private func consumeRenameSelectAllWhenEditorReady(
             fieldEditorIsFirstResponder: isFirstResponder,
             isEditingRenameField: isEditingRenameField()
         )
-        guard ready else {
-            await Task.yield()
-            continue
+        if ready {
+            if AppModel.shouldConsumeRenameSelectAll(
+                fieldEditorReady: true,
+                selectAllPending: consume()
+            ) {
+                editor?.selectAll(nil)
+            }
+            return
         }
-        if AppModel.shouldConsumeRenameSelectAll(
-            fieldEditorReady: true,
-            selectAllPending: consume()
-        ) {
-            editor?.selectAll(nil)
-        }
-        return
+        let elapsed = ContinuousClock.now - started
+        guard AppModel.shouldContinueRenameSelectAllRetry(elapsed: elapsed) else { return }
+        try? await Task.sleep(for: AppModel.renameSelectAllRetryInterval)
     }
 }
 
