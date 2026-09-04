@@ -836,7 +836,7 @@ private struct ProjectSectionHeader: View {
         )
         .font(.system(size: 10, weight: .medium, design: .monospaced))
         .lineLimit(1)
-        .truncationMode(.tail)
+        .truncationMode(truncationMode(paint.visibleTruncation))
         .padding(.horizontal, 14)
         .padding(.top, isFirst ? 10 : 18)
         .padding(.bottom, 4)
@@ -1084,7 +1084,7 @@ private struct SessionRow: View {
                 )
                 .font(.system(size: 9.5, design: .monospaced))
                 .lineLimit(1)
-                .truncationMode(.tail)
+                .truncationMode(truncationMode(paint.subtitleTruncation))
             }
             Spacer(minLength: 8)
             if let activity, activity == .working, !isRenaming {
@@ -1405,6 +1405,13 @@ private func consumeRenameSelectAllWhenEditorReady(
             return
         }
         try? await Task.sleep(for: AppModel.renameSelectAllRetryInterval)
+    }
+}
+
+private func truncationMode(_ truncation: SearchMatchHighlight.Truncation) -> Text.TruncationMode {
+    switch truncation {
+    case .tail: return .tail
+    case .middle: return .middle
     }
 }
 

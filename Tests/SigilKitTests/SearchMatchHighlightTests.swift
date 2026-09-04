@@ -437,6 +437,53 @@ struct SearchMatchHighlightTests {
         #expect(!SearchMatchHighlight.keepingMatchVisible(summary, query: "handshake").hasPrefix("…"))
     }
 
+    @Test func truncationIsTailOnlyAfterACollapsedPathPrefix() {
+        #expect(SearchMatchHighlight.truncation(forVisible: "…/DerivedData/foo") == .tail)
+        #expect(SearchMatchHighlight.truncation(forVisible: "Rewrite the handshake · 14m") == .middle)
+        #expect(SearchMatchHighlight.truncation(forVisible: "project · 14m") == .middle)
+        #expect(SearchMatchHighlight.truncation(forVisible: "Authentication (2)") == .middle)
+
+        let collapsed = SearchMatchHighlight.row(
+            displayedTitle: "Auth rewrite",
+            cliTitle: "CLI summary",
+            projectName: "checkouts",
+            cwd: "/Users/me/Library/Developer/Xcode/DerivedData/sigil-abc/SourcePackages/checkouts",
+            displayPath: "~/Library/Developer/Xcode/DerivedData/sigil-abc/SourcePackages/checkouts",
+            relativeTime: "14m",
+            showsProject: true,
+            query: "DerivedData"
+        )
+        #expect(collapsed.subtitle.hasPrefix("…"))
+        #expect(collapsed.subtitleTruncation == .tail)
+
+        let cli = recentsRow(
+            displayed: "Auth rewrite",
+            cli: "Rewrite the authentication handshake",
+            query: "handshake"
+        )
+        #expect(!cli.subtitle.hasPrefix("…"))
+        #expect(cli.subtitleTruncation == .middle)
+
+        let header = SearchMatchHighlight.projectHeader(
+            name: "Authentication",
+            paths: ["~/repos/Authentication"],
+            count: 2,
+            query: "tication"
+        )
+        #expect(header.visibleTruncation == .middle)
+
+        let pathHeader = SearchMatchHighlight.projectHeader(
+            name: "checkouts",
+            paths: [
+                "/Users/me/Library/Developer/Xcode/DerivedData/sigil-abc/SourcePackages/checkouts"
+            ],
+            count: 3,
+            query: "DerivedData"
+        )
+        #expect(pathHeader.text.hasPrefix("…"))
+        #expect(pathHeader.visibleTruncation == .tail)
+    }
+
     @Test func cliOnlySubtitleKeepsTheFullSlashFreeSummary() {
         let summary = "Rewrite the authentication handshake"
         let paint = recentsRow(displayed: "Auth rewrite", cli: summary, query: "handshake")

@@ -23,6 +23,18 @@ public enum SearchMatchHighlight: Sendable {
         }
     }
 
+    /// Line truncation for a painted title, subtitle, or header.
+    /// `.tail` only when `keepingMatchVisible` collapsed a path (leading `…`).
+    public enum Truncation: Equatable, Sendable {
+        case tail
+        case middle
+    }
+
+    /// `.tail` when the visible string starts with the collapse ellipsis, else `.middle`.
+    public static func truncation(forVisible text: String) -> Truncation {
+        text.hasPrefix("…") ? .tail : .middle
+    }
+
     /// Same fold `SessionScanner.matches` uses: case and diacritic insensitive, no locale.
     public static func fold(_ string: String) -> String {
         string.folding(options: foldOptions, locale: nil)
@@ -123,6 +135,10 @@ public enum SearchMatchHighlight: Sendable {
         public var paints: Bool {
             titleRuns.contains(where: \.isMatch) || subtitleRuns.contains(where: \.isMatch)
         }
+
+        public var subtitleTruncation: Truncation {
+            SearchMatchHighlight.truncation(forVisible: subtitle)
+        }
     }
 
     /// What a Projects section header should paint.
@@ -131,6 +147,8 @@ public enum SearchMatchHighlight: Sendable {
         public var runs: [Run]
 
         public var paints: Bool { runs.contains(where: \.isMatch) }
+
+        public var visibleTruncation: Truncation { SearchMatchHighlight.truncation(forVisible: text) }
     }
 
     /// Visible title/subtitle paint for one sidebar row.
