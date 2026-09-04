@@ -1120,6 +1120,30 @@ struct AppModelTests {
                 forceReconfigure: false,
                 forceRepresent: true
             ))
+        #expect(AppModel.shouldInvalidatePreparedRenameOnBegin())
+        #expect(
+            AppModel.shouldRepresentRenamePromptOnSameKeyBegin(
+                isFreshKey: false, showRenameAlert: false, preparedSurface: .prompt))
+        #expect(
+            !AppModel.shouldRepresentRenamePromptOnSameKeyBegin(
+                isFreshKey: false, showRenameAlert: true, preparedSurface: .prompt))
+        #expect(
+            !AppModel.shouldRepresentRenamePromptOnSameKeyBegin(
+                isFreshKey: false, showRenameAlert: false, preparedSurface: .inline))
+        #expect(
+            !AppModel.shouldRepresentRenamePromptOnSameKeyBegin(
+                isFreshKey: false, showRenameAlert: false, preparedSurface: .none))
+        #expect(
+            !AppModel.shouldRepresentRenamePromptOnSameKeyBegin(
+                isFreshKey: true, showRenameAlert: false, preparedSurface: .prompt))
+        #expect(
+            AppModel.shouldReconfigureRename(
+                previousKey: nil,
+                previousSurface: .none,
+                nextKey: "s1",
+                nextSurface: .prompt,
+                forceReconfigure: true
+            ))
     }
 
     @Test @MainActor
@@ -1779,6 +1803,80 @@ struct AppModelTests {
         #expect(model.renamingSessionKey == model.sessionKey(session))
         #expect(model.renameDraft == "Typed")
         #expect(!model.renameAlertDidCommit)
+    }
+
+    @Test @MainActor
+    func sameKeyBeginRenameAfterAlertDismissRepresentsPromptAndKeepsDraft() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.beginRename(session)
+        let key = model.sessionKey(session)
+        model.preparedRenameKey = key
+        model.preparedRenameSurface = .prompt
+        model.revealRenameAlert(session)
+        model.renameDraft = "Typed"
+        model.showRenameAlert = false
+        let generation = model.renameAlertDismissGeneration
+        let token = model.renamePrepareToken
+        let pending = Task {
+            await model.deferCancelRenameAlert(expectedGeneration: generation)
+        }
+        model.beginRename(session)
+        await Task.yield()
+        await pending.value
+        #expect(model.renamingSessionKey == key)
+        #expect(model.renameDraft == "Typed")
+        #expect(model.showRenameAlert)
+        #expect(model.renameAlertSession?.id == session.id)
+        #expect(model.preparedRenameKey == nil)
+        #expect(model.preparedRenameSurface == .none)
+        #expect(model.renamePrepareToken == token + 1)
+        #expect(model.renamePrepareTaskID.token == token + 1)
+        #expect(model.renamePrepareTaskID.key == key)
+        #expect(!model.renameSelectAllPending)
+        #expect(!AppModel.shouldArmRenameSelectAllOnBegin(isFreshKey: false))
+        #expect(
+            AppModel.shouldReconfigureRename(
+                previousKey: model.preparedRenameKey,
+                previousSurface: model.preparedRenameSurface,
+                nextKey: key,
+                nextSurface: .prompt,
+                forceReconfigure: model.renamingSessionKey != model.preparedRenameKey
+            ))
+    }
+
+    @Test @MainActor
+    func sameKeyBeginRenameInvalidatesInlinePrepareWithoutReseedingDraft() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(
+            id: "s1", cwd: "/Users/someone/Documents/project", summary: "CLI summary")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(model.store.sessions.first)
+        model.beginRename(session)
+        let key = model.sessionKey(session)
+        model.preparedRenameKey = key
+        model.preparedRenameSurface = .inline
+        model.renameDraft = "Typed"
+        let token = model.renamePrepareToken
+        model.beginRename(session)
+        #expect(model.renamingSessionKey == key)
+        #expect(model.renameDraft == "Typed")
+        #expect(!model.showRenameAlert)
+        #expect(model.preparedRenameKey == nil)
+        #expect(model.preparedRenameSurface == .none)
+        #expect(model.renamePrepareToken == token + 1)
+        #expect(!model.renameSelectAllPending)
     }
 
     @Test @MainActor

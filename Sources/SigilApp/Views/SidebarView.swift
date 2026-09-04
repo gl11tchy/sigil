@@ -62,7 +62,7 @@ struct SidebarView: View {
             await Task.yield()
             focus = .search
         }
-        .task(id: model.renamingSessionKey) {
+        .task(id: model.renamePrepareTaskID) {
             await prepareRename(
                 forceReconfigure: model.renamingSessionKey != model.preparedRenameKey)
         }

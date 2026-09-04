@@ -152,6 +152,13 @@ final class AppModel {
         case abort
     }
 
+    /// `.task` identity for prepareRename. Token bumps on beginRename so a
+    /// same-key F2/⌘⇧R re-runs prepare even when the session key is unchanged.
+    struct RenamePrepareTaskID: Hashable {
+        var key: String?
+        var token: Int
+    }
+
     /// Restrict the sidebar to conversations started in the current tab's folder.
     var scopeToCurrentFolder = false
     /// Recents and Projects hide archived chats; this shows only those.
@@ -171,6 +178,11 @@ final class AppModel {
     var renameAlertDismissGeneration = 0
     var preparedRenameKey: String?
     var preparedRenameSurface: RenameSurface = .none
+    /// Bumped on beginRename so prepareRename re-runs for a same-key F2/⌘⇧R.
+    private(set) var renamePrepareToken = 0
+    var renamePrepareTaskID: RenamePrepareTaskID {
+        RenamePrepareTaskID(key: renamingSessionKey, token: renamePrepareToken)
+    }
     /// Session key of the inline field currently in the tree. Nil if unmounted.
     var renameFieldMountedKey: String?
     /// Bumped on every mount/unmount so a stale blur task cannot commit after remount.
@@ -496,6 +508,11 @@ final class AppModel {
         let key = sessionKey(session)
         let isFreshKey = renamingSessionKey != key
         renameAlertDismissGeneration += 1
+        let representPrompt = Self.shouldRepresentRenamePromptOnSameKeyBegin(
+            isFreshKey: isFreshKey,
+            showRenameAlert: showRenameAlert,
+            preparedSurface: preparedRenameSurface
+        )
         if isFreshKey {
             // Keep didCommit true across teardown so the alert Binding cannot
             // treat this as a click-out (same as pulseRenameAlertOff).
@@ -511,7 +528,15 @@ final class AppModel {
         } else {
             clearRenameSelectAllPending()
         }
+        if Self.shouldInvalidatePreparedRenameOnBegin() {
+            preparedRenameKey = nil
+            preparedRenameSurface = .none
+            renamePrepareToken += 1
+        }
         renamingSessionKey = key
+        if representPrompt {
+            revealRenameAlert(session)
+        }
     }
 
     func cancelRename() {
@@ -831,6 +856,22 @@ final class AppModel {
     /// Same-key F2/⌘⇧R must not re-arm select-all; a late select would wipe typing.
     static func shouldArmRenameSelectAllOnBegin(isFreshKey: Bool) -> Bool {
         isFreshKey
+    }
+
+    /// Clear prepared surface on every begin so a same-key F2 after dismiss
+    /// is not treated as an already-configured prompt/inline handoff.
+    static func shouldInvalidatePreparedRenameOnBegin() -> Bool {
+        true
+    }
+
+    /// Click-out leaves the prompt prepared but hidden. Same-key begin must
+    /// show it again without reseeding the draft.
+    static func shouldRepresentRenamePromptOnSameKeyBegin(
+        isFreshKey: Bool,
+        showRenameAlert: Bool,
+        preparedSurface: RenameSurface
+    ) -> Bool {
+        !isFreshKey && !showRenameAlert && preparedSurface == .prompt
     }
 
     /// Focus steal may suppress blur-commit; the select-all wait must not.
