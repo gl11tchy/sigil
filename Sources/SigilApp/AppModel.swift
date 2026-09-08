@@ -18,6 +18,7 @@ final class AppModel {
     let store: SessionStore
     /// The right-hand utility column: scratch shell, dev-server browser, notes.
     let panel = RightPanel()
+    let remoteControl = RemoteControl()
 
     private(set) var tabs: [TerminalTab] = []
     var selectedTabID: TerminalTab.ID? {
@@ -1260,6 +1261,7 @@ final class AppModel {
     /// left to finish an asynchronous kill. Does not persist — the last user
     /// mutation already wrote the tabs that should come back next launch.
     func closeAllTabsAndWait() {
+        remoteControl.stop()
         stopTabMessaging()
         panel.closeShellAndWait()
         for tab in tabs { tab.terminateAndWait() }

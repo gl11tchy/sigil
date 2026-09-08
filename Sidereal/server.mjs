@@ -1,0 +1,137 @@
+import http from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
+import { WebSocketServer, WebSocket } from 'ws';
+
+const token = () => randomBytes(32).toString('hex');
+const equal = (a, b) => typeof a === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+const assets = new Map([
+  ['/', ['index.html', 'text/html']], ['/app.mjs', ['app.mjs', 'text/javascript']],
+  ['/crypto.mjs', ['crypto.mjs', 'text/javascript']], ['/style.css', ['style.css', 'text/css']],
+  ['/sw.js', ['sw.js', 'text/javascript']], ['/manifest.webmanifest', ['manifest.webmanifest', 'application/manifest+json']],
+  ['/icon.svg', ['icon.svg', 'image/svg+xml']],
+  ...[180, 192, 512].map(size => [`/icon-${size}.png`, [`icon-${size}.png`, 'image/png']]),
+]);
+
+export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {}) {
+  const origin = new URL(publicOrigin);
+  if (origin.origin !== publicOrigin || !(origin.protocol === 'https:' ||
+      (origin.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(origin.hostname)))) {
+    throw new Error('PUBLIC_ORIGIN must be an HTTPS origin (HTTP is allowed only on loopback).');
+  }
+  const rooms = new Map();
+  let creationWindow = now(), creations = 0;
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 110000, perMessageDeflate: false });
+  const server = http.createServer(async (req, res) => {
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Cache-Control', 'no-store');
+    if (origin.protocol === 'https:') res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+    if (req.url === '/health' && req.method === 'GET') { res.end('ok'); return; }
+    if (req.url === '/rooms' && req.method === 'POST') {
+      // Browsers cannot allocate hosts. Native clients do not send Origin.
+      if (req.headers.origin || Number(req.headers['content-length'] || 0) > 0 || req.headers['transfer-encoding']) {
+        res.writeHead(403).end(); return;
+      }
+      if (now() - creationWindow >= 60000) { creationWindow = now(); creations = 0; }
+      if (rooms.size >= maxRooms || ++creations > 20) { res.writeHead(429).end(); return; }
+      const room = randomBytes(16).toString('hex'), hostToken = token();
+      rooms.set(room, { hostToken, created: now(), disconnectedAt: now(), host: null, phone: null });
+      res.writeHead(201, { 'Content-Type': 'application/json' }).end(JSON.stringify({ room, hostToken }));
+      return;
+    }
+    const asset = req.method === 'GET' && assets.get(req.url);
+    if (!asset) { res.writeHead(404).end(); return; }
+    try {
+      const data = await readFile(new URL(`public/${asset[0]}`, import.meta.url));
+      res.writeHead(200, { 'Content-Type': `${asset[1]}; charset=utf-8` }).end(data);
+    } catch { res.writeHead(500).end(); }
+  });
+  server.requestTimeout = 10000;
+  server.headersTimeout = 10000;
+  server.maxConnections = 300;
+  const send = (socket, value) => {
+    if (socket?.readyState !== WebSocket.OPEN) return;
+    if (socket.bufferedAmount > 220000) { socket.terminate(); return; }
+    socket.send(JSON.stringify(value));
+  };
+  const deleteRoom = id => {
+    const room = rooms.get(id);
+    if (!room) return;
+    rooms.delete(id);
+    room.phone?.terminate(); room.host?.terminate();
+  };
+  server.on('upgrade', (req, socket, head) => {
+    const reject = () => { socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); };
+    let url;
+    try { url = new URL(req.url, publicOrigin); } catch { reject(); return; }
+    const id = url.searchParams.get('room'), role = url.searchParams.get('role');
+    const room = rooms.get(id);
+    if (url.pathname !== '/connect' || !room) { reject(); return; }
+    if (role === 'host') {
+      if (req.headers.origin || room.host || !equal(req.headers.authorization, `Bearer ${room.hostToken}`)) { reject(); return; }
+    } else if (role === 'phone') {
+      if (req.headers.origin !== publicOrigin || !room.host || room.phone) { reject(); return; }
+    } else { reject(); return; }
+    wss.handleUpgrade(req, socket, head, ws => {
+      ws.on('error', () => {});
+      ws.alive = true;
+      ws.on('pong', () => { ws.alive = true; });
+      let windowStart = now(), count = 0;
+      const peer = randomBytes(16).toString('hex');
+      if (role === 'host') { room.host = ws; send(ws, { type: 'ready' }); }
+      else { room.phone = ws; room.peer = peer; send(room.host, { type: 'peer', peer }); }
+      ws.on('message', (bytes, binary) => {
+        if (now() - windowStart >= 1000) { count = 0; windowStart = now(); }
+        if (binary || ++count > 30) { ws.close(1008); return; }
+        let value;
+        try { value = JSON.parse(bytes.toString()); } catch { ws.close(1008); return; }
+        if (!value || typeof value !== 'object' || Array.isArray(value)) { ws.close(1008); return; }
+        const frame = {};
+        if (typeof value.data === 'string' && value.data.length <= 100000) frame.data = value.data;
+        else if (role === 'host' && typeof value.hello === 'string' && value.hello.length <= 64) frame.hello = value.hello;
+        else if (role === 'host' && value.error === 'unauthorized') frame.error = value.error;
+        else { ws.close(1008); return; }
+        if (role === 'host') {
+          if (value.peer === room.peer) {
+            send(room.phone, frame);
+            if (frame.error) room.phone?.close(1008);
+          }
+        } else if (room.phone === ws) send(room.host, { peer, ...frame });
+      });
+      ws.on('close', () => {
+        if (role === 'host' && room.host === ws) {
+          room.host = null; room.disconnectedAt = now();
+          room.phone?.terminate(); room.phone = null;
+        } else if (room.phone === ws) {
+          room.phone = null;
+          send(room.host, { type: 'left', peer });
+        }
+      });
+    });
+  });
+  const timer = setInterval(() => {
+    for (const [id, room] of rooms) {
+      if ((!room.host && now() - room.disconnectedAt > 300000) || now() - room.created > 86400000) deleteRoom(id);
+    }
+    for (const ws of wss.clients) {
+      if (!ws.alive) ws.terminate();
+      else { ws.alive = false; ws.ping(); }
+    }
+  }, 15000);
+  timer.unref();
+  return { server, close() {
+    clearInterval(timer);
+    for (const id of rooms.keys()) deleteRoom(id);
+    wss.close(); server.close(); server.closeAllConnections();
+  } };
+}
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const relay = createRelay({ publicOrigin: process.env.PUBLIC_ORIGIN });
+  relay.server.listen(Number(process.env.PORT || 3000), '0.0.0.0');
+  process.on('SIGTERM', () => relay.close());
+  process.on('SIGINT', () => relay.close());
+}

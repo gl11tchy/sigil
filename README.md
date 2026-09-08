@@ -54,6 +54,16 @@ By gl11tchy.
   tools: `list_tabs`, `send_to_tab`, `ask_tab` and `reply_to`. A tab can hand work to
   another tab, or ask it a question and wait for the answer. See below.
 
+## Phone remote control
+
+Open **Settings → Remote** to connect a phone using a QR code. The included
+**Sidereal** PWA controls open sessions from any internet connection. Deploy its
+small encrypted relay over HTTPS, then enter that address in Sigil. The Mac makes
+outbound connections only; no router ports need opening.
+
+See [Sidereal setup](Sidereal/README.md) for hosting, pairing, controls, and limits.
+Remote access is off by default. Disconnecting or quitting Sigil revokes it.
+
 ## Tab messaging
 
 Grok Build has no channel between sessions. Sigil supplies one: it owns every tab, so it
@@ -210,7 +220,9 @@ The patch is `Scripts/grok-cli/sigil-neon.patch`.
 Scripts/verify.sh
 ```
 
-Runs the build, tests, shell checks, optional Swift format lint, debug app bundling, and
+Requires Node 22 or later for the Sidereal tests.
+
+Runs the build, native and Sidereal tests, dependency audit, shell checks, optional Swift format lint, debug app bundling, and
 a launch smoke check. The smoke launch uses temporary home, preferences, cache, and Grok
 folders. It does not restore tabs, register the bridge, or start a real session.
 

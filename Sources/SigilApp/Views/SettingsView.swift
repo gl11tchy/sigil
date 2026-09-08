@@ -17,6 +17,7 @@ struct SettingsView: View {
         TabView {
             appearance.tabItem { Label("Appearance", systemImage: "paintbrush") }
             general.tabItem { Label("General", systemImage: "gearshape") }
+            RemoteControlView(model: model).tabItem { Label("Remote", systemImage: "iphone") }
         }
         .tint(Palette(theme: model.settings.theme).accent)
         .environment(\.palette, Palette(theme: model.settings.theme))
