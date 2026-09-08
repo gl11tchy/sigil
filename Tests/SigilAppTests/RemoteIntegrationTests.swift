@@ -1,0 +1,138 @@
+import Foundation
+import SigilKit
+import Testing
+
+@testable import SigilApp
+
+@Suite(.serialized)
+struct RemoteIntegrationTests {
+    @Test @MainActor func pairsOverRelayAndRevokesOnStop() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let portFile = root.appendingPathComponent("port")
+        let server = Process()
+        server.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        server.arguments = ["node", repo.appendingPathComponent("Sidereal/test/relay-fixture.mjs").path]
+        server.environment = ProcessInfo.processInfo.environment.merging(["SIGIL_TEST_PORT_FILE": portFile.path]) {
+            _, new in new
+        }
+        server.standardOutput = FileHandle.nullDevice
+        server.standardError = FileHandle.nullDevice
+        try server.run()
+        defer {
+            if server.isRunning {
+                server.terminate()
+                server.waitUntilExit()
+            }
+        }
+        for _ in 0..<200 {
+            if FileManager.default.fileExists(atPath: portFile.path) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let port = try String(contentsOf: portFile, encoding: .utf8)
+        let defaultsName = "sigil-remote-integration-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: defaultsName))
+        defer { defaults.removePersistentDomain(forName: defaultsName) }
+        let executable = root.appendingPathComponent("fake-grok")
+        try Data(
+            "#!/bin/sh\nstty -echo\nprintf 'RELAY_READY\\n'\nwhile IFS= read -r line; do printf 'RELAY:%s\\n' \"$line\"; done\n"
+                .utf8
+        ).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let settings = AppSettings(defaults: defaults)
+        settings.executablePath = executable.path
+        let model = AppModel(settings: settings, presentError: { _ in })
+        defer { model.closeAllTabsAndWait() }
+        let tab = try #require(model.newTab(in: root))
+        for _ in 0..<100 {
+            if tab.controller.remoteSnapshot().contains("RELAY_READY") { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(tab.controller.remoteSnapshot().contains("RELAY_READY"))
+        model.remoteControl.start(urlText: "http://127.0.0.1:\(port)", model: model)
+        for _ in 0..<200 {
+            if model.remoteControl.pairingURL != nil || model.remoteControl.error != nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(model.remoteControl.error == nil)
+        let link = try #require(model.remoteControl.pairingURL)
+        let fragment = try #require(URLComponents(url: link, resolvingAgainstBaseURL: false)?.fragment)
+        var parts = URLComponents()
+        parts.query = fragment
+        let room = try #require(parts.queryItems?.first { $0.name == "room" }?.value)
+        let bootstrap = try #require(parts.queryItems?.first { $0.name == "key" }?.value)
+        let network = URLSession(configuration: .ephemeral)
+        defer { network.invalidateAndCancel() }
+        var request = URLRequest(url: URL(string: "ws://127.0.0.1:\(port)/connect?room=\(room)&role=phone")!)
+        request.setValue("http://localhost:3099", forHTTPHeaderField: "Origin")
+        let phone = network.webSocketTask(with: request)
+        phone.resume()
+        defer { phone.cancel(with: .goingAway, reason: nil) }
+        // Bounds receive even if the host never answers.
+        let timeout = Task {
+            try? await Task.sleep(for: .seconds(10))
+            if !Task.isCancelled { phone.cancel(with: .goingAway, reason: nil) }
+        }
+        defer { timeout.cancel() }
+        let hello = try await receive(phone)
+        let challenge = try #require(hello["hello"])
+        let device = RemoteCrypto.randomKey()
+        let pair = RemoteRequest(challenge: challenge, sequence: 1, action: "pair", text: device)
+        let ciphertext = try RemoteCrypto.seal(pair, key: bootstrap, direction: "phone")
+        try await send(["data": ciphertext], phone)
+        let pairFrame = try await receive(phone)
+        let pairReply: RemoteReply = try RemoteCrypto.open(
+            try #require(pairFrame["data"]), key: device, direction: "mac")
+        #expect(pairReply.ok)
+        #expect(pairReply.state?.tabs.first?.id == tab.id.uuidString)
+        #expect(model.remoteControl.isPaired)
+        #expect(model.remoteControl.pairingURL == nil)
+        for command in [
+            RemoteRequest(
+                challenge: challenge, sequence: 2, action: "input", tabID: tab.id.uuidString,
+                text: "encrypted-phone-input"),
+            RemoteRequest(challenge: challenge, sequence: 3, action: "key", tabID: tab.id.uuidString, text: "enter"),
+        ] {
+            try await send(["data": RemoteCrypto.seal(command, key: device, direction: "phone")], phone)
+            let frame = try await receive(phone)
+            let reply: RemoteReply = try RemoteCrypto.open(try #require(frame["data"]), key: device, direction: "mac")
+            #expect(reply.ok)
+        }
+        var output = ""
+        for sequence in 4..<104 {
+            let state = RemoteRequest(challenge: challenge, sequence: sequence, action: "state")
+            try await send(["data": RemoteCrypto.seal(state, key: device, direction: "phone")], phone)
+            let frame = try await receive(phone)
+            let reply: RemoteReply = try RemoteCrypto.open(try #require(frame["data"]), key: device, direction: "mac")
+            output = reply.state?.terminal ?? ""
+            if output.contains("RELAY:encrypted-phone-input") { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        #expect(output.contains("RELAY:encrypted-phone-input"))
+        model.remoteControl.stop()
+        do {
+            _ = try await phone.receive()
+            Issue.record("Phone remained connected after revocation")
+        } catch {}
+        #expect(!model.remoteControl.isEnabled)
+    }
+
+    private func send(_ frame: [String: String], _ socket: URLSessionWebSocketTask) async throws {
+        let bytes = try JSONEncoder().encode(frame)
+        try await socket.send(.string(String(decoding: bytes, as: UTF8.self)))
+    }
+
+    private func receive(_ socket: URLSessionWebSocketTask) async throws -> [String: String] {
+        let message = try await socket.receive()
+        let bytes: Data
+        switch message {
+        case .string(let text): bytes = Data(text.utf8)
+        case .data(let data): bytes = data
+        @unknown default: throw RemoteError.invalidMessage
+        }
+        return try JSONDecoder().decode([String: String].self, from: bytes)
+    }
+}
