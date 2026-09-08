@@ -7,3 +7,5 @@ dist/
 .swiftpm-cache/
 
 Sidereal/node_modules/
+Sidereal/test-results/
+Sidereal/playwright-report/

@@ -38,6 +38,11 @@ use your computer's `localhost`; real phone access requires the HTTPS deployment
 
 Pair one phone at a time. The phone can select sessions, read recent terminal
 output, send text, use arrow/Enter/Tab/Escape keys, and interrupt the current turn.
+The phone layout keeps the message box below a full-height, scrollable terminal.
+Keys opens the terminal key controls. Latest returns to the newest output.
+Drafts stay with each session until the page closes; a lost connection keeps them editable.
+Connection settings are under the status in the top-right corner.
+
 New starts a session in Sigil's current folder. Paste fills the prompt without
 submitting it. Send pastes, then presses Enter.
 
@@ -77,7 +82,13 @@ within that grace interval preserves pairing. Rooms expire after 24 hours.
 ```sh
 npm test
 npm audit --omit=dev
+npx playwright install chromium webkit
+npm run test:browser
 ```
 
 The native `Scripts/verify.sh` installs these dependencies and runs these checks,
 then runs native tests including real URLSession → relay → phone protocol tests.
+
+Browser tests use synthetic Mac sessions through the real encrypted relay. They
+cover narrow phones, tablets, desktop, drafting, scrolling, and a simulated visual
+viewport resize. Real iOS keyboard behavior still requires a physical device check.

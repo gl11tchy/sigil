@@ -1,5 +1,7 @@
 import { importKey, randomKey, seal, open } from './crypto.mjs';
 const $ = id => document.getElementById(id);
+const drafts = new Map();
+let tabsSignature = '';
 let credential, bootstrap, newDeviceKey, socket, challenge, sequence = 0, selected;
 let connected = false, busy = false, stopped = false, reconnectTimer, pollTimer, generation = 0;
 let incoming = Promise.resolve(), outgoing = Promise.resolve(), pending = new Map();
@@ -26,8 +28,12 @@ async function storage(mode, value) {
 function updateControls() {
   const disabled = !connected || busy;
   document.querySelectorAll('#controls button, #controls select, #controls textarea').forEach(element => {
+    // Never disable a focused editor while a command is pending: it closes the phone keyboard.
+    if (element.id === 'message') { element.disabled = !selected; return; }
+    if (element.id === 'keys-toggle' || element.id === 'latest') { element.disabled = false; return; }
     element.disabled = disabled || (!selected && element.id !== 'new');
   });
+  $('send').disabled = disabled || !selected || !$('message').value.trim();
   $('forget').hidden = !credential;
   $('reconnect').hidden = !credential || connected;
 }
@@ -42,7 +48,13 @@ function offline(message = 'Disconnected') {
 }
 function render(state) {
   if (!state || !Array.isArray(state.tabs) || state.tabs.length > 100 || typeof state.terminal !== 'string') throw new Error('Invalid Mac response');
+  const changedSession = selected !== state.selectedTabID;
+  if (changedSession) {
+    if (selected) drafts.set(selected, $('message').value);
+    $('message').value = drafts.get(state.selectedTabID) || '';
+  }
   selected = state.selectedTabID;
+  for (const id of drafts.keys()) { if (!state.tabs.some(tab => tab.id === id)) drafts.delete(id); }
   const tabs = state.tabs.map(tab => {
     if (typeof tab.id !== 'string' || typeof tab.title !== 'string' || typeof tab.status !== 'string') throw new Error('Invalid tab');
     const option = document.createElement('option');
@@ -51,16 +63,19 @@ function render(state) {
     return option;
   });
   if (!tabs.length) { const empty = document.createElement('option'); empty.textContent = 'No open sessions'; tabs.push(empty); }
-  $('tabs').replaceChildren(...tabs);
+  const signature = JSON.stringify(state.tabs);
+  if (signature !== tabsSignature) { $('tabs').replaceChildren(...tabs); tabsSignature = signature; }
   $('tabs').value = selected || '';
+  $('welcome').hidden = true;
+  $('controls').hidden = false;
   const terminal = $('terminal');
   const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
   if (terminal.textContent !== state.terminal) {
     terminal.textContent = state.terminal || 'Start a session to see its output.';
-    if (atBottom) terminal.scrollTop = terminal.scrollHeight;
+    if (atBottom || changedSession) terminal.scrollTop = terminal.scrollHeight;
   }
-  $('welcome').hidden = true;
-  $('controls').hidden = false;
+  if (changedSession) { resizeMessage(); terminal.scrollTop = terminal.scrollHeight; }
+  updateLatest();
   updateControls();
 }
 async function request(action, text, tabID = selected, pairing = false) {
@@ -162,13 +177,52 @@ async function sendText(submit) {
   const target = selected, current = generation;
   await request('input', text, target);
   if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
-  $('message').value = '';
+  if (selected === target && $('message').value === text) { $('message').value = ''; resizeMessage(); }
   if (submit) {
     await new Promise(resolve => setTimeout(resolve, 100));
     if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
     await request('key', 'enter', target);
   }
 }
+function updateLatest() {
+  const terminal = $('terminal');
+  $('latest').hidden = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
+}
+function resizeMessage() {
+  const terminal = $('terminal');
+  const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
+  const message = $('message');
+  message.style.height = 'auto';
+  message.style.height = `${message.scrollHeight + 2}px`;
+  if (atBottom) terminal.scrollTop = terminal.scrollHeight;
+  updateLatest();
+}
+function updateViewport() {
+  const viewport = window.visualViewport;
+  // Leave pinch zoom to the browser; only follow normal keyboard/browser resizing.
+  if (!viewport || viewport.scale !== 1) return;
+  const terminal = $('terminal');
+  const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
+  document.documentElement.style.setProperty('--viewport-height', `${viewport.height}px`);
+  document.documentElement.style.setProperty('--viewport-top', `${viewport.offsetTop}px`);
+  if (atBottom) terminal.scrollTop = terminal.scrollHeight;
+  updateLatest();
+}
+window.visualViewport?.addEventListener('resize', updateViewport);
+window.visualViewport?.addEventListener('scroll', updateViewport);
+updateViewport();
+$('message').oninput = () => { resizeMessage(); updateControls(); };
+$('terminal').onscroll = updateLatest;
+$('latest').onclick = () => { $('terminal').scrollTop = $('terminal').scrollHeight; updateLatest(); };
+$('keys-toggle').onclick = () => {
+  const terminal = $('terminal');
+  const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
+  const expanded = $('keys-toggle').getAttribute('aria-expanded') !== 'true';
+  $('keys-toggle').setAttribute('aria-expanded', String(expanded));
+  $('keys').hidden = !expanded;
+  if (atBottom) terminal.scrollTop = terminal.scrollHeight;
+  updateLatest();
+};
 $('compose').onsubmit = event => { event.preventDefault(); void perform(() => sendText(true)); };
 $('paste').onclick = () => void perform(() => sendText(false));
 $('tabs').onchange = () => void perform(() => request('select', undefined, $('tabs').value));
@@ -178,7 +232,8 @@ document.querySelectorAll('[data-key]').forEach(button => { button.onclick = () 
 $('reconnect').onclick = () => { stopped = false; connect(); };
 $('forget').onclick = async () => {
   stopped = true; ++generation; clearTimeout(reconnectTimer); socket?.close(); offline();
-  credential = null; bootstrap = null; newDeviceKey = null;
+  credential = null; bootstrap = null; newDeviceKey = null; selected = null; drafts.clear(); tabsSignature = '';
+  $('keys').hidden = true; $('keys-toggle').setAttribute('aria-expanded', 'false');
   $('terminal').textContent = ''; $('message').value = ''; $('controls').hidden = true; $('welcome').hidden = false;
   try { await storage('delete'); showError(''); } catch { showError('Could not clear pairing. Clear this site’s data in browser settings.'); }
   updateControls();

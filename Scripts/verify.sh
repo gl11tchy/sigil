@@ -54,6 +54,10 @@ npm --prefix "$ROOT/Sidereal" ci --ignore-scripts || fail "Sidereal dependencies
 npm --prefix "$ROOT/Sidereal" test || fail "Sidereal tests"
 npm --prefix "$ROOT/Sidereal" audit --omit=dev || fail "Sidereal dependency audit"
 
+echo "==> Sidereal mobile browser checks"
+npm --prefix "$ROOT/Sidereal" exec -- playwright install chromium webkit || fail "Sidereal browsers"
+npm --prefix "$ROOT/Sidereal" run test:browser || fail "Sidereal browser tests"
+
 echo "==> swift test --no-parallel"
 # Several integration tests use blocking processes and sockets. Serial execution
 # avoids starving the older Swift concurrency runtime on GitHub's macOS runner.

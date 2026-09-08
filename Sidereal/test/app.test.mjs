@@ -13,7 +13,8 @@ async function browser() {
   let nextTimer = 0, reloads = 0;
   const element = id => {
     if (!elements.has(id)) elements.set(id, {
-      value: '', textContent: '', hidden: false, disabled: false, dataset: {},
+      id, value: '', textContent: '', hidden: false, disabled: false, dataset: {}, style: {},
+      getAttribute(name) { return this[name]; }, setAttribute(name, value) { this[name] = value; },
       scrollHeight: 0, scrollTop: 0, clientHeight: 0,
       replaceChildren(...children) { this.children = children; },
     });
@@ -113,7 +114,7 @@ test('Send pastes and submits exactly once on an unchanged connection', async ()
   assert.equal(socket.sent.at(-1).tabID, 'tab-1');
   socket.reply();
   await settle();
-  assert.equal(page.element('send').disabled, false);
+  assert.equal(page.element('send').disabled, true); // Empty messages cannot be sent.
 });
 
 test('Send does not submit Enter after its paste connection is replaced', async () => {
@@ -154,4 +155,26 @@ test('a same-document QR fragment reloads the app but an empty fragment does not
   page.location.hash = `#room=${'a'.repeat(32)}&key=${'b'.repeat(64)}`;
   page.events.get('hashchange')();
   assert.equal(page.reloads(), 1);
+});
+
+test('sending never disables the editor or erases a newer draft', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.submit();
+  await settle();
+  assert.equal(page.element('message').disabled, false);
+  page.element('message').value = 'My next thought';
+  socket.reply();
+  await settle();
+  assert.equal(page.element('message').value, 'My next thought');
+});
+
+test('disconnect preserves an editable draft while remote actions are disabled', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('message').value = 'Keep this draft';
+  socket.close();
+  assert.equal(page.element('message').disabled, false);
+  assert.equal(page.element('send').disabled, true);
+  assert.equal(page.element('message').value, 'Keep this draft');
 });

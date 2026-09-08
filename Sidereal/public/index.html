@@ -14,26 +14,45 @@
   <script type="module" src="/app.mjs"></script>
 </head>
 <body>
-  <header><h1>Sidereal</h1><span id="status" role="status">Not connected</span></header>
+  <header>
+    <h1>Sidereal</h1>
+    <details class="connection">
+      <summary aria-label="Connection settings"><span id="status" role="status">Not connected</span><span aria-hidden="true">⌄</span></summary>
+      <div class="connection-panel">
+        <p>Keep Sigil open and your Mac awake.</p>
+        <button id="reconnect" hidden>Reconnect</button>
+        <button id="forget" hidden>Forget this Mac</button>
+      </div>
+    </details>
+  </header>
   <main>
-    <section id="welcome"><h2>Your Mac, from here.</h2><p>Open Sigil → Settings → Remote.<br>Scan the code with your phone’s camera.</p></section>
+    <section id="welcome"><img src="/icon.svg" width="56" height="56" alt=""><h2>Your Mac, from here.</h2><p>Open Sigil → Settings → Remote.<br>Scan the code with your phone’s camera.</p></section>
     <p id="error" role="alert" hidden></p>
     <section id="controls" hidden aria-label="Sigil remote control">
-      <div class="toolbar"><label for="tabs">Session</label><select id="tabs"></select><button id="new" type="button">New</button></div>
-      <pre id="terminal" tabindex="0" aria-label="Terminal output"></pre>
-      <div class="keys" aria-label="Terminal keys">
-        <button data-key="escape">Esc</button><button data-key="tab">Tab</button>
-        <button data-key="up" aria-label="Up arrow">↑</button><button data-key="down" aria-label="Down arrow">↓</button>
-        <button data-key="left" aria-label="Left arrow">←</button><button data-key="right" aria-label="Right arrow">→</button>
-        <button data-key="backspace" aria-label="Backspace">⌫</button><button data-key="enter">Enter</button>
+      <div class="toolbar"><label class="sr-only" for="tabs">Session</label><div class="session-picker"><select id="tabs"></select><span aria-hidden="true">⌄</span></div><button id="new" type="button" aria-label="New session">＋ New</button></div>
+      <div class="output">
+        <pre id="terminal" tabindex="0" aria-label="Terminal output"></pre>
+        <button id="latest" type="button" hidden>↓ Latest</button>
       </div>
       <form id="compose">
-        <label for="message">Message</label>
-        <textarea id="message" rows="3" placeholder="Send a message…" maxlength="8192" autocapitalize="sentences"></textarea>
-        <div class="actions"><button id="interrupt" type="button">Stop</button><button id="paste" type="button">Paste</button><button id="send" type="submit">Send</button></div>
+        <div id="keys" class="keys" aria-label="Terminal keys" hidden>
+          <button type="button" data-key="escape">Esc</button><button type="button" data-key="tab">Tab</button>
+          <button type="button" data-key="up" aria-label="Up arrow">↑</button><button type="button" data-key="down" aria-label="Down arrow">↓</button>
+          <button type="button" data-key="left" aria-label="Left arrow">←</button><button type="button" data-key="right" aria-label="Right arrow">→</button>
+          <button type="button" data-key="backspace" aria-label="Backspace">⌫</button><button type="button" data-key="enter">Enter</button>
+          <button id="paste" type="button">Paste without sending</button>
+        </div>
+        <div class="entry">
+          <label class="sr-only" for="message">Message</label>
+          <textarea id="message" rows="1" placeholder="Message Sigil…" maxlength="8192" autocapitalize="sentences"></textarea>
+          <button id="send" type="submit" aria-label="Send message">↑</button>
+        </div>
+        <div class="actions">
+          <button id="keys-toggle" type="button" aria-expanded="false" aria-controls="keys">Keys</button>
+          <button id="interrupt" type="button">Stop</button>
+        </div>
       </form>
     </section>
   </main>
-  <footer><button id="reconnect" hidden>Reconnect</button><button id="forget" hidden>Forget this Mac</button><span>Keep Sigil open and your Mac awake.</span></footer>
 </body>
 </html>
