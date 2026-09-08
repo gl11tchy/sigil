@@ -6,4 +6,4 @@
 4. Add QR Settings and the installable phone companion, with disconnect controls.
 5. Run native and relay gates, isolated end-to-end QA, and review the complete diff.
 
-No paid hosting or existing session changes during implementation or QA.
+Recurring Railway hosting was approved on 2026-09-07. QA uses synthetic sessions only.

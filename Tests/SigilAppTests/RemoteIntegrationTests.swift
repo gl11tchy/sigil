@@ -12,27 +12,38 @@ struct RemoteIntegrationTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent()
-        let portFile = root.appendingPathComponent("port")
         let server = Process()
-        server.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        server.arguments = ["node", repo.appendingPathComponent("Sidereal/test/relay-fixture.mjs").path]
-        server.environment = ProcessInfo.processInfo.environment.merging(["SIGIL_TEST_PORT_FILE": portFile.path]) {
-            _, new in new
-        }
-        server.standardOutput = FileHandle.nullDevice
-        server.standardError = FileHandle.nullDevice
-        try server.run()
         defer {
             if server.isRunning {
                 server.terminate()
                 server.waitUntilExit()
             }
         }
-        for _ in 0..<200 {
-            if FileManager.default.fileExists(atPath: portFile.path) { break }
-            try await Task.sleep(for: .milliseconds(20))
+        let origin: String
+        let phoneOrigin: String
+        if let external = ProcessInfo.processInfo.environment["SIGIL_REMOTE_TEST_ORIGIN"] {
+            let url = try #require(RemoteControl.origin(external))
+            #expect(url.scheme == "https")
+            origin = url.absoluteString
+            phoneOrigin = origin
+        } else {
+            let portFile = root.appendingPathComponent("port")
+            server.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            server.arguments = ["node", repo.appendingPathComponent("Sidereal/test/relay-fixture.mjs").path]
+            server.environment = ProcessInfo.processInfo.environment.merging(["SIGIL_TEST_PORT_FILE": portFile.path]) {
+                _, new in new
+            }
+            server.standardOutput = FileHandle.nullDevice
+            server.standardError = FileHandle.nullDevice
+            try server.run()
+            for _ in 0..<200 {
+                if FileManager.default.fileExists(atPath: portFile.path) { break }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            let port = try String(contentsOf: portFile, encoding: .utf8)
+            origin = "http://127.0.0.1:\(port)"
+            phoneOrigin = "http://localhost:3099"
         }
-        let port = try String(contentsOf: portFile, encoding: .utf8)
         let defaultsName = "sigil-remote-integration-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: defaultsName))
         defer { defaults.removePersistentDomain(forName: defaultsName) }
@@ -52,7 +63,7 @@ struct RemoteIntegrationTests {
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(tab.controller.remoteSnapshot().contains("RELAY_READY"))
-        model.remoteControl.start(urlText: "http://127.0.0.1:\(port)", model: model)
+        model.remoteControl.start(urlText: origin, model: model)
         for _ in 0..<200 {
             if model.remoteControl.pairingURL != nil || model.remoteControl.error != nil { break }
             try await Task.sleep(for: .milliseconds(20))
@@ -66,14 +77,18 @@ struct RemoteIntegrationTests {
         let bootstrap = try #require(parts.queryItems?.first { $0.name == "key" }?.value)
         let network = URLSession(configuration: .ephemeral)
         defer { network.invalidateAndCancel() }
-        var request = URLRequest(url: URL(string: "ws://127.0.0.1:\(port)/connect?room=\(room)&role=phone")!)
-        request.setValue("http://localhost:3099", forHTTPHeaderField: "Origin")
+        var endpoint = try #require(URLComponents(string: origin))
+        endpoint.scheme = endpoint.scheme == "https" ? "wss" : "ws"
+        endpoint.path = "/connect"
+        endpoint.queryItems = [URLQueryItem(name: "room", value: room), URLQueryItem(name: "role", value: "phone")]
+        var request = URLRequest(url: try #require(endpoint.url))
+        request.setValue(phoneOrigin, forHTTPHeaderField: "Origin")
         let phone = network.webSocketTask(with: request)
         phone.resume()
         defer { phone.cancel(with: .goingAway, reason: nil) }
         // Bounds receive even if the host never answers.
         let timeout = Task {
-            try? await Task.sleep(for: .seconds(10))
+            try? await Task.sleep(for: .seconds(30))
             if !Task.isCancelled { phone.cancel(with: .goingAway, reason: nil) }
         }
         defer { timeout.cancel() }

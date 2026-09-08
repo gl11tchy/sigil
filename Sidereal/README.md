@@ -1,5 +1,8 @@
 # Sidereal
 
+Live companion: https://sidereal-production-587c.up.railway.app
+Sigil uses this address by default.
+
 Phone companion and encrypted relay for Sigil. Deploy this directory as a single
 Node 22 service behind HTTPS, with WebSocket upgrades enabled. No database required.
 Do not horizontally scale it: room routing is in memory. A restart revokes all rooms.

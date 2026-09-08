@@ -4,7 +4,7 @@ import SwiftUI
 
 struct RemoteControlView: View {
     @Bindable var model: AppModel
-    @AppStorage("remoteServerURL") private var serverURL = ""
+    @AppStorage("remoteServerURL") private var serverURL = "https://sidereal-production-587c.up.railway.app"
 
     var body: some View {
         Form {
