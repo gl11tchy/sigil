@@ -206,6 +206,43 @@ public final class TerminalController {
         Self.reap(pid)
     }
 
+    /// Bounded readable output for an explicitly paired remote controller.
+    public func remoteSnapshot() -> String { accessibilitySnapshot(maxCharacters: 12_000) }
+
+    /// Uses the terminal's negotiated paste mode without changing the clipboard.
+    /// Multiline input cannot be pasted safely when that mode is disabled.
+    public func pasteRemoteText(_ text: String) -> Bool {
+        guard isRunning else { return false }
+        let bracketed = terminalView.getTerminal().bracketedPasteMode
+        guard bracketed || !text.contains("\n") else { return false }
+        if bracketed { terminalView.send(txt: "\u{1b}[200~") }
+        terminalView.send(txt: text)
+        if bracketed { terminalView.send(txt: "\u{1b}[201~") }
+        return true
+    }
+
+    /// Reuses local key handling, including application-cursor and enhanced modes.
+    public func sendRemoteKey(_ key: String) -> Bool {
+        guard isRunning else { return false }
+        let selector: Selector
+        switch key {
+        case "enter": selector = #selector(NSTextView.insertNewline(_:))
+        case "escape": selector = #selector(NSTextView.cancelOperation(_:))
+        case "up": selector = #selector(NSTextView.moveUp(_:))
+        case "down": selector = #selector(NSTextView.moveDown(_:))
+        case "left": selector = #selector(NSTextView.moveLeft(_:))
+        case "right": selector = #selector(NSTextView.moveRight(_:))
+        case "tab": selector = #selector(NSTextView.insertTab(_:))
+        case "backspace": selector = #selector(NSTextView.deleteBackward(_:))
+        case "interrupt":
+            terminalView.send(txt: "\u{3}")
+            return true
+        default: return false
+        }
+        terminalView.doCommand(by: selector)
+        return true
+    }
+
     /// Writes `text` to the child's stdin, as if typed.
     public func send(text: String) {
         terminalView.send(txt: text)

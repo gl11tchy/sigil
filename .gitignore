@@ -5,3 +5,5 @@ dist/
 *.xcodeproj
 .DS_Store
 .swiftpm-cache/
+
+Sidereal/node_modules/
