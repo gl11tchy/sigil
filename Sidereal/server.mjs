@@ -8,6 +8,7 @@ const token = () => randomBytes(32).toString('hex');
 const equal = (a, b) => typeof a === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const assets = new Map([
   ['/', ['index.html', 'text/html']], ['/app.mjs', ['app.mjs', 'text/javascript']],
+  ['/output.mjs', ['output.mjs', 'text/javascript']],
   ['/crypto.mjs', ['crypto.mjs', 'text/javascript']], ['/style.css', ['style.css', 'text/css']],
   ['/sw.js', ['sw.js', 'text/javascript']], ['/manifest.webmanifest', ['manifest.webmanifest', 'application/manifest+json']],
   ['/icon.svg', ['icon.svg', 'image/svg+xml']],

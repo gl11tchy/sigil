@@ -1,7 +1,9 @@
 import { importKey, randomKey, seal, open } from './crypto.mjs';
+import { readableOutput } from './output.mjs';
 const $ = id => document.getElementById(id);
 const drafts = new Map();
 let tabsSignature = '';
+let rawOutput = '', rawMode = false;
 let credential, bootstrap, newDeviceKey, socket, challenge, sequence = 0, selected;
 let connected = false, busy = false, stopped = false, reconnectTimer, pollTimer, generation = 0;
 let incoming = Promise.resolve(), outgoing = Promise.resolve(), pending = new Map();
@@ -27,13 +29,14 @@ async function storage(mode, value) {
 }
 function updateControls() {
   const disabled = !connected || busy;
-  document.querySelectorAll('#controls button, #controls select, #controls textarea').forEach(element => {
+  document.querySelectorAll('#controls button, #controls textarea, #session-toolbar button, #session-toolbar select').forEach(element => {
     // Never disable a focused editor while a command is pending: it closes the phone keyboard.
     if (element.id === 'message') { element.disabled = !selected; return; }
     if (element.id === 'keys-toggle' || element.id === 'latest') { element.disabled = false; return; }
     element.disabled = disabled || (!selected && element.id !== 'new');
   });
   $('send').disabled = disabled || !selected || !$('message').value.trim();
+  $('raw-toggle').hidden = !selected;
   $('forget').hidden = !credential;
   $('reconnect').hidden = !credential || connected;
 }
@@ -68,16 +71,28 @@ function render(state) {
   $('tabs').value = selected || '';
   $('welcome').hidden = true;
   $('controls').hidden = false;
-  const terminal = $('terminal');
-  const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
-  if (terminal.textContent !== state.terminal) {
-    terminal.textContent = state.terminal || 'Start a session to see its output.';
-    if (atBottom || changedSession) terminal.scrollTop = terminal.scrollHeight;
-  }
-  if (changedSession) { resizeMessage(); terminal.scrollTop = terminal.scrollHeight; }
-  updateLatest();
+  rawOutput = state.terminal;
+  $('session-toolbar').hidden = false;
+  $('brand').hidden = true;
+  renderOutput(changedSession);
+  if (changedSession) resizeMessage();
   updateControls();
 }
+function renderOutput(changedSession = false) {
+  const terminal = $('terminal');
+  const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
+  const output = rawMode ? rawOutput : readableOutput(rawOutput);
+  $('empty-output').hidden = Boolean(output);
+  $('empty-output').querySelector('h2').textContent = selected ? 'Ready when you are.' : 'No open sessions.';
+  $('empty-output').querySelector('p').textContent = selected ? 'Send a message to this session.' : 'Choose New to start a session.';
+  terminal.dataset.raw = String(rawMode);
+  if (terminal.textContent !== output || changedSession) {
+    terminal.textContent = output;
+    if (atBottom || changedSession) terminal.scrollTop = terminal.scrollHeight;
+  }
+  updateLatest();
+}
+
 async function request(action, text, tabID = selected, pairing = false) {
   const current = generation;
   const previous = outgoing;
@@ -211,6 +226,12 @@ function updateViewport() {
 window.visualViewport?.addEventListener('resize', updateViewport);
 window.visualViewport?.addEventListener('scroll', updateViewport);
 updateViewport();
+$('raw-toggle').onclick = () => {
+  rawMode = !rawMode;
+  $('raw-toggle').setAttribute('aria-pressed', String(rawMode));
+  $('raw-toggle').textContent = rawMode ? 'Show readable output' : 'Show raw terminal';
+  renderOutput(true);
+};
 $('message').oninput = () => { resizeMessage(); updateControls(); };
 $('terminal').onscroll = updateLatest;
 $('latest').onclick = () => { $('terminal').scrollTop = $('terminal').scrollHeight; updateLatest(); };
@@ -234,6 +255,9 @@ $('forget').onclick = async () => {
   stopped = true; ++generation; clearTimeout(reconnectTimer); socket?.close(); offline();
   credential = null; bootstrap = null; newDeviceKey = null; selected = null; drafts.clear(); tabsSignature = '';
   $('keys').hidden = true; $('keys-toggle').setAttribute('aria-expanded', 'false');
+  rawOutput = ''; rawMode = false;
+  $('raw-toggle').setAttribute('aria-pressed', 'false'); $('raw-toggle').textContent = 'Show raw terminal';
+  $('session-toolbar').hidden = true; $('brand').hidden = false;
   $('terminal').textContent = ''; $('message').value = ''; $('controls').hidden = true; $('welcome').hidden = false;
   try { await storage('delete'); showError(''); } catch { showError('Could not clear pairing. Clear this site’s data in browser settings.'); }
   updateControls();

@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import { randomKey, importKey, seal, open } from '../../public/crypto.mjs';
 
 // A synthetic Mac, using the actual relay and encryption. Never touches user sessions.
-async function pair(page, origin) {
+async function pair(page, origin, initialOutput) {
   const allocation = await fetch(`${origin}/rooms`, { method: 'POST' });
   expect(allocation.status).toBe(201);
   const { room, hostToken } = await allocation.json();
@@ -12,7 +12,7 @@ async function pair(page, origin) {
   let key = await importKey(bootstrap), selected = 'one', peer, challenge, serial = Promise.resolve();
   const actions = [], errors = [];
   const terminal = title => `${title}\n\n${Array.from({ length: 35 }, (_, i) => `Line ${i + 1}: Verified the mobile layout and terminal output.`).join('\n')}\n\nReady for your next message.`;
-  const outputs = { one: terminal('Mobile layout review'), two: terminal('Release checks') };
+  const outputs = { one: initialOutput ?? terminal('Mobile layout review'), two: terminal('Release checks') };
   const ws = new WebSocket(`${origin.replace(/^http/, 'ws')}/connect?room=${room}&role=host`, { headers: { Authorization: `Bearer ${hostToken}` } });
   ws.on('message', bytes => {
     serial = serial.then(async () => {
@@ -140,5 +140,36 @@ test('the visual viewport keeps the composer above an on-screen keyboard', async
     expect((await page.locator('#terminal').boundingBox()).height).toBeGreaterThan(500);
     await page.locator('#send').click();
     await expect.poll(() => mac.actions.filter(a => a.text === 'enter').length).toBe(1);
+  } finally { mac.close(); }
+});
+
+
+test('idle desktop chrome becomes one composer, with lossless raw output available', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const raw = '\n└\n┘\n' + '\n'.repeat(25) + '─'.repeat(80)
+    + '\n│ ❯ Build anything\n                    Grok 4.6\n(xhigh) · always-approve\n\n→:expand | Ctrl+e:collapse thinking | Ctrl+x:shortcuts';
+  const mac = await pair(page, baseURL, raw);
+  try {
+    await expect(page.locator('#empty-output')).toBeVisible();
+    await expect(page.locator('#terminal')).toHaveText('');
+    await expect(page.locator('#keys')).toBeHidden();
+    await expect(page.locator('#interrupt')).toBeHidden();
+    const header = await page.locator('header').boundingBox();
+    expect(header.height).toBeLessThan(90);
+    await page.screenshot({ path: testInfo.outputPath('idle-readable.png') });
+    await page.getByLabel('Connection settings').click();
+    await page.locator('#raw-toggle').click();
+    await expect(page.locator('#terminal')).toHaveText(raw);
+    await expect(page.locator('#empty-output')).toBeHidden();
+    await expect(page.locator('#raw-toggle')).toHaveAttribute('aria-pressed', 'true');
+    await page.locator('#raw-toggle').click();
+    await expect(page.locator('#empty-output')).toBeVisible();
+    await page.getByLabel('Connection settings').click();
+    await page.locator('#keys-toggle').click();
+    await page.locator('#interrupt').click();
+    await expect.poll(() => mac.actions.filter(a => a.text === 'interrupt').length).toBe(1);
+    await page.locator('#keys-toggle').click();
+    await page.locator('#new').click();
+    await expect(page.locator('#terminal')).toContainText('Release checks');
   } finally { mac.close(); }
 });
