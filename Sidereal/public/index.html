@@ -15,11 +15,16 @@
 </head>
 <body>
   <header>
-    <h1>Sidereal</h1>
+    <h1 id="brand">Sigil</h1>
+    <div id="session-toolbar" class="toolbar" hidden>
+      <div class="session-picker"><label for="tabs">Sigil</label><select id="tabs" aria-label="Session"></select><span class="session-chevron" aria-hidden="true">⌄</span></div>
+      <button id="new" type="button" aria-label="New session">New</button>
+    </div>
     <details class="connection">
       <summary aria-label="Connection settings"><span id="status" role="status">Not connected</span><span aria-hidden="true">⌄</span></summary>
       <div class="connection-panel">
         <p>Keep Sigil open and your Mac awake.</p>
+        <button id="raw-toggle" type="button" aria-pressed="false" hidden>Show raw terminal</button>
         <button id="reconnect" hidden>Reconnect</button>
         <button id="forget" hidden>Forget this Mac</button>
       </div>
@@ -29,8 +34,8 @@
     <section id="welcome"><img src="/icon.svg" width="56" height="56" alt=""><h2>Your Mac, from here.</h2><p>Open Sigil → Settings → Remote.<br>Scan the code with your phone’s camera.</p></section>
     <p id="error" role="alert" hidden></p>
     <section id="controls" hidden aria-label="Sigil remote control">
-      <div class="toolbar"><label class="sr-only" for="tabs">Session</label><div class="session-picker"><select id="tabs"></select><span aria-hidden="true">⌄</span></div><button id="new" type="button" aria-label="New session">＋ New</button></div>
       <div class="output">
+        <div id="empty-output" hidden><h2>Ready when you are.</h2><p>Send a message to this session.</p></div>
         <pre id="terminal" tabindex="0" aria-label="Terminal output"></pre>
         <button id="latest" type="button" hidden>↓ Latest</button>
       </div>
@@ -41,15 +46,13 @@
           <button type="button" data-key="left" aria-label="Left arrow">←</button><button type="button" data-key="right" aria-label="Right arrow">→</button>
           <button type="button" data-key="backspace" aria-label="Backspace">⌫</button><button type="button" data-key="enter">Enter</button>
           <button id="paste" type="button">Paste without sending</button>
+          <button id="interrupt" type="button" aria-label="Stop current response">Stop</button>
         </div>
         <div class="entry">
-          <label class="sr-only" for="message">Message</label>
-          <textarea id="message" rows="1" placeholder="Message Sigil…" maxlength="8192" autocapitalize="sentences"></textarea>
-          <button id="send" type="submit" aria-label="Send message">↑</button>
-        </div>
-        <div class="actions">
           <button id="keys-toggle" type="button" aria-expanded="false" aria-controls="keys">Keys</button>
-          <button id="interrupt" type="button">Stop</button>
+          <label class="sr-only" for="message">Message</label>
+          <textarea id="message" rows="1" placeholder="Message…" maxlength="8192" autocapitalize="sentences"></textarea>
+          <button id="send" type="submit" aria-label="Send message">↑</button>
         </div>
       </form>
     </section>

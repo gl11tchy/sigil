@@ -2,9 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
+import { readableOutput } from '../public/output.mjs';
 
 const source = (await readFile(new URL('../public/app.mjs', import.meta.url), 'utf8'))
-  .replace(/^import .* from '\.\/crypto\.mjs';\n/, '');
+  .replace(/^import .* from '\.\/.*\.mjs';\n/gm, '');
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
 // Run the real handlers; only browser services and encryption are replaced.
@@ -16,6 +17,7 @@ async function browser() {
       id, value: '', textContent: '', hidden: false, disabled: false, dataset: {}, style: {},
       getAttribute(name) { return this[name]; }, setAttribute(name, value) { this[name] = value; },
       scrollHeight: 0, scrollTop: 0, clientHeight: 0,
+      querySelector(selector) { return element(`${id}-${selector}`); },
       replaceChildren(...children) { this.children = children; },
     });
     return elements.get(id);
@@ -65,7 +67,7 @@ async function browser() {
     },
   };
   vm.runInNewContext(source, {
-    document, location, history: { replaceState() {} }, indexedDB,
+    readableOutput, document, location, history: { replaceState() {} }, indexedDB,
     window: { addEventListener: (name, callback) => events.set(name, callback) },
     navigator: {}, crypto: { subtle: {} }, URL, URLSearchParams, TextEncoder,
     WebSocket: FakeSocket, seal: async value => JSON.stringify(value), open: async frame => JSON.parse(frame),

@@ -38,8 +38,11 @@ use your computer's `localhost`; real phone access requires the HTTPS deployment
 
 Pair one phone at a time. The phone can select sessions, read recent terminal
 output, send text, use arrow/Enter/Tab/Escape keys, and interrupt the current turn.
-The phone layout keeps the message box below a full-height, scrollable terminal.
-Keys opens the terminal key controls. Latest returns to the newest output.
+The phone layout uses one session header and one bottom message box.
+Readable output removes a recognized idle Grok composer and empty screen padding.
+Connection settings → Show raw terminal keeps the complete snapshot available.
+Unknown prompts and Mac-side drafts stay visible in both views.
+Keys opens terminal controls, including Stop. Latest returns to the newest output.
 Drafts stay with each session until the page closes; a lost connection keeps them editable.
 Connection settings are under the status in the top-right corner.
 
