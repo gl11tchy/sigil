@@ -122,11 +122,8 @@ public final class TerminalController {
         reportsActivity = false
         activityFlushTask?.cancel()
         activityFlushTask = nil
-        let pid = childPid.withLock { pid in
-            let current = pid
-            pid = 0
-            return current
-        }
+        let pid = childPid.withLock { $0 }
+        guard escalationTask == nil else { return }
         guard pid > 0 else {
             isRunning = false
             return
@@ -149,6 +146,7 @@ public final class TerminalController {
                 if Task.isCancelled { return }
                 if Self.reap(pid) {
                     self?.reportExitIfSilent()
+                    self?.escalationTask = nil
                     return
                 }
                 Self.signal(SIGTERM, to: pid)
@@ -157,12 +155,14 @@ public final class TerminalController {
             if Task.isCancelled { return }
             if Self.reap(pid) {
                 self?.reportExitIfSilent()
+                self?.escalationTask = nil
                 return
             }
             Self.signal(SIGKILL, to: pid)
             try? await Task.sleep(for: Self.killGrace)
             _ = Self.reap(pid)
             self?.reportExitIfSilent()
+            self?.escalationTask = nil
         }
     }
 
@@ -183,6 +183,7 @@ public final class TerminalController {
             isRunning = false
             return
         }
+        defer { reportExitIfSilent() }
         if Self.reap(pid) {
             isRunning = false
             reportExitIfSilent()

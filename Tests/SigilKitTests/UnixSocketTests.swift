@@ -43,6 +43,40 @@ final class UnixSocketTests: XCTestCase {
         XCTAssertLessThan(staleElapsed, probeBound)
     }
 
+    func testStaleProbeIsTrueOnlyForAClosedSocket() throws {
+        let stale = uniqueSocketPath()
+        let bindFD = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        XCTAssertGreaterThanOrEqual(bindFD, 0)
+        do {
+            try UnixSocket.bind(bindFD, path: stale)
+        } catch {
+            Darwin.close(bindFD)
+            throw error
+        }
+        Darwin.close(bindFD)
+        defer { Darwin.unlink(stale) }
+        XCTAssertTrue(UnixSocket.isStaleSocket(at: stale))
+
+        XCTAssertFalse(UnixSocket.isStaleSocket(at: uniqueSocketPath()))
+
+        try withUnixListener(backlog: 8) { path, _ in
+            let start = ContinuousClock.now
+            XCTAssertFalse(UnixSocket.isStaleSocket(at: path))
+            XCTAssertLessThan(ContinuousClock.now - start, probeBound)
+        }
+
+        try withUnixListener(backlog: 1) { path, _ in
+            let held = try fillListenQueue(at: path)
+            XCTAssertFalse(held.isEmpty, "listen backlog 1 should queue at least one connect")
+            defer {
+                for fd in held { Darwin.close(fd) }
+            }
+            let start = ContinuousClock.now
+            XCTAssertFalse(UnixSocket.isStaleSocket(at: path))
+            XCTAssertLessThan(ContinuousClock.now - start, probeBound)
+        }
+    }
+
     func testProbeAgainstNonAcceptingListenerDoesNotExceedTimeout() throws {
         try withUnixListener(backlog: 1) { path, _ in
             let held = try fillListenQueue(at: path)

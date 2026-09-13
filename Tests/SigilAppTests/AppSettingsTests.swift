@@ -74,6 +74,52 @@ struct AppSettingsTests {
         #expect(!settings.showWorktreeSessions)
         #expect(!settings.showSubagentSessions)
     }
+
+    @Test @MainActor
+    func persistedFontSizeIsClampedToTheSliderRange() {
+        for (stored, expected) in [
+            (-20.0, 8.0), (1000.0, 32.0), (Double.infinity, 13.0), (Double.nan, 13.0),
+        ] {
+            let defaults = isolatedDefaults()
+            defer { defaults.reset() }
+            defaults.value.set(stored, forKey: "terminal.fontSize")
+            #expect(Double(AppSettings(defaults: defaults.value).fontSize) == expected)
+        }
+
+        let absent = isolatedDefaults()
+        defer { absent.reset() }
+        #expect(AppSettings(defaults: absent.value).fontSize == 13)
+    }
+
+    @Test @MainActor
+    func fontSizeAssignmentsStayClampedAndRelaunchMatches() {
+        let defaults = isolatedDefaults()
+        defer { defaults.reset() }
+        let settings = AppSettings(defaults: defaults.value)
+        settings.fontSize = -20
+        #expect(settings.fontSize == 8)
+        settings.fontSize = 1000
+        #expect(settings.fontSize == 32)
+        #expect(AppSettings(defaults: defaults.value).fontSize == 32)
+    }
+
+    @Test @MainActor
+    func invalidPersistedEffortFallsBackToTheCLIDefault() {
+        let defaults = isolatedDefaults()
+        defer { defaults.reset() }
+        defaults.value.set("turbo", forKey: "session.effort")
+        #expect(AppSettings(defaults: defaults.value).effort == "")
+        defaults.value.set("high", forKey: "session.effort")
+        #expect(AppSettings(defaults: defaults.value).effort == "high")
+    }
+
+    @Test @MainActor
+    func normalizedExecutablePathTrimsWhitespaceAndExpandsTilde() {
+        #expect(AppSettings.normalizedExecutablePath("  /bin/echo \n") == "/bin/echo")
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        #expect(AppSettings.normalizedExecutablePath("~/bin/grok") == "\(home)/bin/grok")
+        #expect(AppSettings.normalizedExecutablePath("/tmp/grok") == "/tmp/grok")
+    }
 }
 
 private func temporaryDirectory() throws -> URL {

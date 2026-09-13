@@ -32,6 +32,11 @@ struct SidebarProject: Identifiable, Equatable, Sendable {
 /// Pure grouping for the sidebar. Path identity is injected so tests do not
 /// need POSIX `realpath`. Pins and archives share the same identity list.
 enum SidebarOrganization {
+    static func activationKey(preferred: String?, in keys: [String]) -> String? {
+        if let preferred, keys.contains(preferred) { return preferred }
+        return keys.first
+    }
+
     static func entry(for session: GrokSession) -> OpenTabsSnapshot.Entry {
         OpenTabsSnapshot.Entry(sessionID: session.id, cwd: session.cwd)
     }
@@ -149,12 +154,18 @@ enum SidebarOrganization {
                 grouped[key]?.append(session)
             }
         }
+        var nameCounts: [String: Int] = [:]
+        for session in representative.values {
+            nameCounts[session.projectName, default: 0] += 1
+        }
+        let duplicated = Set(nameCounts.filter { $0.value > 1 }.keys)
         return order.map { key in
             let list = grouped[key] ?? []
             let sample = representative[key] ?? list[0]
             return SidebarProject(
                 id: key,
-                name: sample.projectName,
+                name: duplicated.contains(sample.projectName)
+                    ? sample.displayPath : sample.projectName,
                 displayPath: sample.displayPath,
                 cwd: sample.cwd,
                 sessions: list,

@@ -32,7 +32,7 @@ struct SettingsView: View {
                     ForEach(TerminalTheme.all) { theme in
                         ThemeCard(
                             theme: theme,
-                            isSelected: model.settings.themeName == theme.name
+                            isSelected: model.settings.theme.name == theme.name
                         ) {
                             model.settings.themeName = theme.name
                             model.applyAppearance()
@@ -55,6 +55,9 @@ struct SettingsView: View {
                 }
             }
             .onChange(of: model.settings.fontSize) { _, _ in model.applyAppearance() }
+            Text("Terminal colors and font size update immediately. Reopen a session to apply the theme inside Grok.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
     }
@@ -165,7 +168,8 @@ struct SettingsView: View {
     }
 
     private var draftExecutableExists: Bool {
-        AppSettings.isExecutableFile(at: URL(fileURLWithPath: pathDraft.text))
+        AppSettings.isExecutableFile(
+            at: URL(fileURLWithPath: AppSettings.normalizedExecutablePath(pathDraft.text)))
     }
 
     private func applyExecutablePath() {
@@ -269,11 +273,12 @@ struct ExecutablePathDraft: Equatable {
 
     @MainActor
     func commit(stored: String) -> Outcome {
-        guard AppSettings.isExecutableFile(at: URL(fileURLWithPath: text)) else {
+        let path = AppSettings.normalizedExecutablePath(text)
+        guard AppSettings.isExecutableFile(at: URL(fileURLWithPath: path)) else {
             return .rejected
         }
-        guard text != stored else { return .unchanged }
-        return .applied(text)
+        guard path != stored else { return .unchanged }
+        return .applied(path)
     }
 }
 
@@ -285,6 +290,7 @@ struct ModelNameField: View {
         HStack(spacing: 6) {
             TextField("CLI default", text: $text)
                 .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Model")
             Menu {
                 ForEach(AppSettings.modelOptions.filter { !$0.isEmpty }, id: \.self) { option in
                     Button(option) { text = option }
@@ -297,6 +303,7 @@ struct ModelNameField: View {
             .menuIndicator(.hidden)
             .frame(width: 20)
             .help("Suggested models")
+            .accessibilityLabel("Suggested models")
         }
     }
 }

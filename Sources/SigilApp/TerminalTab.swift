@@ -48,6 +48,7 @@ final class TerminalTab: Identifiable {
     private let completionEventsURL: URL?
     private var completionWatchTask: Task<Void, Never>?
     private var idleFallbackTask: Task<Void, Never>?
+    private var hasConfirmedJournalActivity = false
 
     /// Quiet period after the last submit or child output that returns a tab
     /// to idle when the journal never writes `turn_completed`.
@@ -137,6 +138,7 @@ final class TerminalTab: Identifiable {
         activity = .working
         armIdleFallback()
         if needsWatcher {
+            hasConfirmedJournalActivity = false
             watchForTurnCompletion()
         }
     }
@@ -203,9 +205,13 @@ final class TerminalTab: Identifiable {
                         discardingOversizedLine: scanDiscardingOversizedLine
                     )
                 }.value
+                guard !Task.isCancelled else { return }
                 offset = scan.offset
                 remainder = scan.remainder
                 discardingOversizedLine = scan.discardingOversizedLine
+                if scan.didObserveWork {
+                    self?.hasConfirmedJournalActivity = true
+                }
                 if scan.didCompleteTurn {
                     self?.noteTurnCompleted()
                     return
@@ -226,7 +232,7 @@ final class TerminalTab: Identifiable {
         idleFallbackTask?.cancel()
         idleFallbackTask = Task { [weak self] in
             try? await Task.sleep(for: Self.idleFallbackSilence)
-            guard !Task.isCancelled, let self else { return }
+            guard !Task.isCancelled, let self, !self.hasConfirmedJournalActivity else { return }
             self.noteTurnCompleted()
         }
     }
@@ -236,6 +242,7 @@ final class TerminalTab: Identifiable {
         idleFallbackTask = nil
         completionWatchTask?.cancel()
         completionWatchTask = nil
+        hasConfirmedJournalActivity = false
     }
 
     private struct CompletionScan: Sendable {
@@ -243,6 +250,7 @@ final class TerminalTab: Identifiable {
         let remainder: Data
         let discardingOversizedLine: Bool
         let didCompleteTurn: Bool
+        var didObserveWork = false
     }
 
     private struct JournalEnvelope: Decodable {
@@ -303,6 +311,7 @@ final class TerminalTab: Identifiable {
             buffer.append(data)
             var discarding = discardingOversizedLine
             var completed = false
+            var observedWork = false
 
             while let newline = buffer.firstIndex(of: 0x0A) {
                 let line = Data(buffer[..<newline])
@@ -310,11 +319,18 @@ final class TerminalTab: Identifiable {
                 if discarding {
                     discarding = false
                 } else if line.count <= 1_048_576,
-                    let event = try? JSONDecoder().decode(JournalEnvelope.self, from: line),
-                    event.params?.update?.sessionUpdate == "turn_completed"
+                    let event = try? JSONDecoder().decode(JournalEnvelope.self, from: line)
                 {
-                    completed = true
-                    break
+                    switch event.params?.update?.sessionUpdate {
+                    case "turn_completed":
+                        completed = true
+                    case "agent_message_chunk", "agent_thought_chunk", "tool_call",
+                        "tool_call_update":
+                        observedWork = true
+                    default:
+                        break
+                    }
+                    if completed { break }
                 }
             }
             if buffer.count > 1_048_576 {
@@ -325,7 +341,8 @@ final class TerminalTab: Identifiable {
                 offset: offset + UInt64(data.count),
                 remainder: buffer,
                 discardingOversizedLine: discarding,
-                didCompleteTurn: completed
+                didCompleteTurn: completed,
+                didObserveWork: observedWork
             )
         } catch {
             return CompletionScan(

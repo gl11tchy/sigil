@@ -32,6 +32,7 @@ public struct Palette: Equatable, Sendable {
     public let textFaintHex: UInt32
     /// State only — the open conversation, a working session, a focused field.
     public let accentHex: UInt32
+    public let errorHex: UInt32
 
     public init(theme: TerminalTheme) {
         let background = theme.backgroundHex
@@ -63,6 +64,7 @@ public struct Palette: Equatable, Sendable {
         textDimHex = Self.mix(foreground, ink, isDark ? 0.15 : 0.13)
         textFaintHex = Self.mix(foreground, ink, isDark ? 0.30 : 0.28)
         accentHex = theme.accentHex
+        errorHex = isDark ? 0xFF5F9E : 0xB4232E
     }
 
     // MARK: - SwiftUI
@@ -76,6 +78,7 @@ public struct Palette: Equatable, Sendable {
     public var textDim: Color { Self.color(textDimHex) }
     public var textFaint: Color { Self.color(textFaintHex) }
     public var accent: Color { Self.color(accentHex) }
+    public var error: Color { Self.color(errorHex) }
     public var groundNSColor: NSColor { Self.nsColor(groundHex) }
 
     // MARK: - Contrast

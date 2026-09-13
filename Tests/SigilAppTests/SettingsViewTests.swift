@@ -85,6 +85,20 @@ struct SettingsViewTests {
         #expect(session.configurationChangeCount == 0)
         #expect(session.lastError == nil)
     }
+
+    @Test @MainActor
+    func paddedValidPathCommitsTheNormalizedString() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let grok = try makeExecutable(in: root, name: "grok")
+        var session = PathFieldSession(stored: "/bin/echo")
+        session.type("  \(grok.path)  ")
+        session.pressReturn()
+        #expect(session.stored == grok.path)
+        #expect(session.configurationChangeCount == 1)
+        #expect(session.lastError == nil)
+    }
 }
 
 /// Mirrors SettingsView: keystrokes mutate the draft; Return/focus-loss call `commit`.

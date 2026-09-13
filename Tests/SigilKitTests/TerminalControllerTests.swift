@@ -159,6 +159,70 @@ struct TerminalControllerTests {
         #expect(submissions == 2)
     }
 
+    @Test func enhancedKeyboardReturnStillReportsSubmission() {
+        let view = GrokProcessTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 200, height: 100),
+            options: .default
+        )
+        var submissions = 0
+        view.onUserSubmit = { submissions += 1 }
+
+        view.doCommand(by: #selector(NSTextView.insertNewline(_:)))
+        #expect(submissions == 1)
+
+        view.doCommand(by: #selector(NSTextView.moveUp(_:)))
+        #expect(submissions == 1)
+
+        view.feed(byteArray: [0x1B, 0x5B, 0x3E, 0x31, 0x31, 0x75][...])
+        view.doCommand(by: #selector(NSTextView.insertNewline(_:)))
+        #expect(submissions == 2)
+
+        view.send(source: view, data: Array("\u{1b}[13;1:3u".utf8)[...])
+        #expect(submissions == 2)
+    }
+
+    @Test func synchronousTerminationFinishesAnEarlierAsynchronousStop() async throws {
+        let helper = try TerminalTestSupport.makeFlagStrippingHelper()
+        let controller = TerminalController()
+        var terminations = 0
+        controller.onTerminate = { _ in terminations += 1 }
+
+        controller.start(
+            TerminalTestSupport.launchSpec(
+                executable: helper,
+                extraArguments: [
+                    "/bin/sh", "-c",
+                    "trap '' TERM; printf RESIST_READY; while :; do /bin/sleep 1; done",
+                ]
+            )
+        )
+        #expect(controller.isRunning)
+        #expect(
+            await TerminalTestSupport.waitUntil {
+                controller.bufferText().contains("RESIST_READY")
+            })
+        let pid = controller.processID
+        #expect(pid > 0)
+        defer {
+            if TerminalTestSupport.processIsAlive(pid) {
+                kill(-pid, SIGKILL)
+                kill(pid, SIGKILL)
+                _ = TerminalController.reap(pid)
+            }
+        }
+
+        controller.terminate()
+        controller.terminateAndWait(timeout: .milliseconds(300))
+
+        #expect(
+            await TerminalTestSupport.waitUntil(timeout: .seconds(2)) {
+                !TerminalTestSupport.processIsAlive(pid)
+                    && TerminalTestSupport.processGroupMembers(pid).isEmpty
+                    && !controller.isRunning
+                    && terminations == 1
+            })
+    }
+
     @Test func accessibilityExposesBoundedUnicodeTerminalText() async throws {
         let helper = try TerminalTestSupport.makeFlagStrippingHelper()
         let controller = TerminalController()

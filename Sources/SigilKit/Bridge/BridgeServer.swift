@@ -296,6 +296,19 @@ public final class BridgeServer {
     }
 }
 
+extension BridgeServer.Error: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .alreadyInUse:
+            return "Another copy of Sigil is already using tab messaging."
+        case .pathTooLong:
+            return "The tab messaging socket path is too long."
+        case .failed(let operation, let code):
+            return "Could not \(operation) for tab messaging: \(String(cString: strerror(code)))."
+        }
+    }
+}
+
 private enum ServeEvent: Sendable {
     case response(BridgeResponse)
     case disconnected
@@ -343,6 +356,23 @@ private final class ClientPool: @unchecked Sendable {
     }
 }
 
+private struct SocketPathIdentity: Equatable {
+    let device: dev_t
+    let inode: ino_t
+
+    static func read(_ path: String) -> SocketPathIdentity? {
+        var info = stat()
+        guard Darwin.lstat(path, &info) == 0,
+            info.st_mode & mode_t(S_IFMT) == mode_t(S_IFSOCK)
+        else { return nil }
+        return SocketPathIdentity(device: info.st_dev, inode: info.st_ino)
+    }
+
+    func unlinkIfUnchanged(_ path: String) {
+        if Self.read(path) == self { Darwin.unlink(path) }
+    }
+}
+
 /// Listen socket + accept source. `@unchecked Sendable` because every mutable
 /// field is read and written under `lock`, including from the source callbacks.
 private final class ListenBox: @unchecked Sendable {
@@ -351,6 +381,7 @@ private final class ListenBox: @unchecked Sendable {
     private var fd: Int32 = -1
     private var source: DispatchSourceRead?
     private var path: String?
+    private var pathIdentity: SocketPathIdentity?
     private var onAccept: (@Sendable (Int32) -> Void)?
     private var closed: DispatchGroup?
 
@@ -363,11 +394,22 @@ private final class ListenBox: @unchecked Sendable {
         let parent = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
         let path = url.path
-        if FileManager.default.fileExists(atPath: path) {
-            if UnixSocket.isAccepting(at: path) {
+        var existing = stat()
+        if Darwin.lstat(path, &existing) == 0 {
+            guard existing.st_mode & mode_t(S_IFMT) == mode_t(S_IFSOCK),
+                existing.st_uid == geteuid()
+            else {
+                throw BridgeServer.Error.failed(operation: "replace non-socket path", errno: EEXIST)
+            }
+            let previous = SocketPathIdentity(device: existing.st_dev, inode: existing.st_ino)
+            guard UnixSocket.isStaleSocket(at: path), SocketPathIdentity.read(path) == previous else {
                 throw BridgeServer.Error.alreadyInUse
             }
-            Darwin.unlink(path)
+            guard Darwin.unlink(path) == 0 else {
+                throw BridgeServer.Error.failed(operation: "unlink stale socket", errno: errno)
+            }
+        } else if errno != ENOENT {
+            throw BridgeServer.Error.failed(operation: "inspect socket path", errno: errno)
         }
 
         let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
@@ -376,11 +418,16 @@ private final class ListenBox: @unchecked Sendable {
         }
         applySocketFlags(fd)
 
+        var createdIdentity: SocketPathIdentity?
         do {
             guard setNonBlocking(fd) else {
                 throw BridgeServer.Error.failed(operation: "fcntl", errno: errno)
             }
             try UnixSocket.bind(fd, path: path)
+            createdIdentity = SocketPathIdentity.read(path)
+            guard createdIdentity != nil else {
+                throw BridgeServer.Error.failed(operation: "inspect bound socket", errno: EIO)
+            }
             guard chmod(path, 0o600) == 0 else {
                 throw BridgeServer.Error.failed(operation: "chmod", errno: errno)
             }
@@ -389,7 +436,7 @@ private final class ListenBox: @unchecked Sendable {
             }
         } catch {
             Darwin.close(fd)
-            Darwin.unlink(path)
+            createdIdentity?.unlinkIfUnchanged(path)
             throw error
         }
 
@@ -408,6 +455,7 @@ private final class ListenBox: @unchecked Sendable {
         self.fd = fd
         self.source = source
         self.path = path
+        self.pathIdentity = createdIdentity
         self.onAccept = onAccept
         self.closed = closed
         lock.unlock()
@@ -421,9 +469,11 @@ private final class ListenBox: @unchecked Sendable {
         }
         let source = self.source
         let path = self.path
+        let pathIdentity = self.pathIdentity
         let closed = self.closed
         self.source = nil
         self.path = nil
+        self.pathIdentity = nil
         self.onAccept = nil
         self.closed = nil
         fd = -1
@@ -433,7 +483,7 @@ private final class ListenBox: @unchecked Sendable {
         // cannot reuse that number while the cancel handler still holds it.
         closed?.wait()
         if let path {
-            Darwin.unlink(path)
+            pathIdentity?.unlinkIfUnchanged(path)
         }
     }
 
@@ -517,6 +567,34 @@ enum UnixSocket {
             return false
         }
         return waitUntilConnected(fd: fd, deadline: deadline)
+    }
+
+    static func isStaleSocket(at path: String) -> Bool {
+        let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+        defer { Darwin.close(fd) }
+        applySocketFlags(fd)
+        guard setNonBlocking(fd), var addr = try? address(path: path) else { return false }
+        let connected = withUnsafePointer(to: &addr) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard connected < 0, errno == ECONNREFUSED else { return false }
+        let probe = Darwin.socket(AF_UNIX, SOCK_DGRAM, 0)
+        guard probe >= 0 else { return false }
+        defer { Darwin.close(probe) }
+        applySocketFlags(probe)
+        guard setNonBlocking(probe) else { return false }
+        var byte: UInt8 = 0
+        let delivered = withUnsafePointer(to: &addr) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.sendto(
+                    probe, &byte, 1, MSG_DONTWAIT, $0,
+                    socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        return delivered < 0 && errno == ECONNREFUSED
     }
 
     private static func waitUntilConnected(fd: Int32, deadline: DispatchTime) -> Bool {

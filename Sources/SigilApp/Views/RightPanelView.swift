@@ -6,6 +6,7 @@ import WebKit
 /// The right-hand utility column: one header of tool buttons over one tool.
 struct RightPanelView: View {
     @Bindable var model: AppModel
+    var availableWidth: Double = 380
     @Environment(\.palette) private var palette
 
     private var panel: RightPanel { model.panel }
@@ -30,6 +31,7 @@ struct RightPanelView: View {
                 ToolButton(
                     mode: mode,
                     isSelected: panel.mode == mode,
+                    showsTitle: availableWidth >= 360 || panel.mode == mode,
                     action: { model.showPanel(mode) }
                 )
             }
@@ -82,21 +84,44 @@ struct RightPanelView: View {
             VStack(spacing: 0) {
                 AddressBar(panel: panel)
                 Rectangle().fill(palette.hairline).frame(height: 1)
-                if let url = panel.requestedURL {
-                    WebPane(url: url, reloadToken: panel.reloadToken)
-                } else {
-                    PanelPlaceholder(text: "Type an address or a port number.")
+                ZStack {
+                    if panel.requestedURL != nil {
+                        WebPane(panel: panel)
+                    } else {
+                        PanelPlaceholder(text: "Type an address or a port number.")
+                    }
+                    if let error = panel.pageError {
+                        pageErrorOverlay(error)
+                    }
                 }
             }
         case .notes:
+            let directory = model.currentDirectory
             NotesPane(
-                directory: model.currentDirectory,
+                directory: directory,
                 text: Binding(
-                    get: { panel.notes(for: model.currentDirectory) },
-                    set: { panel.setNotes($0, for: model.currentDirectory) }
+                    get: { panel.notes(for: directory) },
+                    set: { panel.setNotes($0, for: directory) }
                 )
             )
+            .id(directory.path)
         }
+    }
+    private func pageErrorOverlay(_ error: String) -> some View {
+        VStack(spacing: 8) {
+            Text("Could not load page")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(palette.text)
+            Text(error)
+                .font(.system(size: 11))
+                .foregroundStyle(palette.textDim)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Retry") { panel.reload() }
+                .controlSize(.small)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(palette.ground)
     }
 }
 
@@ -104,6 +129,7 @@ struct RightPanelView: View {
 private struct ToolButton: View {
     let mode: RightPanelMode
     let isSelected: Bool
+    let showsTitle: Bool
     let action: () -> Void
 
     @Environment(\.palette) private var palette
@@ -114,8 +140,10 @@ private struct ToolButton: View {
             HStack(spacing: 5) {
                 Image(systemName: mode.systemImage)
                     .font(.system(size: 10.5, weight: .medium))
-                Text(mode.title)
-                    .font(.system(size: 11, weight: .medium))
+                if showsTitle {
+                    Text(mode.title)
+                        .font(.system(size: 11, weight: .medium))
+                }
             }
             .padding(.horizontal, 8)
             .frame(height: 22)
@@ -129,6 +157,7 @@ private struct ToolButton: View {
         .foregroundStyle(isSelected ? palette.text : palette.textDim)
         .onHover { isHovering = $0 }
         .help(mode.title)
+        .accessibilityLabel(mode.title)
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 }
@@ -140,63 +169,58 @@ private struct AddressBar: View {
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        HStack(spacing: 6) {
-            TextField("localhost:3000", text: $panel.addressField)
-                .textFieldStyle(.plain)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(palette.text)
-                .focused($isFocused)
-                .onSubmit { panel.navigate(to: panel.addressField) }
-            if panel.requestedURL != nil, panel.requestedURL?.absoluteString != panel.homeURL {
-                Button("Set Home") { panel.setHomeToCurrentAddress() }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 10))
-                    .foregroundStyle(palette.textFaint)
-                    .help("Open the panel on this address next time")
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                TextField("localhost:3000", text: $panel.addressField)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(palette.text)
+                    .focused($isFocused)
+                    .onSubmit { panel.navigate(to: panel.addressField) }
+                    .accessibilityLabel("Web address")
+                    .onChange(of: isFocused) { _, focused in panel.isEditingAddress = focused }
+                if panel.isLoadingPage {
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.55)
+                        .frame(width: 10, height: 10)
+                        .accessibilityLabel("Loading")
+                }
+                if panel.requestedURL != nil, panel.requestedURL?.absoluteString != panel.homeURL {
+                    Button("Set Home") { panel.setHomeToCurrentAddress() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10))
+                        .foregroundStyle(palette.textFaint)
+                        .help("Open the panel on this address next time")
+                }
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 28)
+            if let error = panel.addressError {
+                Text(error)
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(palette.error)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 4)
             }
         }
-        .padding(.horizontal, 8)
-        .frame(height: 28)
         .background(palette.sidebar)
         .accessibilityLabel("Address")
+        .onDisappear { panel.isEditingAddress = false }
     }
 }
 
 /// A web view for a locally running dev server, or any other page.
 private struct WebPane: NSViewRepresentable {
-    let url: URL
-    let reloadToken: Int
+    let panel: RightPanel
 
     func makeNSView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
-        let view = WKWebView(frame: .zero, configuration: configuration)
-        view.allowsBackForwardNavigationGestures = true
-        view.setValue(false, forKey: "drawsBackground")
-        context.coordinator.load(url, in: view, token: reloadToken)
-        return view
+        panel.browserView()
     }
-
-    func updateNSView(_ nsView: WKWebView, context: Context) {
-        context.coordinator.load(url, in: nsView, token: reloadToken)
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
 
     /// Loads only when the address or the reload counter actually changed, so a
     /// SwiftUI redraw cannot restart a page the user is using.
-    @MainActor
-    final class Coordinator {
-        private var loadedURL: URL?
-        private var loadedToken: Int?
-
-        func load(_ url: URL, in view: WKWebView, token: Int) {
-            guard loadedURL != url || loadedToken != token else { return }
-            loadedURL = url
-            loadedToken = token
-            view.load(URLRequest(url: url))
-        }
-    }
+    func updateNSView(_ nsView: WKWebView, context: Context) {}
 }
 
 /// A plain scratch pad, saved per working folder as the user types.
@@ -221,9 +245,9 @@ private struct NotesPane: View {
                 .scrollContentBackground(.hidden)
                 .padding(.horizontal, 6)
                 .padding(.bottom, 6)
+                .accessibilityLabel("Notes for \(directory.abbreviatedPath)")
         }
         .background(palette.ground)
-        .accessibilityLabel("Notes for \(directory.abbreviatedPath)")
     }
 }
 

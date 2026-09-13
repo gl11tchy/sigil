@@ -9,17 +9,34 @@ struct RootView: View {
     private var palette: Palette { Palette(theme: model.settings.theme) }
 
     var body: some View {
-        HStack(spacing: 0) {
-            if model.isSidebarVisible {
-                SidebarView(model: model)
-                    .frame(width: sidebarWidth)
-                SplitDivider(width: $sidebarWidth)
-            }
-            detail
-            if model.panel.isVisible {
-                PanelDivider(width: Bindable(model.panel).width)
-                RightPanelView(model: model)
-                    .frame(width: model.panel.width)
+        GeometryReader { geometry in
+            let columns = WindowColumns(
+                width: geometry.size.width,
+                sidebarWidth: model.isSidebarVisible ? sidebarWidth : nil,
+                panelWidth: model.panel.isVisible ? model.panel.width : nil
+            )
+            HStack(spacing: 0) {
+                if model.isSidebarVisible {
+                    SidebarView(model: model)
+                        .frame(width: columns.sidebar)
+                    SplitDivider(
+                        width: Binding(
+                            get: { columns.sidebar },
+                            set: { sidebarWidth = $0 }
+                        )
+                    )
+                }
+                detail
+                if model.panel.isVisible {
+                    PanelDivider(
+                        width: Binding(
+                            get: { columns.panel },
+                            set: { model.panel.width = $0 }
+                        )
+                    )
+                    RightPanelView(model: model, availableWidth: columns.panel)
+                        .frame(width: columns.panel)
+                }
             }
         }
         .background(palette.ground)
@@ -30,6 +47,14 @@ struct RootView: View {
             NewSessionSheet(model: model)
         }
         .task { await model.onAppear() }
+        .task(id: model.selectedTabID) {
+            await Task.yield()
+            model.focusSelectedTerminal()
+        }
+        .onChange(of: model.isShowingNewSessionSheet) { _, shown in
+            if !shown { model.focusSelectedTerminal() }
+        }
+        .ignoresSafeArea(.container, edges: .top)
     }
 
     // MARK: - Detail column
@@ -44,12 +69,14 @@ struct RootView: View {
 
     @ViewBuilder
     private var content: some View {
-        if !model.settings.executableExists {
-            MissingCLIView(path: model.settings.executablePath)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if model.tabs.isEmpty {
-            EmptyDetailView { model.newTab(in: model.currentDirectory) }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        if model.tabs.isEmpty {
+            if !model.settings.executableExists {
+                MissingCLIView(path: model.settings.executablePath)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                EmptyDetailView { model.newTab(in: model.currentDirectory) }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         } else {
             VStack(spacing: 0) {
                 ZStack(alignment: .topTrailing) {
@@ -114,6 +141,7 @@ struct RootView: View {
 private struct TopBar: View {
     @Bindable var model: AppModel
     @Environment(\.palette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 0) {
@@ -126,7 +154,9 @@ private struct TopBar: View {
                 systemImage: "sidebar.leading",
                 help: model.isSidebarVisible ? "Hide Sidebar (⌘B)" : "Show Sidebar (⌘B)"
             ) {
-                withAnimation(.easeOut(duration: 0.14)) { model.isSidebarVisible.toggle() }
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) {
+                    model.isSidebarVisible.toggle()
+                }
             }
             .padding(.leading, model.isSidebarVisible ? 8 : 0)
 
@@ -141,12 +171,13 @@ private struct TopBar: View {
                 systemImage: "sidebar.trailing",
                 help: model.panel.isVisible ? "Hide Panel (⌥⌘B)" : "Show Panel (⌥⌘B)"
             ) {
-                withAnimation(.easeOut(duration: 0.14)) { model.togglePanel() }
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) { model.togglePanel() }
             }
 
             IconButton(systemImage: "plus", help: "New Session in \(model.currentDirectory.abbreviatedPath) (⌘T)") {
                 model.newTab(in: model.currentDirectory)
             }
+            .disabled(!model.settings.executableExists)
             Menu {
                 Button("New Session in Folder…") { model.isShowingNewSessionSheet = true }
                 Divider()
@@ -159,6 +190,7 @@ private struct TopBar: View {
             .frame(width: 20)
             .foregroundStyle(palette.textDim)
             .padding(.trailing, 10)
+            .accessibilityLabel("Session actions")
         }
         .frame(height: 36)
         .background(palette.ground)
@@ -282,27 +314,29 @@ private struct BridgeInboxBanner: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "tray.and.arrow.down")
-                .foregroundStyle(palette.accent)
-            Text(prompt)
-                .font(.system(size: 10.5))
-                .foregroundStyle(palette.textDim)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            if pendingCount > 1 {
-                Text("\(pendingCount) queued")
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundStyle(palette.textFaint)
+        VStack(alignment: .leading, spacing: 8) {
+            ScrollView {
+                Text(prompt)
+                    .font(.system(size: 11))
+                    .foregroundStyle(palette.textDim)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
             }
-            Spacer(minLength: 0)
-            Button("Dismiss", action: dismiss)
-            Button("Deliver", action: deliver)
-                .buttonStyle(.borderedProminent)
-                .disabled(!canDeliver)
+            .frame(maxHeight: 96)
+            HStack {
+                if pendingCount > 1 {
+                    Text("\(pendingCount) queued")
+                        .font(.system(size: 9.5, design: .monospaced))
+                        .foregroundStyle(palette.textFaint)
+                }
+                Spacer(minLength: 0)
+                Button("Dismiss", action: dismiss)
+                Button("Deliver", action: deliver)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canDeliver)
+            }
         }
-        .padding(.horizontal, 10)
-        .frame(height: 36)
+        .padding(10)
         .background(palette.raised)
         .overlay(alignment: .top) { Rectangle().fill(palette.hairline).frame(height: 1) }
         .accessibilityElement(children: .contain)
@@ -408,7 +442,7 @@ private struct ExitedBanner: View {
     var body: some View {
         HStack(spacing: 7) {
             Circle()
-                .fill(activity.endedInFailure ? Color.red.opacity(0.8) : palette.textFaint)
+                .fill(activity.endedInFailure ? palette.error : palette.textFaint)
                 .frame(width: 6, height: 6)
             Text(
                 activity.endedInFailure
@@ -446,5 +480,25 @@ extension URL {
         let names = pathComponents.filter { $0 != "/" }
         guard names.count >= 2 else { return abbreviatedPath }
         return names.suffix(2).joined(separator: "/")
+    }
+}
+
+struct WindowColumns: Equatable {
+    let sidebar: Double
+    let panel: Double
+
+    static func minimumWidth(sidebarVisible: Bool, panelVisible: Bool) -> Double {
+        max(760, 400 + (sidebarVisible ? 201 : 0) + (panelVisible ? 281 : 0))
+    }
+
+    init(width: Double, sidebarWidth: Double?, panelWidth: Double?) {
+        let total = width.isFinite ? max(0, width) : 0
+        let seams = (sidebarWidth == nil ? 0.0 : 1.0) + (panelWidth == nil ? 0.0 : 1.0)
+        let available = max(0, total - 400 - seams)
+        let panelReserve = panelWidth == nil ? 0 : min(280, available)
+        let wantedSidebar = sidebarWidth.map { $0.isFinite ? min(430, max(200, $0)) : 272 } ?? 0
+        sidebar = min(wantedSidebar, max(0, available - panelReserve))
+        let wantedPanel = panelWidth.map { $0.isFinite ? min(900, max(280, $0)) : 380 } ?? 0
+        panel = min(wantedPanel, max(0, available - sidebar))
     }
 }

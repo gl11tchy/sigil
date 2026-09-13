@@ -5,7 +5,8 @@ const drafts = new Map();
 let tabsSignature = '';
 let rawOutput = '', rawMode = false;
 let credential, bootstrap, newDeviceKey, socket, challenge, sequence = 0, selected;
-let connected = false, busy = false, stopped = false, reconnectTimer, pollTimer, generation = 0;
+let selectedStatus = null, tabCount = 0;
+let connected = false, busy = false, stopped = false, reconnectTimer, pollTimer, connectTimer, generation = 0;
 let incoming = Promise.resolve(), outgoing = Promise.resolve(), pending = new Map();
 const showError = text => { $('error').textContent = text; $('error').hidden = !text; };
 
@@ -29,13 +30,16 @@ async function storage(mode, value) {
 }
 function updateControls() {
   const disabled = !connected || busy;
+  const ended = selectedStatus === 'exited';
   document.querySelectorAll('#controls button, #controls textarea, #session-toolbar button, #session-toolbar select').forEach(element => {
     // Never disable a focused editor while a command is pending: it closes the phone keyboard.
     if (element.id === 'message') { element.disabled = !selected; return; }
     if (element.id === 'keys-toggle' || element.id === 'latest') { element.disabled = false; return; }
-    element.disabled = disabled || (!selected && element.id !== 'new');
+    if (element.id === 'new') { element.disabled = disabled; return; }
+    if (element.id === 'tabs') { element.disabled = disabled || tabCount === 0; return; }
+    element.disabled = disabled || !selected || ended;
   });
-  $('send').disabled = disabled || !selected || !$('message').value.trim();
+  $('send').disabled = disabled || !selected || ended || !$('message').value.trim();
   $('raw-toggle').hidden = !selected;
   $('forget').hidden = !credential;
   $('reconnect').hidden = !credential || connected;
@@ -45,27 +49,43 @@ function offline(message = 'Disconnected') {
   $('status').textContent = message;
   $('status').dataset.connected = 'false';
   clearTimeout(pollTimer);
+  clearTimeout(connectTimer);
   for (const item of pending.values()) { clearTimeout(item.timer); item.reject(new Error('Connection lost. Check the terminal before sending again.')); }
   pending.clear();
   updateControls();
 }
 function render(state) {
   if (!state || !Array.isArray(state.tabs) || state.tabs.length > 100 || typeof state.terminal !== 'string') throw new Error('Invalid Mac response');
-  const changedSession = selected !== state.selectedTabID;
+  const nextSelected = state.selectedTabID ?? null;
+  const ids = new Set();
+  for (const tab of state.tabs) {
+    if (!tab || typeof tab.id !== 'string' || !tab.id || typeof tab.title !== 'string'
+      || !['starting', 'working', 'idle', 'exited'].includes(tab.status) || ids.has(tab.id)) {
+      throw new Error('Invalid Mac response');
+    }
+    ids.add(tab.id);
+  }
+  if (nextSelected !== null && (typeof nextSelected !== 'string' || !ids.has(nextSelected))) {
+    throw new Error('Invalid Mac response');
+  }
+  const changedSession = selected !== nextSelected;
   if (changedSession) {
     if (selected) drafts.set(selected, $('message').value);
-    $('message').value = drafts.get(state.selectedTabID) || '';
+    $('message').value = drafts.get(nextSelected) || '';
   }
-  selected = state.selectedTabID;
+  selected = nextSelected;
+  selectedStatus = selected ? state.tabs.find(tab => tab.id === selected).status : null;
+  tabCount = state.tabs.length;
   for (const id of drafts.keys()) { if (!state.tabs.some(tab => tab.id === id)) drafts.delete(id); }
   const tabs = state.tabs.map(tab => {
-    if (typeof tab.id !== 'string' || typeof tab.title !== 'string' || typeof tab.status !== 'string') throw new Error('Invalid tab');
     const option = document.createElement('option');
     option.value = tab.id;
-    option.textContent = `${tab.title}${tab.status === 'working' ? ' · Working' : ''}`;
+    const suffix = tab.status === 'working' ? ' · Working'
+      : tab.status === 'exited' ? ' · Ended' : tab.status === 'starting' ? ' · Starting' : '';
+    option.textContent = `${tab.title}${suffix}`;
     return option;
   });
-  if (!tabs.length) { const empty = document.createElement('option'); empty.textContent = 'No open sessions'; tabs.push(empty); }
+  if (!tabs.length) { const empty = document.createElement('option'); empty.value = ''; empty.textContent = 'No open sessions'; tabs.push(empty); }
   const signature = JSON.stringify(state.tabs);
   if (signature !== tabsSignature) { $('tabs').replaceChildren(...tabs); tabsSignature = signature; }
   $('tabs').value = selected || '';
@@ -83,8 +103,9 @@ function renderOutput(changedSession = false) {
   const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
   const output = rawMode ? rawOutput : readableOutput(rawOutput);
   $('empty-output').hidden = Boolean(output);
-  $('empty-output').querySelector('h2').textContent = selected ? 'Ready when you are.' : 'No open sessions.';
-  $('empty-output').querySelector('p').textContent = selected ? 'Send a message to this session.' : 'Choose New to start a session.';
+  const ended = Boolean(selected) && selectedStatus === 'exited';
+  $('empty-output').querySelector('h2').textContent = ended ? 'Session ended' : selected ? 'Ready when you are.' : 'No open sessions.';
+  $('empty-output').querySelector('p').textContent = ended ? 'Restart this session in Sigil on your Mac.' : selected ? 'Send a message to this session.' : 'Choose New to start a session.';
   terminal.dataset.raw = String(rawMode);
   if (terminal.textContent !== output || changedSession) {
     terminal.textContent = output;
@@ -139,6 +160,11 @@ function connect() {
   url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   url.search = new URLSearchParams({ room: credential.room, role: 'phone' });
   const ws = socket = new WebSocket(url);
+  connectTimer = setTimeout(() => {
+    if (current !== generation || socket !== ws) return;
+    showError('The Mac did not respond. Keep Sigil open and try again.');
+    ws.close();
+  }, 10000);
   incoming = Promise.resolve();
   ws.onmessage = event => {
     incoming = incoming.then(async () => {
@@ -152,6 +178,7 @@ function connect() {
         authorization.then(() => {
           if (current !== generation) return;
           bootstrap = null; newDeviceKey = null;
+          clearTimeout(connectTimer);
           connected = true; busy = false;
           $('status').textContent = 'Connected'; $('status').dataset.connected = 'true';
           showError(''); updateControls(); poll();
@@ -165,9 +192,13 @@ function connect() {
         if (current !== generation) return;
         const item = pending.get(reply.sequence);
         if (!item || reply.challenge !== challenge) throw new Error('Invalid response');
-        pending.delete(reply.sequence); clearTimeout(item.timer);
-        if (reply.ok !== true) { item.reject(new Error(reply.error || 'The Mac could not complete this action.')); return; }
+        if (reply.ok !== true) {
+          pending.delete(reply.sequence); clearTimeout(item.timer);
+          item.reject(new Error(reply.error || 'The Mac could not complete this action.'));
+          return;
+        }
         if (reply.state) render(reply.state);
+        pending.delete(reply.sequence); clearTimeout(item.timer);
         item.resolve(reply);
       } else throw new Error('Invalid response');
     }).catch(() => { if (current === generation) { showError('Could not verify the connection.'); ws.close(); } });
@@ -181,9 +212,11 @@ function connect() {
 }
 async function perform(work) {
   if (!connected || busy) return;
+  const current = generation;
   busy = true; updateControls(); showError('');
-  try { await work(); } catch (error) { showError(error.message); }
-  finally { busy = false; updateControls(); }
+  try { await work(); }
+  catch (error) { showError(error.message); $('tabs').value = selected || ''; }
+  finally { if (generation === current) { busy = false; updateControls(); } }
 }
 async function sendText(submit) {
   const text = $('message').value;
@@ -192,11 +225,15 @@ async function sendText(submit) {
   const target = selected, current = generation;
   await request('input', text, target);
   if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
-  if (selected === target && $('message').value === text) { $('message').value = ''; resizeMessage(); }
   if (submit) {
     await new Promise(resolve => setTimeout(resolve, 100));
     if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
     await request('key', 'enter', target);
+  }
+  if (selected === target && $('message').value === text) {
+    $('message').value = ''; resizeMessage();
+  } else if (selected !== target && drafts.get(target) === text) {
+    drafts.delete(target);
   }
 }
 function updateLatest() {
@@ -254,6 +291,7 @@ $('reconnect').onclick = () => { stopped = false; connect(); };
 $('forget').onclick = async () => {
   stopped = true; ++generation; clearTimeout(reconnectTimer); socket?.close(); offline();
   credential = null; bootstrap = null; newDeviceKey = null; selected = null; drafts.clear(); tabsSignature = '';
+  selectedStatus = null; tabCount = 0;
   $('keys').hidden = true; $('keys-toggle').setAttribute('aria-expanded', 'false');
   rawOutput = ''; rawMode = false;
   $('raw-toggle').setAttribute('aria-pressed', 'false'); $('raw-toggle').textContent = 'Show raw terminal';
@@ -262,6 +300,14 @@ $('forget').onclick = async () => {
   try { await storage('delete'); showError(''); } catch { showError('Could not clear pairing. Clear this site’s data in browser settings.'); }
   updateControls();
 };
+document.addEventListener('keydown', event => {
+  const details = $('connection');
+  if (event.key === 'Escape' && details.open) { details.open = false; $('connection-toggle').focus(); }
+});
+document.addEventListener('pointerdown', event => {
+  const details = $('connection');
+  if (details.open && !details.contains(event.target)) details.open = false;
+});
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { clearTimeout(pollTimer); }
   else if (connected) poll();

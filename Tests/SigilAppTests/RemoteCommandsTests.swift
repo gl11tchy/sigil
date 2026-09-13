@@ -90,6 +90,35 @@ struct RemoteCommandsTests {
         #expect(request.results?.first?.payloadStringValue == value)
     }
 
+    @Test @MainActor func visibleTabsKeepsASelectedTabBeyondTheFirstHundred() {
+        let tabs = (0..<101).map { RemoteState.Tab(id: "tab-\($0)", title: "Tab \($0)", status: "idle") }
+        let visible = RemoteCommands.visibleTabs(tabs, selectedID: "tab-100")
+        #expect(visible.count == 100)
+        #expect(visible.last?.id == "tab-100")
+        #expect(Set(visible.map(\.id)).count == 100)
+        #expect(visible.prefix(99).map(\.id) == tabs.prefix(99).map(\.id))
+        #expect(tabs.count == 101)
+        let few = Array(tabs.prefix(50))
+        #expect(RemoteCommands.visibleTabs(few, selectedID: "tab-10").map(\.id) == few.map(\.id))
+        #expect(RemoteCommands.visibleTabs(few, selectedID: "missing").map(\.id) == few.map(\.id))
+    }
+
+    @Test @MainActor func boundedStringsCutOnScalarBoundariesWithoutReplacementCharacters() {
+        let cut = RemoteCommands.bounded(String(repeating: "é", count: 60), bytes: 97)
+        #expect(cut == String(repeating: "é", count: 48))
+        #expect(!cut.contains("\u{FFFD}"))
+        #expect(cut.utf8.count <= 97)
+        let tail = RemoteCommands.boundedSuffix("start-" + String(repeating: "\u{1D11E}", count: 10), bytes: 18)
+        #expect(tail == String(repeating: "\u{1D11E}", count: 4))
+        #expect(!tail.contains("\u{FFFD}"))
+        #expect(tail.utf8.count <= 18)
+        #expect(RemoteCommands.bounded("héllo", bytes: 3) == "hé")
+        #expect(RemoteCommands.bounded("short", bytes: 96) == "short")
+        #expect(RemoteCommands.boundedSuffix("end", bytes: 12_000) == "end")
+        #expect(RemoteCommands.bounded("abc", bytes: 0) == "")
+        #expect(RemoteCommands.boundedSuffix("abc", bytes: 0) == "")
+    }
+
     @Test @MainActor func stopRevokesPendingStartup() async {
         let remote = RemoteControl()
         let model = AppModel()

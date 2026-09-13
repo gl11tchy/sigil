@@ -45,7 +45,7 @@ By gl11tchy.
   no tab messaging.
 - **Status light.** A green dot per tab while the agent is working, and a dot on the
   Dock icon when a background tab finishes a turn.
-- **Themes and font size**, applied live to running sessions.
+- **Terminal colors and font size**, applied live; reopen a session to apply Grok’s interface theme.
 - **Transcript export**, through `grok export`.
 - **Delete**, from the row's context menu. The conversation folder goes to the Trash.
 - **Tab restore.** The sessions you had open come back on the next launch. Starting the
