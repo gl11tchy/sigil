@@ -49,7 +49,7 @@ struct TerminalFindBar: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
                         .strokeBorder(
-                            isFieldFocused ? palette.accent.opacity(0.45) : palette.hairline,
+                            isFieldFocused ? palette.accent : palette.hairline,
                             lineWidth: 1
                         )
                 )

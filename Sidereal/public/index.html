@@ -20,8 +20,8 @@
       <div class="session-picker"><label for="tabs">Sigil</label><select id="tabs" aria-label="Session"></select><span class="session-chevron" aria-hidden="true">⌄</span></div>
       <button id="new" type="button" aria-label="New session">New</button>
     </div>
-    <details class="connection">
-      <summary aria-label="Connection settings"><span id="status" role="status">Not connected</span><span aria-hidden="true">⌄</span></summary>
+    <details class="connection" id="connection">
+      <summary id="connection-toggle" aria-label="Connection settings"><span id="status" role="status">Not connected</span><span aria-hidden="true">⌄</span></summary>
       <div class="connection-panel">
         <p>Keep Sigil open and your Mac awake.</p>
         <button id="raw-toggle" type="button" aria-pressed="false" hidden>Show raw terminal</button>

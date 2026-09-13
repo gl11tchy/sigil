@@ -22,6 +22,10 @@ struct NewSessionSheet: View {
         .map { $0 }
     }
 
+    private var recentChoices: [URL] {
+        recents.contains(directory) ? recents : [directory] + recents
+    }
+
     private var directoryIsAvailable: Bool { isDirectory(directory) }
 
     var body: some View {
@@ -53,7 +57,7 @@ struct NewSessionSheet: View {
 
                 if !recents.isEmpty {
                     Picker("Recent", selection: $directory) {
-                        ForEach(recents, id: \.self) { url in
+                        ForEach(recentChoices, id: \.self) { url in
                             Text(url.abbreviatedPath).tag(url)
                         }
                     }
@@ -65,7 +69,7 @@ struct NewSessionSheet: View {
 
                 Picker("Effort", selection: $effort) {
                     ForEach(AppSettings.effortOptions, id: \.self) { option in
-                        Text(option.isEmpty ? "Default" : option.capitalized).tag(option)
+                        Text(option.isEmpty ? "CLI default" : option.capitalized).tag(option)
                     }
                 }
             }

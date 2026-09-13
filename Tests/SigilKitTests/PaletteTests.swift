@@ -45,6 +45,15 @@ struct PaletteTests {
         }
     }
 
+    @Test(arguments: TerminalTheme.all)
+    func accentAndErrorsAreReadableAsText(theme: TerminalTheme) {
+        let palette = Palette(theme: theme)
+        for background in [palette.groundHex, palette.sidebarHex, palette.raisedHex, palette.selectedHex] {
+            #expect(Palette.contrast(palette.accentHex, background) >= 4.5)
+            #expect(Palette.contrast(palette.errorHex, background) >= 4.5)
+        }
+    }
+
     /// A tinted terminal theme must not tint the chrome.
     @Test func panelGreysAreNeutral() {
         let palette = Palette(theme: .grokEmber)

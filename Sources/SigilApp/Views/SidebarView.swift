@@ -90,10 +90,12 @@ struct SidebarView: View {
                 .font(.system(size: 11.5))
                 .foregroundStyle(palette.text)
                 .focused($focus, equals: .search)
+                .onSubmit(activateSearchResult)
                 .onKeyPress(.downArrow) { moveFocusToList() }
                 .onKeyPress(Self.f2) { renameKeyboardSelection() }
                 .onKeyPress(.escape) { handleEscape() }
                 .onExitCommand { _ = handleEscape() }
+                .accessibilityLabel("Search conversations")
             if !model.searchText.isEmpty {
                 Button {
                     model.searchText = ""
@@ -102,8 +104,10 @@ struct SidebarView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(palette.textFaint)
+                .accessibilityLabel("Clear conversation search")
+                .help("Clear search")
             } else if focus != .search {
-                KbdChip(label: "⌘F", palette: palette)
+                KbdChip(label: "⌘⇧F", palette: palette)
                     .transition(.opacity)
             }
         }
@@ -115,7 +119,7 @@ struct SidebarView: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
                         .strokeBorder(
-                            focus == .search ? palette.accent.opacity(0.45) : Color.clear,
+                            focus == .search ? palette.accent : Color.clear,
                             lineWidth: 1
                         )
                 )
@@ -129,7 +133,7 @@ struct SidebarView: View {
     // MARK: - Mode
 
     private var modeRow: some View {
-        HStack(alignment: .bottom, spacing: 16) {
+        HStack(alignment: .bottom, spacing: 8) {
             ForEach(SidebarMode.allCases) { mode in
                 let selected = model.settings.sidebarMode == mode
                 Button {
@@ -144,6 +148,8 @@ struct SidebarView: View {
                 } label: {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(mode.title)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(
                                 selected
@@ -480,6 +486,8 @@ struct SidebarView: View {
     }
 
     private var emptyTitle: String {
+        if model.store.isLoading { return "Loading conversations…" }
+        if model.store.loadError != nil { return "Could not load conversations" }
         if !model.searchText.isEmpty { return "No matches" }
         if model.showingArchived { return "No archived conversations" }
         return "No conversations yet"
@@ -487,7 +495,15 @@ struct SidebarView: View {
 
     @ViewBuilder
     private var emptyHint: some View {
-        if !model.searchText.isEmpty {
+        if let error = model.store.loadError {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(error)
+                Button("Retry") { Task { await model.store.reload() } }
+                    .controlSize(.small)
+            }
+        } else if model.store.isLoading {
+            EmptyView()
+        } else if !model.searchText.isEmpty {
             Text("Nothing matches “\(model.searchText)”.")
         } else if model.scopeToCurrentFolder {
             Text("Turn off the folder filter to see the rest.")
@@ -535,7 +551,19 @@ struct SidebarView: View {
             return .handled
         }
         focus = nil
+        model.focusSelectedTerminal()
         return .handled
+    }
+
+    private func activateSearchResult() {
+        guard
+            let id = SidebarOrganization.activationKey(
+                preferred: keyboardSelectionID, in: visibleRowIDs()),
+            let session = session(for: id)
+        else { return }
+        keyboardSelectionID = id
+        focus = nil
+        model.open(session)
     }
 
     private func beginInlineRename(_ session: GrokSession) {
@@ -768,9 +796,10 @@ struct SidebarView: View {
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(
                     model.store.loadError == nil
-                        ? AnyShapeStyle(palette.textFaint) : AnyShapeStyle(Color.red.opacity(0.85))
+                        ? AnyShapeStyle(palette.textFaint) : AnyShapeStyle(palette.error)
                 )
                 .lineLimit(1)
+                .help(statusText)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
@@ -785,11 +814,13 @@ struct SidebarView: View {
             return threads == 1 ? "1 archived" : "\(threads) archived"
         }
         let threads = model.sidebarSessions.count
+        let threadLabel = threads == 1 ? "1 thread" : "\(threads) threads"
         let pinned = model.pinnedSessions().count
         if model.settings.sidebarMode == .projects {
             let folders = model.sidebarProjects.count
+            let folderLabel = folders == 1 ? "1 project" : "\(folders) projects"
             let pinnedFolders = model.pinnedProjects().count
-            var parts = ["\(threads) threads", "\(folders) projects"]
+            var parts = [threadLabel, folderLabel]
             if pinned > 0 { parts.append("\(pinned) pinned") }
             if pinnedFolders == 1 {
                 parts.append("1 pinned project")
@@ -799,9 +830,9 @@ struct SidebarView: View {
             return parts.joined(separator: " · ")
         }
         if pinned > 0 {
-            return "\(threads) threads · \(pinned) pinned"
+            return "\(threadLabel) · \(pinned) pinned"
         }
-        return "\(threads) threads"
+        return threadLabel
     }
 }
 
@@ -849,7 +880,10 @@ private struct ProjectSectionHeader: View {
         .contextMenu {
             Button(isPinned ? "Unpin Project" : "Pin Project", action: togglePin)
         }
-        .help(isPinned ? "Unpin this project" : "Pin this project")
+        .help(
+            "\(paths.first { $0.hasPrefix("/") || $0.hasPrefix("~") } ?? title)\n"
+                + (isPinned ? "Unpin this project" : "Pin this project")
+        )
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
         .accessibilityLabel(
@@ -972,6 +1006,7 @@ private struct ScopeToggle: View {
         .onHover { isHovering = $0 }
         .help(helpText)
         .accessibilityLabel(helpText)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }
 
@@ -1051,6 +1086,8 @@ private struct SessionRow: View {
                 )
             )
             .accessibilityLabel(rowAccessibilityLabel)
+            .accessibilityValue(rowAccessibilityValue)
+            .accessibilityAddTraits(state == .active ? .isSelected : [])
             .accessibilityAction(named: isPinned ? "Unpin" : "Pin") { togglePin() }
             .accessibilityAction(named: isArchived ? "Unarchive" : "Archive") {
                 toggleArchive()
@@ -1088,7 +1125,7 @@ private struct SessionRow: View {
                 .truncationMode(textTruncationMode(paint.subtitleTruncation))
             }
             Spacer(minLength: 8)
-            if let activity, activity == .working, !isRenaming {
+            if let activity, activity == .working || state == .open, !isRenaming {
                 StatusDot(activity: activity)
             }
         }
@@ -1117,6 +1154,17 @@ private struct SessionRow: View {
     private var rowHelpText: String {
         "\(title)\n\(session.displayPath)\n"
             + "\(session.messageCount) messages · \(session.updatedAt.longRelative)"
+    }
+
+    private var rowAccessibilityValue: String {
+        var value: String
+        switch state {
+        case .active: value = "Selected"
+        case .open: value = "Open in another tab"
+        case .closed: value = "Closed"
+        }
+        if activity == .working { value += ", working" }
+        return value
     }
 
     private var rowAccessibilityLabel: String {

@@ -4,6 +4,7 @@ import SwiftUI
 /// once a second session is open.
 struct TabStripView: View {
     @Bindable var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -26,8 +27,9 @@ struct TabStripView: View {
             .scrollIndicators(.hidden)
             .task(id: model.selectedTabID) {
                 await Task.yield()
+                guard !Task.isCancelled else { return }
                 if let id = model.selectedTabID {
-                    withAnimation(.easeOut(duration: 0.12)) {
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.12)) {
                         proxy.scrollTo(id, anchor: .center)
                     }
                 }

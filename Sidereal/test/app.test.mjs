@@ -15,6 +15,7 @@ async function browser() {
   const element = id => {
     if (!elements.has(id)) elements.set(id, {
       id, value: '', textContent: '', hidden: false, disabled: false, dataset: {}, style: {},
+      open: false, focus() {}, contains() { return false; },
       getAttribute(name) { return this[name]; }, setAttribute(name, value) { this[name] = value; },
       scrollHeight: 0, scrollTop: 0, clientHeight: 0,
       querySelector(selector) { return element(`${id}-${selector}`); },
@@ -100,23 +101,194 @@ async function browser() {
   return { element, events, location, sockets, authorize, fireTimer, submit, reloads: () => reloads };
 }
 
-test('Send pastes and submits exactly once on an unchanged connection', async () => {
+test('Send clears the draft only after the Enter acknowledgement', async () => {
   const page = await browser();
   const socket = await page.authorize();
   page.submit();
   await settle();
   assert.equal(socket.sent.at(-1).action, 'input');
   assert.equal(socket.sent.at(-1).text, 'fixture input');
+  assert.equal(socket.sent.at(-1).tabID, 'tab-1');
   socket.reply();
   await settle();
-  assert.equal(page.element('message').value, '');
+  assert.equal(page.element('message').value, 'fixture input');
   await page.fireTimer(100);
   assert.deepEqual(socket.sent.map(request => request.action), ['state', 'input', 'key']);
   assert.equal(socket.sent.at(-1).text, 'enter');
   assert.equal(socket.sent.at(-1).tabID, 'tab-1');
   socket.reply();
   await settle();
+  assert.equal(page.element('message').value, '');
   assert.equal(page.element('send').disabled, true); // Empty messages cannot be sent.
+});
+
+test('a refused Enter keeps the sent draft and reports the failure', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.submit();
+  await settle();
+  socket.reply();
+  await settle();
+  await page.fireTimer(100);
+  const enter = socket.sent.at(-1);
+  assert.equal(enter.action, 'key');
+  socket.receive({ data: JSON.stringify({
+    challenge: enter.challenge, sequence: enter.sequence, ok: false, error: 'Refused.' }) });
+  await settle();
+  assert.equal(page.element('message').value, 'fixture input');
+  assert.equal(page.element('error').hidden, false);
+  assert.equal(socket.sent.at(-1).action, 'key');
+});
+
+test('a Mac tab switch during Send files the sent draft under its own tab', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.submit();
+  await settle();
+  const input = socket.sent.at(-1);
+  socket.receive({ data: JSON.stringify({ challenge: input.challenge, sequence: input.sequence, ok: true,
+    state: { tabs: [{ id: 'tab-1', title: 'One', status: 'idle' }, { id: 'tab-2', title: 'Two', status: 'idle' }],
+      selectedTabID: 'tab-2', terminal: 'TWO' } }) });
+  await settle();
+  assert.equal(page.element('message').value, '');
+  await page.fireTimer(100);
+  const enter = socket.sent.at(-1);
+  assert.equal(enter.action, 'key');
+  assert.equal(enter.tabID, 'tab-1');
+  socket.receive({ data: JSON.stringify({ challenge: enter.challenge, sequence: enter.sequence, ok: true,
+    state: { tabs: [{ id: 'tab-1', title: 'One', status: 'idle' }, { id: 'tab-2', title: 'Two', status: 'idle' }],
+      selectedTabID: 'tab-2', terminal: 'TWO' } }) });
+  await settle();
+  page.element('tabs').value = 'tab-1';
+  page.element('tabs').onchange();
+  await settle();
+  socket.reply();
+  await settle();
+  assert.equal(page.element('message').value, '');
+});
+
+test('a stale send finishing after reconnect cannot enable a newer in-flight send', async () => {
+  const page = await browser();
+  const original = await page.authorize();
+  page.submit();
+  await settle();
+  original.reply();
+  await settle();
+  original.close();
+  page.element('reconnect').onclick();
+  const replacement = await page.authorize();
+  page.element('message').value = 'second send';
+  page.submit();
+  await settle();
+  assert.equal(replacement.sent.at(-1).action, 'input');
+  await page.fireTimer(100);
+  await settle();
+  assert.equal(page.element('error').hidden, false);
+  assert.equal(page.element('send').disabled, true);
+});
+
+test('a malformed state rejects the command, closes the socket, and recovers', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('tabs').value = 'tab-1';
+  page.element('tabs').onchange();
+  await settle();
+  const request = socket.sent.at(-1);
+  assert.equal(request.action, 'select');
+  socket.receive({ data: JSON.stringify({ challenge: request.challenge, sequence: request.sequence, ok: true,
+    state: { tabs: [{ id: 'x', title: 'A', status: 'idle' }, { id: 'x', title: 'B', status: 'idle' }],
+      selectedTabID: 'x', terminal: '' } }) });
+  await settle();
+  assert.equal(socket.readyState, 3);
+  assert.equal(page.element('error').hidden, false);
+  page.element('reconnect').onclick();
+  const replacement = await page.authorize();
+  page.element('message').value = 'after recovery';
+  page.submit();
+  await settle();
+  assert.equal(replacement.sent.at(-1).action, 'input');
+});
+
+test('a state naming an unknown selected tab is rejected the same way', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('message').value = 'queued';
+  page.element('paste').onclick();
+  await settle();
+  const request = socket.sent.at(-1);
+  socket.receive({ data: JSON.stringify({ challenge: request.challenge, sequence: request.sequence, ok: true,
+    state: { tabs: [{ id: 'tab-1', title: 'A', status: 'idle' }], selectedTabID: 'ghost', terminal: '' } }) });
+  await settle();
+  assert.equal(socket.readyState, 3);
+  assert.equal(page.element('message').value, 'queued');
+});
+
+test('an unanswered connection reports and closes after ten seconds', async () => {
+  const page = await browser();
+  const socket = page.sockets.at(-1);
+  await page.fireTimer(10000);
+  assert.equal(socket.readyState, 3);
+  assert.match(page.element('error').textContent, /did not respond/);
+  page.element('reconnect').onclick();
+  await page.authorize();
+  assert.equal(page.element('status').textContent, 'Connected');
+});
+
+test('an ended session disables remote actions but keeps local editing and picker', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  await page.fireTimer(1000);
+  const request = socket.sent.at(-1);
+  assert.equal(request.action, 'state');
+  socket.receive({ data: JSON.stringify({ challenge: request.challenge, sequence: request.sequence, ok: true,
+    state: { tabs: [{ id: 'tab-1', title: 'Done', status: 'exited' }], selectedTabID: 'tab-1', terminal: '' } }) });
+  await settle();
+  assert.equal(page.element('tabs').children[0].textContent, 'Done · Ended');
+  assert.equal(page.element('send').disabled, true);
+  assert.equal(page.element('paste').disabled, true);
+  assert.equal(page.element('interrupt').disabled, true);
+  assert.equal(page.element('new').disabled, false);
+  assert.equal(page.element('tabs').disabled, false);
+  assert.equal(page.element('message').disabled, false);
+  assert.equal(page.element('empty-output-h2').textContent, 'Session ended');
+  assert.equal(page.element('empty-output-p').textContent, 'Restart this session in Sigil on your Mac.');
+});
+
+test('an empty session list keeps a labelled placeholder and disables the picker', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  await page.fireTimer(1000);
+  const request = socket.sent.at(-1);
+  socket.receive({ data: JSON.stringify({ challenge: request.challenge, sequence: request.sequence, ok: true,
+    state: { tabs: [], selectedTabID: null, terminal: '' } }) });
+  await settle();
+  const placeholder = page.element('tabs').children[0];
+  assert.equal(placeholder.value, '');
+  assert.equal(placeholder.textContent, 'No open sessions');
+  assert.equal(page.element('tabs').disabled, true);
+  assert.equal(page.element('new').disabled, false);
+  assert.equal(page.element('empty-output-h2').textContent, 'No open sessions.');
+});
+
+test('a failed selection restores the picker to the displayed session', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  await page.fireTimer(1000);
+  const poll = socket.sent.at(-1);
+  socket.receive({ data: JSON.stringify({ challenge: poll.challenge, sequence: poll.sequence, ok: true,
+    state: { tabs: [{ id: 'tab-1', title: 'One', status: 'idle' }, { id: 'tab-2', title: 'Two', status: 'idle' }],
+      selectedTabID: 'tab-1', terminal: '' } }) });
+  await settle();
+  page.element('tabs').value = 'tab-2';
+  page.element('tabs').onchange();
+  await settle();
+  const request = socket.sent.at(-1);
+  assert.equal(request.action, 'select');
+  socket.receive({ data: JSON.stringify({ challenge: request.challenge, sequence: request.sequence,
+    ok: false, error: 'This tab is closed.' }) });
+  await settle();
+  assert.equal(page.element('tabs').value, 'tab-1');
+  assert.equal(page.element('error').hidden, false);
 });
 
 test('Send does not submit Enter after its paste connection is replaced', async () => {

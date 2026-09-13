@@ -5,6 +5,22 @@ import Testing
 @testable import SigilApp
 
 struct SidebarOrganizationTests {
+    @Test func activationKeyPrefersTheCurrentSelection() {
+        let keys = ["a", "b", "c"]
+        #expect(SidebarOrganization.activationKey(preferred: "b", in: keys) == "b")
+        #expect(SidebarOrganization.activationKey(preferred: "stale", in: keys) == "a")
+        #expect(SidebarOrganization.activationKey(preferred: nil, in: keys) == "a")
+        #expect(SidebarOrganization.activationKey(preferred: "a", in: []) == nil)
+    }
+
+    @Test func projectsWithTheSameBasenameUseDisplayPaths() {
+        let first = session(id: "a", cwd: "/workspace/a/web", updated: 2)
+        let second = session(id: "b", cwd: "/workspace/b/web", updated: 1)
+        let unique = session(id: "c", cwd: "/workspace/c/unique", updated: 3)
+        let grouped = SidebarOrganization.projects(from: [unique, first, second]) { $0 }
+        #expect(grouped.map(\.name) == ["unique", "/workspace/a/web", "/workspace/b/web"])
+    }
+
     @Test func pinningPrependsAndIsIdempotentOnIdentity() {
         let first = session(id: "a", cwd: "/tmp/one", updated: 2)
         let second = session(id: "b", cwd: "/tmp/two", updated: 1)

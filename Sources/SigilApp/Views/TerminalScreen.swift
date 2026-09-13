@@ -40,6 +40,7 @@ struct TerminalScreen: View {
             )
             .onAppear { isPulsing = isWorking && !reduceMotion }
             .onChange(of: isWorking) { _, working in isPulsing = working && !reduceMotion }
+            .onChange(of: reduceMotion) { _, reduced in isPulsing = isWorking && !reduced }
             // The same 8pt gutter the sidebar and the screen's own inset use, so
             // the frame sits off the window edge by one consistent step.
             .padding(8)

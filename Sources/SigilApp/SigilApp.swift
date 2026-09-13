@@ -10,7 +10,13 @@ struct SigilApp: App {
     var body: some Scene {
         WindowGroup {
             RootView(model: model)
-                .frame(minWidth: 760, minHeight: 460)
+                .frame(
+                    minWidth: WindowColumns.minimumWidth(
+                        sidebarVisible: model.isSidebarVisible,
+                        panelVisible: model.panel.isVisible
+                    ),
+                    minHeight: 460
+                )
                 .onAppear { delegate.model = model }
         }
         .windowStyle(.hiddenTitleBar)
@@ -61,8 +67,10 @@ struct GrokCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Session") { model.newTab(in: model.currentDirectory) }
                 .keyboardShortcut("t", modifiers: .command)
+                .disabled(!model.settings.executableExists)
             Button("New Session in Folder…") { model.isShowingNewSessionSheet = true }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
+                .disabled(!model.settings.executableExists)
         }
 
         CommandGroup(after: .newItem) {
@@ -86,24 +94,12 @@ struct GrokCommands: Commands {
         CommandGroup(replacing: .pasteboard) {
             Button("Cut") { Self.performTextAction(#selector(NSText.cut(_:))) }
                 .keyboardShortcut("x", modifiers: .command)
-            Button("Copy") {
-                if !Self.performTextAction(#selector(NSText.copy(_:))) {
-                    model.selectedTab?.controller.copySelection()
-                }
-            }
-            .keyboardShortcut("c", modifiers: .command)
-            Button("Paste") {
-                if !Self.performTextAction(#selector(NSText.paste(_:))) {
-                    model.selectedTab?.controller.paste()
-                }
-            }
-            .keyboardShortcut("v", modifiers: .command)
-            Button("Select All") {
-                if !Self.performTextAction(#selector(NSText.selectAll(_:))) {
-                    model.selectedTab?.controller.selectAll()
-                }
-            }
-            .keyboardShortcut("a", modifiers: .command)
+            Button("Copy") { Self.performTextAction(#selector(NSText.copy(_:))) }
+                .keyboardShortcut("c", modifiers: .command)
+            Button("Paste") { Self.performTextAction(#selector(NSText.paste(_:))) }
+                .keyboardShortcut("v", modifiers: .command)
+            Button("Select All") { Self.performTextAction(#selector(NSText.selectAll(_:))) }
+                .keyboardShortcut("a", modifiers: .command)
         }
 
         CommandGroup(after: .pasteboard) {
@@ -154,6 +150,7 @@ struct GrokCommands: Commands {
             ForEach(1...9, id: \.self) { index in
                 Button("Tab \(index)") { model.select(index: index - 1) }
                     .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: .command)
+                    .disabled(model.tabs.count < index)
             }
         }
 
@@ -169,7 +166,6 @@ struct GrokCommands: Commands {
     /// it so these shortcuts do not steal from search, sheets, or Settings.
     @discardableResult
     private static func performTextAction(_ selector: Selector) -> Bool {
-        guard let text = NSApp.keyWindow?.firstResponder as? NSTextView else { return false }
-        return text.tryToPerform(selector, with: nil)
+        NSApp.sendAction(selector, to: nil, from: nil)
     }
 }

@@ -65,6 +65,41 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func restartingANeverCreatedNewSessionStaysNewAndPicksUpTheTheme() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        let original = try #require(model.newTab(in: cwd, model: "grok-4", effort: "high"))
+        let sessionID = try #require(original.sessionID)
+        fixture.settings.themeName = TerminalTheme.grokDay.name
+
+        model.restartTab(id: original.id)
+
+        let restarted = try #require(model.tabs.first)
+        #expect(restarted.sessionID == sessionID)
+        guard case .new = restarted.spec.mode else {
+            Issue.record("expected .new mode, got \(restarted.spec.mode)")
+            return
+        }
+        #expect(restarted.spec.themeName == TerminalTheme.grokDay.grokThemeName)
+        #expect(restarted.spec.model == original.spec.model)
+        #expect(restarted.spec.reasoningEffort == original.spec.reasoningEffort)
+
+        try fixture.createSession(id: sessionID, cwd: cwd)
+        model.restartTab(id: restarted.id)
+
+        let resumed = try #require(model.tabs.first)
+        guard case .resume(let resumedID) = resumed.spec.mode else {
+            Issue.record("expected .resume mode, got \(resumed.spec.mode)")
+            return
+        }
+        #expect(resumedID == sessionID)
+    }
+
+    @Test @MainActor
     func failedTrashRestartsOnlyStoppedTabAndPreservesSelectionAndSnapshot() throws {
         let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
         defer { fixture.cleanup() }
@@ -181,6 +216,80 @@ struct AppModelTests {
 
         #expect(try String(contentsOf: output, encoding: .utf8) == "original")
         #expect(try temporaryExports(nextTo: output).isEmpty)
+    }
+
+    @Test @MainActor
+    func selectingATabWhileTheWindowIsInactiveKeepsAPendingFocus() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        let first = try #require(model.newTab(in: cwd))
+        let second = try #require(model.newTab(in: cwd))
+        await flushMainAsync()
+        model.needsTerminalFocus = false
+
+        model.isFindBarVisible = true
+        model.select(second.id)
+        await flushMainAsync()
+        #expect(!model.needsTerminalFocus)
+        #expect(model.selectedTabID == second.id)
+
+        model.isFindBarVisible = false
+        model.select(first.id)
+        await flushMainAsync()
+        #expect(model.needsTerminalFocus)
+
+        model.appDidBecomeActive()
+        await flushMainAsync()
+        #expect(model.needsTerminalFocus)
+
+        model.windowDidBecomeKey()
+        await flushMainAsync()
+        #expect(model.needsTerminalFocus)
+    }
+
+    @Test @MainActor
+    func newTabTrimsWhitespaceInModelAndEffort() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        let trimmed = try #require(model.newTab(in: cwd, model: "  grok-4.6  ", effort: " high "))
+        #expect(trimmed.spec.model == "grok-4.6")
+        #expect(trimmed.spec.reasoningEffort == "high")
+
+        let blank = try #require(model.newTab(in: cwd, model: "   ", effort: " \t "))
+        #expect(blank.spec.model == nil)
+        #expect(blank.spec.reasoningEffort == nil)
+    }
+
+    @Test
+    func repeatedFastExportsFinishWithoutBlocking() async throws {
+        let root = try makeTemporaryTestDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let script = try makeExecutable(
+            in: root,
+            body: """
+                #!/bin/sh
+                printf 'body-%s' "$2" > "$3"
+                """
+        )
+        for index in 1...8 {
+            let output = root.appendingPathComponent("Transcript-\(index).md")
+            try await AppModel.runTranscriptExport(
+                executable: script,
+                sessionID: "session-\(index)",
+                output: output,
+                workingDirectory: root,
+                timeout: .seconds(2)
+            )
+            #expect(try String(contentsOf: output, encoding: .utf8) == "body-session-\(index)")
+        }
     }
 
     @Test
@@ -2642,7 +2751,8 @@ private final class ModelFixture {
                 registrationRunner: registrationRunner,
                 mcpBinary: mcpBinary,
                 tabMessagingSocketURL: socketURL,
-                canonicalPath: canonicalPath ?? { GrokPaths.canonicalPath($0) }
+                canonicalPath: canonicalPath ?? { GrokPaths.canonicalPath($0) },
+                panel: RightPanel(defaults: defaults)
             )
         }
         if let canonicalPath {
@@ -2651,14 +2761,16 @@ private final class ModelFixture {
                 store: store,
                 trashConversation: trashConversation,
                 presentError: presentError,
-                canonicalPath: canonicalPath
+                canonicalPath: canonicalPath,
+                panel: RightPanel(defaults: defaults)
             )
         }
         return AppModel(
             settings: settings,
             store: store,
             trashConversation: trashConversation,
-            presentError: presentError
+            presentError: presentError,
+            panel: RightPanel(defaults: defaults)
         )
     }
 
@@ -2703,6 +2815,13 @@ private func temporaryExports(nextTo output: URL) throws -> [URL] {
         at: output.deletingLastPathComponent(),
         includingPropertiesForKeys: nil
     ).filter { $0.lastPathComponent.hasPrefix(prefix) }
+}
+
+@MainActor
+private func flushMainAsync() async {
+    await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+        DispatchQueue.main.async { cont.resume() }
+    }
 }
 
 private func makeTemporaryTestDirectory() throws -> URL {

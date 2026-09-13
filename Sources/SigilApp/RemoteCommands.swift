@@ -58,26 +58,46 @@ enum RemoteCommands {
     }
 
     static func snapshot(_ model: AppModel) -> RemoteState {
-        RemoteState(
-            tabs: model.tabs.prefix(100).map { tab in
-                let status: String
-                switch tab.activity {
-                case .starting: status = "starting"
-                case .working: status = "working"
-                case .idle: status = "idle"
-                case .exited: status = "exited"
-                }
-                return RemoteState.Tab(
-                    id: tab.id.uuidString, title: bounded(model.title(for: tab), bytes: 96), status: status)
-            },
+        let tabs = model.tabs.map { tab in
+            let status: String
+            switch tab.activity {
+            case .starting: status = "starting"
+            case .working: status = "working"
+            case .idle: status = "idle"
+            case .exited: status = "exited"
+            }
+            return RemoteState.Tab(
+                id: tab.id.uuidString, title: bounded(model.title(for: tab), bytes: 96), status: status)
+        }
+        return RemoteState(
+            tabs: visibleTabs(tabs, selectedID: model.selectedTab?.id.uuidString),
             selectedTabID: model.selectedTab?.id.uuidString,
-            terminal: String(
-                decoding: (model.selectedTab?.controller.remoteSnapshot() ?? "").utf8.suffix(12_000), as: UTF8.self)
+            terminal: boundedSuffix(model.selectedTab?.controller.remoteSnapshot() ?? "", bytes: 12_000)
         )
     }
 
-    private static func bounded(_ text: String, bytes: Int) -> String {
-        String(decoding: text.utf8.prefix(bytes), as: UTF8.self)
+    static func visibleTabs(_ tabs: [RemoteState.Tab], selectedID: String?) -> [RemoteState.Tab] {
+        var visible = Array(tabs.prefix(100))
+        if let selectedID, !visible.contains(where: { $0.id == selectedID }),
+            let selected = tabs.first(where: { $0.id == selectedID }), !visible.isEmpty
+        {
+            visible[visible.count - 1] = selected
+        }
+        return visible
+    }
+
+    static func bounded(_ text: String, bytes: Int) -> String {
+        guard bytes > 0 else { return "" }
+        var cut = Array(text.utf8.prefix(bytes))
+        while String(bytes: cut, encoding: .utf8) == nil { cut.removeLast() }
+        return String(bytes: cut, encoding: .utf8) ?? ""
+    }
+
+    static func boundedSuffix(_ text: String, bytes: Int) -> String {
+        guard bytes > 0 else { return "" }
+        var cut = Array(text.utf8.suffix(bytes))
+        while String(bytes: cut, encoding: .utf8) == nil { cut.removeFirst() }
+        return String(bytes: cut, encoding: .utf8) ?? ""
     }
 
     private static func failure(_ request: RemoteRequest, _ message: String) -> RemoteReply {

@@ -17,7 +17,7 @@ final class AppModel {
     let settings: AppSettings
     let store: SessionStore
     /// The right-hand utility column: scratch shell, dev-server browser, notes.
-    let panel = RightPanel()
+    let panel: RightPanel
     let remoteControl = RemoteControl()
 
     private(set) var tabs: [TerminalTab] = []
@@ -32,6 +32,8 @@ final class AppModel {
     var isShowingNewSessionSheet = false
     /// Find-in-terminal bar for the selected tab.
     var isFindBarVisible = false
+    /// True when a tab was selected while the main window could not take focus.
+    var needsTerminalFocus = false
     var findQuery = ""
     var findMatchIndex = 0
     var findMatchCount = 0
@@ -90,10 +92,12 @@ final class AppModel {
         registrationRunner: BridgeRegistration.Runner? = nil,
         mcpBinary: URL? = nil,
         tabMessagingSocketURL: URL? = nil,
-        canonicalPath: (@Sendable (String) -> String)? = nil
+        canonicalPath: (@Sendable (String) -> String)? = nil,
+        panel: RightPanel? = nil
     ) {
         self.settings = settings
         self.store = store
+        self.panel = panel ?? RightPanel()
         self.trashConversation = trashConversation
         self.presentError = presentError
         self.registrationRunner = registrationRunner ?? BridgeRegistration.processRunner
@@ -1155,6 +1159,13 @@ final class AppModel {
         let old = tabs[index]
         // `.new` tabs already have a UUID the CLI wrote a session directory for.
         guard let sessionID = old.sessionID else { return }
+        guard Self.isUsableDirectory(old.workingDirectory) else {
+            showError(
+                title: "Folder is unavailable",
+                message: "Restore the folder, then try again."
+            )
+            return
+        }
         let wasSelected = selectedTabID == old.id
         tabBridge?.noteTabClosed(id: old.id)
         old.terminateAndWait()
@@ -1169,7 +1180,15 @@ final class AppModel {
     private func replacementTab(for old: TerminalTab, sessionID: String) -> TerminalTab {
         var spec = old.spec
         spec.executable = settings.executableURL
-        spec.mode = .resume(sessionID: sessionID)
+        if case .new = old.spec.mode,
+            let directory = old.spec.sessionDirectory,
+            !Self.isUsableDirectory(directory)
+        {
+            spec.mode = old.spec.mode
+        } else {
+            spec.mode = .resume(sessionID: sessionID)
+        }
+        spec.themeName = settings.theme.grokThemeName
         spec.bridgeTabID = nil
         spec.bridgeSocketPath = nil
         let tabID = UUID()
@@ -1227,8 +1246,22 @@ final class AppModel {
         tabs.first { $0.id == id }?.clearUnseenActivity()
         refreshDockIndicator()
         persistOpenTabs()
-        DispatchQueue.main.async { [weak self] in
-            self?.tabs.first { $0.id == id }?.controller.focus()
+        focusSelectedTerminal()
+    }
+
+    func focusSelectedTerminal() {
+        guard let tab = selectedTab else { return }
+        DispatchQueue.main.async { [weak self, weak tab] in
+            guard let self, let tab, self.selectedTab?.id == tab.id else { return }
+            guard !self.isFindBarVisible, !self.isShowingNewSessionSheet else { return }
+            guard let window = tab.controller.view.window, window.isKeyWindow,
+                window.attachedSheet == nil
+            else {
+                self.needsTerminalFocus = true
+                return
+            }
+            self.needsTerminalFocus = false
+            tab.controller.focus()
         }
     }
 
@@ -1430,6 +1463,16 @@ final class AppModel {
     func appDidBecomeActive() {
         selectedTab?.clearUnseenActivity()
         refreshDockIndicator()
+        retryPendingTerminalFocus()
+    }
+
+    func windowDidBecomeKey() {
+        retryPendingTerminalFocus()
+    }
+
+    private func retryPendingTerminalFocus() {
+        guard needsTerminalFocus else { return }
+        focusSelectedTerminal()
     }
 
     func executableConfigurationChanged() async {
@@ -1751,8 +1794,18 @@ final class AppModel {
             if process.isRunning {
                 Darwin.kill(process.processIdentifier, SIGKILL)
             }
-            process.waitUntilExit()
+            let stopDeadline = ContinuousClock.now + .seconds(2)
+            while process.isRunning, ContinuousClock.now < stopDeadline {
+                try? await Task.sleep(for: .milliseconds(25))
+            }
             await waitForReader(readerFinished, handle: pipe.fileHandleForReading)
+            guard !process.isRunning else {
+                throw TranscriptExportError(
+                    status: nil,
+                    output: "Could not stop the transcript export.",
+                    timedOut: false
+                )
+            }
             let text = captured.text
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if Task.isCancelled { throw CancellationError() }
@@ -1976,7 +2029,10 @@ final class AppModel {
 }
 
 extension String {
-    var nilIfEmpty: String? { isEmpty ? nil : self }
+    var nilIfEmpty: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
 }
 
 private enum TabMessagingChangeError: Error, LocalizedError, Sendable {

@@ -193,6 +193,58 @@ final class BridgeServerTests: XCTestCase {
         XCTAssertEqual(response.ok, true)
     }
 
+    func testStartRefusesToReplaceARegularFile() async throws {
+        let env = try TestEnv(start: false)
+        defer { env.tearDown() }
+        try Data("preserve-me".utf8).write(to: env.socketURL)
+
+        XCTAssertThrowsError(try env.server.start())
+        XCTAssertFalse(env.server.isListening)
+        XCTAssertEqual(try String(contentsOf: env.socketURL, encoding: .utf8), "preserve-me")
+    }
+
+    func testStartRefusesToReplaceASymlink() async throws {
+        let env = try TestEnv(start: false)
+        defer { env.tearDown() }
+        let target = env.socketURL.deletingLastPathComponent()
+            .appendingPathComponent("\(UUID().uuidString.prefix(8))-target")
+        try Data("preserve-me".utf8).write(to: target)
+        defer { try? FileManager.default.removeItem(at: target) }
+        try FileManager.default.createSymbolicLink(at: env.socketURL, withDestinationURL: target)
+
+        XCTAssertThrowsError(try env.server.start())
+        XCTAssertFalse(env.server.isListening)
+        let attributes = try FileManager.default.attributesOfItem(atPath: env.socketURL.path)
+        XCTAssertEqual(attributes[.type] as? FileAttributeType, .typeSymbolicLink)
+        XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), "preserve-me")
+    }
+
+    func testStartRefusesToFollowADanglingSymlink() async throws {
+        let env = try TestEnv(start: false)
+        defer { env.tearDown() }
+        let target = env.socketURL.deletingLastPathComponent()
+            .appendingPathComponent("\(UUID().uuidString.prefix(8))-missing")
+        try FileManager.default.createSymbolicLink(at: env.socketURL, withDestinationURL: target)
+
+        XCTAssertThrowsError(try env.server.start())
+        XCTAssertFalse(env.server.isListening)
+        XCTAssertEqual(
+            try FileManager.default.destinationOfSymbolicLink(atPath: env.socketURL.path),
+            target.path)
+    }
+
+    func testStopLeavesAReplacementPathAlone() async throws {
+        let env = try TestEnv()
+        defer { env.tearDown() }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: env.socketURL.path))
+        XCTAssertEqual(Darwin.unlink(env.socketURL.path), 0)
+        try Data("preserve-me".utf8).write(to: env.socketURL)
+
+        env.server.stop()
+        XCTAssertFalse(env.server.isListening)
+        XCTAssertEqual(try String(contentsOf: env.socketURL, encoding: .utf8), "preserve-me")
+    }
+
     func testStartReplacesStaleSocket() async throws {
         let env = try TestEnv(start: false)
         defer { env.tearDown() }

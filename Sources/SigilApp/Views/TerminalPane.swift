@@ -24,40 +24,52 @@ struct TerminalPane: NSViewRepresentable {
         self.cornerRadius = cornerRadius
     }
 
-    func makeNSView(context: Context) -> NSView {
+    func makeNSView(context: Context) -> ContainerView {
         let container = ContainerView()
         container.wantsLayer = true
         container.layer?.backgroundColor = background.cgColor
         container.layer?.cornerRadius = cornerRadius
         container.layer?.cornerCurve = .continuous
         container.layer?.masksToBounds = cornerRadius > 0
-        let terminal = controller.view
-        terminal.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(terminal)
-        // The same gutter the sidebar uses, on all four sides. Glyphs should sit
-        // off the divider and the window edge by the same amount the list does.
-        NSLayoutConstraint.activate([
-            terminal.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Self.gutter),
-            terminal.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Self.gutter),
-            terminal.topAnchor.constraint(equalTo: container.topAnchor, constant: Self.gutter),
-            terminal.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Self.gutter),
-        ])
-        // SwiftTerm's scroller draws a pale track against a black ground. The
-        // list on the left is the navigation surface; the terminal scrolls itself.
-        for scroller in terminal.subviews.compactMap({ $0 as? NSScroller }) {
-            scroller.isHidden = true
-        }
+        container.install(controller.view)
         return container
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
+    func updateNSView(_ nsView: ContainerView, context: Context) {
         nsView.layer?.backgroundColor = background.cgColor
         nsView.layer?.cornerRadius = cornerRadius
         nsView.layer?.masksToBounds = cornerRadius > 0
+        nsView.install(controller.view)
     }
 
     /// A plain container that keeps the terminal pinned to its bounds.
     final class ContainerView: NSView {
         override var acceptsFirstResponder: Bool { false }
+
+        private(set) var hostedTerminal: NSView?
+        private var terminalConstraints: [NSLayoutConstraint] = []
+
+        func install(_ terminal: NSView) {
+            guard hostedTerminal !== terminal else { return }
+            NSLayoutConstraint.deactivate(terminalConstraints)
+            hostedTerminal?.removeFromSuperview()
+            hostedTerminal = terminal
+            terminal.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(terminal)
+            // The same gutter the sidebar uses, on all four sides. Glyphs should sit
+            // off the divider and the window edge by the same amount the list does.
+            terminalConstraints = [
+                terminal.leadingAnchor.constraint(equalTo: leadingAnchor, constant: TerminalPane.gutter),
+                terminal.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -TerminalPane.gutter),
+                terminal.topAnchor.constraint(equalTo: topAnchor, constant: TerminalPane.gutter),
+                terminal.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -TerminalPane.gutter),
+            ]
+            NSLayoutConstraint.activate(terminalConstraints)
+            // SwiftTerm's scroller draws a pale track against a black ground. The
+            // list on the left is the navigation surface; the terminal scrolls itself.
+            for scroller in terminal.subviews.compactMap({ $0 as? NSScroller }) {
+                scroller.isHidden = true
+            }
+        }
     }
 }

@@ -4,16 +4,30 @@ import { once } from 'node:events';
 import { randomKey, importKey, seal, open } from '../../public/crypto.mjs';
 
 // A synthetic Mac, using the actual relay and encryption. Never touches user sessions.
-async function pair(page, origin, initialOutput) {
-  const allocation = await fetch(`${origin}/rooms`, { method: 'POST' });
-  expect(allocation.status).toBe(201);
-  const { room, hostToken } = await allocation.json();
+let sharedRoom, previousHost;
+async function pair(page, origin, initialOutput, options = {}) {
+  if (!sharedRoom) {
+    const allocation = await fetch(`${origin}/rooms`, { method: 'POST' });
+    expect(allocation.status).toBe(201);
+    sharedRoom = await allocation.json();
+  }
+  const { room, hostToken } = sharedRoom;
+  if (previousHost && previousHost.readyState !== WebSocket.CLOSED) {
+    previousHost.close();
+    await once(previousHost, 'close');
+  }
   const bootstrap = randomKey();
   let key = await importKey(bootstrap), selected = 'one', peer, challenge, serial = Promise.resolve();
   const actions = [], errors = [];
   const terminal = title => `${title}\n\n${Array.from({ length: 35 }, (_, i) => `Line ${i + 1}: Verified the mobile layout and terminal output.`).join('\n')}\n\nReady for your next message.`;
   const outputs = { one: initialOutput ?? terminal('Mobile layout review'), two: terminal('Release checks') };
-  const ws = new WebSocket(`${origin.replace(/^http/, 'ws')}/connect?room=${room}&role=host`, { headers: { Authorization: `Bearer ${hostToken}` } });
+  let ws;
+  for (let attempt = 0; ; attempt++) {
+    ws = new WebSocket(`${origin.replace(/^http/, 'ws')}/connect?room=${room}&role=host`, { headers: { Authorization: `Bearer ${hostToken}` } });
+    try { await once(ws, 'open'); break; }
+    catch (error) { if (attempt >= 9) throw error; await new Promise(resolve => setTimeout(resolve, 100)); }
+  }
+  previousHost = ws;
   ws.on('message', bytes => {
     serial = serial.then(async () => {
       const frame = JSON.parse(bytes);
@@ -28,14 +42,14 @@ async function pair(page, origin, initialOutput) {
         if (request.action === 'select') selected = request.tabID;
         if (request.action === 'new') selected = 'two';
         if (request.action === 'input') outputs[selected] += `\n\nYou: ${request.text}`;
-        ws.send(JSON.stringify({ peer, data: await seal({ challenge, sequence: request.sequence, ok: true,
-          state: { tabs: [{ id: 'one', title: 'Mobile layout review', status: 'working' },
-            { id: 'two', title: 'Release checks', status: 'idle' }], selectedTabID: selected, terminal: outputs[selected] },
-        }, key, 'mac') }));
+        const state = options.state ?? { tabs: [
+          { id: 'one', title: 'Mobile layout review', status: options.statuses?.one ?? 'working' },
+          { id: 'two', title: 'Release checks', status: options.statuses?.two ?? 'idle' }],
+          selectedTabID: selected, terminal: outputs[selected] };
+        ws.send(JSON.stringify({ peer, data: await seal({ challenge, sequence: request.sequence, ok: true, state }, key, 'mac') }));
       }
     }).catch(error => errors.push(error));
   });
-  await once(ws, 'open');
   await page.goto(`${origin}/#room=${room}&key=${bootstrap}`);
   await expect(page.locator('#status')).toHaveText('Connected');
   return { actions, errors, close: () => ws.close() };
@@ -171,5 +185,88 @@ test('idle desktop chrome becomes one composer, with lossless raw output availab
     await page.locator('#keys-toggle').click();
     await page.locator('#new').click();
     await expect(page.locator('#terminal')).toContainText('Release checks');
+  } finally { mac.close(); }
+});
+
+for (const width of [400, 414, 430]) {
+  test(`keys and header controls keep 44px touch targets at ${width}px`, async ({ page, baseURL }, testInfo) => {
+    await page.setViewportSize({ width, height: 844 });
+    const consoleErrors = [];
+    page.on('pageerror', error => consoleErrors.push(error.message));
+    page.on('console', message => { if (['warning', 'error'].includes(message.type())) consoleErrors.push(message.text()); });
+    const mac = await pair(page, baseURL);
+    try {
+      await page.locator('#keys-toggle').click();
+      for (const control of await page.locator('#keys button:visible, #new, #keys-toggle, #connection-toggle').all()) {
+        const box = await control.boundingBox();
+        expect(box.width).toBeGreaterThanOrEqual(44);
+        expect(box.height).toBeGreaterThanOrEqual(44);
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+      expect(consoleErrors).toEqual([]);
+      await page.screenshot({ path: testInfo.outputPath(`keys-${width}.png`) });
+    } finally { mac.close(); }
+  });
+}
+
+test('an ended session keeps drafting but disables remote actions', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const consoleErrors = [];
+  page.on('pageerror', error => consoleErrors.push(error.message));
+  page.on('console', message => { if (['warning', 'error'].includes(message.type())) consoleErrors.push(message.text()); });
+  const mac = await pair(page, baseURL, '', { statuses: { one: 'exited' } });
+  try {
+    await expect(page.locator('#tabs')).toContainText('Ended');
+    await expect(page.locator('#empty-output')).toContainText('Session ended');
+    await expect(page.locator('#empty-output')).toContainText('Restart this session in Sigil on your Mac.');
+    await page.locator('#message').fill('Restarting notes');
+    await expect(page.locator('#send')).toBeDisabled();
+    await expect(page.locator('#message')).toBeEditable();
+    await expect(page.locator('#new')).toBeEnabled();
+    await expect(page.locator('#tabs')).toBeEnabled();
+    await page.locator('#keys-toggle').click();
+    await expect(page.locator('#paste')).toBeDisabled();
+    await expect(page.locator('#interrupt')).toBeDisabled();
+    expect(consoleErrors).toEqual([]);
+    await page.screenshot({ path: testInfo.outputPath('ended.png') });
+  } finally { mac.close(); }
+});
+
+test('an empty session list keeps New available and disables the picker', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const consoleErrors = [];
+  page.on('pageerror', error => consoleErrors.push(error.message));
+  page.on('console', message => { if (['warning', 'error'].includes(message.type())) consoleErrors.push(message.text()); });
+  const mac = await pair(page, baseURL, '', { state: { tabs: [], selectedTabID: null, terminal: '' } });
+  try {
+    await expect(page.locator('#empty-output')).toContainText('No open sessions');
+    await expect(page.locator('#tabs')).toContainText('No open sessions');
+    await expect(page.locator('#tabs')).toBeDisabled();
+    await expect(page.locator('#new')).toBeEnabled();
+    await expect(page.locator('#message')).toBeDisabled();
+    expect(consoleErrors).toEqual([]);
+    await page.screenshot({ path: testInfo.outputPath('empty.png') });
+  } finally { mac.close(); }
+});
+
+test('the connection popover closes on Escape and outside pointer presses', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const consoleErrors = [];
+  page.on('pageerror', error => consoleErrors.push(error.message));
+  page.on('console', message => { if (['warning', 'error'].includes(message.type())) consoleErrors.push(message.text()); });
+  const mac = await pair(page, baseURL);
+  try {
+    const details = page.locator('#connection');
+    await page.locator('#connection-toggle').click();
+    await expect(details).toHaveJSProperty('open', true);
+    await page.keyboard.press('Escape');
+    await expect(details).toHaveJSProperty('open', false);
+    await expect(page.locator('#connection-toggle')).toBeFocused();
+    await page.locator('#connection-toggle').click();
+    await expect(details).toHaveJSProperty('open', true);
+    await page.locator('#terminal').click();
+    await expect(details).toHaveJSProperty('open', false);
+    expect(consoleErrors).toEqual([]);
+    await page.screenshot({ path: testInfo.outputPath('popover.png') });
   } finally { mac.close(); }
 });

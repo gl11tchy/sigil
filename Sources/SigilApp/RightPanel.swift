@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import SigilKit
 import SwiftUI
+import WebKit
 
 /// The tool the right panel is showing.
 enum RightPanelMode: String, CaseIterable, Identifiable, Sendable {
@@ -35,7 +36,7 @@ enum RightPanelMode: String, CaseIterable, Identifiable, Sendable {
 /// current tab's working folder when it opens, and then stays where the user put it.
 @MainActor
 @Observable
-final class RightPanel {
+final class RightPanel: NSObject {
     private enum Key {
         static let isVisible = "panel.visible"
         static let mode = "panel.mode"
@@ -70,6 +71,12 @@ final class RightPanel {
     /// Bumped to force a reload of the same address.
     private(set) var reloadToken = 0
 
+    @ObservationIgnored private var browser: WKWebView?
+    @ObservationIgnored var isEditingAddress = false
+    private(set) var isLoadingPage = false
+    private(set) var addressError: String?
+    private(set) var pageError: String?
+
     /// The scratch shell, created on first use so a hidden panel costs nothing.
     private(set) var shell: TerminalController?
     private(set) var shellDirectory: URL?
@@ -97,6 +104,7 @@ final class RightPanel {
         } else {
             notesByPath = [:]
         }
+        super.init()
     }
 
     // MARK: - Visibility
@@ -117,7 +125,7 @@ final class RightPanel {
     func prepare(in directory: URL) {
         switch mode {
         case .shell:
-            startShellIfNeeded(in: directory)
+            break
         case .web:
             if requestedURL == nil { navigate(to: addressField) }
         case .notes:
@@ -131,7 +139,8 @@ final class RightPanel {
     /// running is left alone, even if the selected tab has since moved folder.
     func startShellIfNeeded(in directory: URL, theme: TerminalTheme = .grokNight, fontSize: CGFloat = 13) {
         if let shell, shell.isRunning { return }
-        let controller = shell ?? TerminalController(theme: theme, fontSize: fontSize)
+        shell?.terminateAndWait()
+        let controller = TerminalController(theme: theme, fontSize: fontSize)
         shell = controller
         shellDirectory = directory
         controller.startShell(ShellLaunchSpec(workingDirectory: directory))
@@ -139,7 +148,7 @@ final class RightPanel {
 
     /// Kills the shell and starts a fresh one in `directory`.
     func restartShell(in directory: URL, theme: TerminalTheme = .grokNight, fontSize: CGFloat = 13) {
-        shell?.terminate()
+        shell?.terminateAndWait()
         shell = TerminalController(theme: theme, fontSize: fontSize)
         shellDirectory = directory
         shell?.startShell(ShellLaunchSpec(workingDirectory: directory))
@@ -157,13 +166,53 @@ final class RightPanel {
     /// A bare host or `:port` is treated as `http://localhost`, which is what a dev
     /// server needs and what a person types.
     func navigate(to text: String) {
-        guard let url = Self.resolve(text) else { return }
+        guard let url = Self.resolve(text) else {
+            addressError = "Enter a web address or a port from 1 to 65535."
+            return
+        }
+        isEditingAddress = false
+        addressError = nil
+        pageError = nil
         addressField = url.absoluteString
         requestedURL = url
+        isLoadingPage = true
+        browser?.load(URLRequest(url: url))
+    }
+
+    func finishEditingAddress() {
+        isEditingAddress = false
+        if let url = browser?.url ?? requestedURL {
+            requestedURL = url
+            addressField = url.absoluteString
+        }
+    }
+
+    func browserView() -> WKWebView {
+        if let browser { return browser }
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        let view = WKWebView(frame: .zero, configuration: configuration)
+        view.allowsBackForwardNavigationGestures = true
+        view.navigationDelegate = self
+        browser = view
+        if let requestedURL {
+            view.load(URLRequest(url: requestedURL))
+        }
+        return view
     }
 
     func reload() {
         reloadToken += 1
+        let hadError = pageError != nil
+        pageError = nil
+        guard let browser else { return }
+        if hadError, let requestedURL {
+            isLoadingPage = true
+            browser.load(URLRequest(url: requestedURL))
+        } else {
+            isLoadingPage = true
+            browser.reload()
+        }
     }
 
     func goHome() {
@@ -179,17 +228,24 @@ final class RightPanel {
 
     static func resolve(_ text: String) -> URL? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        if trimmed.hasPrefix(":"), Int(trimmed.dropFirst()) != nil {
-            return URL(string: "http://localhost\(trimmed)")
-        }
-        if let port = Int(trimmed), port > 0, port <= 65535 {
+        guard !trimmed.isEmpty, !trimmed.contains(where: { $0.isWhitespace }),
+            !trimmed.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+        else { return nil }
+        if trimmed.hasPrefix(":") || trimmed.allSatisfy(\.isNumber) {
+            let raw = trimmed.hasPrefix(":") ? String(trimmed.dropFirst()) : trimmed
+            guard let port = Int(raw), (1...65535).contains(port) else { return nil }
             return URL(string: "http://localhost:\(port)")
         }
-        if let url = URL(string: trimmed), url.scheme != nil, url.host != nil || url.isFileURL {
-            return url
-        }
-        return URL(string: "http://\(trimmed)")
+        let candidate = trimmed.contains("://") ? trimmed : "http://" + trimmed
+        guard let parts = URLComponents(string: candidate),
+            let scheme = parts.scheme?.lowercased(), ["http", "https", "file"].contains(scheme),
+            parts.user == nil, parts.password == nil,
+            parts.port.map({ (1...65535).contains($0) }) ?? true,
+            let url = parts.url
+        else { return nil }
+        if scheme == "file" { return url.isFileURL && parts.path.hasPrefix("/") ? url : nil }
+        guard let host = parts.host, !host.isEmpty else { return nil }
+        return url
     }
 
     // MARK: - Notes
@@ -207,5 +263,56 @@ final class RightPanel {
         if let data = try? JSONEncoder().encode(notesByPath) {
             defaults.set(data, forKey: Key.notes)
         }
+    }
+}
+
+extension RightPanel: WKNavigationDelegate {
+    func webView(
+        _ webView: WKWebView,
+        didStartProvisionalNavigation navigation: WKNavigation!
+    ) {
+        isLoadingPage = true
+        pageError = nil
+    }
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        syncAddress(from: webView)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        isLoadingPage = false
+        syncAddress(from: webView)
+    }
+
+    func webView(
+        _ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error
+    ) {
+        notePageFailure(error)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        didFailProvisionalNavigation navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        notePageFailure(error)
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        isLoadingPage = false
+        pageError = "The page stopped. Reload to try again."
+    }
+
+    private func syncAddress(from webView: WKWebView) {
+        guard let url = webView.url else { return }
+        requestedURL = url
+        if !isEditingAddress { addressField = url.absoluteString }
+    }
+
+    private func notePageFailure(_ error: Error) {
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled { return }
+        isLoadingPage = false
+        pageError = error.localizedDescription
     }
 }

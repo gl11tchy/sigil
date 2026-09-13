@@ -135,7 +135,7 @@ extension TerminalTheme {
     /// field. The terminal itself never uses it.
     public var accentHex: UInt32 {
         if name == Self.sigilNeon.name { return 0x4EF0C4 }
-        return isDark ? 0xE8934A : 0xB4601C
+        return isDark ? 0xE8934A : 0x934B11
     }
 
     /// The name of the CLI theme that matches this one. It reaches the CLI as

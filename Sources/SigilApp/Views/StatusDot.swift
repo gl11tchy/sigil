@@ -30,6 +30,7 @@ struct StatusDot: View {
             )
             .onAppear { pulse = isWorking && !reduceMotion }
             .onChange(of: isWorking) { _, working in pulse = working && !reduceMotion }
+            .onChange(of: reduceMotion) { _, reduced in pulse = isWorking && !reduced }
             .accessibilityLabel(label)
     }
 
@@ -39,7 +40,7 @@ struct StatusDot: View {
         switch activity {
         case .working: return palette.accent
         case .idle, .starting: return palette.textFaint
-        case .exited: return activity.endedInFailure ? .red : palette.textFaint.opacity(0.5)
+        case .exited: return activity.endedInFailure ? palette.error : palette.textFaint.opacity(0.5)
         }
     }
 

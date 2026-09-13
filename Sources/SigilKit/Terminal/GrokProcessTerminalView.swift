@@ -63,13 +63,27 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
         } else if data.elementsEqual(Self.bracketedPasteEnd) {
             isForwardingBracketedPaste = false
         } else if !isForwardingBracketedPaste,
-            data.contains(0x0A) || data.contains(0x0D)
+            data.contains(0x0A) || data.contains(0x0D) || Self.isEnhancedReturnPress(data)
         {
             // Capture the journal offset before Return reaches the child. A fast
             // response can otherwise append its completion event first.
             onUserSubmit?()
         }
         super.send(source: source, data: data)
+    }
+
+    private static func isEnhancedReturnPress(_ data: ArraySlice<UInt8>) -> Bool {
+        guard data.count >= 5,
+            data.first == 0x1B,
+            data[data.index(after: data.startIndex)] == 0x5B,
+            data.last == 0x75,
+            let body = String(bytes: data.dropFirst(2).dropLast(), encoding: .ascii)
+        else { return false }
+        let fields = body.split(separator: ";", omittingEmptySubsequences: false)
+        guard fields[0].split(separator: ":").first == "13" else { return false }
+        guard fields.count > 1 else { return true }
+        let eventField = fields[1].split(separator: ":")
+        return eventField.count < 2 || eventField[1] != "3"
     }
 
     private static let bracketedPasteStart: [UInt8] = [0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E]

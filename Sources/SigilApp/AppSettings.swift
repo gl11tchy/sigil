@@ -29,8 +29,20 @@ final class AppSettings {
 
     private let defaults: UserDefaults
 
+    static func normalizedFontSize(_ value: CGFloat) -> CGFloat {
+        value.isFinite ? min(32, max(8, value)) : 13
+    }
+
+    static func normalizedExecutablePath(_ text: String) -> String {
+        (text.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).expandingTildeInPath
+    }
+
     var fontSize: CGFloat {
-        didSet { defaults.set(Double(fontSize), forKey: Key.fontSize) }
+        didSet {
+            let normalized = Self.normalizedFontSize(fontSize)
+            if normalized != fontSize { fontSize = normalized }
+            defaults.set(Double(fontSize), forKey: Key.fontSize)
+        }
     }
     var themeName: String {
         didSet { defaults.set(themeName, forKey: Key.themeName) }
@@ -123,8 +135,10 @@ final class AppSettings {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        let storedSize = defaults.double(forKey: Key.fontSize)
-        fontSize = storedSize > 0 ? CGFloat(storedSize) : 13
+        fontSize =
+            defaults.object(forKey: Key.fontSize) == nil
+            ? 13
+            : Self.normalizedFontSize(CGFloat(defaults.double(forKey: Key.fontSize)))
         themeName = defaults.string(forKey: Key.themeName) ?? TerminalTheme.sigilNeon.name
         // A stored path is the user's choice and stays — except when it is the
         // installer's own binary and the themed build is now there. That path
@@ -181,14 +195,17 @@ final class AppSettings {
             defaults.string(forKey: Key.defaultDirectory)
             ?? FileManager.default.homeDirectoryForCurrentUser.path
         model = defaults.string(forKey: Key.model) ?? ""
-        effort = defaults.string(forKey: Key.effort) ?? ""
+        let storedEffort = defaults.string(forKey: Key.effort) ?? ""
+        effort = Self.effortOptions.contains(storedEffort) ? storedEffort : ""
     }
 
     var theme: TerminalTheme {
         TerminalTheme.all.first { $0.name == themeName } ?? .sigilNeon
     }
 
-    var executableURL: URL { URL(fileURLWithPath: executablePath) }
+    var executableURL: URL {
+        URL(fileURLWithPath: Self.normalizedExecutablePath(executablePath))
+    }
 
     var executableExists: Bool {
         Self.isExecutableFile(at: executableURL)
