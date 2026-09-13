@@ -170,12 +170,21 @@ final class RightPanel: NSObject {
             addressError = "Enter a web address or a port from 1 to 65535."
             return
         }
+        isEditingAddress = false
         addressError = nil
         pageError = nil
         addressField = url.absoluteString
         requestedURL = url
         isLoadingPage = true
         browser?.load(URLRequest(url: url))
+    }
+
+    func finishEditingAddress() {
+        isEditingAddress = false
+        if let url = browser?.url ?? requestedURL {
+            requestedURL = url
+            addressField = url.absoluteString
+        }
     }
 
     func browserView() -> WKWebView {

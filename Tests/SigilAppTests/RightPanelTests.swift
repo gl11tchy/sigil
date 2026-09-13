@@ -231,6 +231,28 @@ struct RightPanelTests {
     }
 
     @Test @MainActor
+    func endingAddressEditingAdoptsTheCurrentPage() {
+        let panel = makePanel()
+        panel.navigate(to: "example.com")
+        panel.isEditingAddress = true
+        panel.addressField = "http://stale.example"
+        panel.finishEditingAddress()
+        #expect(!panel.isEditingAddress)
+        #expect(panel.addressField == "http://example.com")
+        #expect(panel.requestedURL?.absoluteString == "http://example.com")
+    }
+
+    @Test @MainActor
+    func submittingAnAddressClearsEditingSoRedirectsCanUpdateTheField() {
+        let panel = makePanel()
+        panel.isEditingAddress = true
+        panel.addressField = "http://stale.example"
+        panel.navigate(to: "example.com")
+        #expect(!panel.isEditingAddress)
+        #expect(panel.addressField == "http://example.com")
+    }
+
+    @Test @MainActor
     func browserKeepsItsOwnPageCanvas() {
         let panel = makePanel()
         #expect(panel.browserView().value(forKey: "drawsBackground") as? Bool == true)

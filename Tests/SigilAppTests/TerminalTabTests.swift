@@ -216,6 +216,30 @@ struct TerminalTabTests {
         #expect(tab.hasUnseenActivity)
     }
 
+    @Test func journalWorkStillIdlesIfCompletionNeverArrives() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "TerminalTabJournalFallback.\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let journal = directory.appendingPathComponent("updates.jsonl")
+        _ = FileManager.default.createFile(atPath: journal.path, contents: nil)
+        let tab = makeTab(mode: .new(sessionID: UUID()), completionEventsURL: journal)
+        tab.journalIdleFallbackSilence = .seconds(2)
+
+        tab.noteTurnStarted()
+        try append(
+            #"{"params":{"update":{"sessionUpdate":"tool_call"}}}"# + "\n",
+            to: journal
+        )
+        try await Task.sleep(for: TerminalTab.idleFallbackSilence + .milliseconds(400))
+        #expect(tab.activity == .working)
+
+        try await Task.sleep(for: tab.journalIdleFallbackSilence)
+        #expect(tab.activity == .idle)
+        #expect(tab.hasUnseenActivity)
+    }
+
     @Test func stoppedJournalWatchRestartsFromTheCurrentOffset() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
             "TerminalTabCancelledWatch.\(UUID().uuidString)", isDirectory: true)

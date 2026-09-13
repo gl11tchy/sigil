@@ -53,6 +53,9 @@ final class TerminalTab: Identifiable {
     /// Quiet period after the last submit or child output that returns a tab
     /// to idle when the journal never writes `turn_completed`.
     static let idleFallbackSilence: Duration = .milliseconds(1200)
+    /// After the journal has confirmed work, wait this long with no further
+    /// journal, title, or output activity before treating the turn as finished.
+    var journalIdleFallbackSilence: Duration = .seconds(30)
 
     init(
         id: UUID = UUID(),
@@ -211,6 +214,7 @@ final class TerminalTab: Identifiable {
                 discardingOversizedLine = scan.discardingOversizedLine
                 if scan.didObserveWork {
                     self?.hasConfirmedJournalActivity = true
+                    self?.armIdleFallback()
                 }
                 if scan.didCompleteTurn {
                     self?.noteTurnCompleted()
@@ -230,9 +234,12 @@ final class TerminalTab: Identifiable {
 
     private func armIdleFallback() {
         idleFallbackTask?.cancel()
+        let silence =
+            hasConfirmedJournalActivity
+            ? journalIdleFallbackSilence : Self.idleFallbackSilence
         idleFallbackTask = Task { [weak self] in
-            try? await Task.sleep(for: Self.idleFallbackSilence)
-            guard !Task.isCancelled, let self, !self.hasConfirmedJournalActivity else { return }
+            try? await Task.sleep(for: silence)
+            guard !Task.isCancelled, let self else { return }
             self.noteTurnCompleted()
         }
     }

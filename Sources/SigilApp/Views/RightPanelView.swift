@@ -178,7 +178,13 @@ private struct AddressBar: View {
                     .focused($isFocused)
                     .onSubmit { panel.navigate(to: panel.addressField) }
                     .accessibilityLabel("Web address")
-                    .onChange(of: isFocused) { _, focused in panel.isEditingAddress = focused }
+                    .onChange(of: isFocused) { _, focused in
+                        if focused {
+                            panel.isEditingAddress = true
+                        } else {
+                            panel.finishEditingAddress()
+                        }
+                    }
                 if panel.isLoadingPage {
                     ProgressView()
                         .controlSize(.small)
@@ -206,7 +212,7 @@ private struct AddressBar: View {
         }
         .background(palette.sidebar)
         .accessibilityLabel("Address")
-        .onDisappear { panel.isEditingAddress = false }
+        .onDisappear { panel.finishEditingAddress() }
     }
 }
 

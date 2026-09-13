@@ -219,6 +219,39 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func selectingATabWhileTheWindowIsInactiveKeepsAPendingFocus() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        let first = try #require(model.newTab(in: cwd))
+        let second = try #require(model.newTab(in: cwd))
+        await flushMainAsync()
+        model.needsTerminalFocus = false
+
+        model.isFindBarVisible = true
+        model.select(second.id)
+        await flushMainAsync()
+        #expect(!model.needsTerminalFocus)
+        #expect(model.selectedTabID == second.id)
+
+        model.isFindBarVisible = false
+        model.select(first.id)
+        await flushMainAsync()
+        #expect(model.needsTerminalFocus)
+
+        model.appDidBecomeActive()
+        await flushMainAsync()
+        #expect(model.needsTerminalFocus)
+
+        model.windowDidBecomeKey()
+        await flushMainAsync()
+        #expect(model.needsTerminalFocus)
+    }
+
+    @Test @MainActor
     func newTabTrimsWhitespaceInModelAndEffort() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
@@ -2782,6 +2815,13 @@ private func temporaryExports(nextTo output: URL) throws -> [URL] {
         at: output.deletingLastPathComponent(),
         includingPropertiesForKeys: nil
     ).filter { $0.lastPathComponent.hasPrefix(prefix) }
+}
+
+@MainActor
+private func flushMainAsync() async {
+    await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+        DispatchQueue.main.async { cont.resume() }
+    }
 }
 
 private func makeTemporaryTestDirectory() throws -> URL {

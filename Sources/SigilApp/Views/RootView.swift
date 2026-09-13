@@ -54,6 +54,9 @@ struct RootView: View {
         .onChange(of: model.isShowingNewSessionSheet) { _, shown in
             if !shown { model.focusSelectedTerminal() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            model.windowDidBecomeKey()
+        }
         .ignoresSafeArea(.container, edges: .top)
     }
 

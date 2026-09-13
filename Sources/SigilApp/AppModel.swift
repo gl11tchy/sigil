@@ -32,6 +32,8 @@ final class AppModel {
     var isShowingNewSessionSheet = false
     /// Find-in-terminal bar for the selected tab.
     var isFindBarVisible = false
+    /// True when a tab was selected while the main window could not take focus.
+    var needsTerminalFocus = false
     var findQuery = ""
     var findMatchIndex = 0
     var findMatchCount = 0
@@ -1250,11 +1252,15 @@ final class AppModel {
     func focusSelectedTerminal() {
         guard let tab = selectedTab else { return }
         DispatchQueue.main.async { [weak self, weak tab] in
-            guard let self, let tab, self.selectedTab?.id == tab.id,
-                !self.isFindBarVisible, !self.isShowingNewSessionSheet,
-                let window = tab.controller.view.window, window.isKeyWindow,
+            guard let self, let tab, self.selectedTab?.id == tab.id else { return }
+            guard !self.isFindBarVisible, !self.isShowingNewSessionSheet else { return }
+            guard let window = tab.controller.view.window, window.isKeyWindow,
                 window.attachedSheet == nil
-            else { return }
+            else {
+                self.needsTerminalFocus = true
+                return
+            }
+            self.needsTerminalFocus = false
             tab.controller.focus()
         }
     }
@@ -1457,6 +1463,16 @@ final class AppModel {
     func appDidBecomeActive() {
         selectedTab?.clearUnseenActivity()
         refreshDockIndicator()
+        retryPendingTerminalFocus()
+    }
+
+    func windowDidBecomeKey() {
+        retryPendingTerminalFocus()
+    }
+
+    private func retryPendingTerminalFocus() {
+        guard needsTerminalFocus else { return }
+        focusSelectedTerminal()
     }
 
     func executableConfigurationChanged() async {
