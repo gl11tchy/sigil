@@ -14,6 +14,33 @@ struct TerminalThemeTests {
         #expect(TerminalTheme.all.contains(.grokEmber))
     }
 
+    /// App-inspired dark themes sit in the picker after the shipping four.
+    @Test func appDarkThemesAreListedAndDark() throws {
+        #expect(TerminalTheme.all.count >= 20)
+        for name in Self.appDarkThemeNames {
+            let theme = try #require(TerminalTheme.all.first { $0.name == name })
+            #expect(theme.isDark)
+            #expect(theme.grokThemeName == "groknight")
+        }
+    }
+
+    @Test func themeNamesAndGroundsAreUnique() {
+        let names = TerminalTheme.all.map(\.name)
+        #expect(Set(names).count == names.count)
+        let grounds = TerminalTheme.all.map(\.backgroundHex)
+        #expect(Set(grounds).count == grounds.count)
+    }
+
+    @Test func namedInitResolvesKnownThemesAndFallsBackByAppearance() {
+        #expect(TerminalTheme(name: "GitHub", isDark: true) == .githubDark)
+        let dark = TerminalTheme(name: "Custom Dark", isDark: true)
+        #expect(dark.name == "Custom Dark")
+        #expect(dark.backgroundHex == TerminalTheme.grokNight.backgroundHex)
+        let light = TerminalTheme(name: "Custom Light", isDark: false)
+        #expect(light.name == "Custom Light")
+        #expect(light.backgroundHex == TerminalTheme.grokDay.backgroundHex)
+    }
+
     /// Every theme names a CLI theme, so the program and its window match.
     @Test func everyThemeNamesACLITheme() {
         #expect(TerminalTheme.sigilNeon.grokThemeName == "sigil-neon")
@@ -21,6 +48,12 @@ struct TerminalThemeTests {
         #expect(TerminalTheme.grokNight.grokThemeName == "groknight")
         #expect(TerminalTheme.grokEmber.grokThemeName == "groknight")
     }
+
+    private static let appDarkThemeNames = [
+        "GitHub", "Linear", "Notion", "Discord", "Slack", "Spotify",
+        "VS Code", "Cursor", "X", "Raycast", "ChatGPT", "Figma",
+        "macOS", "Obsidian", "Telegram", "Twitch",
+    ]
 
     @Test(arguments: TerminalTheme.all)
     func foregroundOnBackgroundMeetsWCAGAA(_ theme: TerminalTheme) {

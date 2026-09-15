@@ -27,19 +27,30 @@ struct SettingsView: View {
 
     private var appearance: some View {
         Form {
-            LabeledContent("Theme") {
-                HStack(spacing: 8) {
-                    ForEach(TerminalTheme.all) { theme in
-                        ThemeCard(
-                            theme: theme,
-                            isSelected: model.settings.theme.name == theme.name
-                        ) {
-                            model.settings.themeName = theme.name
-                            model.applyAppearance()
+            Section {
+                VStack(spacing: 10) {
+                    ForEach(ThemeGrid.rows(TerminalTheme.all)) { row in
+                        HStack(spacing: 8) {
+                            ForEach(row.themes) { theme in
+                                ThemeCard(
+                                    theme: theme,
+                                    isSelected: model.settings.theme.name == theme.name
+                                ) {
+                                    model.settings.themeName = theme.name
+                                    model.applyAppearance()
+                                }
+                            }
+                            if row.themes.count < ThemeGrid.columns {
+                                ForEach(0..<(ThemeGrid.columns - row.themes.count), id: \.self) { _ in
+                                    Color.clear.frame(maxWidth: .infinity)
+                                }
+                            }
                         }
                     }
                 }
                 .padding(.vertical, 2)
+            } header: {
+                Text("Theme")
             }
 
             LabeledContent("Font size") {
@@ -199,6 +210,22 @@ struct SettingsView: View {
     }
 }
 
+/// Theme swatches in a fixed column count so Form can measure the stack.
+enum ThemeGrid {
+    static let columns = 4
+
+    struct Row: Identifiable {
+        let id: Int
+        let themes: [TerminalTheme]
+    }
+
+    static func rows(_ themes: [TerminalTheme]) -> [Row] {
+        stride(from: 0, to: themes.count, by: columns).enumerated().map { index, start in
+            Row(id: index, themes: Array(themes[start..<min(start + columns, themes.count)]))
+        }
+    }
+}
+
 /// One theme as a selectable swatch: its ground, its accent dot, its name.
 /// Appearance is a visual choice, so the picker shows the thing itself.
 private struct ThemeCard: View {
@@ -217,7 +244,8 @@ private struct ThemeCard: View {
             VStack(spacing: 5) {
                 RoundedRectangle(cornerRadius: 5)
                     .fill(colors.ground)
-                    .frame(width: 64, height: 34)
+                    .frame(height: 34)
+                    .frame(maxWidth: .infinity)
                     .overlay(alignment: .bottomLeading) {
                         Circle()
                             .fill(colors.accent)
@@ -250,7 +278,11 @@ private struct ThemeCard: View {
                 Text(theme.name)
                     .font(.system(size: 10))
                     .foregroundStyle(isSelected ? palette.text : palette.textDim)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .minimumScaleFactor(0.85)
             }
+            .frame(maxWidth: .infinity)
             .animation(.easeOut(duration: 0.12), value: isHovering)
         }
         .buttonStyle(.plain)

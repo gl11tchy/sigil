@@ -1,10 +1,19 @@
 import Foundation
+import SigilKit
 import Testing
 
 @testable import SigilApp
 
 @Suite(.serialized)
 struct SettingsViewTests {
+    @Test func themeGridRowsCoverEveryThemeInOrder() {
+        let rows = ThemeGrid.rows(TerminalTheme.all)
+        #expect(rows.allSatisfy { $0.themes.count <= ThemeGrid.columns })
+        #expect(rows.contains { $0.themes.count == ThemeGrid.columns })
+        #expect(rows.flatMap(\.themes) == TerminalTheme.all)
+        #expect(rows.count >= 5)
+    }
+
     @Test @MainActor
     func typingATransientValidPathDoesNotCommitUntilSubmit() throws {
         let root = try temporaryDirectory()
