@@ -10,21 +10,16 @@ private enum SidebarFocus: Hashable {
 
 /// The thread viewer: every Grok Build conversation on this machine.
 ///
-/// Recents is the time-ordered list. Projects is a folder list; open one to
-/// see its chats and start a new one there. Chat pins sit at the top of Recents
-/// and of an open project. Archived chats leave both until the archivebox in
-/// the header is turned on. The list is the product: find one conversation in a
-/// history of hundreds, without leaving the keyboard.
+/// Home is the project list. Recents and Archived are rows you open. A plus
+/// on a folder starts a chat there. Archive lives on the row, not in the header.
 struct SidebarView: View {
     @Bindable var model: AppModel
     @Environment(\.palette) private var palette
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focus: SidebarFocus?
     /// Arrow-key highlight. Separate from open/active so those markers stay
     /// about the tab strip, not about where the keys are.
     @State private var keyboardSelectionID: String?
     @State private var pendingDelete: GrokSession?
-    @State private var hoveredMode: SidebarMode?
 
     /// F2. Unicode private-use scalar for `NSF2FunctionKey`.
     private static let f2 = KeyEquivalent(Character("\u{F705}"))
@@ -35,7 +30,6 @@ struct SidebarView: View {
             searchRow
             modeArea
             list
-            footer
         }
         .background(palette.sidebar)
         .overlay(alignment: .trailing) { Rectangle().fill(palette.hairline).frame(width: 1) }
@@ -145,74 +139,34 @@ struct SidebarView: View {
 
     @ViewBuilder
     private var modeArea: some View {
-        if let project = model.focusedProject, model.settings.sidebarMode == .projects {
-            ProjectFocusBar(
-                project: project,
-                isPinned: model.isPinned(project),
-                leave: { model.leaveProject() },
-                newChat: { _ = model.newTabInProject(project) },
-                togglePin: { model.togglePin(project) },
-                canStart: model.settings.executableExists
+        switch model.sidebarSurface {
+        case .project:
+            if let project = model.focusedProject {
+                DrillBar(
+                    title: project.name,
+                    isPinned: model.isPinned(project),
+                    showsPin: true,
+                    showsArchive: true,
+                    canStart: model.settings.executableExists,
+                    leave: { model.leaveProject() },
+                    newChat: { _ = model.newTabInProject(project) },
+                    togglePin: { model.togglePin(project) },
+                    toggleArchive: { model.archive(project) }
+                )
+            }
+        case .recents:
+            DrillBar(
+                title: "Recents",
+                leave: { model.leaveProject() }
             )
-        } else {
-            modeRow
+        case .archived:
+            DrillBar(
+                title: "Archived",
+                leave: { model.leaveProject() }
+            )
+        case .folders:
+            EmptyView()
         }
-    }
-
-    private var modeRow: some View {
-        HStack(spacing: 6) {
-            HStack(spacing: 2) {
-                ForEach(SidebarMode.allCases) { mode in
-                    let selected = model.settings.sidebarMode == mode
-                    Button {
-                        if reduceMotion {
-                            model.settings.sidebarMode = mode
-                        } else {
-                            withAnimation(.easeOut(duration: 0.16)) {
-                                model.settings.sidebarMode = mode
-                            }
-                        }
-                    } label: {
-                        Text(mode.title)
-                            .lineLimit(1)
-                            .font(.system(size: 11, weight: selected ? .medium : .regular))
-                            .foregroundStyle(
-                                selected
-                                    ? palette.text
-                                    : (hoveredMode == mode ? palette.textDim : palette.textFaint)
-                            )
-                            .padding(.horizontal, 8)
-                            .frame(height: 22)
-                            .background(
-                                RoundedRectangle(cornerRadius: 5)
-                                    .fill(
-                                        selected
-                                            ? palette.selected
-                                            : (hoveredMode == mode ? palette.raised : Color.clear)
-                                    )
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .onHover { hovering in
-                        hoveredMode = hovering ? mode : nil
-                    }
-                    .accessibilityAddTraits(selected ? .isSelected : [])
-                    .help(
-                        mode == .recents
-                            ? "Sort conversations by time"
-                            : "Open a project, then start chats in it"
-                    )
-                }
-            }
-            Spacer(minLength: 0)
-            HStack(spacing: 2) {
-                ArchiveToggle(isOn: $model.showingArchived, count: model.archivedCount)
-                ScopeToggle(isOn: $model.scopeToCurrentFolder, folder: model.currentDirectory)
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.bottom, 8)
-        .overlay(alignment: .bottom) { Rectangle().fill(palette.hairline).frame(height: 1) }
     }
 
     // MARK: - List
@@ -325,13 +279,14 @@ struct SidebarView: View {
             }
         case .projectSearch:
             projectGroupedSections(from: unpinned, afterPinned: afterPinned)
+        case .archived:
+            projectGroupedSections(from: unpinned, afterPinned: afterPinned)
         }
     }
 
     private var listKind: SidebarListKind {
         SidebarOrganization.listKind(
-            mode: model.settings.sidebarMode,
-            hasFocusedProject: model.focusedProject != nil,
+            surface: model.sidebarSurface,
             isSearching: !model.searchText.isEmpty
         )
     }
@@ -344,11 +299,27 @@ struct SidebarView: View {
     private var projectList: some View {
         let pinned = visibleProjects(model.pinnedProjects(), from: listedSessions)
         let rest = visibleProjects(model.unpinnedProjects(), from: listedSessions)
+        if listedSessions.count > 0 {
+            railRow(
+                id: SidebarOrganization.recentsID,
+                title: "Recents",
+                count: listedSessions.count,
+                open: { model.openRecents() }
+            )
+        }
         ForEach(pinned, id: \.id) { item in
             projectRow(item.project, rows: item.rows)
         }
         ForEach(rest, id: \.id) { item in
             projectRow(item.project, rows: item.rows)
+        }
+        if model.archivedCount > 0 {
+            railRow(
+                id: SidebarOrganization.archivedID,
+                title: "Archived",
+                count: model.archivedCount,
+                open: { model.openArchived() }
+            )
         }
     }
 
@@ -429,7 +400,8 @@ struct SidebarView: View {
                 searchQuery: model.searchText,
                 isFirst: isFirst,
                 isPinned: model.isPinned(project),
-                togglePin: { model.togglePin(project) }
+                togglePin: { model.togglePin(project) },
+                unarchive: listKind == .archived ? { model.unarchive(project) } : nil
             )
         }
     }
@@ -442,7 +414,37 @@ struct SidebarView: View {
     }
 
     private var isListEmpty: Bool {
-        listKind == .projectList ? model.sidebarProjects.isEmpty : listedSessions.isEmpty
+        if listKind == .projectList {
+            return model.sidebarProjects.isEmpty && listedSessions.isEmpty
+                && model.archivedCount == 0
+        }
+        return listedSessions.isEmpty
+    }
+
+    private func railRow(
+        id: String, title: String, count: Int, open: @escaping () -> Void
+    ) -> some View {
+        ProjectListRow(
+            title: title,
+            paths: [title],
+            count: count,
+            relativeTime: "",
+            longRelative: "",
+            isPinned: false,
+            isWorking: false,
+            isActive: false,
+            isKeyboardSelected: id == keyboardSelectionID,
+            canStart: false,
+            showsPin: false,
+            open: {
+                keyboardSelectionID = id
+                open()
+            },
+            newChat: {},
+            togglePin: {},
+            archive: nil
+        )
+        .id(id)
     }
 
     private func projectRow(_ project: SidebarProject, rows: [GrokSession]) -> some View {
@@ -467,7 +469,8 @@ struct SidebarView: View {
                 model.openProject(project)
             },
             newChat: { _ = model.newTabInProject(project) },
-            togglePin: { model.togglePin(project) }
+            togglePin: { model.togglePin(project) },
+            archive: { model.archive(project) }
         )
         .id(project.id)
         .contextMenu {
@@ -476,6 +479,7 @@ struct SidebarView: View {
             Button(model.isPinned(project) ? "Unpin Project" : "Pin Project") {
                 model.togglePin(project)
             }
+            Button("Archive Project") { model.archive(project) }
             if let session = rows.first {
                 Button("Reveal Folder in Finder") { model.revealInFinder(session) }
             }
@@ -614,7 +618,7 @@ struct SidebarView: View {
         if model.store.isLoading { return "Loading conversations…" }
         if model.store.loadError != nil { return "Could not load conversations" }
         if !model.searchText.isEmpty { return "No matches" }
-        if model.showingArchived { return "No archived conversations" }
+        if listKind == .archived { return "No archived conversations" }
         if listKind == .projectList { return "No projects yet" }
         return "No conversations yet"
     }
@@ -631,10 +635,8 @@ struct SidebarView: View {
             EmptyView()
         } else if !model.searchText.isEmpty {
             Text("Nothing matches “\(model.searchText)”.")
-        } else if model.scopeToCurrentFolder {
-            Text("Turn off the folder filter to see the rest.")
-        } else if model.showingArchived {
-            Text("Archive a conversation from Recents or Projects to send it here.")
+        } else if listKind == .archived {
+            Text("Archive a chat or a project from its row to send it here.")
         } else {
             HStack(spacing: 4) {
                 Text("Press")
@@ -649,8 +651,13 @@ struct SidebarView: View {
     private func visibleRowIDs() -> [String] {
         switch listKind {
         case .projectList:
-            return (model.pinnedProjects() + model.unpinnedProjects()).map(\.id)
-        case .recents, .projectChats, .projectSearch:
+            return SidebarOrganization.folderListRowIDs(
+                recentsCount: listedSessions.count,
+                archivedCount: model.archivedCount,
+                pinnedIDs: model.pinnedProjects().map(\.id),
+                restIDs: model.unpinnedProjects().map(\.id)
+            )
+        case .recents, .projectChats, .projectSearch, .archived:
             return visiblePinned.map { model.sessionKey($0) }
                 + groupedUnpinnedSessions().map { model.sessionKey($0) }
         }
@@ -662,7 +669,7 @@ struct SidebarView: View {
         switch listKind {
         case .recents, .projectChats:
             return unpinned
-        case .projectSearch:
+        case .projectSearch, .archived:
             return (model.pinnedProjects() + model.unpinnedProjects()).flatMap { project in
                 SidebarOrganization.listedRows(in: project, from: unpinned)
             }
@@ -690,7 +697,7 @@ struct SidebarView: View {
             model.searchText = ""
             return .handled
         }
-        if model.focusedProject != nil {
+        if model.sidebarSurface != .folders {
             model.leaveProject()
             return .handled
         }
@@ -909,6 +916,14 @@ struct SidebarView: View {
 
     @discardableResult
     private func activate(id: String) -> Bool {
+        if id == SidebarOrganization.recentsID {
+            model.openRecents()
+            return true
+        }
+        if id == SidebarOrganization.archivedID {
+            model.openArchived()
+            return true
+        }
         if listKind == .projectList, let project = project(for: id) {
             model.openProject(project)
             return true
@@ -932,67 +947,6 @@ struct SidebarView: View {
             keyboardSelectionID = nil
         }
     }
-
-    // MARK: - Footer
-
-    private var footer: some View {
-        HStack(spacing: 5) {
-            if model.store.isLoading {
-                ProgressView()
-                    .controlSize(.small)
-                    .scaleEffect(0.55)
-                    .frame(width: 10, height: 10)
-            }
-            Text(statusText)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(
-                    model.store.loadError == nil
-                        ? AnyShapeStyle(palette.textFaint) : AnyShapeStyle(palette.error)
-                )
-                .lineLimit(1)
-                .help(statusText)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 12)
-        .frame(height: 22)
-        .overlay(alignment: .top) { Rectangle().fill(palette.hairline).frame(height: 1) }
-    }
-
-    private var statusText: String {
-        if let error = model.store.loadError { return error }
-        if model.showingArchived {
-            let threads = listedSessions.count
-            return threads == 1 ? "1 archived" : "\(threads) archived"
-        }
-        let threads = listedSessions.count
-        let threadLabel = threads == 1 ? "1 thread" : "\(threads) threads"
-        let pinned = model.pinnedSessions().count
-        if listKind == .projectList {
-            let folders = model.sidebarProjects.count
-            return folders == 1 ? "1 project" : "\(folders) projects"
-        }
-        if let project = model.focusedProject, listKind == .projectChats {
-            let folder = project.name
-            return threads == 1 ? "1 chat in \(folder)" : "\(threads) chats in \(folder)"
-        }
-        if model.settings.sidebarMode == .projects {
-            let folders = model.sidebarProjects.count
-            let folderLabel = folders == 1 ? "1 project" : "\(folders) projects"
-            let pinnedFolders = model.pinnedProjects().count
-            var parts = [threadLabel, folderLabel]
-            if pinned > 0 { parts.append("\(pinned) pinned") }
-            if pinnedFolders == 1 {
-                parts.append("1 pinned project")
-            } else if pinnedFolders > 0 {
-                parts.append("\(pinnedFolders) pinned projects")
-            }
-            return parts.joined(separator: " · ")
-        }
-        if pinned > 0 {
-            return "\(threadLabel) · \(pinned) pinned"
-        }
-        return threadLabel
-    }
 }
 
 private struct ProjectRows: Identifiable {
@@ -1001,13 +955,16 @@ private struct ProjectRows: Identifiable {
     var rows: [GrokSession]
 }
 
-private struct ProjectFocusBar: View {
-    let project: SidebarProject
-    let isPinned: Bool
+private struct DrillBar: View {
+    let title: String
+    var isPinned: Bool = false
+    var showsPin: Bool = false
+    var showsArchive: Bool = false
+    var canStart: Bool = false
     let leave: () -> Void
-    let newChat: () -> Void
-    let togglePin: () -> Void
-    let canStart: Bool
+    var newChat: (() -> Void)? = nil
+    var togglePin: (() -> Void)? = nil
+    var toggleArchive: (() -> Void)? = nil
 
     @Environment(\.palette) private var palette
     @State private var isHoveringBack = false
@@ -1018,7 +975,7 @@ private struct ProjectFocusBar: View {
                 HStack(spacing: 4) {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 10, weight: .semibold))
-                    Text(project.name)
+                    Text(title)
                         .font(.system(size: 12, weight: .medium))
                         .lineLimit(1)
                 }
@@ -1036,17 +993,29 @@ private struct ProjectFocusBar: View {
             .help("Back to projects")
             .accessibilityLabel("Back to projects")
             Spacer(minLength: 4)
-            IconButton(systemImage: isPinned ? "pin.fill" : "pin", help: isPinned ? "Unpin Project" : "Pin Project") {
-                togglePin()
+            if showsArchive, let toggleArchive {
+                IconButton(systemImage: "archivebox", help: "Archive Project") {
+                    toggleArchive()
+                }
             }
-            .foregroundStyle(isPinned ? palette.accent : palette.textDim)
-            IconButton(
-                systemImage: "plus",
-                help: "New Session in \(project.name) (⌘T)"
-            ) {
-                newChat()
+            if showsPin, let togglePin {
+                IconButton(
+                    systemImage: isPinned ? "pin.fill" : "pin",
+                    help: isPinned ? "Unpin Project" : "Pin Project"
+                ) {
+                    togglePin()
+                }
+                .foregroundStyle(isPinned ? palette.accent : palette.textDim)
             }
-            .disabled(!canStart)
+            if let newChat {
+                IconButton(
+                    systemImage: "plus",
+                    help: "New Session in \(title) (⌘T)"
+                ) {
+                    newChat()
+                }
+                .disabled(!canStart)
+            }
         }
         .padding(.horizontal, 8)
         .padding(.bottom, 8)
@@ -1065,9 +1034,11 @@ private struct ProjectListRow: View {
     let isActive: Bool
     let isKeyboardSelected: Bool
     let canStart: Bool
+    var showsPin: Bool = true
     let open: () -> Void
     let newChat: () -> Void
     let togglePin: () -> Void
+    var archive: (() -> Void)? = nil
 
     @Environment(\.palette) private var palette
     @State private var isHovering = false
@@ -1105,14 +1076,25 @@ private struct ProjectListRow: View {
         .accessibilityLabel(title)
         .accessibilityValue(countLabel)
         .accessibilityAction(.default, open)
-        .accessibilityAction(named: "New Session", newChat)
-        .accessibilityAction(named: isPinned ? "Unpin Project" : "Pin Project", togglePin)
+        .modifier(NamedActionIf(name: "New Session", enabled: canStart, action: newChat))
+        .modifier(
+            NamedActionIf(
+                name: isPinned ? "Unpin Project" : "Pin Project",
+                enabled: showsPin,
+                action: togglePin
+            )
+        )
+        .modifier(ArchiveProjectAction(archive: archive))
     }
 
     private var rowHelp: String {
         let path = paths.first { $0.hasPrefix("/") || $0.hasPrefix("~") } ?? title
         if longRelative.isEmpty { return "\(path)\n\(countLabel)" }
         return "\(path)\n\(countLabel) · \(longRelative)"
+    }
+
+    private var showHoverControls: Bool {
+        (isHovering || isKeyboardSelected) && (showsPin || archive != nil)
     }
 
     private var countLabel: String {
@@ -1143,7 +1125,7 @@ private struct ProjectListRow: View {
 
     @ViewBuilder
     private var trailing: some View {
-        if isHovering || isKeyboardSelected {
+        if canStart || showHoverControls || (isPinned && showsPin) {
             HStack(spacing: 0) {
                 LinearGradient(
                     colors: [fill.opacity(0), fill],
@@ -1152,39 +1134,57 @@ private struct ProjectListRow: View {
                 )
                 .frame(width: 14)
                 HStack(spacing: 0) {
-                    Button(action: newChat) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 9, weight: .semibold))
-                            .frame(width: 22, height: 22)
-                            .contentShape(Rectangle())
+                    if canStart {
+                        Button(action: newChat) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 9, weight: .semibold))
+                                .frame(width: 22, height: 22)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(
+                            (isHovering || isKeyboardSelected) ? palette.textDim : palette.textFaint
+                        )
+                        .help("New Session")
+                        .accessibilityLabel("New Session")
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(palette.textDim)
-                    .disabled(!canStart)
-                    .help("New Session")
-                    .accessibilityLabel("New Session")
-                    Button(action: togglePin) {
-                        Image(systemName: isPinned ? "pin.fill" : "pin")
-                            .font(.system(size: 9, weight: .semibold))
+                    if isHovering || isKeyboardSelected {
+                        if let archive {
+                            Button(action: archive) {
+                                Image(systemName: "archivebox")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .frame(width: 22, height: 22)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(palette.textDim)
+                            .help("Archive Project")
+                            .accessibilityLabel("Archive Project")
+                        }
+                        if showsPin {
+                            Button(action: togglePin) {
+                                Image(systemName: isPinned ? "pin.fill" : "pin")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .frame(width: 22, height: 22)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(isPinned ? palette.accent : palette.textDim)
+                            .help(isPinned ? "Unpin Project" : "Pin Project")
+                            .accessibilityLabel(isPinned ? "Unpin Project" : "Pin Project")
+                        }
+                    } else if isPinned && showsPin {
+                        Image(systemName: "pin.fill")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(palette.accent.opacity(0.9))
                             .frame(width: 22, height: 22)
-                            .contentShape(Rectangle())
+                            .accessibilityHidden(true)
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(isPinned ? palette.accent : palette.textDim)
-                    .help(isPinned ? "Unpin Project" : "Pin Project")
-                    .accessibilityLabel(isPinned ? "Unpin Project" : "Pin Project")
                 }
                 .padding(.trailing, 8)
                 .padding(.top, 4)
                 .background(fill)
             }
-        } else if isPinned {
-            Image(systemName: "pin.fill")
-                .font(.system(size: 8, weight: .semibold))
-                .foregroundStyle(palette.accent.opacity(0.9))
-                .padding(.trailing, 12)
-                .padding(.top, 8)
-                .accessibilityHidden(true)
         }
     }
 }
@@ -1197,6 +1197,7 @@ private struct ProjectSectionHeader: View {
     let isFirst: Bool
     let isPinned: Bool
     let togglePin: () -> Void
+    var unarchive: (() -> Void)? = nil
 
     @Environment(\.palette) private var palette
     @State private var isHovering = false
@@ -1226,6 +1227,9 @@ private struct ProjectSectionHeader: View {
         .onHover { isHovering = $0 }
         .contextMenu {
             Button(isPinned ? "Unpin Project" : "Pin Project", action: togglePin)
+            if let unarchive {
+                Button("Unarchive Project", action: unarchive)
+            }
         }
         .help(
             "\(paths.first { $0.hasPrefix("/") || $0.hasPrefix("~") } ?? title)\n"
@@ -1270,90 +1274,6 @@ private struct ProjectSectionHeader: View {
                 .padding(.top, isFirst ? 10 : 18)
                 .accessibilityHidden(true)
         }
-    }
-}
-
-/// Shows archived conversations instead of Recents and Projects.
-private struct ArchiveToggle: View {
-    @Binding var isOn: Bool
-    let count: Int
-
-    @Environment(\.palette) private var palette
-    @State private var isHovering = false
-
-    private var helpText: String {
-        if isOn {
-            return count == 1
-                ? "Showing 1 archived conversation"
-                : "Showing \(count) archived conversations"
-        }
-        if count == 0 { return "No archived conversations" }
-        return count == 1
-            ? "Show 1 archived conversation"
-            : "Show \(count) archived conversations"
-    }
-
-    var body: some View {
-        Button {
-            isOn.toggle()
-        } label: {
-            Image(systemName: isOn ? "archivebox.fill" : "archivebox")
-                .font(.system(size: 10.5, weight: .medium))
-                .frame(width: 22, height: 22)
-                .background(
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(
-                            isOn
-                                ? palette.accent.opacity(0.14)
-                                : (isHovering ? palette.raised : Color.clear)
-                        )
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(isOn ? palette.accent : (isHovering ? palette.textDim : palette.textFaint))
-        .onHover { isHovering = $0 }
-        .help(helpText)
-        .accessibilityLabel(helpText)
-        .accessibilityAddTraits(isOn ? .isSelected : [])
-    }
-}
-
-/// Restricts the list to the folder the current session is working in.
-private struct ScopeToggle: View {
-    @Binding var isOn: Bool
-    let folder: URL
-
-    @Environment(\.palette) private var palette
-    @State private var isHovering = false
-
-    private var helpText: String {
-        isOn ? "Showing only \(folder.abbreviatedPath)" : "Show only \(folder.abbreviatedPath)"
-    }
-
-    var body: some View {
-        Button {
-            isOn.toggle()
-        } label: {
-            Image(systemName: isOn ? "folder.fill" : "folder")
-                .font(.system(size: 10.5, weight: .medium))
-                .frame(width: 22, height: 22)
-                .background(
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(
-                            isOn
-                                ? palette.accent.opacity(0.14)
-                                : (isHovering ? palette.raised : Color.clear)
-                        )
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(isOn ? palette.accent : (isHovering ? palette.textDim : palette.textFaint))
-        .onHover { isHovering = $0 }
-        .help(helpText)
-        .accessibilityLabel(helpText)
-        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }
 
@@ -1584,16 +1504,22 @@ private struct SessionRow: View {
                 .frame(width: 14)
                 HStack(spacing: 0) {
                     rowActionButton(
-                        systemImage: "xmark",
-                        tinted: false,
-                        help: dismissHelp,
-                        action: dismiss
+                        systemImage: isArchived ? "archivebox.fill" : "archivebox",
+                        tinted: isArchived,
+                        help: isArchived ? "Unarchive" : "Archive",
+                        action: toggleArchive
                     )
                     rowActionButton(
                         systemImage: isPinned ? "pin.fill" : "pin",
                         tinted: isPinned,
                         help: isPinned ? "Unpin" : "Pin",
                         action: togglePin
+                    )
+                    rowActionButton(
+                        systemImage: "xmark",
+                        tinted: false,
+                        help: dismissHelp,
+                        action: dismiss
                     )
                 }
                 .padding(.trailing, 8)
@@ -1911,6 +1837,34 @@ private struct SessionRowActivateTrait: ViewModifier {
             content
                 .accessibilityAddTraits(.isButton)
                 .accessibilityAction { open() }
+        } else {
+            content
+        }
+    }
+}
+
+private struct NamedActionIf: ViewModifier {
+    let name: String
+    let enabled: Bool
+    let action: () -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            content.accessibilityAction(named: name, action)
+        } else {
+            content
+        }
+    }
+}
+
+private struct ArchiveProjectAction: ViewModifier {
+    let archive: (() -> Void)?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let archive {
+            content.accessibilityAction(named: "Archive Project", archive)
         } else {
             content
         }

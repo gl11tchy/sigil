@@ -21,6 +21,56 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
 
     var hostedPid: pid_t { process.running ? process.shellPid : 0 }
 
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        registerForDraggedTypes(TerminalDrop.pasteboardTypes)
+    }
+
+    override init(frame: CGRect, font: NSFont? = nil, options: TerminalOptions) {
+        super.init(frame: frame, font: font, options: options)
+        registerForDraggedTypes(TerminalDrop.pasteboardTypes)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        registerForDraggedTypes(TerminalDrop.pasteboardTypes)
+    }
+
+    override func paste(_ sender: Any) {
+        if pasteDroppedContent(from: NSPasteboard.general) { return }
+        super.paste(sender)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        TerminalDrop.canAccept(sender.draggingPasteboard) ? .copy : []
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        draggingEntered(sender)
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        TerminalDrop.canAccept(sender.draggingPasteboard)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        pasteDroppedContent(from: sender.draggingPasteboard)
+    }
+
+    @discardableResult
+    func pasteDroppedContent(from pasteboard: NSPasteboard) -> Bool {
+        guard process.running else { return false }
+        guard let paths = try? TerminalDrop.pathsToPaste(from: pasteboard), !paths.isEmpty else {
+            return false
+        }
+        let text = TerminalDrop.pasteText(for: paths)
+        let bracketed = getTerminal().bracketedPasteMode
+        if bracketed { send(txt: "\u{1b}[200~") }
+        send(txt: text)
+        if bracketed { send(txt: "\u{1b}[201~") }
+        return true
+    }
+
     func startHosted(
         executable: String,
         args: [String],

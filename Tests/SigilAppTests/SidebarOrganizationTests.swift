@@ -104,36 +104,57 @@ struct SidebarOrganizationTests {
         #expect(grouped[1].sessions.map(\.id) == ["p"])
     }
 
-    @Test func projectsWithoutAFocusAreAFolderList() {
+    @Test func foldersAreTheHomeList() {
         #expect(
-            SidebarOrganization.listKind(
-                mode: .projects, hasFocusedProject: false, isSearching: false
-            ) == .projectList)
+            SidebarOrganization.listKind(surface: .folders, isSearching: false) == .projectList)
     }
 
     @Test func aFocusedProjectShowsItsChats() {
         #expect(
-            SidebarOrganization.listKind(
-                mode: .projects, hasFocusedProject: true, isSearching: false
-            ) == .projectChats)
+            SidebarOrganization.listKind(surface: .project, isSearching: false) == .projectChats)
         #expect(
-            SidebarOrganization.listKind(
-                mode: .projects, hasFocusedProject: true, isSearching: true
-            ) == .projectChats)
+            SidebarOrganization.listKind(surface: .project, isSearching: true) == .projectChats)
     }
 
-    @Test func searchingProjectsWithoutAFocusGroupsMatchingChats() {
+    @Test func searchingFoldersGroupsMatchingChats() {
         #expect(
-            SidebarOrganization.listKind(
-                mode: .projects, hasFocusedProject: false, isSearching: true
-            ) == .projectSearch)
+            SidebarOrganization.listKind(surface: .folders, isSearching: true) == .projectSearch)
     }
 
-    @Test func recentsStayATimeListEvenWithAFocus() {
+    @Test func recentsAndArchivedAreTheirOwnLists() {
+        #expect(SidebarOrganization.listKind(surface: .recents, isSearching: true) == .recents)
+        #expect(SidebarOrganization.listKind(surface: .archived, isSearching: false) == .archived)
+    }
+
+    @Test func sentinelPathsAreNotRealFolders() {
+        #expect(SidebarOrganization.isSentinel(SidebarOrganization.recentsID))
+        #expect(SidebarOrganization.isSentinel(SidebarOrganization.archivedID))
+        #expect(!SidebarOrganization.isSentinel("/tmp/sigil"))
+        #expect(!SidebarOrganization.isSentinel(""))
+    }
+
+    @Test func surfaceReadsSentinelPathsBeforeARealFolder() {
+        #expect(SidebarOrganization.surface(focusedPath: SidebarOrganization.recentsID) == .recents)
         #expect(
-            SidebarOrganization.listKind(
-                mode: .recents, hasFocusedProject: true, isSearching: true
-            ) == .recents)
+            SidebarOrganization.surface(focusedPath: SidebarOrganization.archivedID) == .archived)
+        #expect(SidebarOrganization.surface(focusedPath: "/tmp/sigil") == .project)
+        #expect(SidebarOrganization.surface(focusedPath: "") == .folders)
+    }
+
+    @Test func folderListPutsRecentsFirstAndArchivedLast() {
+        #expect(
+            SidebarOrganization.folderListRowIDs(
+                recentsCount: 2,
+                archivedCount: 1,
+                pinnedIDs: ["pin"],
+                restIDs: ["rest"]
+            ) == [
+                SidebarOrganization.recentsID, "pin", "rest", SidebarOrganization.archivedID,
+            ])
+        #expect(
+            SidebarOrganization.folderListRowIDs(
+                recentsCount: 0, archivedCount: 0, pinnedIDs: ["a"], restIDs: []
+            ) == ["a"])
     }
 
     @Test func pathHaystacksIncludeEveryMemberSpelling() {

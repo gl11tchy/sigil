@@ -163,10 +163,9 @@ final class AppModel {
         var token: Int
     }
 
-    /// Restrict the sidebar to conversations started in the current tab's folder.
-    var scopeToCurrentFolder = false
-    /// Recents and Projects hide archived chats; this shows only those.
-    var showingArchived = false
+    var sidebarSurface: SidebarSurface {
+        SidebarOrganization.surface(focusedPath: settings.focusedProjectPath)
+    }
     /// Session key (`id` + cwd) of the row being renamed. Nil when idle.
     /// Lives on the model so ⌘B can hide the sidebar without dropping the draft.
     var renamingSessionKey: String?
@@ -199,9 +198,8 @@ final class AppModel {
     /// the CLI summary moved. Same-key begin must not clear this.
     var renameCommitBaseline: String?
 
-    /// Conversations for the sidebar: newest first, one-shot noise filtered out,
-    /// optionally scoped to the folder the current tab is working in. Archived
-    /// chats are hidden unless `showingArchived` is on.
+    /// Conversations for the sidebar: newest first, one-shot noise filtered out.
+    /// Archived chats are hidden unless the Archived row is open.
     var sidebarSessions: [GrokSession] {
         var result = store.search(searchText) { self.title(for: $0) }
         if !settings.showEmptySessions {
@@ -216,11 +214,7 @@ final class AppModel {
         if !settings.showSubagentSessions {
             result = result.filter { !$0.isSubagent || isOpen($0) }
         }
-        if scopeToCurrentFolder {
-            let folder = currentDirectory.resolvingSymlinksInPath().path
-            result = result.filter { samePath($0.cwd, folder) }
-        }
-        if showingArchived {
+        if sidebarSurface == .archived {
             result = result.filter { isArchived($0) }
         } else {
             result = result.filter { !isArchived($0) }
@@ -336,6 +330,22 @@ final class AppModel {
         if isArchived(session) { unarchive(session) } else { archive(session) }
     }
 
+    func archive(_ project: SidebarProject) {
+        unpin(project)
+        for session in store.sessions where samePath(session.cwd, project.cwd) {
+            archive(session)
+        }
+        if focusedProject.map({ samePath($0.cwd, project.cwd) }) == true {
+            leaveProject()
+        }
+    }
+
+    func unarchive(_ project: SidebarProject) {
+        for session in store.sessions where samePath(session.cwd, project.cwd) {
+            unarchive(session)
+        }
+    }
+
     /// Archived conversations still on disk, in archive order.
     var archivedCount: Int {
         store.sessions.filter { isArchived($0) }.count
@@ -387,7 +397,10 @@ final class AppModel {
 
     var focusedProject: SidebarProject? {
         let path = settings.focusedProjectPath
-        guard !path.isEmpty else { return nil }
+        guard !path.isEmpty,
+            path != SidebarOrganization.recentsID,
+            path != SidebarOrganization.archivedID
+        else { return nil }
         return project(at: path, from: sidebarSessions)
             ?? project(at: path, from: store.sessions)
     }
@@ -413,8 +426,15 @@ final class AppModel {
     }
 
     func openProject(_ project: SidebarProject) {
-        settings.sidebarMode = .projects
         settings.focusedProjectPath = project.cwd
+    }
+
+    func openRecents() {
+        settings.focusedProjectPath = SidebarOrganization.recentsID
+    }
+
+    func openArchived() {
+        settings.focusedProjectPath = SidebarOrganization.archivedID
     }
 
     func leaveProject() {
@@ -464,8 +484,10 @@ final class AppModel {
         if remainingNames != settings.conversationNames {
             settings.conversationNames = remainingNames
         }
-        if !settings.focusedProjectPath.isEmpty,
-            !store.sessions.contains(where: { samePath($0.cwd, settings.focusedProjectPath) })
+        let focused = settings.focusedProjectPath
+        if !focused.isEmpty,
+            !SidebarOrganization.isSentinel(focused),
+            !store.sessions.contains(where: { samePath($0.cwd, focused) })
         {
             settings.focusedProjectPath = ""
         }

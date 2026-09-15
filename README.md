@@ -17,13 +17,13 @@ By gl11tchy.
 
 ## What it adds
 
-- **Thread sidebar.** Every conversation on this machine. Recents is newest first,
-  in Today / Yesterday / Previous 7 days buckets. Projects is a folder list; open
-  a folder to see its chats and start a new one with the plus. Search by title,
-  folder or path. Click a chat to reopen it; if it is already open, the app moves
-  to that tab. Hover X closes an open tab, or deletes a closed chat. Workflow and
-  subagent children stay off the list unless you turn them on in Settings. They
-  still run in the background.
+- **Thread sidebar.** Every conversation on this machine. Home is the project
+  list; open a folder to see its chats and start a new one with the plus. Recents
+  and Archived are rows you open, not extra chrome. Search by title, folder or
+  path. Click a chat to reopen it; if it is already open, the app moves to that
+  tab. Hover archive on a chat or a project. Hover X closes an open tab, or
+  deletes a closed chat. Workflow and subagent children stay off the list unless
+  you turn them on in Settings. They still run in the background.
 - **Search highlight.** Matches from the sidebar Search field (`⌘⇧F`) light up in
   each visible title, in the project name or path on the subtitle, and in the
   Projects header. A hit on the CLI summary or a path still paints a visible run.
@@ -32,13 +32,13 @@ By gl11tchy.
   tabs, and search use, and it survives the CLI rewriting its own summary.
   Reset Name, or a blank rename, brings that summary back.
 - **Pins.** Hover a row and pin a chat. Pinned chats stay at the top of Recents
-  and Projects, in the order you pinned them. In Projects, hover a folder name
-  to pin the folder; pinned folders stay at the top of that sort.
+  and of an open project, in the order you pinned them. Hover a folder to pin
+  it; pinned folders stay at the top of the project list.
 - **Projects.** A list of working folders, newest folder first. Open a folder to
   see its chats. Pin a folder to keep it above the rest. The plus on a folder
   starts a session there.
-- **Scope switch.** Show all conversations, or only the ones started in the folder the
-  current tab is working in.
+- **Photo drop.** Drag an image onto the session, or paste one with ⌘V. Grok
+  attaches it the same way it does in a regular terminal.
 - **Tabs.** Several sessions at once, each in its own folder.
 - **Right panel.** ⌥⌘B opens a second column beside the session. It holds a plain
   login shell in the same folder (⌥⌘1) and a notes pad kept per working folder
