@@ -49,6 +49,7 @@ struct EphemeralPathTests {
         "/Users/someone/.bb",
         "/Users/someone/.bb/plugins",
         "/Users/someone/.bb/plugins/other-plugin",
+        "/Users/someone/src/environment-git-worktree",
     ])
     func treatsRealLocationsAsPersistent(path: String) {
         #expect(!isEphemeral(path: path))

@@ -59,7 +59,6 @@ private let temporaryPrefixes: [String] = {
 /// Folder names that always mean an agent worktree or scratch checkout.
 private let scratchComponents: Set<String> = [
     ".worktrees", "scratchpad", "scratchpads", ".t3", ".codex",
-    "environment-git-worktree",
 ]
 
 /// Direct children of a dot-dir that hold implementer worktrees, not real projects.
@@ -78,6 +77,15 @@ private func hasScratchWorkspaceMarker(_ path: String) -> Bool {
         if let index = parts.firstIndex(of: root) {
             let next = parts.index(after: index)
             if next < parts.endIndex, children.contains(parts[next]) {
+                return true
+            }
+        }
+    }
+    if let index = parts.firstIndex(of: ".bb") {
+        let plugins = parts.index(after: index)
+        if plugins < parts.endIndex, parts[plugins] == "plugins" {
+            let plugin = parts.index(after: plugins)
+            if plugin < parts.endIndex, parts[plugin] == "environment-git-worktree" {
                 return true
             }
         }
