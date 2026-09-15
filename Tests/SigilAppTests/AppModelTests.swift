@@ -2660,6 +2660,65 @@ struct AppModelTests {
         model.commitRename(session, to: "From alert")
         #expect(model.title(for: session) == "From alert")
     }
+
+    @Test @MainActor
+    func focusedProjectLimitsChatsAndNewSessionsToThatFolder() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let projectA = try fixture.directory("acme-api")
+        let projectB = try fixture.directory("acme-web")
+        try fixture.writeListedSession(id: "a", cwd: projectA.path, summary: "API chat")
+        try fixture.writeListedSession(id: "b", cwd: projectB.path, summary: "Web chat")
+        fixture.settings.showWorktreeSessions = true
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let api = try #require(model.sidebarProjects.first { $0.name == "acme-api" })
+        model.openProject(api)
+
+        #expect(model.focusedProject?.name == "acme-api")
+        #expect(model.focusedSidebarSessions.map(\.id) == ["a"])
+        #expect(
+            model.newSessionDirectory.resolvingSymlinksInPath().path
+                == projectA.resolvingSymlinksInPath().path)
+
+        let tab = try #require(model.newTabInProject(api))
+        #expect(
+            tab.workingDirectory.resolvingSymlinksInPath().path
+                == projectA.resolvingSymlinksInPath().path)
+
+        model.searchText = "no-such-chat"
+        #expect(model.focusedProject?.name == "acme-api")
+        #expect(model.focusedSidebarSessions.isEmpty)
+        #expect(
+            model.newSessionDirectory.resolvingSymlinksInPath().path
+                == projectA.resolvingSymlinksInPath().path)
+
+        model.searchText = ""
+        model.leaveProject()
+        #expect(model.focusedProject == nil)
+        #expect(model.focusedSidebarSessions.map(\.id).sorted() == ["a", "b"])
+    }
+
+    @Test @MainActor
+    func sidebarDismissClosesAnOpenTabAndDeletesAClosedChat() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        let tab = try #require(model.newTab(in: cwd))
+        let sessionID = try #require(tab.sessionID)
+        let open = makeSession(id: sessionID, cwd: cwd)
+        #expect(model.sidebarDismiss(for: open) == .closeTab(tab.id))
+        model.performSidebarDismiss(open)
+        #expect(model.tabs.isEmpty)
+
+        let closed = makeSession(id: "closed-id", cwd: cwd)
+        #expect(model.sidebarDismiss(for: closed) == .delete)
+    }
 }
 
 private enum TestFailure: Error {

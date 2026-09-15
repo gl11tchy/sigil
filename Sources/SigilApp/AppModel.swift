@@ -16,7 +16,7 @@ final class AppModel {
 
     let settings: AppSettings
     let store: SessionStore
-    /// The right-hand utility column: scratch shell, dev-server browser, notes.
+    /// The right-hand utility column: scratch shell and per-folder notes.
     let panel: RightPanel
     let remoteControl = RemoteControl()
 
@@ -389,8 +389,28 @@ final class AppModel {
     var focusedProject: SidebarProject? {
         let path = settings.focusedProjectPath
         guard !path.isEmpty else { return nil }
+        return project(at: path, from: sidebarSessions)
+            ?? project(at: path, from: store.sessions)
+    }
+
+    private func project(at path: String, from sessions: [GrokSession]) -> SidebarProject? {
         let focused = canonicalPath(path)
-        return sidebarProjects.first { $0.id == focused || samePath($0.cwd, path) }
+        return SidebarOrganization.projects(from: sessions, canonicalPath: canonicalPath)
+            .first { $0.id == focused || samePath($0.cwd, path) }
+    }
+
+    /// Chats in the open project, or the full sidebar list.
+    var focusedSidebarSessions: [GrokSession] {
+        guard let project = focusedProject else { return sidebarSessions }
+        return sidebarSessions.filter { samePath($0.cwd, project.cwd) }
+    }
+
+    /// Folder a new chat should start in: the open project, else the current tab.
+    var newSessionDirectory: URL {
+        if let project = focusedProject {
+            return URL(fileURLWithPath: project.cwd)
+        }
+        return currentDirectory
     }
 
     func openProject(_ project: SidebarProject) {
@@ -400,6 +420,30 @@ final class AppModel {
 
     func leaveProject() {
         settings.focusedProjectPath = ""
+    }
+
+    @discardableResult
+    func newTabInProject(_ project: SidebarProject) -> TerminalTab? {
+        openProject(project)
+        return newTab(in: URL(fileURLWithPath: project.cwd))
+    }
+
+    enum SidebarDismiss: Equatable {
+        case closeTab(UUID)
+        case delete
+    }
+
+    func sidebarDismiss(for session: GrokSession) -> SidebarDismiss {
+        if let tab = tabs.first(where: { tabMatches($0, sessionID: session.id, cwd: session.cwd) }) {
+            return .closeTab(tab.id)
+        }
+        return .delete
+    }
+
+    func performSidebarDismiss(_ session: GrokSession) {
+        if case .closeTab(let id) = sidebarDismiss(for: session) {
+            requestCloseTab(id)
+        }
     }
 
     /// Drops pins, archives, and names whose conversations are gone, after a successful scan.
@@ -421,7 +465,9 @@ final class AppModel {
         if remainingNames != settings.conversationNames {
             settings.conversationNames = remainingNames
         }
-        if !settings.focusedProjectPath.isEmpty, focusedProject == nil {
+        if !settings.focusedProjectPath.isEmpty,
+            !store.sessions.contains(where: { samePath($0.cwd, settings.focusedProjectPath) })
+        {
             settings.focusedProjectPath = ""
         }
     }

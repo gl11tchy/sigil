@@ -122,6 +122,8 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         env["GROK_WRAPPER"] = "Sigil.app"
         if let themeName = themeName?.nilIfBlank {
             env["GROK_THEME"] = themeName
+        } else {
+            env.removeValue(forKey: "GROK_THEME")
         }
         // The app bundle inherits a bare or duplicated PATH. Keep one copy of
         // each entry and put both the selected CLI directory and Grok bin first.

@@ -73,9 +73,9 @@ Two families on a contrast axis:
   paths. This is what makes metadata read as metadata rather than as a failed title.
   Section titles stay in SF, because they are labels a human reads as structure.
 
-Fixed scale, no fluid sizing. 13 / 12 / 11.5 / 10 / 9.5 px. Product UI is viewed at
-one DPI; clamped headings serve nothing here. 13 semibold belongs to the sidebar
-mode switch alone — it is the only heading in the chrome.
+Fixed scale, no fluid sizing. 12 / 11.5 / 11 / 10 / 9.5 px. Product UI is viewed at
+one DPI; clamped headings serve nothing here. 12 medium belongs to the open
+project name in the sidebar — it is the only heading in the chrome.
 
 Relative time in the list is compact mono — `now`, `14m`, `3h`, `2d`, `3w`, then a
 short date. A column of "14 minutes ago" is noise; `14m` scans. Tooltips and
@@ -105,12 +105,15 @@ Two-line rows stay: a single line was tried and the titles ran together.
 
 Section headers for Recents are uppercase with a count, `PINNED (2)` / `TODAY (1)`,
 because that is how the chosen mockup marks structure. They take 16pt above and
-5pt below. Project names stay in their own case, `sigil (4)`, so a folder slug
+5pt below. Project names stay in their own case, `sigil`, so a folder slug
 does not become a shout.
 
-The sidebar has one list and two sorts. Recents is time. Projects is the same
-chats grouped by working folder. Chat pins sit at the top of either sort.
-Project pins sit at the top of Projects, newest-pinned first.
+The sidebar has one list and two sorts. Recents is time. Projects is a list of
+working folders; click one to open it. Chat pins sit at the top of Recents and
+of an open project. Project pins sit at the top of the folder list, newest-pinned
+first. A plus on the search row, on a folder row, and in an open project starts
+a chat in that folder. Hover X on a chat closes its tab, or deletes it if it is
+not open.
 
 ## Type ramp and the contrast floor
 
@@ -133,9 +136,10 @@ Every interactive element ships all of these, or it is not done:
 - **Tab**: default, hover, selected (`selected` fill — the same fill as the open
   row, because it is the same state), close button with its own hover.
 - **Session**: starting, working (pulsing ember on the row), idle, exited.
-- **Folder**: in Projects sort, the working folder is a section of chats, not a
-  drill-in. Pin it from the header; pinned folders stay at the top. The current
-  folder is the one you are already in; it does not need a second icon language.
+- **Folder**: in Projects, a working folder is a row you open. Pin it from the
+  row or from the open-project bar; pinned folders stay at the top of the list.
+  The plus on that row starts a chat in the folder. The current folder is the
+  one you are already in; it does not need a second icon language.
 
 ## System appearance
 
@@ -147,7 +151,6 @@ ember, never system blue.
 ## Motion
 
 150–200ms, ease-out. Motion reports state changes only: the sidebar collapsing, a
-session starting work, the find bar entering, the mode underline sliding. There is
-no page-load choreography — the app opens into a task. Every animation has a
-`prefers-reduced-motion` answer: crossfade instead of move, a steady dot instead
-of a pulse.
+session starting work, the find bar entering. There is no page-load choreography —
+the app opens into a task. Every animation has a `prefers-reduced-motion` answer:
+crossfade instead of move, a steady dot instead of a pulse.

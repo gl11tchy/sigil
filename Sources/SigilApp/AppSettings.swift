@@ -159,7 +159,7 @@ final class AppSettings {
         {
             sidebarMode = mode
         } else {
-            sidebarMode = .recents
+            sidebarMode = .projects
         }
         focusedProjectPath = defaults.string(forKey: Key.focusedProjectPath) ?? ""
         if let data = defaults.data(forKey: Key.pinnedConversations),

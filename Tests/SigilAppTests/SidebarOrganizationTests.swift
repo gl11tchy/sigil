@@ -104,6 +104,38 @@ struct SidebarOrganizationTests {
         #expect(grouped[1].sessions.map(\.id) == ["p"])
     }
 
+    @Test func projectsWithoutAFocusAreAFolderList() {
+        #expect(
+            SidebarOrganization.listKind(
+                mode: .projects, hasFocusedProject: false, isSearching: false
+            ) == .projectList)
+    }
+
+    @Test func aFocusedProjectShowsItsChats() {
+        #expect(
+            SidebarOrganization.listKind(
+                mode: .projects, hasFocusedProject: true, isSearching: false
+            ) == .projectChats)
+        #expect(
+            SidebarOrganization.listKind(
+                mode: .projects, hasFocusedProject: true, isSearching: true
+            ) == .projectChats)
+    }
+
+    @Test func searchingProjectsWithoutAFocusGroupsMatchingChats() {
+        #expect(
+            SidebarOrganization.listKind(
+                mode: .projects, hasFocusedProject: false, isSearching: true
+            ) == .projectSearch)
+    }
+
+    @Test func recentsStayATimeListEvenWithAFocus() {
+        #expect(
+            SidebarOrganization.listKind(
+                mode: .recents, hasFocusedProject: true, isSearching: true
+            ) == .recents)
+    }
+
     @Test func pathHaystacksIncludeEveryMemberSpelling() {
         let sample = session(id: "a", cwd: "/var/folders/x", name: "n", updated: 2)
         let sibling = session(id: "b", cwd: "/private/var/folders/x", name: "n", updated: 1)

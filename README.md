@@ -17,9 +17,11 @@ By gl11tchy.
 
 ## What it adds
 
-- **Thread sidebar.** Every conversation on this machine, newest first, in Today /
-  Yesterday / Previous 7 days buckets. Search by title, folder or path. Click one to
-  reopen it; if it is already open, the app moves to that tab. Workflow and
+- **Thread sidebar.** Every conversation on this machine. Recents is newest first,
+  in Today / Yesterday / Previous 7 days buckets. Projects is a folder list; open
+  a folder to see its chats and start a new one with the plus. Search by title,
+  folder or path. Click a chat to reopen it; if it is already open, the app moves
+  to that tab. Hover X closes an open tab, or deletes a closed chat. Workflow and
   subagent children stay off the list unless you turn them on in Settings. They
   still run in the background.
 - **Search highlight.** Matches from the sidebar Search field (`⌘⇧F`) light up in
@@ -32,22 +34,21 @@ By gl11tchy.
 - **Pins.** Hover a row and pin a chat. Pinned chats stay at the top of Recents
   and Projects, in the order you pinned them. In Projects, hover a folder name
   to pin the folder; pinned folders stay at the top of that sort.
-- **Projects.** The same Recents list, grouped by working folder. Newest folder
-  first; chats inside a folder stay newest first. Pin a folder to keep it above
-  the rest.
+- **Projects.** A list of working folders, newest folder first. Open a folder to
+  see its chats. Pin a folder to keep it above the rest. The plus on a folder
+  starts a session there.
 - **Scope switch.** Show all conversations, or only the ones started in the folder the
   current tab is working in.
 - **Tabs.** Several sessions at once, each in its own folder.
-- **Right panel.** ⌥⌘B opens a second column beside the session. It holds three
-  tools: a plain login shell in the same folder (⌥⌘1), a browser for a local dev
-  server — type a bare port and it goes to `localhost` (⌥⌘2), and a notes pad kept
-  per working folder (⌥⌘3). The shell is a scratch terminal only: no conversation,
-  no tab messaging.
+- **Right panel.** ⌥⌘B opens a second column beside the session. It holds a plain
+  login shell in the same folder (⌥⌘1) and a notes pad kept per working folder
+  (⌥⌘2). The shell is a scratch terminal only: no conversation, no tab messaging.
 - **Status light.** A green dot per tab while the agent is working, and a dot on the
   Dock icon when a background tab finishes a turn.
 - **Terminal colors and font size**, applied live; reopen a session to apply Grok’s interface theme.
 - **Transcript export**, through `grok export`.
-- **Delete**, from the row's context menu. The conversation folder goes to the Trash.
+- **Delete**, from the row's hover X when the chat is not open, or from the
+  context menu. The conversation folder goes to the Trash.
 - **Tab restore.** The sessions you had open come back on the next launch. Starting the
   app never creates a new conversation.
 - **Tab messaging.** Off by default. Turn it on in Settings, and each session gets four
@@ -94,6 +95,8 @@ terminal itself.
 | `⌘F` | Find in the terminal |
 | `⌘⇧F` | Find conversations |
 | `⌘B` | Hide or show the thread list |
+| `⌥⌘B` | Hide or show the utility panel |
+| `⌥⌘1` / `⌥⌘2` | Panel terminal / notes |
 | `⌘+` / `⌘-` / `⌘0` | Font size |
 | `⌘R` | Reload the conversation list |
 | `⌘⇧R` | Rename the conversation on screen |

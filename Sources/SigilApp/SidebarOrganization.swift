@@ -1,7 +1,7 @@
 import Foundation
 import SigilKit
 
-/// Recents is a time-ordered thread list. Projects is that same list grouped by folder.
+/// Recents is a time-ordered thread list. Projects is a folder list you open.
 enum SidebarMode: String, CaseIterable, Identifiable, Sendable {
     case recents
     case projects
@@ -14,6 +14,18 @@ enum SidebarMode: String, CaseIterable, Identifiable, Sendable {
         case .projects: return "Projects"
         }
     }
+}
+
+/// What the sidebar list is showing.
+enum SidebarListKind: Equatable, Sendable {
+    /// Time buckets of chats.
+    case recents
+    /// Working folders; click one to open it.
+    case projectList
+    /// Chats in the open folder.
+    case projectChats
+    /// Search hits grouped by folder.
+    case projectSearch
 }
 
 /// One working folder and the conversations started in it, newest first.
@@ -32,6 +44,20 @@ struct SidebarProject: Identifiable, Equatable, Sendable {
 /// Pure grouping for the sidebar. Path identity is injected so tests do not
 /// need POSIX `realpath`. Pins and archives share the same identity list.
 enum SidebarOrganization {
+    static func listKind(
+        mode: SidebarMode,
+        hasFocusedProject: Bool,
+        isSearching: Bool
+    ) -> SidebarListKind {
+        switch mode {
+        case .recents:
+            return .recents
+        case .projects:
+            if hasFocusedProject { return .projectChats }
+            return isSearching ? .projectSearch : .projectList
+        }
+    }
+
     static func activationKey(preferred: String?, in keys: [String]) -> String? {
         if let preferred, keys.contains(preferred) { return preferred }
         return keys.first

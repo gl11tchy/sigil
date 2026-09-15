@@ -32,7 +32,7 @@ enum RemoteCommands {
             model.select(tab.id)
         case "new":
             guard model.settings.executableExists,
-                model.newTab(in: model.currentDirectory) != nil
+                model.newTab(in: model.newSessionDirectory) != nil
             else {
                 return failure(request, "Could not start a session. Check Sigil on your Mac.")
             }
