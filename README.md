@@ -19,7 +19,7 @@ By gl11tchy.
 
 - **Thread sidebar.** Every conversation on this machine. Home is the project
   list; open a folder to see its chats and start a new one with the plus. Recents
-  and Archived are rows you open, not extra chrome. Search by title, folder or
+  and Archived sit under the folders as destinations you open. Search by title, folder or
   path. Click a chat to reopen it; if it is already open, the app moves to that
   tab. Hover archive on a chat or a project. Hover X closes an open tab, or
   deletes a closed chat. Workflow and subagent children stay off the list unless

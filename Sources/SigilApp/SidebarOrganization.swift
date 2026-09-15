@@ -77,18 +77,26 @@ enum SidebarOrganization {
         }
     }
 
-    static func folderListRowIDs(
+    static func folderListRowIDs(pinnedIDs: [String], restIDs: [String]) -> [String] {
+        pinnedIDs + restIDs
+    }
+
+    /// Recents and Archived are destinations, not folders.
+    static func destinationRowIDs(recentsCount: Int, archivedCount: Int) -> [String] {
+        var ids: [String] = []
+        if recentsCount > 0 { ids.append(recentsID) }
+        if archivedCount > 0 { ids.append(archivedID) }
+        return ids
+    }
+
+    static func homeRowIDs(
         recentsCount: Int,
         archivedCount: Int,
         pinnedIDs: [String],
         restIDs: [String]
     ) -> [String] {
-        var ids: [String] = []
-        ids.append(contentsOf: pinnedIDs)
-        ids.append(contentsOf: restIDs)
-        if recentsCount > 0 { ids.append(recentsID) }
-        if archivedCount > 0 { ids.append(archivedID) }
-        return ids
+        folderListRowIDs(pinnedIDs: pinnedIDs, restIDs: restIDs)
+            + destinationRowIDs(recentsCount: recentsCount, archivedCount: archivedCount)
     }
 
     static func activationKey(preferred: String?, in keys: [String]) -> String? {

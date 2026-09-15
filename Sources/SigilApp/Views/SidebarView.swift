@@ -10,8 +10,8 @@ private enum SidebarFocus: Hashable {
 
 /// The thread viewer: every Grok Build conversation on this machine.
 ///
-/// Home is the project list. Recents and Archived are rows you open. A plus
-/// on a folder starts a chat there. Archive lives on the row, not in the header.
+/// Home is the project list. Recents and Archived sit under it as destinations
+/// you open. A plus on a folder starts a chat there. Archive lives on the row.
 struct SidebarView: View {
     @Bindable var model: AppModel
     @Environment(\.palette) private var palette
@@ -30,6 +30,7 @@ struct SidebarView: View {
             searchRow
             modeArea
             list
+            if showsDestinations { destinations }
         }
         .background(palette.sidebar)
         .overlay(alignment: .trailing) { Rectangle().fill(palette.hairline).frame(width: 1) }
@@ -305,22 +306,45 @@ struct SidebarView: View {
         ForEach(rest, id: \.id) { item in
             projectRow(item.project, rows: item.rows)
         }
-        if listedSessions.count > 0 {
-            railRow(
-                id: SidebarOrganization.recentsID,
-                title: "Recents",
-                count: listedSessions.count,
-                open: { model.openRecents() }
-            )
+    }
+
+    private var showsDestinations: Bool {
+        listKind == .projectList && !destinationIDs.isEmpty
+    }
+
+    private var destinationIDs: [String] {
+        SidebarOrganization.destinationRowIDs(
+            recentsCount: listedSessions.count,
+            archivedCount: model.archivedCount
+        )
+    }
+
+    @ViewBuilder
+    private var destinations: some View {
+        VStack(spacing: 0) {
+            Rectangle().fill(palette.hairline).frame(height: 1)
+            if listedSessions.count > 0 {
+                destinationRow(
+                    id: SidebarOrganization.recentsID,
+                    icon: "clock",
+                    title: "Recents",
+                    count: listedSessions.count,
+                    help: "All conversations, newest first",
+                    open: { model.openRecents() }
+                )
+            }
+            if model.archivedCount > 0 {
+                destinationRow(
+                    id: SidebarOrganization.archivedID,
+                    icon: "archivebox",
+                    title: "Archived",
+                    count: model.archivedCount,
+                    help: "Archived conversations",
+                    open: { model.openArchived() }
+                )
+            }
         }
-        if model.archivedCount > 0 {
-            railRow(
-                id: SidebarOrganization.archivedID,
-                title: "Archived",
-                count: model.archivedCount,
-                open: { model.openArchived() }
-            )
-        }
+        .padding(.bottom, 6)
     }
 
     @ViewBuilder
@@ -414,35 +438,28 @@ struct SidebarView: View {
     }
 
     private var isListEmpty: Bool {
-        if listKind == .projectList {
-            return model.sidebarProjects.isEmpty && listedSessions.isEmpty
-                && model.archivedCount == 0
-        }
+        if listKind == .projectList { return model.sidebarProjects.isEmpty }
         return listedSessions.isEmpty
     }
 
-    private func railRow(
-        id: String, title: String, count: Int, open: @escaping () -> Void
+    private func destinationRow(
+        id: String,
+        icon: String,
+        title: String,
+        count: Int,
+        help: String,
+        open: @escaping () -> Void
     ) -> some View {
-        ProjectListRow(
+        DestinationRow(
+            icon: icon,
             title: title,
-            paths: [title],
             count: count,
-            relativeTime: "",
-            longRelative: "",
-            isPinned: false,
-            isWorking: false,
-            isActive: false,
             isKeyboardSelected: id == keyboardSelectionID,
-            canStart: false,
-            showsPin: false,
+            help: help,
             open: {
                 keyboardSelectionID = id
                 open()
-            },
-            newChat: {},
-            togglePin: {},
-            archive: nil
+            }
         )
         .id(id)
     }
@@ -651,7 +668,7 @@ struct SidebarView: View {
     private func visibleRowIDs() -> [String] {
         switch listKind {
         case .projectList:
-            return SidebarOrganization.folderListRowIDs(
+            return SidebarOrganization.homeRowIDs(
                 recentsCount: listedSessions.count,
                 archivedCount: model.archivedCount,
                 pinnedIDs: model.pinnedProjects().map(\.id),
@@ -1020,6 +1037,70 @@ private struct DrillBar: View {
         .padding(.horizontal, 8)
         .padding(.bottom, 8)
         .overlay(alignment: .bottom) { Rectangle().fill(palette.hairline).frame(height: 1) }
+    }
+}
+
+private struct DestinationRow: View {
+    let icon: String
+    let title: String
+    let count: Int
+    let isKeyboardSelected: Bool
+    let help: String
+    let open: () -> Void
+
+    @Environment(\.palette) private var palette
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(palette.textFaint)
+                .frame(width: 16)
+            Text(title)
+                .font(.system(size: 12))
+                .foregroundStyle(palette.text)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Text(countLabel)
+                .font(.system(size: 9.5, design: .monospaced))
+                .foregroundStyle(palette.textFaint)
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 10)
+        .padding(.vertical, 6)
+        .background(rowFill)
+        .padding(.horizontal, 6)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: open)
+        .onHover { isHovering = $0 }
+        .help(help)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(title)
+        .accessibilityValue(countLabel)
+        .accessibilityAction(.default, open)
+    }
+
+    private var countLabel: String {
+        count == 1 ? "1 chat" : "\(count) chats"
+    }
+
+    private var fill: Color {
+        (isHovering || isKeyboardSelected) ? palette.raised : .clear
+    }
+
+    @ViewBuilder
+    private var rowFill: some View {
+        RoundedRectangle(cornerRadius: 6)
+            .fill(fill)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(
+                        isKeyboardSelected ? palette.hairline : Color.clear,
+                        lineWidth: 1
+                    )
+            )
     }
 }
 
