@@ -141,7 +141,7 @@ struct SidebarOrganizationTests {
         #expect(SidebarOrganization.surface(focusedPath: "") == .folders)
     }
 
-    @Test func folderListPutsRecentsFirstAndArchivedLast() {
+    @Test func folderListPutsProjectsFirstThenRecentsAndArchived() {
         #expect(
             SidebarOrganization.folderListRowIDs(
                 recentsCount: 2,
@@ -149,7 +149,7 @@ struct SidebarOrganizationTests {
                 pinnedIDs: ["pin"],
                 restIDs: ["rest"]
             ) == [
-                SidebarOrganization.recentsID, "pin", "rest", SidebarOrganization.archivedID,
+                "pin", "rest", SidebarOrganization.recentsID, SidebarOrganization.archivedID,
             ])
         #expect(
             SidebarOrganization.folderListRowIDs(

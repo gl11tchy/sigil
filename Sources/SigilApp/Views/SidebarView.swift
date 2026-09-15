@@ -299,6 +299,12 @@ struct SidebarView: View {
     private var projectList: some View {
         let pinned = visibleProjects(model.pinnedProjects(), from: listedSessions)
         let rest = visibleProjects(model.unpinnedProjects(), from: listedSessions)
+        ForEach(pinned, id: \.id) { item in
+            projectRow(item.project, rows: item.rows)
+        }
+        ForEach(rest, id: \.id) { item in
+            projectRow(item.project, rows: item.rows)
+        }
         if listedSessions.count > 0 {
             railRow(
                 id: SidebarOrganization.recentsID,
@@ -306,12 +312,6 @@ struct SidebarView: View {
                 count: listedSessions.count,
                 open: { model.openRecents() }
             )
-        }
-        ForEach(pinned, id: \.id) { item in
-            projectRow(item.project, rows: item.rows)
-        }
-        ForEach(rest, id: \.id) { item in
-            projectRow(item.project, rows: item.rows)
         }
         if model.archivedCount > 0 {
             railRow(
