@@ -59,11 +59,14 @@ private let temporaryPrefixes: [String] = {
 /// Folder names that always mean an agent worktree or scratch checkout.
 private let scratchComponents: Set<String> = [
     ".worktrees", "scratchpad", "scratchpads", ".t3", ".codex",
+    "environment-git-worktree",
 ]
 
-/// Direct children of `.claude` that hold implementer worktrees, not real projects.
-private let claudeScratchChildren: Set<String> = [
-    "worktrees", "projects", "scratch", "scratchpads", "tmp",
+/// Direct children of a dot-dir that hold implementer worktrees, not real projects.
+private let scratchChildrenByRoot: [String: Set<String>] = [
+    ".claude": ["worktrees", "projects", "scratch", "scratchpads", "tmp"],
+    ".bb": ["worktrees"],
+    ".cache": ["quick-grok"],
 ]
 
 private func hasScratchWorkspaceMarker(_ path: String) -> Bool {
@@ -71,16 +74,12 @@ private func hasScratchWorkspaceMarker(_ path: String) -> Bool {
     if parts.contains(where: { scratchComponents.contains($0) }) {
         return true
     }
-    if let index = parts.firstIndex(of: ".claude") {
-        let next = parts.index(after: index)
-        if next < parts.endIndex, claudeScratchChildren.contains(parts[next]) {
-            return true
-        }
-    }
-    if let index = parts.firstIndex(of: ".cache") {
-        let next = parts.index(after: index)
-        if next < parts.endIndex, parts[next] == "quick-grok" {
-            return true
+    for (root, children) in scratchChildrenByRoot {
+        if let index = parts.firstIndex(of: root) {
+            let next = parts.index(after: index)
+            if next < parts.endIndex, children.contains(parts[next]) {
+                return true
+            }
         }
     }
     return false

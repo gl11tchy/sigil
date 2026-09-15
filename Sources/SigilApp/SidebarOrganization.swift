@@ -84,9 +84,9 @@ enum SidebarOrganization {
         restIDs: [String]
     ) -> [String] {
         var ids: [String] = []
-        if recentsCount > 0 { ids.append(recentsID) }
         ids.append(contentsOf: pinnedIDs)
         ids.append(contentsOf: restIDs)
+        if recentsCount > 0 { ids.append(recentsID) }
         if archivedCount > 0 { ids.append(archivedID) }
         return ids
     }
