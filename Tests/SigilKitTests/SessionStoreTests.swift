@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Testing
 
 @testable import SigilKit
@@ -514,6 +515,37 @@ struct SessionStoreTests {
         #expect(harness.store.loadError?.contains("does not exist") == true)
     }
 
+    @Test func aSecondUnchangedScanDoesNotPublishSessionsOrLoading() async throws {
+        let harness = try FixtureHarness()
+        defer { harness.tearDown() }
+        try harness.write(
+            fixture: "minimal.json",
+            cwd: "/Users/exec",
+            id: "019ffeab-c76b-7fe1-be40-508369febd51"
+        )
+        await harness.store.scan(ignoringCache: false)
+
+        let sessionPublishes = ObservationCounter()
+        let loadingPublishes = ObservationCounter()
+        withObservationTracking {
+            _ = harness.store.sessions
+        } onChange: {
+            sessionPublishes.increment()
+        }
+        withObservationTracking {
+            _ = harness.store.isLoading
+        } onChange: {
+            loadingPublishes.increment()
+        }
+
+        await harness.store.scan(ignoringCache: false)
+
+        #expect(sessionPublishes.value == 0)
+        #expect(loadingPublishes.value == 0)
+        #expect(harness.store.sessions.map(\.id) == ["019ffeab-c76b-7fe1-be40-508369febd51"])
+        #expect(!harness.store.isLoading)
+    }
+
     @Test func unreadableProjectIsReportedAndPreservesItsCachedSessions() async throws {
         let harness = try FixtureHarness()
         defer { harness.tearDown() }
@@ -854,6 +886,23 @@ private func waitUntilAsync(
         try await Task.sleep(for: .milliseconds(20))
     }
     Issue.record("Timed out waiting for condition")
+}
+
+private final class ObservationCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
+
+    func increment() {
+        lock.lock()
+        count += 1
+        lock.unlock()
+    }
 }
 
 private actor ScanRecorder {

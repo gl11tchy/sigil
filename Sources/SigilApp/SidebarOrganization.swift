@@ -174,6 +174,24 @@ enum SidebarOrganization {
         }
     }
 
+    /// O(n) index so a row can find its project without walking every folder.
+    static func indexByDirectory(_ projects: [SidebarProject]) -> [URL: SidebarProject] {
+        var index: [URL: SidebarProject] = [:]
+        index.reserveCapacity(projects.reduce(0) { $0 + $1.sessions.count })
+        for project in projects {
+            for session in project.sessions {
+                index[session.directory] = project
+            }
+        }
+        return index
+    }
+
+    /// Sessions from `project` that are also in `sessions`, in project order.
+    static func listedRows(in project: SidebarProject, from sessions: [GrokSession]) -> [GrokSession] {
+        let listed = Set(sessions.map(\.directory))
+        return project.sessions.filter { listed.contains($0.directory) }
+    }
+
     /// Unique name and path spellings for search paint, sample first, then each row.
     /// A canonical group can still list `/var/…` and `/private/var/…` together.
     static func pathHaystacks(

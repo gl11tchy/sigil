@@ -1,9 +1,21 @@
 import Foundation
+import os
 
 /// True when `path` lives in a scratch location: temp dirs, agent worktrees,
 /// and other folders that should not become the remembered default directory.
 /// The sidebar hides these sessions unless the user turns them on.
 public func isEphemeral(path: String) -> Bool {
+    if let cached = ephemeralPathCache.withLock({ $0[path] }) {
+        return cached
+    }
+    let value = computeIsEphemeral(path: path)
+    ephemeralPathCache.withLock { $0[path] = value }
+    return value
+}
+
+private let ephemeralPathCache = OSAllocatedUnfairLock(initialState: [String: Bool]())
+
+private func computeIsEphemeral(path: String) -> Bool {
     let variants = pathVariants(path)
     if variants.contains(where: isTemporaryVariant) { return true }
     return variants.contains(where: hasScratchWorkspaceMarker)

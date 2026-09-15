@@ -120,6 +120,40 @@ final class SessionDirectoryWatcher: Sendable {
     deinit {
         stop()
     }
+
+    /// Sidebar state comes from `summary.json`. Journal and lock files churn constantly.
+    static func shouldScan(path: String, flags: FSEventStreamEventFlags) -> Bool {
+        if requiresRestart(flags) { return true }
+        if flags & FSEventStreamEventFlags(kFSEventStreamEventFlagItemIsDir) != 0 {
+            return true
+        }
+        return URL(fileURLWithPath: path).lastPathComponent == "summary.json"
+    }
+
+    static func decision(
+        paths: [String],
+        flags: [FSEventStreamEventFlags]
+    ) -> (scan: Bool, restart: Bool) {
+        var scan = false
+        var restart = false
+        let count = min(paths.count, flags.count)
+        for index in 0..<count {
+            if requiresRestart(flags[index]) { restart = true }
+            if shouldScan(path: paths[index], flags: flags[index]) { scan = true }
+        }
+        if restart { scan = true }
+        return (scan, restart)
+    }
+
+    static func requiresRestart(_ flags: FSEventStreamEventFlags) -> Bool {
+        flags & restartMask != 0
+    }
+
+    fileprivate static let restartMask =
+        FSEventStreamEventFlags(kFSEventStreamEventFlagRootChanged)
+        | FSEventStreamEventFlags(kFSEventStreamEventFlagEventIdsWrapped)
+        | FSEventStreamEventFlags(kFSEventStreamEventFlagKernelDropped)
+        | FSEventStreamEventFlags(kFSEventStreamEventFlagUserDropped)
 }
 
 private final class EventSink: Sendable {
@@ -139,19 +173,30 @@ private final class EventSink: Sendable {
 }
 
 private let sessionFSEventCallback: FSEventStreamCallback = {
-    _, info, eventCount, _, eventFlags, _ in
+    _, info, eventCount, eventPaths, eventFlags, _ in
     guard let info else { return }
-    let restartMask =
-        FSEventStreamEventFlags(kFSEventStreamEventFlagRootChanged)
-        | FSEventStreamEventFlags(kFSEventStreamEventFlagEventIdsWrapped)
-        | FSEventStreamEventFlags(kFSEventStreamEventFlagKernelDropped)
-        | FSEventStreamEventFlags(kFSEventStreamEventFlagUserDropped)
-    var requiresRestart = false
-    for index in 0..<eventCount where eventFlags[index] & restartMask != 0 {
-        requiresRestart = true
-        break
+    let paths = fsEventPaths(eventPaths, count: eventCount)
+    var flags: [FSEventStreamEventFlags] = []
+    flags.reserveCapacity(eventCount)
+    for index in 0..<eventCount {
+        flags.append(eventFlags[index])
     }
+    let decision: (scan: Bool, restart: Bool)
+    if paths.count == eventCount {
+        decision = SessionDirectoryWatcher.decision(paths: paths, flags: flags)
+    } else {
+        // Path list missing: keep the old "any event scans" behavior.
+        let restart = flags.contains { SessionDirectoryWatcher.requiresRestart($0) }
+        decision = (true, restart)
+    }
+    guard decision.scan else { return }
     Unmanaged<EventSink>.fromOpaque(info).takeUnretainedValue().fire(
-        requiresRestart: requiresRestart
+        requiresRestart: decision.restart
     )
+}
+
+private func fsEventPaths(_ eventPaths: UnsafeMutableRawPointer, count: Int) -> [String] {
+    let array = Unmanaged<CFArray>.fromOpaque(eventPaths).takeUnretainedValue() as NSArray
+    let paths = array.compactMap { $0 as? String }
+    return paths.count == count ? paths : []
 }

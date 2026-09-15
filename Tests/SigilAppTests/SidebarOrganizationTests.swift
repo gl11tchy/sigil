@@ -117,6 +117,28 @@ struct SidebarOrganizationTests {
         #expect(hay.contains("/private/var/folders/x"))
         #expect(hay.first == "x")
     }
+
+    @Test func indexByDirectoryLooksUpAProjectInConstantTime() {
+        let a1 = session(id: "a1", cwd: "/p/a", updated: 2)
+        let a2 = session(id: "a2", cwd: "/p/a", updated: 1)
+        let b1 = session(id: "b1", cwd: "/p/b", updated: 3)
+        let grouped = SidebarOrganization.projects(from: [b1, a1, a2]) { $0 }
+        let index = SidebarOrganization.indexByDirectory(grouped)
+        #expect(index[a1.directory]?.id == "/p/a")
+        #expect(index[a2.directory]?.id == "/p/a")
+        #expect(index[b1.directory]?.id == "/p/b")
+        #expect(index[URL(fileURLWithPath: "/missing")] == nil)
+    }
+
+    @Test func listedRowsKeepTheUnpinnedIntersectionWithoutNestedScans() {
+        let pinned = session(id: "pin", cwd: "/p/a", updated: 3)
+        let kept = session(id: "kept", cwd: "/p/a", updated: 2)
+        let other = session(id: "other", cwd: "/p/b", updated: 1)
+        let grouped = SidebarOrganization.projects(from: [pinned, kept, other]) { $0 }
+        let project = grouped.first { $0.id == "/p/a" }!
+        let rows = SidebarOrganization.listedRows(in: project, from: [kept, other])
+        #expect(rows.map(\.id) == ["kept"])
+    }
 }
 
 private func session(

@@ -458,6 +458,36 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func canonicalPathCacheSurvivesANewerSessionTimestamp() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let counter = ResolverCounter()
+        let model = fixture.model(canonicalPath: counter.wrap)
+        defer { model.closeAllTabsAndWait() }
+
+        try fixture.writeListedSession(
+            id: "session-1",
+            cwd: "/Users/someone/Documents/sigil",
+            updatedAt: "2026-08-01T00:00:00Z"
+        )
+        await fixture.store.reload()
+        let first = try #require(model.store.sessions.first)
+        _ = model.sessionKey(first)
+        let afterWarm = counter.count
+        #expect(afterWarm > 0)
+
+        try fixture.writeListedSession(
+            id: "session-1",
+            cwd: "/Users/someone/Documents/sigil",
+            updatedAt: "2026-08-02T00:00:00Z"
+        )
+        await fixture.store.reload()
+        let updated = try #require(model.store.sessions.first)
+        _ = model.sessionKey(updated)
+        #expect(counter.count == afterWarm)
+    }
+
+    @Test @MainActor
     func sidebarHidesWorktreeSessionsUntilEnabled() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
@@ -2717,7 +2747,8 @@ private final class ModelFixture {
         cwd: String,
         summary: String = "Session",
         messages: Int = 4,
-        sessionKind: String? = nil
+        sessionKind: String? = nil,
+        updatedAt: String = "2026-08-01T00:00:00Z"
     ) throws {
         let dir = GrokPaths.sessionDirectory(cwd: cwd, sessionID: id)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -2725,7 +2756,7 @@ private final class ModelFixture {
             "info": ["id": id, "cwd": cwd],
             "session_summary": summary,
             "created_at": "2026-08-01T00:00:00Z",
-            "updated_at": "2026-08-01T00:00:00Z",
+            "updated_at": updatedAt,
             "num_chat_messages": messages,
         ]
         if let sessionKind {
