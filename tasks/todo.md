@@ -1,6 +1,8 @@
-# Agentic sidebar
+# Quiet sidebar and photo drop
 
-- [ ] Right panel: Terminal and Notes only; stored `web` becomes shell
-- [ ] Project list vs focused chats vs recents
-- [ ] New chat in a project; hover X closes or deletes
-- [ ] Tests, build, and the real window checked
+- [x] TerminalDrop builds paste text from files and image bytes
+- [x] Finder drop and Cmd+V send that text into the session
+- [x] Sidebar home is the project list; Recents and Archived are rows
+- [x] Archive is a row action for chats and projects
+- [x] Mode pills, folder-scope, archivebox header, and footer are gone
+- [x] Tests, build, and the real window checked

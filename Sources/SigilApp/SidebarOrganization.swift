@@ -16,6 +16,14 @@ enum SidebarMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// Which list the sidebar is showing. Home is always the folder list.
+enum SidebarSurface: Equatable, Sendable {
+    case folders
+    case recents
+    case archived
+    case project
+}
+
 /// What the sidebar list is showing.
 enum SidebarListKind: Equatable, Sendable {
     /// Time buckets of chats.
@@ -26,6 +34,8 @@ enum SidebarListKind: Equatable, Sendable {
     case projectChats
     /// Search hits grouped by folder.
     case projectSearch
+    /// Archived chats, grouped by folder.
+    case archived
 }
 
 /// One working folder and the conversations started in it, newest first.
@@ -44,18 +54,37 @@ struct SidebarProject: Identifiable, Equatable, Sendable {
 /// Pure grouping for the sidebar. Path identity is injected so tests do not
 /// need POSIX `realpath`. Pins and archives share the same identity list.
 enum SidebarOrganization {
-    static func listKind(
-        mode: SidebarMode,
-        hasFocusedProject: Bool,
-        isSearching: Bool
-    ) -> SidebarListKind {
-        switch mode {
-        case .recents:
-            return .recents
-        case .projects:
-            if hasFocusedProject { return .projectChats }
-            return isSearching ? .projectSearch : .projectList
+    static let recentsID = "sigil:recents"
+    static let archivedID = "sigil:archived"
+
+    static func surface(focusedPath: String) -> SidebarSurface {
+        if focusedPath == recentsID { return .recents }
+        if focusedPath == archivedID { return .archived }
+        if focusedPath.isEmpty { return .folders }
+        return .project
+    }
+
+    static func listKind(surface: SidebarSurface, isSearching: Bool) -> SidebarListKind {
+        switch surface {
+        case .recents: return .recents
+        case .archived: return .archived
+        case .project: return .projectChats
+        case .folders: return isSearching ? .projectSearch : .projectList
         }
+    }
+
+    static func folderListRowIDs(
+        recentsCount: Int,
+        archivedCount: Int,
+        pinnedIDs: [String],
+        restIDs: [String]
+    ) -> [String] {
+        var ids: [String] = []
+        if recentsCount > 0 { ids.append(recentsID) }
+        ids.append(contentsOf: pinnedIDs)
+        ids.append(contentsOf: restIDs)
+        if archivedCount > 0 { ids.append(archivedID) }
+        return ids
     }
 
     static func activationKey(preferred: String?, in keys: [String]) -> String? {

@@ -278,6 +278,12 @@ public final class TerminalController {
         terminalView.paste(self)
     }
 
+    /// Finder drop or a clipboard image: paste absolute paths into the child.
+    @discardableResult
+    public func pasteDroppedContent(from pasteboard: NSPasteboard) -> Bool {
+        terminalView.pasteDroppedContent(from: pasteboard)
+    }
+
     public func selectAll() {
         terminalView.selectAll()
     }

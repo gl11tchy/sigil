@@ -1,34 +1,38 @@
-# Implementation Plan: Agentic sidebar, drop the browser
+# Implementation Plan: Quiet sidebar, drop photos into chat
 
 ## Overview
 
-Make the left sidebar work like an agent IDE: projects you open, new chats
-inside a folder, close on the row. Delete the right-panel Browser. Shell and
-notes stay.
+The left rail is one list of projects. Recents and Archived are rows you open,
+not header chrome. New chat is the plus on a project. Archive is on the row.
+Dragging a photo into the session pastes it the way Grok's TUI already
+understands.
 
-Skills: using-agent-skills, impeccable, frontend-ui-engineering, planning-and-task-breakdown, test-driven-development, incremental-implementation, write-swift, apple-design, git-workflow-and-versioning, code-review-and-quality
+Skills: using-agent-skills, write-like-i-want, planning-and-task-breakdown, spec-driven-development, impeccable, frontend-ui-engineering, write-swift, apple-design, test-driven-development, incremental-implementation, debugging-and-error-recovery, security-and-hardening, git-workflow-and-versioning, code-review-and-quality, babysit-prs
+
+Visual-direction-by-generation skipped: this is a distill of Sigil Neon, not a new look.
 
 ASSUMPTIONS:
-1. Remove Browser only. The right panel keeps Terminal and Notes.
-2. Projects is a folder list you click into (`focusedProject` already exists).
-3. Hover X closes an open tab, or deletes a closed chat (existing confirm).
-4. Unset sidebar sort defaults to Projects. A stored Recents value stays.
+1. Home is the project list. Recents and Archived are drill-in rows.
+2. Folder-scope and the Recents/Projects pills go away.
+3. Archive a project archives every chat in that folder.
+4. A dropped photo becomes a pasted absolute path (Grok turns image paths into chips). Clipboard images are written to cache first.
+5. Top bar and right panel stay.
 
 ## Architecture Decisions
 
-- Wire `openProject` / `leaveProject` in the sidebar. Do not add a second model.
-- Search with no focused project still lists matching chats by folder.
-- ⌘T and the sidebar + use the focused project folder when one is open.
+- `SidebarOrganization.listKind` keys off drill-in (folders / recents / archived / project), not a Recents/Projects mode.
+- Drop handling lives in SigilKit (`TerminalDrop`) so paste and Finder drops share one path builder.
+- SwiftTerm has no `NSDraggingDestination`. The pane container and the paste override supply it.
 
 ## Task List
 
-### Phase 1: Browser gone
-- [ ] Task 1: Right panel has Terminal and Notes only. Stored `web` becomes shell.
+### Phase 1: Photo drop
+- [x] Task 1: `TerminalDrop` builds paste text from file URLs and image bytes. Paste and Finder drops send it through the PTY.
 
-### Phase 2: Sidebar as an agent list
-- [ ] Task 2: `SidebarOrganization.listKind` picks project list, focused chats, or recents.
-- [ ] Task 3: Project rows open a folder. Header + and row + start a chat there. Hover X closes or deletes.
+### Phase 2: Quiet sidebar
+- [x] Task 2: Drill-in list kinds. Recents and Archived are rows. Archive is a row action for chats and projects.
+- [x] Task 3: Remove the mode pills, folder-scope, archivebox header, and footer. Plus on a project starts a chat.
 
 ### Checkpoint
-- [ ] Swift tests pass
-- [ ] App builds and the real window is checked
+- [x] Swift tests pass
+- [x] App builds and the real window is checked (sidebar + a photo drop)

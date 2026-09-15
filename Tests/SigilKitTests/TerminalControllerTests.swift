@@ -139,6 +139,40 @@ struct TerminalControllerTests {
         #expect(count <= 12)
     }
 
+    @Test func droppedFilePathIsPastedIntoTheChild() async throws {
+        let helper = try TerminalTestSupport.makeFlagStrippingHelper()
+        let controller = TerminalController()
+        controller.start(
+            TerminalTestSupport.launchSpec(
+                executable: helper,
+                extraArguments: ["/bin/cat"]
+            )
+        )
+        #expect(
+            await TerminalTestSupport.waitUntil {
+                controller.isRunning
+            })
+
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "sigil-drop-pty-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let photo = root.appendingPathComponent("shot.png")
+        try Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]).write(to: photo)
+
+        let pasteboard = NSPasteboard.withUniqueName()
+        pasteboard.clearContents()
+        #expect(pasteboard.writeObjects([photo as NSURL]))
+        #expect(controller.pasteDroppedContent(from: pasteboard))
+
+        let sawPath = await TerminalTestSupport.waitUntil {
+            controller.bufferText().contains(photo.path)
+        }
+        controller.terminate()
+        #expect(sawPath)
+        #expect(await TerminalTestSupport.waitUntil { !controller.isRunning })
+    }
+
     @Test func inputSubmissionIgnoresBracketedPasteNewlines() {
         let view = GrokProcessTerminalView(
             frame: NSRect(x: 0, y: 0, width: 200, height: 100),

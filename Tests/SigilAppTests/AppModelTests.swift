@@ -2732,6 +2732,60 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func recentsAndArchivedAreDrillInsNotFilters() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("acme-api")
+        try fixture.writeListedSession(id: "live", cwd: cwd.path, summary: "Live chat")
+        try fixture.writeListedSession(id: "old", cwd: cwd.path, summary: "Old chat")
+        fixture.settings.showWorktreeSessions = true
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let old = try #require(model.store.sessions.first { $0.id == "old" })
+        model.archive(old)
+
+        #expect(model.sidebarSurface == .folders)
+        #expect(model.sidebarSessions.map(\.id) == ["live"])
+        model.openRecents()
+        #expect(model.sidebarSurface == .recents)
+        #expect(model.focusedProject == nil)
+        #expect(model.sidebarSessions.map(\.id) == ["live"])
+        model.openArchived()
+        #expect(model.sidebarSurface == .archived)
+        #expect(model.sidebarSessions.map(\.id) == ["old"])
+        model.leaveProject()
+        #expect(model.sidebarSurface == .folders)
+    }
+
+    @Test @MainActor
+    func archivingAProjectHidesTheFolderAndLeavesIt() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("acme-api")
+        try fixture.writeListedSession(id: "a", cwd: cwd.path, summary: "A")
+        try fixture.writeListedSession(id: "b", cwd: cwd.path, summary: "B")
+        fixture.settings.showWorktreeSessions = true
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let project = try #require(model.sidebarProjects.first)
+        model.pin(project)
+        model.openProject(project)
+        model.archive(project)
+        #expect(model.focusedProject == nil)
+        #expect(model.sidebarProjects.isEmpty)
+        #expect(!model.isPinned(project))
+        model.openArchived()
+        #expect(model.sidebarSessions.map(\.id).sorted() == ["a", "b"])
+        model.unarchive(project)
+        model.leaveProject()
+        #expect(model.sidebarProjects.map(\.name) == ["acme-api"])
+    }
+
+    @Test @MainActor
     func sidebarDismissClosesAnOpenTabAndDeletesAClosedChat() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }

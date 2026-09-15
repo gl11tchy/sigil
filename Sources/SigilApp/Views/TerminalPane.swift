@@ -31,6 +31,9 @@ struct TerminalPane: NSViewRepresentable {
         container.layer?.cornerRadius = cornerRadius
         container.layer?.cornerCurve = .continuous
         container.layer?.masksToBounds = cornerRadius > 0
+        container.pasteDroppedContent = { [weak controller] pasteboard in
+            controller?.pasteDroppedContent(from: pasteboard) ?? false
+        }
         container.install(controller.view)
         return container
     }
@@ -39,15 +42,45 @@ struct TerminalPane: NSViewRepresentable {
         nsView.layer?.backgroundColor = background.cgColor
         nsView.layer?.cornerRadius = cornerRadius
         nsView.layer?.masksToBounds = cornerRadius > 0
+        nsView.pasteDroppedContent = { [weak controller] pasteboard in
+            controller?.pasteDroppedContent(from: pasteboard) ?? false
+        }
         nsView.install(controller.view)
     }
 
     /// A plain container that keeps the terminal pinned to its bounds.
     final class ContainerView: NSView {
         override var acceptsFirstResponder: Bool { false }
+        var pasteDroppedContent: ((NSPasteboard) -> Bool)?
 
         private(set) var hostedTerminal: NSView?
         private var terminalConstraints: [NSLayoutConstraint] = []
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            registerForDraggedTypes(TerminalDrop.pasteboardTypes)
+        }
+
+        required init?(coder: NSCoder) {
+            super.init(coder: coder)
+            registerForDraggedTypes(TerminalDrop.pasteboardTypes)
+        }
+
+        override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+            TerminalDrop.canAccept(sender.draggingPasteboard) ? .copy : []
+        }
+
+        override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+            draggingEntered(sender)
+        }
+
+        override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+            TerminalDrop.canAccept(sender.draggingPasteboard)
+        }
+
+        override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+            pasteDroppedContent?(sender.draggingPasteboard) ?? false
+        }
 
         func install(_ terminal: NSView) {
             guard hostedTerminal !== terminal else { return }
