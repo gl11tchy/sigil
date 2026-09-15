@@ -3,7 +3,6 @@ import Foundation
 import SigilKit
 import SwiftTerm
 import Testing
-import WebKit
 
 @testable import SigilApp
 
@@ -19,45 +18,6 @@ struct RightPanelTests {
     }
 
     @Test @MainActor
-    func aBarePortMeansTheLocalDevServer() {
-        #expect(RightPanel.resolve("3000")?.absoluteString == "http://localhost:3000")
-        #expect(RightPanel.resolve(":8080")?.absoluteString == "http://localhost:8080")
-    }
-
-    @Test @MainActor
-    func anAddressWithoutASchemeGetsOne() {
-        #expect(RightPanel.resolve("example.com")?.absoluteString == "http://example.com")
-        #expect(RightPanel.resolve("https://example.com")?.absoluteString == "https://example.com")
-        #expect(RightPanel.resolve("   ") == nil)
-        #expect(RightPanel.resolve("") == nil)
-        #expect(RightPanel.resolve("99999") == nil)
-    }
-
-    @Test @MainActor
-    func resolveRejectsBadPortsSchemesCredentialsAndWhitespace() {
-        for bad in [
-            ":0", ":65536", ":99999", "0", "65536", "99999",
-            "javascript://example", "javascript:alert(1)", "ftp://example",
-            "http://user:pass@example.com", "http://exa mple.com", "with space", "  ",
-        ] {
-            #expect(RightPanel.resolve(bad) == nil, "should reject \(bad)")
-        }
-    }
-
-    @Test @MainActor
-    func resolveAcceptsPortsHostsAndFilePaths() {
-        #expect(RightPanel.resolve("3000")?.absoluteString == "http://localhost:3000")
-        #expect(RightPanel.resolve(":8080")?.absoluteString == "http://localhost:8080")
-        #expect(RightPanel.resolve("localhost:5173")?.absoluteString == "http://localhost:5173")
-        #expect(
-            RightPanel.resolve("https://example.com/path")?.absoluteString
-                == "https://example.com/path")
-        #expect(
-            RightPanel.resolve("file:///tmp/fixture.html")?.absoluteString
-                == "file:///tmp/fixture.html")
-    }
-
-    @Test @MainActor
     func pickingTheShowingToolClosesThePanel() {
         let panel = makePanel()
         let directory = FileManager.default.homeDirectoryForCurrentUser
@@ -65,12 +25,25 @@ struct RightPanelTests {
         #expect(panel.isVisible)
         #expect(panel.mode == .notes)
 
-        panel.toggle(.web, in: directory)
+        panel.toggle(.shell, in: directory)
         #expect(panel.isVisible)
-        #expect(panel.mode == .web)
+        #expect(panel.mode == .shell)
 
-        panel.toggle(.web, in: directory)
+        panel.toggle(.shell, in: directory)
         #expect(!panel.isVisible)
+    }
+
+    @Test func panelModesAreShellAndNotes() {
+        #expect(RightPanelMode.allCases.map(\.rawValue) == ["shell", "notes"])
+    }
+
+    @Test @MainActor
+    func aStoredBrowserModeOpensTheShell() {
+        let name = "RightPanelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        defaults.set("web", forKey: "panel.mode")
+        #expect(RightPanel(defaults: defaults).mode == .shell)
     }
 
     @Test @MainActor
@@ -83,28 +56,6 @@ struct RightPanelTests {
         #expect(panel.notes(for: b) == "")
         panel.setNotes("", for: a)
         #expect(panel.notes(for: a) == "")
-    }
-
-    @Test @MainActor
-    func reloadingChangesTheTokenWithoutChangingTheAddress() {
-        let panel = makePanel()
-        panel.navigate(to: "3000")
-        let url = panel.requestedURL
-        let token = panel.reloadToken
-        panel.reload()
-        #expect(panel.requestedURL == url)
-        #expect(panel.reloadToken == token + 1)
-    }
-
-    @Test @MainActor
-    func homeCanBeMovedToTheCurrentAddress() {
-        let panel = makePanel()
-        panel.navigate(to: "localhost:5173")
-        panel.setHomeToCurrentAddress()
-        #expect(panel.homeURL == "http://localhost:5173")
-        panel.navigate(to: "example.com")
-        panel.goHome()
-        #expect(panel.requestedURL?.absoluteString == "http://localhost:5173")
     }
 
     @Test func windowColumnsDivideTheWidthWithoutOverflowing() {
@@ -205,57 +156,6 @@ struct RightPanelTests {
             alpha: 1
         )
         #expect(view.nativeBackgroundColor == expected)
-    }
-
-    @Test @MainActor
-    func invalidAddressKeepsTheCurrentPageAndShowsAnError() {
-        let panel = makePanel()
-        panel.navigate(to: "3000")
-        let url = panel.requestedURL
-        panel.navigate(to: ":99999")
-        #expect(panel.requestedURL == url)
-        #expect(panel.addressError != nil)
-        panel.navigate(to: "example.com")
-        #expect(panel.addressError == nil)
-        #expect(panel.requestedURL?.absoluteString == "http://example.com")
-    }
-
-    @Test @MainActor
-    func browserViewSurvivesSwitchingTools() {
-        let panel = makePanel()
-        panel.navigate(to: "3000")
-        let first = panel.browserView()
-        panel.mode = .notes
-        panel.mode = .web
-        #expect(panel.browserView() === first)
-    }
-
-    @Test @MainActor
-    func endingAddressEditingAdoptsTheCurrentPage() {
-        let panel = makePanel()
-        panel.navigate(to: "example.com")
-        panel.isEditingAddress = true
-        panel.addressField = "http://stale.example"
-        panel.finishEditingAddress()
-        #expect(!panel.isEditingAddress)
-        #expect(panel.addressField == "http://example.com")
-        #expect(panel.requestedURL?.absoluteString == "http://example.com")
-    }
-
-    @Test @MainActor
-    func submittingAnAddressClearsEditingSoRedirectsCanUpdateTheField() {
-        let panel = makePanel()
-        panel.isEditingAddress = true
-        panel.addressField = "http://stale.example"
-        panel.navigate(to: "example.com")
-        #expect(!panel.isEditingAddress)
-        #expect(panel.addressField == "http://example.com")
-    }
-
-    @Test @MainActor
-    func browserKeepsItsOwnPageCanvas() {
-        let panel = makePanel()
-        #expect(panel.browserView().value(forKey: "drawsBackground") as? Bool == true)
     }
 
     @Test @MainActor

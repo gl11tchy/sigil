@@ -77,7 +77,7 @@ struct RootView: View {
                 MissingCLIView(path: model.settings.executablePath)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                EmptyDetailView { model.newTab(in: model.currentDirectory) }
+                EmptyDetailView { model.newTab(in: model.newSessionDirectory) }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         } else {
@@ -177,8 +177,8 @@ private struct TopBar: View {
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) { model.togglePanel() }
             }
 
-            IconButton(systemImage: "plus", help: "New Session in \(model.currentDirectory.abbreviatedPath) (⌘T)") {
-                model.newTab(in: model.currentDirectory)
+            IconButton(systemImage: "plus", help: "New Session in \(model.newSessionDirectory.abbreviatedPath) (⌘T)") {
+                model.newTab(in: model.newSessionDirectory)
             }
             .disabled(!model.settings.executableExists)
             Menu {
