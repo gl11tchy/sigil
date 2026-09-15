@@ -75,6 +75,9 @@ struct SidebarView: View {
         .onChange(of: model.store.isLoading) { _, loading in
             if !loading { model.pruneMissingPins() }
         }
+        .onChange(of: model.store.sessions) { _, _ in
+            if !model.store.isLoading { model.pruneMissingPins() }
+        }
     }
 
     // MARK: - Search
@@ -217,14 +220,19 @@ struct SidebarView: View {
     @ViewBuilder
     private var list: some View {
         let pinned = visiblePinned
-        let content = listContent
+        let projectIndex = SidebarOrganization.indexByDirectory(model.sidebarProjects)
+        let content = listContent(projectIndex: projectIndex)
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                     if listKind != .projectList, !pinned.isEmpty {
                         section("Pinned", count: pinned.count, isFirst: true) {
                             ForEach(pinned, id: \.directory) { session in
-                                sessionRow(session, showsProject: listKind != .projectChats)
+                                sessionRow(
+                                    session,
+                                    showsProject: listKind != .projectChats,
+                                    containingProject: projectIndex[session.directory]
+                                )
                             }
                         }
                     }
@@ -299,17 +307,21 @@ struct SidebarView: View {
     }
 
     @ViewBuilder
-    private var listContent: some View {
+    private func listContent(projectIndex: [URL: SidebarProject]) -> some View {
         let unpinned = model.unpinnedSessions(from: listedSessions)
         let afterPinned = listKind != .projectList && !visiblePinned.isEmpty
         switch listKind {
         case .recents:
-            recentsSections(from: unpinned, afterPinned: afterPinned)
+            recentsSections(from: unpinned, afterPinned: afterPinned, projectIndex: projectIndex)
         case .projectList:
             projectList
         case .projectChats:
             ForEach(unpinned, id: \.directory) { session in
-                sessionRow(session, showsProject: false)
+                sessionRow(
+                    session,
+                    showsProject: false,
+                    containingProject: projectIndex[session.directory]
+                )
             }
         case .projectSearch:
             projectGroupedSections(from: unpinned, afterPinned: afterPinned)
@@ -341,12 +353,20 @@ struct SidebarView: View {
     }
 
     @ViewBuilder
-    private func recentsSections(from sessions: [GrokSession], afterPinned: Bool) -> some View {
+    private func recentsSections(
+        from sessions: [GrokSession],
+        afterPinned: Bool,
+        projectIndex: [URL: SidebarProject]
+    ) -> some View {
         let buckets = SessionBucket.bucket(sessions)
         ForEach(Array(buckets.enumerated()), id: \.element.id) { index, bucket in
             section(bucket.title, count: bucket.sessions.count, isFirst: !afterPinned && index == 0) {
                 ForEach(bucket.sessions, id: \.directory) { session in
-                    sessionRow(session, showsProject: true)
+                    sessionRow(
+                        session,
+                        showsProject: true,
+                        containingProject: projectIndex[session.directory]
+                    )
                 }
             }
         }
@@ -371,9 +391,7 @@ struct SidebarView: View {
         _ projects: [SidebarProject], from sessions: [GrokSession]
     ) -> [ProjectRows] {
         projects.compactMap { project in
-            let rows = sessions.filter { session in
-                project.sessions.contains { $0.directory == session.directory }
-            }
+            let rows = SidebarOrganization.listedRows(in: project, from: sessions)
             return rows.isEmpty ? nil : ProjectRows(project: project, rows: rows)
         }
     }
@@ -396,7 +414,12 @@ struct SidebarView: View {
         ).paints
         Section {
             ForEach(rows, id: \.directory) { session in
-                sessionRow(session, showsProject: false, headerCoversQuery: headerCovers)
+                sessionRow(
+                    session,
+                    showsProject: false,
+                    headerCoversQuery: headerCovers,
+                    containingProject: project
+                )
             }
         } header: {
             ProjectSectionHeader(
@@ -460,19 +483,25 @@ struct SidebarView: View {
     }
 
     private func sessionRow(
-        _ session: GrokSession, showsProject: Bool, headerCoversQuery: Bool = true
+        _ session: GrokSession,
+        showsProject: Bool,
+        headerCoversQuery: Bool = true,
+        containingProject: SidebarProject? = nil
     ) -> some View {
-        SessionRow(
+        let isPinned = model.isPinned(session)
+        let isArchived = model.isArchived(session)
+        let hasCustomName = model.hasCustomName(session)
+        return SessionRow(
             session: session,
             title: model.title(for: session),
             searchQuery: model.searchText,
             state: state(of: session),
             activity: model.activity(of: session),
-            isPinned: model.isPinned(session),
-            isArchived: model.isArchived(session),
+            isPinned: isPinned,
+            isArchived: isArchived,
             isKeyboardSelected: model.sessionKey(session) == keyboardSelectionID,
             isRenaming: model.renamingSessionKey == model.sessionKey(session),
-            hasCustomName: model.hasCustomName(session),
+            hasCustomName: hasCustomName,
             showsProject: showsProject,
             headerCoversQuery: headerCoversQuery,
             open: {
@@ -496,11 +525,11 @@ struct SidebarView: View {
         )
         .id(model.sessionKey(session))
         .contextMenu {
-            Button(model.isPinned(session) ? "Unpin" : "Pin") { model.togglePin(session) }
-            Button(model.isArchived(session) ? "Unarchive" : "Archive") { model.toggleArchive(session) }
+            Button(isPinned ? "Unpin" : "Pin") { model.togglePin(session) }
+            Button(isArchived ? "Unarchive" : "Archive") { model.toggleArchive(session) }
             Divider()
             Button("Rename") { beginInlineRename(session) }
-            if model.hasCustomName(session) {
+            if hasCustomName {
                 Button("Reset Name") { model.resetName(session) }
             }
             Divider()
@@ -512,7 +541,7 @@ struct SidebarView: View {
             Button("New Session in This Folder") {
                 model.newTab(in: URL(fileURLWithPath: session.cwd))
             }
-            if let project = project(containing: session) {
+            if let project = containingProject {
                 Button(model.isPinned(project) ? "Unpin Project" : "Pin Project") {
                     model.togglePin(project)
                 }
@@ -635,9 +664,7 @@ struct SidebarView: View {
             return unpinned
         case .projectSearch:
             return (model.pinnedProjects() + model.unpinnedProjects()).flatMap { project in
-                unpinned.filter { session in
-                    project.sessions.contains { $0.directory == session.directory }
-                }
+                SidebarOrganization.listedRows(in: project, from: unpinned)
             }
         case .projectList:
             return []
@@ -897,12 +924,6 @@ struct SidebarView: View {
 
     private func project(for id: String) -> SidebarProject? {
         model.sidebarProjects.first { $0.id == id }
-    }
-
-    private func project(containing session: GrokSession) -> SidebarProject? {
-        model.sidebarProjects.first { project in
-            project.sessions.contains { $0.directory == session.directory }
-        }
     }
 
     private func clampKeyboardSelection() {

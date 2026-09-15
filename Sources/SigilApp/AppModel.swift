@@ -76,7 +76,6 @@ final class AppModel {
     @ObservationIgnored private var canonicalPathCache: [String: String] = [:]
     @ObservationIgnored private var canonicalCacheTabCount = -1
     @ObservationIgnored private var canonicalCacheSessionCount = -1
-    @ObservationIgnored private var canonicalCacheSessionStamp: Date?
 
     init(
         settings: AppSettings = AppSettings(),
@@ -2027,15 +2026,10 @@ final class AppModel {
     private func canonicalPath(_ path: String) -> String {
         let tabCount = tabs.count
         let sessionCount = store.sessions.count
-        let stamp = store.sessions.first?.updatedAt
-        if tabCount != canonicalCacheTabCount
-            || sessionCount != canonicalCacheSessionCount
-            || stamp != canonicalCacheSessionStamp
-        {
+        if tabCount != canonicalCacheTabCount || sessionCount != canonicalCacheSessionCount {
             canonicalPathCache.removeAll(keepingCapacity: true)
             canonicalCacheTabCount = tabCount
             canonicalCacheSessionCount = sessionCount
-            canonicalCacheSessionStamp = stamp
         }
         if let cached = canonicalPathCache[path] { return cached }
         let resolved = resolveCanonicalPath(path)

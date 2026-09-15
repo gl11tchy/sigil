@@ -69,4 +69,24 @@ struct EphemeralPathTests {
         #expect(!isEphemeral(path: alias.deletingLastPathComponent().path))
         #expect(isEphemeral(path: alias.path))
     }
+
+    @Test func retargetedSymlinkIsReclassified() throws {
+        let fm = FileManager.default
+        let scratch = fm.temporaryDirectory.appendingPathComponent("sigil-wt-\(UUID().uuidString)")
+        let persistent = try #require(
+            fm.urls(for: .applicationDirectory, in: .systemDomainMask).first)
+        let alias = fm.homeDirectoryForCurrentUser.appendingPathComponent(
+            "sigil-ephemeral-retarget-\(UUID().uuidString)")
+        try fm.createDirectory(at: scratch, withIntermediateDirectories: true)
+        try fm.createSymbolicLink(at: alias, withDestinationURL: scratch)
+        defer {
+            try? fm.removeItem(at: alias)
+            try? fm.removeItem(at: scratch)
+        }
+
+        #expect(isEphemeral(path: alias.path))
+        try fm.removeItem(at: alias)
+        try fm.createSymbolicLink(at: alias, withDestinationURL: persistent)
+        #expect(!isEphemeral(path: alias.path))
+    }
 }

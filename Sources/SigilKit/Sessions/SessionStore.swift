@@ -186,10 +186,12 @@ public final class SessionStore {
         }
         let capturedForceEpoch = forceEpoch
         inflight += 1
-        isLoading = true
+        if ignoringCache || sessions.isEmpty, !isLoading {
+            isLoading = true
+        }
         defer {
             inflight -= 1
-            if inflight == 0 { isLoading = false }
+            if inflight == 0, isLoading { isLoading = false }
             if ignoringCache {
                 forcedScansInFlight -= 1
                 if forcedScansInFlight == 0, cachedScanPending {
@@ -209,8 +211,12 @@ public final class SessionStore {
         }
         appliedScanSequence = sequence
         cache = result.cache
-        sessions = result.sessions
-        loadError = result.loadError
+        if sessions != result.sessions {
+            sessions = result.sessions
+        }
+        if loadError != result.loadError {
+            loadError = result.loadError
+        }
         refreshWatcher()
     }
 
