@@ -2688,6 +2688,14 @@ struct AppModelTests {
             tab.workingDirectory.resolvingSymlinksInPath().path
                 == projectA.resolvingSymlinksInPath().path)
 
+        model.searchText = "no-such-chat"
+        #expect(model.focusedProject?.name == "acme-api")
+        #expect(model.focusedSidebarSessions.isEmpty)
+        #expect(
+            model.newSessionDirectory.resolvingSymlinksInPath().path
+                == projectA.resolvingSymlinksInPath().path)
+
+        model.searchText = ""
         model.leaveProject()
         #expect(model.focusedProject == nil)
         #expect(model.focusedSidebarSessions.map(\.id).sorted() == ["a", "b"])

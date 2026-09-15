@@ -77,7 +77,7 @@ struct RootView: View {
                 MissingCLIView(path: model.settings.executablePath)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                EmptyDetailView { model.newTab(in: model.currentDirectory) }
+                EmptyDetailView { model.newTab(in: model.newSessionDirectory) }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         } else {

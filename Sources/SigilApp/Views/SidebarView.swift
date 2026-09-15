@@ -940,10 +940,10 @@ struct SidebarView: View {
     private var statusText: String {
         if let error = model.store.loadError { return error }
         if model.showingArchived {
-            let threads = model.sidebarSessions.count
+            let threads = listedSessions.count
             return threads == 1 ? "1 archived" : "\(threads) archived"
         }
-        let threads = model.sidebarSessions.count
+        let threads = listedSessions.count
         let threadLabel = threads == 1 ? "1 thread" : "\(threads) threads"
         let pinned = model.pinnedSessions().count
         if listKind == .projectList {

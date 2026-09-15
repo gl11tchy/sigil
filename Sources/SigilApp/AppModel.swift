@@ -389,8 +389,14 @@ final class AppModel {
     var focusedProject: SidebarProject? {
         let path = settings.focusedProjectPath
         guard !path.isEmpty else { return nil }
+        return project(at: path, from: sidebarSessions)
+            ?? project(at: path, from: store.sessions)
+    }
+
+    private func project(at path: String, from sessions: [GrokSession]) -> SidebarProject? {
         let focused = canonicalPath(path)
-        return sidebarProjects.first { $0.id == focused || samePath($0.cwd, path) }
+        return SidebarOrganization.projects(from: sessions, canonicalPath: canonicalPath)
+            .first { $0.id == focused || samePath($0.cwd, path) }
     }
 
     /// Chats in the open project, or the full sidebar list.
@@ -459,7 +465,9 @@ final class AppModel {
         if remainingNames != settings.conversationNames {
             settings.conversationNames = remainingNames
         }
-        if !settings.focusedProjectPath.isEmpty, focusedProject == nil {
+        if !settings.focusedProjectPath.isEmpty,
+            !store.sessions.contains(where: { samePath($0.cwd, settings.focusedProjectPath) })
+        {
             settings.focusedProjectPath = ""
         }
     }
