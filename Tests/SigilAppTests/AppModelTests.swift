@@ -2755,6 +2755,11 @@ struct AppModelTests {
         model.openArchived()
         #expect(model.sidebarSurface == .archived)
         #expect(model.sidebarSessions.map(\.id) == ["old"])
+        model.pruneMissingPins()
+        #expect(model.sidebarSurface == .archived)
+        model.openRecents()
+        model.pruneMissingPins()
+        #expect(model.sidebarSurface == .recents)
         model.leaveProject()
         #expect(model.sidebarSurface == .folders)
     }

@@ -21,6 +21,8 @@ struct TerminalDropTests {
         #expect(
             TerminalDrop.pasteText(for: ["/tmp/my photo.png", "/tmp/other.png"])
                 == "'/tmp/my photo.png' /tmp/other.png")
+        #expect(TerminalDrop.pasteText(for: ["/tmp/a;b.png"]) == "'/tmp/a;b.png'")
+        #expect(TerminalDrop.pasteText(for: ["/tmp/a&b.png"]) == "'/tmp/a&b.png'")
     }
 
     @Test func filesToPasteSkipDirectoriesAndCapTheCount() throws {
@@ -71,5 +73,21 @@ struct TerminalDropTests {
         #expect(throws: TerminalDrop.Error.tooLarge) {
             try TerminalDrop.writeImage(huge, to: FileManager.default.temporaryDirectory)
         }
+    }
+
+    @Test func writeImageKeepsOnlyTheNewestCacheFiles() throws {
+        let png = try #require(
+            Data(
+                base64Encoded:
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+            ))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "sigil-cache-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for _ in 0..<(TerminalDrop.cacheKeepCount + 3) {
+            _ = try TerminalDrop.writeImage(png, to: root)
+        }
+        let left = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+        #expect(left.count == TerminalDrop.cacheKeepCount)
     }
 }

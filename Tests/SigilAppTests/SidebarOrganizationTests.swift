@@ -126,6 +126,13 @@ struct SidebarOrganizationTests {
         #expect(SidebarOrganization.listKind(surface: .archived, isSearching: false) == .archived)
     }
 
+    @Test func sentinelPathsAreNotRealFolders() {
+        #expect(SidebarOrganization.isSentinel(SidebarOrganization.recentsID))
+        #expect(SidebarOrganization.isSentinel(SidebarOrganization.archivedID))
+        #expect(!SidebarOrganization.isSentinel("/tmp/sigil"))
+        #expect(!SidebarOrganization.isSentinel(""))
+    }
+
     @Test func surfaceReadsSentinelPathsBeforeARealFolder() {
         #expect(SidebarOrganization.surface(focusedPath: SidebarOrganization.recentsID) == .recents)
         #expect(

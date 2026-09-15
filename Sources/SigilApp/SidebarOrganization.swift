@@ -57,6 +57,10 @@ enum SidebarOrganization {
     static let recentsID = "sigil:recents"
     static let archivedID = "sigil:archived"
 
+    static func isSentinel(_ path: String) -> Bool {
+        path == recentsID || path == archivedID
+    }
+
     static func surface(focusedPath: String) -> SidebarSurface {
         if focusedPath == recentsID { return .recents }
         if focusedPath == archivedID { return .archived }

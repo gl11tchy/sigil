@@ -69,20 +69,53 @@ public enum TerminalDrop {
         return nil
     }
 
+    public static let cacheKeepCount = 8
+
     public static func writeImage(_ data: Data, to directory: URL) throws -> URL {
         guard data.count <= maxImageBytes else { throw Error.tooLarge }
         guard let ext = imageExtension(for: data) else { throw Error.notAnImage }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("drop-\(UUID().uuidString).\(ext)")
         try data.write(to: url, options: .withoutOverwriting)
+        pruneCache(in: directory, keeping: cacheKeepCount, protecting: url)
         return url
     }
 
+    public static func pruneCache(in directory: URL, keeping newest: Int, protecting: URL? = nil) {
+        let files =
+            (try? FileManager.default.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: [.contentModificationDateKey],
+                options: .skipsHiddenFiles)) ?? []
+        var sorted = files.sorted { lhs, rhs in
+            let left =
+                (try? lhs.resourceValues(forKeys: [.contentModificationDateKey])
+                    .contentModificationDate) ?? .distantPast
+            let right =
+                (try? rhs.resourceValues(forKeys: [.contentModificationDateKey])
+                    .contentModificationDate) ?? .distantPast
+            return left > right
+        }
+        if let protecting {
+            let protected = protecting.standardizedFileURL.path
+            sorted.removeAll { $0.standardizedFileURL.path == protected }
+            sorted.insert(protecting, at: 0)
+            for extra in sorted.dropFirst(newest) where extra.standardizedFileURL.path != protected {
+                try? FileManager.default.removeItem(at: extra)
+            }
+        } else {
+            for extra in sorted.dropFirst(newest) {
+                try? FileManager.default.removeItem(at: extra)
+            }
+        }
+    }
+
     public static func pngData(from pasteboard: NSPasteboard) -> Data? {
-        if let png = pasteboard.data(forType: .png), imageExtension(for: png) == "png" {
+        if let png = pasteboard.data(forType: .png), imageExtension(for: png) == "png",
+            png.count <= maxImageBytes
+        {
             return png
         }
-        if let tiff = pasteboard.data(forType: .tiff),
+        if let tiff = pasteboard.data(forType: .tiff), tiff.count <= maxImageBytes,
             let rep = NSBitmapImageRep(data: tiff),
             let png = rep.representation(using: .png, properties: [:])
         {
@@ -108,8 +141,16 @@ public enum TerminalDrop {
     }
 
     public static func canAccept(_ pasteboard: NSPasteboard) -> Bool {
-        !filesToPaste(from: fileURLs(from: pasteboard)).isEmpty
-            || pngData(from: pasteboard) != nil
+        if !filesToPaste(from: fileURLs(from: pasteboard)).isEmpty { return true }
+        if let png = pasteboard.data(forType: .png), png.count <= maxImageBytes,
+            imageExtension(for: png) == "png"
+        {
+            return true
+        }
+        if let tiff = pasteboard.data(forType: .tiff), tiff.count <= maxImageBytes {
+            return true
+        }
+        return false
     }
 
     /// Cache directory for clipboard images that have no file on disk.
@@ -129,10 +170,11 @@ public enum TerminalDrop {
         return [written.path]
     }
 
+    private static let unquotedPath = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-/")
+
     private static func quoteIfNeeded(_ path: String) -> String {
-        let special = CharacterSet.whitespacesAndNewlines.union(
-            CharacterSet(charactersIn: "\"'\\$`"))
-        if path.unicodeScalars.contains(where: { special.contains($0) }) {
+        if path.unicodeScalars.contains(where: { !unquotedPath.contains($0) }) {
             return "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
         }
         return path

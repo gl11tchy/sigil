@@ -484,8 +484,10 @@ final class AppModel {
         if remainingNames != settings.conversationNames {
             settings.conversationNames = remainingNames
         }
-        if !settings.focusedProjectPath.isEmpty,
-            !store.sessions.contains(where: { samePath($0.cwd, settings.focusedProjectPath) })
+        let focused = settings.focusedProjectPath
+        if !focused.isEmpty,
+            !SidebarOrganization.isSentinel(focused),
+            !store.sessions.contains(where: { samePath($0.cwd, focused) })
         {
             settings.focusedProjectPath = ""
         }

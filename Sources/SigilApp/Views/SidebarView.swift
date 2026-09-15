@@ -157,9 +157,7 @@ struct SidebarView: View {
         case .recents:
             DrillBar(
                 title: "Recents",
-                canStart: model.settings.executableExists,
-                leave: { model.leaveProject() },
-                newChat: { model.newTab(in: model.newSessionDirectory) }
+                leave: { model.leaveProject() }
             )
         case .archived:
             DrillBar(
@@ -699,7 +697,7 @@ struct SidebarView: View {
             model.searchText = ""
             return .handled
         }
-        if model.focusedProject != nil {
+        if model.sidebarSurface != .folders {
             model.leaveProject()
             return .handled
         }
@@ -1078,8 +1076,14 @@ private struct ProjectListRow: View {
         .accessibilityLabel(title)
         .accessibilityValue(countLabel)
         .accessibilityAction(.default, open)
-        .accessibilityAction(named: "New Session", newChat)
-        .accessibilityAction(named: isPinned ? "Unpin Project" : "Pin Project", togglePin)
+        .modifier(NamedActionIf(name: "New Session", enabled: canStart, action: newChat))
+        .modifier(
+            NamedActionIf(
+                name: isPinned ? "Unpin Project" : "Pin Project",
+                enabled: showsPin,
+                action: togglePin
+            )
+        )
         .modifier(ArchiveProjectAction(archive: archive))
     }
 
@@ -1833,6 +1837,21 @@ private struct SessionRowActivateTrait: ViewModifier {
             content
                 .accessibilityAddTraits(.isButton)
                 .accessibilityAction { open() }
+        } else {
+            content
+        }
+    }
+}
+
+private struct NamedActionIf: ViewModifier {
+    let name: String
+    let enabled: Bool
+    let action: () -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            content.accessibilityAction(named: name, action)
         } else {
             content
         }
