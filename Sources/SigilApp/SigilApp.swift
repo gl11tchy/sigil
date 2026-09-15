@@ -65,7 +65,7 @@ struct GrokCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("New Session") { model.newTab(in: model.currentDirectory) }
+            Button("New Session") { model.newTab(in: model.newSessionDirectory) }
                 .keyboardShortcut("t", modifiers: .command)
                 .disabled(!model.settings.executableExists)
             Button("New Session in Folder…") { model.isShowingNewSessionSheet = true }
@@ -122,10 +122,8 @@ struct GrokCommands: Commands {
             Menu("Panel") {
                 Button("Terminal") { model.showPanel(.shell) }
                     .keyboardShortcut("1", modifiers: [.command, .option])
-                Button("Browser") { model.showPanel(.web) }
-                    .keyboardShortcut("2", modifiers: [.command, .option])
                 Button("Notes") { model.showPanel(.notes) }
-                    .keyboardShortcut("3", modifiers: [.command, .option])
+                    .keyboardShortcut("2", modifiers: [.command, .option])
             }
             Divider()
             Button("Increase Font Size") { model.adjustFontSize(by: 1) }

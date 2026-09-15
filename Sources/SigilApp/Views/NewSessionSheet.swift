@@ -92,7 +92,7 @@ struct NewSessionSheet: View {
         .padding(20)
         .frame(width: 460)
         .onAppear {
-            directory = model.currentDirectory
+            directory = model.newSessionDirectory
             modelName = model.settings.model
             effort = model.settings.effort
         }

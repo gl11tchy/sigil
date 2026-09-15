@@ -1,7 +1,6 @@
 import AppKit
 import SigilKit
 import SwiftUI
-import WebKit
 
 /// The right-hand utility column: one header of tool buttons over one tool.
 struct RightPanelView: View {
@@ -50,16 +49,6 @@ struct RightPanelView: View {
             IconButton(systemImage: "arrow.clockwise", help: "Restart Shell") {
                 model.restartPanelShell()
             }
-        case .web:
-            IconButton(systemImage: "house", help: "Go to \(panel.homeURL)") {
-                panel.goHome()
-            }
-            IconButton(systemImage: "arrow.clockwise", help: "Reload") {
-                panel.reload()
-            }
-            IconButton(systemImage: "arrow.up.forward.app", help: "Open in Default Browser") {
-                if let url = panel.requestedURL { NSWorkspace.shared.open(url) }
-            }
         case .notes:
             EmptyView()
         }
@@ -80,21 +69,6 @@ struct RightPanelView: View {
             } else {
                 PanelPlaceholder(text: "Starting a shell…")
             }
-        case .web:
-            VStack(spacing: 0) {
-                AddressBar(panel: panel)
-                Rectangle().fill(palette.hairline).frame(height: 1)
-                ZStack {
-                    if panel.requestedURL != nil {
-                        WebPane(panel: panel)
-                    } else {
-                        PanelPlaceholder(text: "Type an address or a port number.")
-                    }
-                    if let error = panel.pageError {
-                        pageErrorOverlay(error)
-                    }
-                }
-            }
         case .notes:
             let directory = model.currentDirectory
             NotesPane(
@@ -106,22 +80,6 @@ struct RightPanelView: View {
             )
             .id(directory.path)
         }
-    }
-    private func pageErrorOverlay(_ error: String) -> some View {
-        VStack(spacing: 8) {
-            Text("Could not load page")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(palette.text)
-            Text(error)
-                .font(.system(size: 11))
-                .foregroundStyle(palette.textDim)
-                .fixedSize(horizontal: false, vertical: true)
-            Button("Retry") { panel.reload() }
-                .controlSize(.small)
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(palette.ground)
     }
 }
 
@@ -160,73 +118,6 @@ private struct ToolButton: View {
         .accessibilityLabel(mode.title)
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
-}
-
-/// The browser's address field. Return navigates; a bare port means localhost.
-private struct AddressBar: View {
-    @Bindable var panel: RightPanel
-    @Environment(\.palette) private var palette
-    @FocusState private var isFocused: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
-                TextField("localhost:3000", text: $panel.addressField)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(palette.text)
-                    .focused($isFocused)
-                    .onSubmit { panel.navigate(to: panel.addressField) }
-                    .accessibilityLabel("Web address")
-                    .onChange(of: isFocused) { _, focused in
-                        if focused {
-                            panel.isEditingAddress = true
-                        } else {
-                            panel.finishEditingAddress()
-                        }
-                    }
-                if panel.isLoadingPage {
-                    ProgressView()
-                        .controlSize(.small)
-                        .scaleEffect(0.55)
-                        .frame(width: 10, height: 10)
-                        .accessibilityLabel("Loading")
-                }
-                if panel.requestedURL != nil, panel.requestedURL?.absoluteString != panel.homeURL {
-                    Button("Set Home") { panel.setHomeToCurrentAddress() }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 10))
-                        .foregroundStyle(palette.textFaint)
-                        .help("Open the panel on this address next time")
-                }
-            }
-            .padding(.horizontal, 8)
-            .frame(height: 28)
-            if let error = panel.addressError {
-                Text(error)
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(palette.error)
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 4)
-            }
-        }
-        .background(palette.sidebar)
-        .accessibilityLabel("Address")
-        .onDisappear { panel.finishEditingAddress() }
-    }
-}
-
-/// A web view for a locally running dev server, or any other page.
-private struct WebPane: NSViewRepresentable {
-    let panel: RightPanel
-
-    func makeNSView(context: Context) -> WKWebView {
-        panel.browserView()
-    }
-
-    /// Loads only when the address or the reload counter actually changed, so a
-    /// SwiftUI redraw cannot restart a page the user is using.
-    func updateNSView(_ nsView: WKWebView, context: Context) {}
 }
 
 /// A plain scratch pad, saved per working folder as the user types.

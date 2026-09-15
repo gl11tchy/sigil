@@ -177,8 +177,8 @@ private struct TopBar: View {
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) { model.togglePanel() }
             }
 
-            IconButton(systemImage: "plus", help: "New Session in \(model.currentDirectory.abbreviatedPath) (⌘T)") {
-                model.newTab(in: model.currentDirectory)
+            IconButton(systemImage: "plus", help: "New Session in \(model.newSessionDirectory.abbreviatedPath) (⌘T)") {
+                model.newTab(in: model.newSessionDirectory)
             }
             .disabled(!model.settings.executableExists)
             Menu {

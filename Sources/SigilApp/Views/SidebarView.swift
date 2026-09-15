@@ -10,10 +10,10 @@ private enum SidebarFocus: Hashable {
 
 /// The thread viewer: every Grok Build conversation on this machine.
 ///
-/// Recents is the time-ordered list. Projects is the same list grouped by
-/// folder. Chat pins sit at the top of either sort. Project pins sit at the
-/// top of Projects. Archived chats leave both until the archivebox in the
-/// header is turned on. The list is the product: find one conversation in a
+/// Recents is the time-ordered list. Projects is a folder list; open one to
+/// see its chats and start a new one there. Chat pins sit at the top of Recents
+/// and of an open project. Archived chats leave both until the archivebox in
+/// the header is turned on. The list is the product: find one conversation in a
 /// history of hundreds, without leaving the keyboard.
 struct SidebarView: View {
     @Bindable var model: AppModel
@@ -25,7 +25,6 @@ struct SidebarView: View {
     @State private var keyboardSelectionID: String?
     @State private var pendingDelete: GrokSession?
     @State private var hoveredMode: SidebarMode?
-    @Namespace private var modeUnderline
 
     /// F2. Unicode private-use scalar for `NSF2FunctionKey`.
     private static let f2 = KeyEquivalent(Character("\u{F705}"))
@@ -34,7 +33,7 @@ struct SidebarView: View {
         VStack(spacing: 0) {
             Color.clear.frame(height: 36)
             searchRow
-            modeRow
+            modeArea
             list
             footer
         }
@@ -81,49 +80,58 @@ struct SidebarView: View {
     // MARK: - Search
 
     private var searchRow: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(focus == .search ? palette.textDim : palette.textFaint)
-            TextField("Search", text: $model.searchText)
-                .textFieldStyle(.plain)
-                .font(.system(size: 11.5))
-                .foregroundStyle(palette.text)
-                .focused($focus, equals: .search)
-                .onSubmit(activateSearchResult)
-                .onKeyPress(.downArrow) { moveFocusToList() }
-                .onKeyPress(Self.f2) { renameKeyboardSelection() }
-                .onKeyPress(.escape) { handleEscape() }
-                .onExitCommand { _ = handleEscape() }
-                .accessibilityLabel("Search conversations")
-            if !model.searchText.isEmpty {
-                Button {
-                    model.searchText = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill").font(.system(size: 10))
+        HStack(spacing: 6) {
+            HStack(spacing: 5) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(focus == .search ? palette.textDim : palette.textFaint)
+                TextField("Search", text: $model.searchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(palette.text)
+                    .focused($focus, equals: .search)
+                    .onSubmit(activateSearchResult)
+                    .onKeyPress(.downArrow) { moveFocusToList() }
+                    .onKeyPress(Self.f2) { renameKeyboardSelection() }
+                    .onKeyPress(.escape) { handleEscape() }
+                    .onExitCommand { _ = handleEscape() }
+                    .accessibilityLabel("Search conversations")
+                if !model.searchText.isEmpty {
+                    Button {
+                        model.searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").font(.system(size: 10))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(palette.textFaint)
+                    .accessibilityLabel("Clear conversation search")
+                    .help("Clear search")
+                } else if focus != .search {
+                    KbdChip(label: "⌘⇧F", palette: palette)
+                        .transition(.opacity)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(palette.textFaint)
-                .accessibilityLabel("Clear conversation search")
-                .help("Clear search")
-            } else if focus != .search {
-                KbdChip(label: "⌘⇧F", palette: palette)
-                    .transition(.opacity)
             }
+            .padding(.horizontal, 8)
+            .frame(height: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(palette.raised)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(
+                                focus == .search ? palette.accent : Color.clear,
+                                lineWidth: 1
+                            )
+                    )
+            )
+            IconButton(
+                systemImage: "plus",
+                help: "New Session in \(model.newSessionDirectory.abbreviatedPath) (⌘T)"
+            ) {
+                model.newTab(in: model.newSessionDirectory)
+            }
+            .disabled(!model.settings.executableExists)
         }
-        .padding(.horizontal, 8)
-        .frame(height: 28)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(palette.raised)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(
-                            focus == .search ? palette.accent : Color.clear,
-                            lineWidth: 1
-                        )
-                )
-        )
         .padding(.horizontal, 10)
         .padding(.bottom, 6)
         .animation(.easeOut(duration: 0.12), value: focus == .search)
@@ -132,61 +140,74 @@ struct SidebarView: View {
 
     // MARK: - Mode
 
+    @ViewBuilder
+    private var modeArea: some View {
+        if let project = model.focusedProject, model.settings.sidebarMode == .projects {
+            ProjectFocusBar(
+                project: project,
+                isPinned: model.isPinned(project),
+                leave: { model.leaveProject() },
+                newChat: { _ = model.newTabInProject(project) },
+                togglePin: { model.togglePin(project) },
+                canStart: model.settings.executableExists
+            )
+        } else {
+            modeRow
+        }
+    }
+
     private var modeRow: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            ForEach(SidebarMode.allCases) { mode in
-                let selected = model.settings.sidebarMode == mode
-                Button {
-                    // Reduce Motion: the underline jumps instead of sliding.
-                    if reduceMotion {
-                        model.settings.sidebarMode = mode
-                    } else {
-                        withAnimation(.easeOut(duration: 0.16)) {
+        HStack(spacing: 6) {
+            HStack(spacing: 2) {
+                ForEach(SidebarMode.allCases) { mode in
+                    let selected = model.settings.sidebarMode == mode
+                    Button {
+                        if reduceMotion {
                             model.settings.sidebarMode = mode
+                        } else {
+                            withAnimation(.easeOut(duration: 0.16)) {
+                                model.settings.sidebarMode = mode
+                            }
                         }
-                    }
-                } label: {
-                    VStack(alignment: .leading, spacing: 5) {
+                    } label: {
                         Text(mode.title)
                             .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 11, weight: selected ? .medium : .regular))
                             .foregroundStyle(
                                 selected
                                     ? palette.text
                                     : (hoveredMode == mode ? palette.textDim : palette.textFaint)
                             )
-                        ZStack {
-                            Rectangle().fill(Color.clear).frame(height: 2)
-                            if selected {
-                                Rectangle()
-                                    .fill(palette.text)
-                                    .frame(height: 2)
-                                    .matchedGeometryEffect(id: "mode", in: modeUnderline)
-                            }
-                        }
+                            .padding(.horizontal, 8)
+                            .frame(height: 22)
+                            .background(
+                                RoundedRectangle(cornerRadius: 5)
+                                    .fill(
+                                        selected
+                                            ? palette.selected
+                                            : (hoveredMode == mode ? palette.raised : Color.clear)
+                                    )
+                            )
                     }
+                    .buttonStyle(.plain)
+                    .onHover { hovering in
+                        hoveredMode = hovering ? mode : nil
+                    }
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                    .help(
+                        mode == .recents
+                            ? "Sort conversations by time"
+                            : "Open a project, then start chats in it"
+                    )
                 }
-                .buttonStyle(.plain)
-                .onHover { hovering in
-                    hoveredMode = hovering ? mode : nil
-                }
-                .accessibilityAddTraits(selected ? .isSelected : [])
-                .help(
-                    mode == .recents
-                        ? "Sort conversations by time"
-                        : "Sort conversations by project"
-                )
             }
             Spacer(minLength: 0)
             HStack(spacing: 2) {
                 ArchiveToggle(isOn: $model.showingArchived, count: model.archivedCount)
                 ScopeToggle(isOn: $model.scopeToCurrentFolder, folder: model.currentDirectory)
             }
-            .padding(.bottom, 2)
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 4)
+        .padding(.horizontal, 10)
         .padding(.bottom, 8)
         .overlay(alignment: .bottom) { Rectangle().fill(palette.hairline).frame(height: 1) }
     }
@@ -200,15 +221,15 @@ struct SidebarView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                    if !pinned.isEmpty {
+                    if listKind != .projectList, !pinned.isEmpty {
                         section("Pinned", count: pinned.count, isFirst: true) {
                             ForEach(pinned, id: \.directory) { session in
-                                sessionRow(session, showsProject: true)
+                                sessionRow(session, showsProject: listKind != .projectChats)
                             }
                         }
                     }
                     content
-                    if pinned.isEmpty && isListEmpty { emptyState }
+                    if (listKind == .projectList || pinned.isEmpty) && isListEmpty { emptyState }
                 }
                 .padding(.bottom, 8)
             }
@@ -279,13 +300,43 @@ struct SidebarView: View {
 
     @ViewBuilder
     private var listContent: some View {
-        let unpinned = model.unpinnedSessions(from: model.sidebarSessions)
-        let afterPinned = !visiblePinned.isEmpty
-        switch model.settings.sidebarMode {
+        let unpinned = model.unpinnedSessions(from: listedSessions)
+        let afterPinned = listKind != .projectList && !visiblePinned.isEmpty
+        switch listKind {
         case .recents:
             recentsSections(from: unpinned, afterPinned: afterPinned)
-        case .projects:
+        case .projectList:
+            projectList
+        case .projectChats:
+            ForEach(unpinned, id: \.directory) { session in
+                sessionRow(session, showsProject: false)
+            }
+        case .projectSearch:
             projectGroupedSections(from: unpinned, afterPinned: afterPinned)
+        }
+    }
+
+    private var listKind: SidebarListKind {
+        SidebarOrganization.listKind(
+            mode: model.settings.sidebarMode,
+            hasFocusedProject: model.focusedProject != nil,
+            isSearching: !model.searchText.isEmpty
+        )
+    }
+
+    private var listedSessions: [GrokSession] {
+        listKind == .projectChats ? model.focusedSidebarSessions : model.sidebarSessions
+    }
+
+    @ViewBuilder
+    private var projectList: some View {
+        let pinned = visibleProjects(model.pinnedProjects(), from: listedSessions)
+        let rest = visibleProjects(model.unpinnedProjects(), from: listedSessions)
+        ForEach(pinned, id: \.id) { item in
+            projectRow(item.project, rows: item.rows)
+        }
+        ForEach(rest, id: \.id) { item in
+            projectRow(item.project, rows: item.rows)
         }
     }
 
@@ -361,11 +412,51 @@ struct SidebarView: View {
     }
 
     private var visiblePinned: [GrokSession] {
-        model.pinnedSessions()
+        if listKind == .projectChats {
+            return model.pinnedSessions(in: model.focusedProject)
+        }
+        return model.pinnedSessions()
     }
 
     private var isListEmpty: Bool {
-        model.sidebarSessions.isEmpty
+        listKind == .projectList ? model.sidebarProjects.isEmpty : listedSessions.isEmpty
+    }
+
+    private func projectRow(_ project: SidebarProject, rows: [GrokSession]) -> some View {
+        ProjectListRow(
+            title: project.name,
+            paths: SidebarOrganization.pathHaystacks(
+                name: project.name,
+                displayPath: project.displayPath,
+                cwd: project.cwd,
+                sessions: rows
+            ),
+            count: rows.count,
+            relativeTime: rows.first?.updatedAt.shortRelative ?? "",
+            longRelative: rows.first?.updatedAt.longRelative ?? "",
+            isPinned: model.isPinned(project),
+            isWorking: model.isWorking(project),
+            isActive: rows.contains { model.isActive($0) },
+            isKeyboardSelected: project.id == keyboardSelectionID,
+            canStart: model.settings.executableExists,
+            open: {
+                keyboardSelectionID = project.id
+                model.openProject(project)
+            },
+            newChat: { _ = model.newTabInProject(project) },
+            togglePin: { model.togglePin(project) }
+        )
+        .id(project.id)
+        .contextMenu {
+            Button("New Session") { _ = model.newTabInProject(project) }
+                .disabled(!model.settings.executableExists)
+            Button(model.isPinned(project) ? "Unpin Project" : "Pin Project") {
+                model.togglePin(project)
+            }
+            if let session = rows.first {
+                Button("Reveal Folder in Finder") { model.revealInFinder(session) }
+            }
+        }
     }
 
     private func sessionRow(
@@ -395,6 +486,8 @@ struct SidebarView: View {
             commitBlur: { model.commitInlineBlur(session, to: $0, mountGeneration: $1) },
             cancelRename: { model.cancelRename() },
             resetName: { model.resetName(session) },
+            dismissHelp: model.isOpen(session) ? "Close Tab" : "Delete Conversation",
+            dismiss: { dismissSession(session) },
             noteMounted: { model.noteRenameFieldMounted($0, key: model.sessionKey(session)) },
             mountGeneration: { model.renameFieldMountGeneration },
             consumeSelectAll: { model.consumeRenameSelectAll() },
@@ -412,6 +505,9 @@ struct SidebarView: View {
             }
             Divider()
             Button("Open in New Tab") { model.open(session) }
+            if model.isOpen(session) {
+                Button("Close Tab") { dismissSession(session) }
+            }
             Divider()
             Button("New Session in This Folder") {
                 model.newTab(in: URL(fileURLWithPath: session.cwd))
@@ -490,6 +586,7 @@ struct SidebarView: View {
         if model.store.loadError != nil { return "Could not load conversations" }
         if !model.searchText.isEmpty { return "No matches" }
         if model.showingArchived { return "No archived conversations" }
+        if listKind == .projectList { return "No projects yet" }
         return "No conversations yet"
     }
 
@@ -521,22 +618,38 @@ struct SidebarView: View {
     // MARK: - Keyboard
 
     private func visibleRowIDs() -> [String] {
-        visiblePinned.map { model.sessionKey($0) }
-            + groupedUnpinnedSessions().map { model.sessionKey($0) }
+        switch listKind {
+        case .projectList:
+            return (model.pinnedProjects() + model.unpinnedProjects()).map(\.id)
+        case .recents, .projectChats, .projectSearch:
+            return visiblePinned.map { model.sessionKey($0) }
+                + groupedUnpinnedSessions().map { model.sessionKey($0) }
+        }
     }
 
     /// Unpinned chats in the order the current sort draws them.
     private func groupedUnpinnedSessions() -> [GrokSession] {
-        let unpinned = model.unpinnedSessions(from: model.sidebarSessions)
-        switch model.settings.sidebarMode {
-        case .recents:
+        let unpinned = model.unpinnedSessions(from: listedSessions)
+        switch listKind {
+        case .recents, .projectChats:
             return unpinned
-        case .projects:
+        case .projectSearch:
             return (model.pinnedProjects() + model.unpinnedProjects()).flatMap { project in
                 unpinned.filter { session in
                     project.sessions.contains { $0.directory == session.directory }
                 }
             }
+        case .projectList:
+            return []
+        }
+    }
+
+    private func dismissSession(_ session: GrokSession) {
+        switch model.sidebarDismiss(for: session) {
+        case .closeTab:
+            model.performSidebarDismiss(session)
+        case .delete:
+            pendingDelete = session
         }
     }
 
@@ -550,6 +663,10 @@ struct SidebarView: View {
             model.searchText = ""
             return .handled
         }
+        if model.focusedProject != nil {
+            model.leaveProject()
+            return .handled
+        }
         focus = nil
         model.focusSelectedTerminal()
         return .handled
@@ -558,12 +675,11 @@ struct SidebarView: View {
     private func activateSearchResult() {
         guard
             let id = SidebarOrganization.activationKey(
-                preferred: keyboardSelectionID, in: visibleRowIDs()),
-            let session = session(for: id)
+                preferred: keyboardSelectionID, in: visibleRowIDs())
         else { return }
         keyboardSelectionID = id
         focus = nil
-        model.open(session)
+        activate(id: id)
     }
 
     private func beginInlineRename(_ session: GrokSession) {
@@ -760,13 +876,27 @@ struct SidebarView: View {
     }
 
     private func activateKeyboardSelection() -> KeyPress.Result {
-        guard let id = keyboardSelectionID, let session = session(for: id) else { return .ignored }
+        guard let id = keyboardSelectionID else { return .ignored }
+        return activate(id: id) ? .handled : .ignored
+    }
+
+    @discardableResult
+    private func activate(id: String) -> Bool {
+        if listKind == .projectList, let project = project(for: id) {
+            model.openProject(project)
+            return true
+        }
+        guard let session = session(for: id) else { return false }
         model.open(session)
-        return .handled
+        return true
     }
 
     private func session(for id: String) -> GrokSession? {
-        model.sidebarSessions.first { model.sessionKey($0) == id }
+        listedSessions.first { model.sessionKey($0) == id }
+    }
+
+    private func project(for id: String) -> SidebarProject? {
+        model.sidebarProjects.first { $0.id == id }
     }
 
     private func project(containing session: GrokSession) -> SidebarProject? {
@@ -816,6 +946,14 @@ struct SidebarView: View {
         let threads = model.sidebarSessions.count
         let threadLabel = threads == 1 ? "1 thread" : "\(threads) threads"
         let pinned = model.pinnedSessions().count
+        if listKind == .projectList {
+            let folders = model.sidebarProjects.count
+            return folders == 1 ? "1 project" : "\(folders) projects"
+        }
+        if let project = model.focusedProject, listKind == .projectChats {
+            let folder = project.name
+            return threads == 1 ? "1 chat in \(folder)" : "\(threads) chats in \(folder)"
+        }
         if model.settings.sidebarMode == .projects {
             let folders = model.sidebarProjects.count
             let folderLabel = folders == 1 ? "1 project" : "\(folders) projects"
@@ -840,6 +978,194 @@ private struct ProjectRows: Identifiable {
     var id: String { project.id }
     var project: SidebarProject
     var rows: [GrokSession]
+}
+
+private struct ProjectFocusBar: View {
+    let project: SidebarProject
+    let isPinned: Bool
+    let leave: () -> Void
+    let newChat: () -> Void
+    let togglePin: () -> Void
+    let canStart: Bool
+
+    @Environment(\.palette) private var palette
+    @State private var isHoveringBack = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Button(action: leave) {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text(project.name)
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(isHoveringBack ? palette.text : palette.textDim)
+                .padding(.horizontal, 6)
+                .frame(height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(isHoveringBack ? palette.raised : Color.clear)
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { isHoveringBack = $0 }
+            .help("Back to projects")
+            .accessibilityLabel("Back to projects")
+            Spacer(minLength: 4)
+            IconButton(systemImage: isPinned ? "pin.fill" : "pin", help: isPinned ? "Unpin Project" : "Pin Project") {
+                togglePin()
+            }
+            .foregroundStyle(isPinned ? palette.accent : palette.textDim)
+            IconButton(
+                systemImage: "plus",
+                help: "New Session in \(project.name) (⌘T)"
+            ) {
+                newChat()
+            }
+            .disabled(!canStart)
+        }
+        .padding(.horizontal, 8)
+        .padding(.bottom, 8)
+        .overlay(alignment: .bottom) { Rectangle().fill(palette.hairline).frame(height: 1) }
+    }
+}
+
+private struct ProjectListRow: View {
+    let title: String
+    let paths: [String]
+    let count: Int
+    let relativeTime: String
+    let longRelative: String
+    let isPinned: Bool
+    let isWorking: Bool
+    let isActive: Bool
+    let isKeyboardSelected: Bool
+    let canStart: Bool
+    let open: () -> Void
+    let newChat: () -> Void
+    let togglePin: () -> Void
+
+    @Environment(\.palette) private var palette
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 12, weight: isActive ? .medium : .regular))
+                    .foregroundStyle(palette.text)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.system(size: 9.5, design: .monospaced))
+                    .foregroundStyle(palette.textFaint)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            if isWorking {
+                StatusDot(activity: .working)
+            }
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 10)
+        .padding(.vertical, 6)
+        .background(rowFill)
+        .overlay(alignment: .topTrailing) { trailing }
+        .padding(.horizontal, 6)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: open)
+        .onHover { isHovering = $0 }
+        .help(rowHelp)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
+        .accessibilityLabel(title)
+        .accessibilityValue(countLabel)
+        .accessibilityAction(.default, open)
+        .accessibilityAction(named: "New Session", newChat)
+        .accessibilityAction(named: isPinned ? "Unpin Project" : "Pin Project", togglePin)
+    }
+
+    private var rowHelp: String {
+        let path = paths.first { $0.hasPrefix("/") || $0.hasPrefix("~") } ?? title
+        if longRelative.isEmpty { return "\(path)\n\(countLabel)" }
+        return "\(path)\n\(countLabel) · \(longRelative)"
+    }
+
+    private var countLabel: String {
+        count == 1 ? "1 chat" : "\(count) chats"
+    }
+
+    private var subtitle: String {
+        relativeTime.isEmpty ? countLabel : "\(countLabel) · \(relativeTime)"
+    }
+
+    private var fill: Color {
+        if isActive { return palette.selected }
+        return (isHovering || isKeyboardSelected) ? palette.raised : .clear
+    }
+
+    @ViewBuilder
+    private var rowFill: some View {
+        RoundedRectangle(cornerRadius: 6)
+            .fill(fill)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(
+                        isKeyboardSelected && !isActive ? palette.hairline : Color.clear,
+                        lineWidth: 1
+                    )
+            )
+    }
+
+    @ViewBuilder
+    private var trailing: some View {
+        if isHovering || isKeyboardSelected {
+            HStack(spacing: 0) {
+                LinearGradient(
+                    colors: [fill.opacity(0), fill],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: 14)
+                HStack(spacing: 0) {
+                    Button(action: newChat) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 9, weight: .semibold))
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(palette.textDim)
+                    .disabled(!canStart)
+                    .help("New Session")
+                    .accessibilityLabel("New Session")
+                    Button(action: togglePin) {
+                        Image(systemName: isPinned ? "pin.fill" : "pin")
+                            .font(.system(size: 9, weight: .semibold))
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(isPinned ? palette.accent : palette.textDim)
+                    .help(isPinned ? "Unpin Project" : "Pin Project")
+                    .accessibilityLabel(isPinned ? "Unpin Project" : "Pin Project")
+                }
+                .padding(.trailing, 8)
+                .padding(.top, 4)
+                .background(fill)
+            }
+        } else if isPinned {
+            Image(systemName: "pin.fill")
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(palette.accent.opacity(0.9))
+                .padding(.trailing, 12)
+                .padding(.top, 8)
+                .accessibilityHidden(true)
+        }
+    }
 }
 
 private struct ProjectSectionHeader: View {
@@ -1037,6 +1363,8 @@ private struct SessionRow: View {
     let commitBlur: (String, Int) -> Void
     let cancelRename: () -> Void
     let resetName: () -> Void
+    let dismissHelp: String
+    let dismiss: () -> Void
     let noteMounted: (Bool) -> Void
     let mountGeneration: () -> Int
     let consumeSelectAll: () -> Bool
@@ -1092,6 +1420,7 @@ private struct SessionRow: View {
             .accessibilityAction(named: isArchived ? "Unarchive" : "Archive") {
                 toggleArchive()
             }
+            .accessibilityAction(named: dismissHelp, dismiss)
             .accessibilityAction(named: "Rename") { beginRename() }
             .modifier(
                 SessionRowResetNameAction(
@@ -1234,10 +1563,10 @@ private struct SessionRow: View {
                 .frame(width: 14)
                 HStack(spacing: 0) {
                     rowActionButton(
-                        systemImage: isArchived ? "archivebox.fill" : "archivebox",
-                        tinted: isArchived,
-                        help: isArchived ? "Unarchive" : "Archive",
-                        action: toggleArchive
+                        systemImage: "xmark",
+                        tinted: false,
+                        help: dismissHelp,
+                        action: dismiss
                     )
                     rowActionButton(
                         systemImage: isPinned ? "pin.fill" : "pin",

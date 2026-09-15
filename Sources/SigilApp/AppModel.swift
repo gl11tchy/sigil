@@ -16,7 +16,7 @@ final class AppModel {
 
     let settings: AppSettings
     let store: SessionStore
-    /// The right-hand utility column: scratch shell, dev-server browser, notes.
+    /// The right-hand utility column: scratch shell and per-folder notes.
     let panel: RightPanel
     let remoteControl = RemoteControl()
 
@@ -393,6 +393,20 @@ final class AppModel {
         return sidebarProjects.first { $0.id == focused || samePath($0.cwd, path) }
     }
 
+    /// Chats in the open project, or the full sidebar list.
+    var focusedSidebarSessions: [GrokSession] {
+        guard let project = focusedProject else { return sidebarSessions }
+        return sidebarSessions.filter { samePath($0.cwd, project.cwd) }
+    }
+
+    /// Folder a new chat should start in: the open project, else the current tab.
+    var newSessionDirectory: URL {
+        if let project = focusedProject {
+            return URL(fileURLWithPath: project.cwd)
+        }
+        return currentDirectory
+    }
+
     func openProject(_ project: SidebarProject) {
         settings.sidebarMode = .projects
         settings.focusedProjectPath = project.cwd
@@ -400,6 +414,30 @@ final class AppModel {
 
     func leaveProject() {
         settings.focusedProjectPath = ""
+    }
+
+    @discardableResult
+    func newTabInProject(_ project: SidebarProject) -> TerminalTab? {
+        openProject(project)
+        return newTab(in: URL(fileURLWithPath: project.cwd))
+    }
+
+    enum SidebarDismiss: Equatable {
+        case closeTab(UUID)
+        case delete
+    }
+
+    func sidebarDismiss(for session: GrokSession) -> SidebarDismiss {
+        if let tab = tabs.first(where: { tabMatches($0, sessionID: session.id, cwd: session.cwd) }) {
+            return .closeTab(tab.id)
+        }
+        return .delete
+    }
+
+    func performSidebarDismiss(_ session: GrokSession) {
+        if case .closeTab(let id) = sidebarDismiss(for: session) {
+            requestCloseTab(id)
+        }
     }
 
     /// Drops pins, archives, and names whose conversations are gone, after a successful scan.

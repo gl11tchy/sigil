@@ -67,6 +67,15 @@ struct AppSettingsTests {
     }
 
     @Test @MainActor
+    func sidebarDefaultsToProjectsAndKeepsAStoredRecentsValue() {
+        let defaults = isolatedDefaults()
+        defer { defaults.reset() }
+        #expect(AppSettings(defaults: defaults.value).sidebarMode == .projects)
+        defaults.value.set("recents", forKey: "sidebar.mode")
+        #expect(AppSettings(defaults: defaults.value).sidebarMode == .recents)
+    }
+
+    @Test @MainActor
     func worktreeSessionsAreHiddenByDefault() {
         let defaults = isolatedDefaults()
         defer { defaults.reset() }
