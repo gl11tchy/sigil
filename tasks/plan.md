@@ -36,3 +36,10 @@ ASSUMPTIONS:
 ### Checkpoint
 - [x] Swift tests pass
 - [x] App builds and the real window is checked (sidebar + a photo drop)
+
+## Recents and Archived are destinations
+
+They are not folders. They pin under the project list, behind a hairline.
+
+- [x] Task 4: Folder list IDs are only projects. Recents and Archived are destination IDs after that.
+- [x] Task 5: Home rail shows them in a footer, not in the project stack.

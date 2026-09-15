@@ -141,9 +141,33 @@ struct SidebarOrganizationTests {
         #expect(SidebarOrganization.surface(focusedPath: "") == .folders)
     }
 
-    @Test func folderListPutsProjectsFirstThenRecentsAndArchived() {
+    @Test func folderListContainsOnlyProjects() {
         #expect(
-            SidebarOrganization.folderListRowIDs(
+            SidebarOrganization.folderListRowIDs(pinnedIDs: ["pin"], restIDs: ["rest"]) == [
+                "pin", "rest",
+            ])
+        #expect(SidebarOrganization.folderListRowIDs(pinnedIDs: ["a"], restIDs: []) == ["a"])
+    }
+
+    @Test func destinationRowsAreRecentsThenArchived() {
+        #expect(
+            SidebarOrganization.destinationRowIDs(recentsCount: 2, archivedCount: 1) == [
+                SidebarOrganization.recentsID, SidebarOrganization.archivedID,
+            ])
+        #expect(SidebarOrganization.destinationRowIDs(recentsCount: 0, archivedCount: 0).isEmpty)
+        #expect(
+            SidebarOrganization.destinationRowIDs(recentsCount: 1, archivedCount: 0) == [
+                SidebarOrganization.recentsID
+            ])
+        #expect(
+            SidebarOrganization.destinationRowIDs(recentsCount: 0, archivedCount: 3) == [
+                SidebarOrganization.archivedID
+            ])
+    }
+
+    @Test func homeListPutsDestinationsAfterProjects() {
+        #expect(
+            SidebarOrganization.homeRowIDs(
                 recentsCount: 2,
                 archivedCount: 1,
                 pinnedIDs: ["pin"],
@@ -152,7 +176,7 @@ struct SidebarOrganizationTests {
                 "pin", "rest", SidebarOrganization.recentsID, SidebarOrganization.archivedID,
             ])
         #expect(
-            SidebarOrganization.folderListRowIDs(
+            SidebarOrganization.homeRowIDs(
                 recentsCount: 0, archivedCount: 0, pinnedIDs: ["a"], restIDs: []
             ) == ["a"])
     }

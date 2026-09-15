@@ -108,12 +108,13 @@ because that is how the chosen mockup marks structure. They take 16pt above and
 5pt below. Project names stay in their own case, `sigil`, so a folder slug
 does not become a shout.
 
-The sidebar is one list of projects. Recents and Archived are rows you open,
-not a second mode and not header icons. Chat pins sit at the top of Recents and
-of an open project. Project pins sit at the top of the folder list, newest-pinned
-first. A plus on a folder row, and in an open project, starts a chat there.
-Hover archive on a chat or a project sends it to Archived. Hover X on a chat
-closes its tab, or deletes it if it is not open.
+The sidebar is one list of projects. Recents and Archived sit under that list
+as destinations — a hairline, then one-line rows with an icon — not as folders
+in the same stack. Chat pins sit at the top of Recents and of an open project.
+Project pins sit at the top of the folder list, newest-pinned first. A plus on
+a folder row, and in an open project, starts a chat there. Hover archive on a
+chat or a project sends it to Archived. Hover X on a chat closes its tab, or
+deletes it if it is not open.
 
 ## Type ramp and the contrast floor
 
