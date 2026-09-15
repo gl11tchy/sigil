@@ -76,6 +76,9 @@ struct SidebarView: View {
         .onChange(of: model.store.isLoading) { _, loading in
             if !loading { model.pruneMissingPins() }
         }
+        .onChange(of: model.store.sessions) { _, _ in
+            if !model.store.isLoading { model.pruneMissingPins() }
+        }
     }
 
     // MARK: - Search
@@ -196,7 +199,8 @@ struct SidebarView: View {
     @ViewBuilder
     private var list: some View {
         let pinned = visiblePinned
-        let content = listContent
+        let projectIndex = SidebarOrganization.indexByDirectory(model.sidebarProjects)
+        let content = listContent(projectIndex: projectIndex)
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
@@ -282,19 +286,23 @@ struct SidebarView: View {
     }
 
     @ViewBuilder
-    private var listContent: some View {
+    private func listContent(projectIndex: [URL: SidebarProject]) -> some View {
         let unpinned = model.unpinnedSessions(from: model.sidebarSessions)
         let afterPinned = !visiblePinned.isEmpty
         switch model.settings.sidebarMode {
         case .recents:
-            recentsSections(from: unpinned, afterPinned: afterPinned)
+            recentsSections(from: unpinned, afterPinned: afterPinned, projectIndex: projectIndex)
         case .projects:
             projectGroupedSections(from: unpinned, afterPinned: afterPinned)
         }
     }
 
     @ViewBuilder
-    private func recentsSections(from sessions: [GrokSession], afterPinned: Bool) -> some View {
+    private func recentsSections(
+        from sessions: [GrokSession],
+        afterPinned: Bool,
+        projectIndex: [URL: SidebarProject]
+    ) -> some View {
         let buckets = SessionBucket.bucket(sessions)
         ForEach(Array(buckets.enumerated()), id: \.element.id) { index, bucket in
             section(bucket.title, count: bucket.sessions.count, isFirst: !afterPinned && index == 0) {
@@ -373,10 +381,6 @@ struct SidebarView: View {
 
     private var visiblePinned: [GrokSession] {
         model.pinnedSessions()
-    }
-
-    private var projectIndex: [URL: SidebarProject] {
-        SidebarOrganization.indexByDirectory(model.sidebarProjects)
     }
 
     private var isListEmpty: Bool {

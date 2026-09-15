@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import os
 
@@ -5,15 +6,37 @@ import os
 /// and other folders that should not become the remembered default directory.
 /// The sidebar hides these sessions unless the user turns them on.
 public func isEphemeral(path: String) -> Bool {
-    if let cached = ephemeralPathCache.withLock({ $0[path] }) {
-        return cached
+    let identity = filesystemIdentity(path)
+    if let cached = ephemeralPathCache.withLock({ $0[path] }),
+        cached.device == identity.device,
+        cached.inode == identity.inode
+    {
+        return cached.value
     }
     let value = computeIsEphemeral(path: path)
-    ephemeralPathCache.withLock { $0[path] = value }
+    ephemeralPathCache.withLock {
+        $0[path] = EphemeralCacheEntry(
+            value: value, device: identity.device, inode: identity.inode)
+    }
     return value
 }
 
-private let ephemeralPathCache = OSAllocatedUnfairLock(initialState: [String: Bool]())
+private struct EphemeralCacheEntry {
+    var value: Bool
+    var device: UInt64?
+    var inode: UInt64?
+}
+
+private let ephemeralPathCache = OSAllocatedUnfairLock(
+    initialState: [String: EphemeralCacheEntry]()
+)
+
+/// Follows symlinks so a retarget changes identity and misses the cache.
+private func filesystemIdentity(_ path: String) -> (device: UInt64?, inode: UInt64?) {
+    var st = stat()
+    guard stat(path, &st) == 0 else { return (nil, nil) }
+    return (UInt64(bitPattern: Int64(st.st_dev)), st.st_ino)
+}
 
 private func computeIsEphemeral(path: String) -> Bool {
     let variants = pathVariants(path)
