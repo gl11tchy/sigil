@@ -31,6 +31,16 @@ struct TerminalThemeTests {
         #expect(Set(grounds).count == grounds.count)
     }
 
+    @Test func namedInitResolvesKnownThemesAndFallsBackByAppearance() {
+        #expect(TerminalTheme(name: "GitHub", isDark: true) == .githubDark)
+        let dark = TerminalTheme(name: "Custom Dark", isDark: true)
+        #expect(dark.name == "Custom Dark")
+        #expect(dark.backgroundHex == TerminalTheme.grokNight.backgroundHex)
+        let light = TerminalTheme(name: "Custom Light", isDark: false)
+        #expect(light.name == "Custom Light")
+        #expect(light.backgroundHex == TerminalTheme.grokDay.backgroundHex)
+    }
+
     /// Every theme names a CLI theme, so the program and its window match.
     @Test func everyThemeNamesACLITheme() {
         #expect(TerminalTheme.sigilNeon.grokThemeName == "sigil-neon")

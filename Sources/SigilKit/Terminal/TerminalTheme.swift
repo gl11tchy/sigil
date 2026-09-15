@@ -9,6 +9,24 @@ public struct TerminalTheme: Sendable, Hashable, Identifiable {
     fileprivate let hex: HexPalette
     fileprivate let cliTheme: String
 
+    /// Looks up a shipping theme by name. An unknown name keeps the night or day
+    /// palette, matching the previous public initializer.
+    public init(name: String, isDark: Bool) {
+        if let existing = Self.all.first(where: { $0.name == name }) {
+            self = existing
+            return
+        }
+        let base = isDark ? Self.grokNight : Self.grokDay
+        self.init(name: name, isDark: isDark, hex: base.hex, cliTheme: base.cliTheme)
+    }
+
+    fileprivate init(name: String, isDark: Bool, hex: HexPalette, cliTheme: String) {
+        self.name = name
+        self.isDark = isDark
+        self.hex = hex
+        self.cliTheme = cliTheme
+    }
+
     /// The 16 ANSI colours, in standard order.
     public var ansi: [SwiftTerm.Color] { hex.ansi.map(Self.color) }
     /// Background, foreground, cursor and selection colours.
