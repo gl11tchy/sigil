@@ -37,7 +37,7 @@ struct SettingsView: View {
                                     isSelected: model.settings.theme.name == theme.name
                                 ) {
                                     model.settings.themeName = theme.name
-                                    model.applyAppearance()
+                                    model.applyTheme()
                                 }
                             }
                             if row.themes.count < ThemeGrid.columns {
@@ -66,7 +66,7 @@ struct SettingsView: View {
                 }
             }
             .onChange(of: model.settings.fontSize) { _, _ in model.applyAppearance() }
-            Text("Terminal colors and font size update immediately. Reopen a session to apply the theme inside Grok.")
+            Text("Font size updates immediately. Changing the theme restarts the Grok tab so the TUI matches.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }

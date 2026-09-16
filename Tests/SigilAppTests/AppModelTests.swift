@@ -99,6 +99,52 @@ struct AppModelTests {
         #expect(resumedID == sessionID)
     }
 
+    /// The Grok TUI reads GROK_THEME at process start. Recolouring SwiftTerm
+    /// leaves the program inside the tab on the old palette.
+    @Test @MainActor
+    func changingTheWindowThemeRelaunchesGrokWithTheNewPalette() throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        let original = try #require(model.newTab(in: cwd))
+        let sessionID = try #require(original.sessionID)
+        #expect(original.spec.themeName == TerminalTheme.sigilNeon.grokThemeName)
+
+        fixture.settings.themeName = TerminalTheme.twitch.name
+        model.applyTheme()
+
+        let relaunched = try #require(model.tabs.first)
+        #expect(relaunched.sessionID == sessionID)
+        #expect(relaunched.spec.themeName == TerminalTheme.twitch.grokThemeName)
+        #expect(relaunched.spec.themeVariables["GROK_THEME_BG"] == "0E0E10")
+        #expect(relaunched.spec.themeVariables["GROK_THEME_ACCENT"] == "BF94FF")
+        #expect(relaunched.id != original.id)
+    }
+
+    @Test @MainActor
+    func changingThemeDoesNotKillATabThatIsStillWorking() throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        let original = try #require(model.newTab(in: cwd))
+        original.noteTurnStarted()
+        #expect(original.shouldWarnBeforeStopping)
+        let originalID = original.id
+
+        fixture.settings.themeName = TerminalTheme.twitch.name
+        model.applyTheme()
+
+        let still = try #require(model.tabs.first)
+        #expect(still.id == originalID)
+        #expect(still.spec.themeName == TerminalTheme.sigilNeon.grokThemeName)
+    }
+
     @Test @MainActor
     func failedTrashRestartsOnlyStoppedTabAndPreservesSelectionAndSnapshot() throws {
         let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")

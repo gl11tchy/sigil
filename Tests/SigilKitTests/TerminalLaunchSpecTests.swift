@@ -124,6 +124,17 @@ struct TerminalLaunchSpecTests {
         #expect(host.environment()["GROK_THEME_BG"] == "0D1117")
         #expect(host.environment()["GROK_THEME_ACCENT"] == "58A6FF")
 
+        let stale = ["GROK_THEME_BG": "140E0C", "GROK_THEME_ACCENT": "E8934A"]
+        let neon = GrokLaunchSpec(
+            workingDirectory: cwd,
+            mode: .continueLatest,
+            themeName: TerminalTheme.sigilNeon.grokThemeName
+        )
+        let neonEnv = neon.environment(processEnvironment: stale)
+        #expect(neonEnv["GROK_THEME"] == "sigil-neon")
+        #expect(neonEnv["GROK_THEME_BG"] == nil)
+        #expect(neonEnv["GROK_THEME_ACCENT"] == nil)
+
         let plain = GrokLaunchSpec(workingDirectory: cwd, mode: .continueLatest)
         #expect(plain.environment()["GROK_THEME"] == nil)
     }

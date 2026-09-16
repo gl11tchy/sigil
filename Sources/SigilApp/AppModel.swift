@@ -1612,6 +1612,20 @@ final class AppModel {
         panel.shell?.apply(theme: settings.theme)
     }
 
+    /// The Grok TUI reads `GROK_THEME` when the process starts. Recolouring
+    /// SwiftTerm only changes the frame around it, so idle tabs are relaunched.
+    /// A tab that is mid-turn is left alone so a theme click does not kill work.
+    func applyTheme() {
+        applyAppearance()
+        let name = settings.theme.grokThemeName
+        let vars = settings.theme.grokThemeEnvironment
+        for tab in tabs {
+            if tab.spec.themeName == name, tab.spec.themeVariables == vars { continue }
+            if tab.shouldWarnBeforeStopping { continue }
+            restartTab(id: tab.id)
+        }
+    }
+
     // MARK: - Session actions
 
     func revealInFinder(_ session: GrokSession) {
