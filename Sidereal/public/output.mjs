@@ -8,7 +8,7 @@ const GROK_META = /Grok [\w.-]+ \([^)]+\) · \S+/;
 const SHORTCUTS = /Ctrl\+x:shortcuts/;
 const HINT_TOKEN = /Ctrl\+x:shortcuts|Shift\+Tab:mode|Esc:cancel|Ctrl\+e:collapse thinking|→:expand|Build anything|↩/g;
 const EMPTY_PROMPT = /^[│| ]*[❯›>] ?(?:Build anything)?\s*$/;
-const GROK_NAME = /^Grok [\w.-]+/;
+const GROK_NAME = /^Grok [\w.-]+$/;
 const GROK_MODEL = /^\(?[\w-]+\)? · [\w-]+/;
 
 function tidy(line) {
@@ -51,7 +51,7 @@ function isComposerChrome(line) {
 function isDraftPrompt(line) {
   const text = ink(line);
   if (!text || EMPTY_PROMPT.test(line) || EMPTY_PROMPT.test(text)) return false;
-  return /[❯›>] /.test(line) || /^[❯›>] /.test(text);
+  return /^[❯›>] \S/.test(text);
 }
 
 function trailingComposerStart(lines) {
@@ -75,9 +75,12 @@ function trailingComposerStart(lines) {
 export function readableOutput(snapshot) {
   const lines = snapshot.split('\n').map(tidy);
   const start = trailingComposerStart(lines);
-  if (start >= 0) lines.splice(start);
+  if (start >= 0) {
+    lines.splice(start);
+    while (lines.length && (isPadding(lines.at(-1)) || isBoxLine(lines.at(-1)))) lines.pop();
+  }
   while (lines.length && isPadding(lines[0])) lines.shift();
-  while (lines.length && (isPadding(lines.at(-1)) || isBoxLine(lines.at(-1)))) lines.pop();
+  while (lines.length && isPadding(lines.at(-1))) lines.pop();
   const compact = [];
   let blanks = 0;
   for (const line of lines) {

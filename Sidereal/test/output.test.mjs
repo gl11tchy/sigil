@@ -90,3 +90,15 @@ test('strips a boxed Grok 4.6 composer while a turn is waiting', () => {
   );
 });
 
+test('keeps a trailing table box and does not treat Grok in a sentence as chrome', () => {
+  const table = 'Table:\n┌────┐\n│ data │\n└────┘';
+  assert.equal(readableOutput(table), table);
+  const about = 'Grok 4.6 is the newest model.\n\n' + boxed.slice(boxed.indexOf('┌'));
+  assert.equal(readableOutput(about), 'Grok 4.6 is the newest model.');
+});
+
+test('still strips a boxed composer after a greater-than in the last result line', () => {
+  const text = 'comparison: x > y\n\n' + boxed.slice(boxed.indexOf('┌'));
+  assert.equal(readableOutput(text), 'comparison: x > y');
+});
+
