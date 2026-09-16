@@ -68,6 +68,28 @@ struct TerminalDropTests {
         #expect(try Data(contentsOf: written) == png)
     }
 
+    @Test func remoteFilesAreSanitizedCappedAndWritten() throws {
+        #expect(TerminalDrop.sanitizedFileName("/tmp/../shot name!.PNG") == "shot-name-.PNG")
+        #expect(TerminalDrop.sanitizedFileName("...") == "file")
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "sigil-remote-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let notes = try TerminalDrop.writeRemoteFile(Data("hi".utf8), name: "notes.md", to: root)
+        #expect(notes.lastPathComponent.contains("notes.md"))
+        #expect(try String(contentsOf: notes, encoding: .utf8) == "hi")
+        let png = try #require(
+            Data(
+                base64Encoded:
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+            ))
+        let image = try TerminalDrop.writeRemoteFile(png, name: "x.bin", to: root)
+        #expect(image.pathExtension == "png")
+        #expect(throws: TerminalDrop.Error.tooLarge) {
+            try TerminalDrop.writeRemoteFile(
+                Data(repeating: 0x61, count: TerminalDrop.maxRemoteBytes + 1), name: "big.txt", to: root)
+        }
+    }
+
     @Test func oversizedImageBytesAreRejected() {
         let huge = Data(repeating: 0x89, count: TerminalDrop.maxImageBytes + 1)
         #expect(throws: TerminalDrop.Error.tooLarge) {

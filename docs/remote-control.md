@@ -7,8 +7,9 @@ The default is internet access through an HTTPS/WebSocket relay, not an exposed
 Mac listening port. Sigil must stay open and the Mac must stay awake.
 
 The companion can list and select open tabs, read bounded terminal text, send
-text and terminal keys, and create a session in the current folder. It does not
-expose arbitrary file access, shell launch configuration, or the local MCP socket.
+text, keys, and phone photos/files, and create a session in the current folder.
+Phone files are written into the local drop cache and pasted as paths. It does not
+expose arbitrary Mac file access, shell launch configuration, or the local MCP socket.
 Remote input has the same authority as typing in an open Grok session.
 
 ## Contract and security

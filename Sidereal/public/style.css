@@ -59,17 +59,33 @@ button:disabled, select:disabled { opacity: .45; cursor: default; }
 #terminal[data-raw="true"] { white-space: pre; overflow-wrap: normal; }
 #terminal {
   white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; overscroll-behavior: contain;
-  height: 100%; padding: 24px 20px; margin: 0;
-  font: 14px/1.65 "SF Mono", Menlo, monospace; tab-size: 4;
+  height: 100%; padding: 16px; margin: 0;
+  font: 15px/1.55 "SF Mono", Menlo, monospace; tab-size: 4;
 }
 #latest {
   position: absolute; right: 16px; bottom: 12px; border-radius: 6px;
   background: var(--raised); font-size: 14px;
 }
-#compose { flex-shrink: 0; padding: 12px 16px max(12px, env(safe-area-inset-bottom)); }
+#compose { flex-shrink: 0; padding: 8px 16px max(12px, env(safe-area-inset-bottom)); }
+.attachments {
+  display: flex; gap: 8px; overflow-x: auto; overscroll-behavior: contain;
+  list-style: none; margin: 0 0 8px; padding: 0;
+}
+.attachments li {
+  display: flex; align-items: center; gap: 8px; flex: 0 0 auto;
+  min-height: 44px; max-width: 220px; padding: 4px 8px 4px 4px;
+  background: var(--raised); border: 1px solid var(--line); border-radius: 6px;
+}
+.attachments img { width: 36px; height: 36px; object-fit: cover; border-radius: 4px; background: #111; }
+.attachments span { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }
+.attachments button { min-width: 44px; min-height: 44px; padding: 0; background: transparent; border-color: transparent; color: var(--muted); }
+#stop {
+  width: 100%; margin: 0 0 8px; color: #ffc46b; background: var(--raised);
+}
 .entry { display: flex; align-items: flex-end; gap: 4px; padding: 4px; background: var(--raised); border: 1px solid var(--line); border-radius: 6px; }
 .entry:focus-within { border-color: var(--muted); }
-#keys-toggle { background: transparent; border-color: transparent; color: var(--muted); padding: 8px; min-width: 44px; font-size: 14px; }
+#attach-toggle, #keys-toggle { background: transparent; border-color: transparent; color: var(--muted); padding: 8px; min-width: 44px; font-size: 14px; }
+#attach-toggle { display: grid; place-items: center; }
 textarea {
   display: block; flex: 1; min-width: 0; width: 100%; resize: none; padding: 10px 4px;
   border: 0; background: transparent; border-radius: 4px; min-height: 44px; max-height: min(120px, calc(var(--viewport-height, 100dvh) * .2)); line-height: 22px; overflow-y: auto;
@@ -85,7 +101,7 @@ textarea::placeholder { color: var(--muted); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 [hidden] { display: none !important; }
 @media (max-width: 429px) { .keys { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-@media (min-width: 700px) { #terminal { font-size: 15px; padding: 20px 24px; } header, #compose { padding-left: 24px; padding-right: 24px; } }
+@media (min-width: 700px) { #terminal { padding: 20px 24px; } header, #compose { padding-left: 24px; padding-right: 24px; } }
 @media (max-height: 450px) { header { padding-top: 0; padding-bottom: 0; } textarea { max-height: 68px; } #compose { padding-top: 6px; } }
 
 .session-chevron { position: absolute; right: 4px; bottom: 14px; color: var(--muted); pointer-events: none; font-size: 13px; }

@@ -1,22 +1,31 @@
-# Implementation Plan: App dark themes
+# Implementation Plan: Phone remote that you can actually use
 
-Skills: using-agent-skills, spec-driven-development, planning-and-task-breakdown, impeccable, frontend-ui-engineering, write-swift, apple-design, test-driven-development, incremental-implementation, git-workflow-and-versioning, code-review-and-quality, babysit-prs
+Skills: using-agent-skills, impeccable, frontend-ui-engineering, planning-and-task-breakdown, spec-driven-development, test-driven-development, incremental-implementation, write-swift, security-and-hardening, apple-design, git-workflow-and-versioning
 
-ASSUMPTIONS: 16 app dark themes, existing four kept, chrome greys stay neutral, picker wraps to 4 columns, CLI name stays `groknight` except Sigil Neon / Grok Day.
+ASSUMPTIONS: Readable companion, not a pixel TUI. Attach writes to SigilDrops and pastes a path, same as Mac drag-drop. Visual lane is Sigil Neon. Image-gen mocks skipped: DESIGN.md is the contract and the screenshot is the defect.
 
 ## Architecture Decisions
-- Each `TerminalTheme` stores its hex palette and chrome accent. No name-switch fallback for new themes.
-- Brand accents lift toward white until they clear WCAG AA as chrome text on the selected row.
-- Settings uses a 4-column grid of the existing `ThemeCard`.
+- Strip the current Grok 4.6 composer (`Shift+Tab:mode`, `| >`, stacked rules) and collapse space-padded TUI rows that wrap into a black void on a phone.
+- `file` action carries base64 chunks under the existing 64 KB plaintext / 100 KB frame caps. Mac assembles, writes, pastes the path.
+- One attach control uses the iOS file sheet (library, camera, Files).
 
 ## Task List
 
-### Phase 1
-- [x] Task 1: Failing tests for 16 named dark themes, unique names/grounds, CLI fallback.
-- [x] Task 2: Palettes that pass TerminalThemeTests and PaletteTests.
-- [x] Task 3: Wrap the Appearance theme picker so 20 swatches fit.
+### Phase 1: Readable output
+- [x] Task 1: Failing tests for the live Grok 4.6 footer and space-padded rows.
+- [x] Task 2: `readableOutput` strips that chrome and keeps drafts.
 
-### Checkpoint
-- [x] Focused tests pass
-- [x] Settings picker lays out every theme in a measured 4-column stack
-- [x] Palettes compiled into the debug binary; second GUI instance could not show a window while the live app holds the bundle ID
+### Phase 2: File upload
+- [x] Task 3: Failing tests for chunk assembly, size, names, and PTY paste.
+- [x] Task 4: `file` action + `RemoteUpload` + `TerminalDrop.writeRemoteFile`.
+
+### Phase 3: Phone UI
+- [x] Task 5: Attach, chips, Stop while working, composer layout.
+- [ ] Task 6: Playwright + native tests, then Railway.
+
+## Risks
+| Risk | Mitigation |
+|------|------------|
+| HEIC decode fails in Safari | Fall back to original bytes if ≤ 4 MB |
+| iOS PWA stale cache | Bump service-worker cache name |
+| Chunk DoS | 4 pending transfers, 4 MB, 128 chunks, 60 s expiry |

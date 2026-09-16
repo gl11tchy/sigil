@@ -25,7 +25,7 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
   let creationWindow = now(), creations = 0;
   const wss = new WebSocketServer({ noServer: true, maxPayload: 110000, perMessageDeflate: false });
   const server = http.createServer(async (req, res) => {
-    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');

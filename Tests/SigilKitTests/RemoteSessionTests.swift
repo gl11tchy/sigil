@@ -73,4 +73,22 @@ struct RemoteSessionTests {
         let fresh = RemoteRequest(challenge: session.challenge, sequence: 1, action: "state")
         #expect(try session.accept(RemoteCrypto.seal(fresh, key: device, direction: "phone")).action == "state")
     }
+
+    @Test func fileChunksMayBeLargerThanPromptText() throws {
+        var session = RemoteSession()
+        let device = RemoteCrypto.randomKey()
+        let pair = RemoteRequest(challenge: session.challenge, sequence: 1, action: "pair", text: device)
+        _ = try session.accept(RemoteCrypto.seal(pair, key: session.pairingKey, direction: "phone"))
+        let chunk = RemoteRequest(
+            challenge: session.challenge, sequence: 2, action: "file",
+            text: String(repeating: "a", count: 20_000), name: "shot.jpg", index: 0, count: 1,
+            transfer: String(repeating: "ab", count: 16))
+        #expect(try session.accept(RemoteCrypto.seal(chunk, key: device, direction: "phone")).action == "file")
+        let oversizedInput = RemoteRequest(
+            challenge: session.challenge, sequence: 3, action: "input",
+            text: String(repeating: "b", count: 8_193))
+        #expect(throws: (any Error).self) {
+            _ = try session.accept(RemoteCrypto.seal(oversizedInput, key: device, direction: "phone"))
+        }
+    }
 }

@@ -17,7 +17,10 @@ test('retains real output, code indentation, and unknown terminal prompts', () =
 });
 
 test('keeps content after a footer and only simplifies the final idle composer', () => {
-  assert.equal(readableOutput('Example' + footer + '\nImportant result'), 'Example' + footer + '\nImportant result');
+  assert.equal(
+    readableOutput('Example' + footer + '\nImportant result'),
+    'Example' + footer.replace('                 Grok 4.6', 'Grok 4.6') + '\nImportant result',
+  );
 });
 
 
@@ -25,5 +28,37 @@ test('recognizes a wide-screen composer without mistaking a result for chrome', 
   const wide = footer.replace('Build anything\n                 Grok', 'Build anything                 Grok');
   assert.equal(readableOutput('Result\n' + wide), 'Result');
   const withResult = footer.replace('Grok 4.6', 'Important result\nGrok 4.6');
-  assert.equal(readableOutput('Result' + withResult), 'Result' + withResult);
+  assert.equal(
+    readableOutput('Result' + withResult),
+    'Result' + withResult.replace('                 Important result', 'Important result'),
+  );
+});
+
+const liveFooter = [
+  '█',
+  '',
+  '         ∴ Thinking... 2.7s',
+  '3m28s ↓328k [stop]',
+  '',
+  '─'.repeat(40),
+  '─'.repeat(40),
+  '─'.repeat(40),
+  '  | >',
+  'Grok 4.6 (xhigh) · always-approve',
+  '  Shift+Tab:mode | Esc:cancel |',
+  'Ctrl+x:shortcuts',
+].join('\n');
+
+test('strips the live Grok 4.6 phone composer and space-padded TUI rows', () => {
+  const padded = Array.from({ length: 18 }, () => ' '.repeat(120)).join('\n') + '\n' + liveFooter;
+  assert.equal(readableOutput(padded), '∴ Thinking... 2.7s\n3m28s ↓328k [stop]');
+  assert.equal(
+    readableOutput('Finished the layout.\n\n' + liveFooter),
+    'Finished the layout.\n\n∴ Thinking... 2.7s\n3m28s ↓328k [stop]',
+  );
+});
+
+test('keeps a typed Mac draft in the new composer', () => {
+  const draft = '─'.repeat(40) + '\n  | > look at this screenshot\nGrok 4.6 (xhigh) · always-approve\nShift+Tab:mode | Esc:cancel |\nCtrl+x:shortcuts';
+  assert.equal(readableOutput(draft), draft.replaceAll(/[ \t]+$/gm, ''));
 });
