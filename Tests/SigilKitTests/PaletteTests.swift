@@ -29,13 +29,13 @@ struct PaletteTests {
         #expect(Palette.contrast(palette.accentHex, palette.selectedHex) >= 3)
     }
 
-    /// The panels have to be distinguishable from each other, or hover and
-    /// selection do not read at all.
+    /// Hover, selection, and hairlines have to step off the rail. The terminal
+    /// ground may sit close to the rail on a near-black theme; that is intended.
     @Test(arguments: TerminalTheme.all)
     func panelsStepApart(theme: TerminalTheme) {
         let palette = Palette(theme: theme)
         let steps = [
-            palette.groundHex, palette.sidebarHex, palette.raisedHex,
+            palette.sidebarHex, palette.raisedHex,
             palette.selectedHex, palette.hairlineHex,
         ]
         let luminances = steps.map(Palette.luminance)
@@ -54,15 +54,40 @@ struct PaletteTests {
         }
     }
 
-    /// A tinted terminal theme must not tint the chrome.
-    @Test func panelGreysAreNeutral() {
-        let palette = Palette(theme: .grokEmber)
-        for hex in [palette.sidebarHex, palette.raisedHex, palette.selectedHex, palette.hairlineHex] {
-            let red = (hex >> 16) & 0xFF
-            let green = (hex >> 8) & 0xFF
-            let blue = hex & 0xFF
-            #expect(red == green)
-            #expect(green == blue)
-        }
+    /// The rail used to be true black on every dark theme, so Discord, Figma,
+    /// Ember, and Telegram all looked like the same strip. Each theme's ground
+    /// has to show in the chrome.
+    @Test func railsFollowTheThemeGround() {
+        let neon = Palette(theme: .sigilNeon)
+        let discord = Palette(theme: .discord)
+        let figma = Palette(theme: .figma)
+        let ember = Palette(theme: .grokEmber)
+        let telegram = Palette(theme: .telegram)
+        let day = Palette(theme: .grokDay)
+
+        #expect(discord.sidebarHex != 0x000000)
+        #expect(figma.sidebarHex != 0x000000)
+        #expect(ember.sidebarHex != 0x000000)
+        #expect(telegram.sidebarHex != 0x000000)
+        #expect(
+            Set([
+                neon.sidebarHex, discord.sidebarHex, figma.sidebarHex,
+                ember.sidebarHex, telegram.sidebarHex, day.sidebarHex,
+            ]).count == 6
+        )
+    }
+
+    @Test func emberRailStaysWarm() {
+        let hex = Palette(theme: .grokEmber).sidebarHex
+        let red = (hex >> 16) & 0xFF
+        let blue = hex & 0xFF
+        #expect(red > blue)
+    }
+
+    @Test func telegramRailStaysCool() {
+        let hex = Palette(theme: .telegram).sidebarHex
+        let red = (hex >> 16) & 0xFF
+        let blue = hex & 0xFF
+        #expect(blue > red)
     }
 }
