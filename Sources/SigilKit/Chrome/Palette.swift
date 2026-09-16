@@ -6,8 +6,8 @@ import SwiftUI
 /// The window has to read as one surface, so every value here is mixed from the
 /// terminal's own background and foreground. Three rules keep it honest:
 ///
-/// 1. The panel greys take their brightness from the terminal ground but not its
-///    hue, so a tinted theme cannot leak colour into the chrome.
+/// 1. The rail is a darkened step of the terminal ground, hue kept, so Discord
+///    is Discord and Ember is Ember. True black made every dark theme identical.
 /// 2. The text ramp is three discrete colours, not one colour at three opacities.
 ///    Opacity ramps mush together over a near-black ground; that is what makes
 ///    grey-on-black read as unfinished.
@@ -18,8 +18,8 @@ import SwiftUI
 public struct Palette: Equatable, Sendable {
     /// The terminal's own background: the detail column and the window itself.
     public let groundHex: UInt32
-    /// The rail on the left. On a dark theme this is true black, so the list reads
-    /// as a separate surface from the terminal rather than a lighter copy of it.
+    /// The rail on the left. A darkened step of the terminal ground, so the list
+    /// sits below the screen without flattening every theme to the same black.
     public let sidebarHex: UInt32
     /// Hover fills, the search field, the selected tab.
     public let raisedHex: UInt32
@@ -42,29 +42,34 @@ public struct Palette: Equatable, Sendable {
         let step: UInt32 = isDark ? 0xFFFFFF : 0x000000
         // Text dims toward the surface it sits on, never toward transparency.
         let ink: UInt32 = isDark ? 0x000000 : 0xFFFFFF
-        // Panels step off a neutral grey of the same brightness as the terminal
-        // ground, so a tinted theme cannot leak colour into the chrome.
-        let neutral = Self.desaturated(background)
-
         groundHex = background
-        // The rail is the darkest surface, and every panel steps up off the rail —
-        // not off the terminal ground, which sits above it.
+        // The rail sits below the terminal. Hue stays with the ground so a theme
+        // change is visible in the chrome, not only inside the program.
         // A light theme cannot take the same step: its panels darken away from the
         // ground, and text that dims toward white loses AA on them fast. These
         // numbers are the darkest the light rail can go and still pass.
-        let rail = isDark ? 0x000000 : Self.mix(neutral, 0x000000, 0.04)
+        let rail = Self.mix(background, 0x000000, isDark ? 0.18 : 0.04)
         sidebarHex = rail
         raisedHex = Self.mix(rail, step, isDark ? 0.10 : 0.035)
         selectedHex = Self.mix(rail, step, isDark ? 0.15 : 0.060)
         hairlineHex = Self.mix(rail, step, isDark ? 0.17 : 0.090)
-        textHex = Self.mix(foreground, step, isDark ? 0.22 : 0.0)
-        // These two are floored by contrast, not by taste: dimming them further
-        // fails AA on the selected row. Hierarchy below this point is carried by
-        // size and by the switch to mono, not by more grey.
-        textDimHex = Self.mix(foreground, ink, isDark ? 0.15 : 0.13)
-        textFaintHex = Self.mix(foreground, ink, isDark ? 0.30 : 0.28)
-        accentHex = theme.accentHex
-        errorHex = isDark ? 0xFF5F9E : 0xB4232E
+        let pole: UInt32 = isDark ? 0xFFFFFF : 0x000000
+        let panels = [background, rail, raisedHex, selectedHex]
+        let hardest = Self.hardestPanel(in: panels, forLightText: isDark)
+        textHex = Self.ensureContrast(
+            Self.mix(foreground, step, isDark ? 0.22 : 0.0),
+            against: hardest, minimum: 4.5, toward: pole)
+        // Dimmed toward the ink, then lifted if the selected row is too light.
+        textDimHex = Self.ensureContrast(
+            Self.mix(foreground, ink, isDark ? 0.15 : 0.13),
+            against: hardest, minimum: 4.5, toward: foreground)
+        textFaintHex = Self.ensureContrast(
+            Self.mix(foreground, ink, isDark ? 0.30 : 0.28),
+            against: hardest, minimum: 4.5, toward: foreground)
+        accentHex = Self.ensureContrast(
+            theme.accentHex, against: hardest, minimum: 4.5, toward: pole)
+        errorHex = Self.ensureContrast(
+            isDark ? 0xFF5F9E : 0xB4232E, against: hardest, minimum: 4.5, toward: pole)
     }
 
     // MARK: - SwiftUI
@@ -119,12 +124,33 @@ public struct Palette: Equatable, Sendable {
         return NSColor(srgbRed: c.r, green: c.g, blue: c.b, alpha: 1)
     }
 
-    /// The same brightness, with the hue taken out.
-    private static func desaturated(_ hex: UInt32) -> UInt32 {
-        let c = components(hex)
-        let brightness = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
-        let level = UInt32((brightness * 255).rounded())
-        return level << 16 | level << 8 | level
+    /// Dark text is hardest on the darkest panel; light text on the lightest.
+    private static func hardestPanel(in panels: [UInt32], forLightText: Bool) -> UInt32 {
+        if forLightText {
+            return panels.max(by: { luminance($0) < luminance($1) }) ?? 0
+        }
+        return panels.min(by: { luminance($0) < luminance($1) }) ?? 0
+    }
+
+    /// Mix `color` toward `toward` until contrast against `background` clears.
+    private static func ensureContrast(
+        _ color: UInt32, against background: UInt32, minimum: Double, toward: UInt32
+    ) -> UInt32 {
+        if contrast(color, background) >= minimum { return color }
+        var lo = 0.0
+        var hi = 1.0
+        var best = mix(color, toward, 1)
+        for _ in 0..<16 {
+            let mid = (lo + hi) / 2
+            let candidate = mix(color, toward, mid)
+            if contrast(candidate, background) >= minimum {
+                best = candidate
+                hi = mid
+            } else {
+                lo = mid
+            }
+        }
+        return best
     }
 
     private static func mix(_ from: UInt32, _ to: UInt32, _ amount: Double) -> UInt32 {
