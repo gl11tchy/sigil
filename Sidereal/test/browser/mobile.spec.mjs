@@ -283,6 +283,36 @@ test('the live Grok composer becomes readable status on a phone', async ({ page,
   } finally { mac.close(); }
 });
 
+test('a boxed waiting composer does not cover the phone transcript', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const raw = [
+    '> Testing 123',
+    '6:56 PM',
+    '',
+    '♦ user_prompt_submit  [hooks: 1/2]',
+    '',
+    ': Waiting for response... 9.9s',
+    '9.9s ↓318k [stop]',
+    '',
+    `┌${'─'.repeat(62)}┐`,
+    `│${' '.repeat(62)}│`,
+    '│  | >                                                         │',
+    `│${' '.repeat(62)}│`,
+    `└${'─'.repeat(62)}┘`,
+    ' Grok 4.6 (xhigh) · always-approve ↩',
+    ' Shift+Tab:mode | Esc:cancel | Ctrl+x:shortcuts',
+  ].join('\n');
+  const mac = await pair(page, baseURL, raw);
+  try {
+    await expect(page.locator('#terminal')).toContainText('Testing 123');
+    await expect(page.locator('#terminal')).toContainText('Waiting for response');
+    await expect(page.locator('#terminal')).not.toContainText('Shift+Tab');
+    await expect(page.locator('#terminal')).not.toContainText('always-approve');
+    await expect(page.locator('#stop')).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath('waiting.png') });
+  } finally { mac.close(); }
+});
+
 test('the connection popover closes on Escape and outside pointer presses', async ({ page, baseURL }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const consoleErrors = [];

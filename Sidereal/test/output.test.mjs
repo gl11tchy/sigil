@@ -64,3 +64,29 @@ test('keeps a typed Mac draft in the new composer', () => {
   const draft = '─'.repeat(40) + '\n  | > look at this screenshot\nGrok 4.6 (xhigh) · always-approve\nShift+Tab:mode | Esc:cancel |\nCtrl+x:shortcuts';
   assert.equal(readableOutput(draft), draft.replaceAll(/[ \t]+$/gm, ''));
 });
+
+const boxed = [
+  '> Testing 123',
+  '6:56 PM',
+  '',
+  '♦ user_prompt_submit  [hooks: 1/2]',
+  '',
+  ': Waiting for response... 9.9s',
+  '9.9s ↓318k [stop]',
+  '',
+  `┌${'─'.repeat(62)}┐`,
+  `│${' '.repeat(62)}│`,
+  '│  | >                                                         │',
+  `│${' '.repeat(62)}│`,
+  `└${'─'.repeat(62)}┘`,
+  ' Grok 4.6 (xhigh) · always-approve ↩',
+  ' Shift+Tab:mode | Esc:cancel | Ctrl+x:shortcuts',
+].join('\n');
+
+test('strips a boxed Grok 4.6 composer while a turn is waiting', () => {
+  assert.equal(
+    readableOutput(boxed),
+    '> Testing 123\n6:56 PM\n\n♦ user_prompt_submit  [hooks: 1/2]\n\n: Waiting for response... 9.9s\n9.9s ↓318k [stop]',
+  );
+});
+
