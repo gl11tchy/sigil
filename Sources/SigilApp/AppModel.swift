@@ -1612,6 +1612,15 @@ final class AppModel {
         panel.shell?.apply(theme: settings.theme)
     }
 
+    /// The Grok TUI reads `GROK_THEME` when the process starts. Recolouring
+    /// SwiftTerm only changes the frame around it, so each tab is relaunched.
+    func applyTheme() {
+        applyAppearance()
+        for id in tabs.map(\.id) {
+            restartTab(id: id)
+        }
+    }
+
     // MARK: - Session actions
 
     func revealInFinder(_ session: GrokSession) {

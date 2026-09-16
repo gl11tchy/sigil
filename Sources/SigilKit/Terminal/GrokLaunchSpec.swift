@@ -118,12 +118,22 @@ public struct GrokLaunchSpec: Sendable, Hashable {
 
     /// Environment for the child process: the user's login environment plus the
     /// terminal capabilities SwiftTerm actually provides.
-    public func environment() -> [String: String] {
-        var env = ProcessInfo.processInfo.environment
+    public func environment(
+        processEnvironment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String: String] {
+        var env = processEnvironment
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
         env["LANG"] = env["LANG"] ?? "en_US.UTF-8"
         env["GROK_WRAPPER"] = "Sigil.app"
+        let hostKeys = [
+            "GROK_THEME_BG", "GROK_THEME_FG", "GROK_THEME_ACCENT", "GROK_THEME_USER",
+            "GROK_THEME_ERROR", "GROK_THEME_WARN", "GROK_THEME_LINK", "GROK_THEME_OK",
+            "GROK_THEME_SELECT", "GROK_THEME_DARK",
+        ]
+        for key in hostKeys {
+            env.removeValue(forKey: key)
+        }
         if let themeName = themeName?.nilIfBlank {
             env["GROK_THEME"] = themeName
         } else {
