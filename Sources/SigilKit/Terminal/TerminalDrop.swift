@@ -7,6 +7,7 @@ import Foundation
 public enum TerminalDrop {
     public static let maxFiles = 16
     public static let maxImageBytes = 20 * 1024 * 1024
+    public static let maxRemoteBytes = 4 * 1024 * 1024
 
     public static let imageExtensions: Set<String> = [
         "png", "jpg", "jpeg", "gif", "webp", "tif", "tiff", "bmp", "heic", "heif",
@@ -70,6 +71,32 @@ public enum TerminalDrop {
     }
 
     public static let cacheKeepCount = 8
+
+    public static func sanitizedFileName(_ name: String) -> String {
+        let base = URL(fileURLWithPath: name).lastPathComponent
+        let mapped = String(
+            base.unicodeScalars.map { scalar -> Character in
+                if CharacterSet.alphanumerics.contains(scalar) { return Character(scalar) }
+                if scalar == "." || scalar == "_" || scalar == "-" { return Character(scalar) }
+                return "-"
+            })
+        let collapsed = mapped.replacingOccurrences(of: "-{2,}", with: "-", options: .regularExpression)
+        let trimmed = collapsed.trimmingCharacters(in: CharacterSet(charactersIn: ".-"))
+        let clipped = String(trimmed.prefix(80))
+        return clipped.isEmpty ? "file" : clipped
+    }
+
+    public static func writeRemoteFile(_ data: Data, name: String, to directory: URL) throws -> URL {
+        guard data.count <= maxRemoteBytes else { throw Error.tooLarge }
+        if imageExtension(for: data) != nil {
+            return try writeImage(data, to: directory)
+        }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("drop-\(UUID().uuidString)-\(sanitizedFileName(name))")
+        try data.write(to: url, options: .withoutOverwriting)
+        pruneCache(in: directory, keeping: max(cacheKeepCount, maxFiles), protecting: url)
+        return url
+    }
 
     public static func writeImage(_ data: Data, to directory: URL) throws -> URL {
         guard data.count <= maxImageBytes else { throw Error.tooLarge }

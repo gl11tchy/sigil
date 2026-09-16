@@ -22,7 +22,10 @@ struct RemoteReply: Codable, Sendable {
 
 @MainActor
 enum RemoteCommands {
+    static var uploads = RemoteUpload.Inbox()
+
     static func execute(_ request: RemoteRequest, model: AppModel) -> RemoteReply {
+        uploads.prune()
         var reply = RemoteReply(challenge: request.challenge, sequence: request.sequence)
         let tab = model.tabs.first { $0.id.uuidString == request.tabID }
         switch request.action {
@@ -50,6 +53,26 @@ enum RemoteCommands {
             guard let tab, tab.controller.isRunning else { return failure(request, "This session is not running.") }
             guard let key = request.text, tab.controller.sendRemoteKey(key) else {
                 return failure(request, "Unknown key.")
+            }
+        case "file":
+            guard let tab, tab.controller.isRunning else { return failure(request, "This session is not running.") }
+            guard let transfer = request.transfer, let name = request.name, let index = request.index,
+                let count = request.count, let text = request.text
+            else { return failure(request, "That file could not be sent.") }
+            do {
+                if let url = try uploads.receive(
+                    transfer: transfer, name: name, index: index, count: count, base64: text,
+                    directory: TerminalDrop.cacheDirectory())
+                {
+                    let paste = TerminalDrop.pasteText(for: [url.path]) + " "
+                    guard tab.controller.pasteRemoteText(paste) else {
+                        return failure(request, "This prompt does not support file paste.")
+                    }
+                }
+            } catch TerminalDrop.Error.tooLarge {
+                return failure(request, "Keep files under 4 MB.")
+            } catch {
+                return failure(request, "That file could not be sent.")
             }
         default: return failure(request, "Unknown action.")
         }

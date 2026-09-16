@@ -17,6 +17,7 @@ async function browser() {
       id, value: '', textContent: '', hidden: false, disabled: false, dataset: {}, style: {},
       open: false, focus() {}, contains() { return false; },
       getAttribute(name) { return this[name]; }, setAttribute(name, value) { this[name] = value; },
+      addEventListener() {},
       scrollHeight: 0, scrollTop: 0, clientHeight: 0,
       querySelector(selector) { return element(`${id}-${selector}`); },
       replaceChildren(...children) { this.children = children; },

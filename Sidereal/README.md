@@ -37,12 +37,15 @@ use your computer's `localhost`; real phone access requires the HTTPS deployment
 4. Add Sidereal to the Home Screen using the browser's Share menu.
 
 Pair one phone at a time. The phone can select sessions, read recent terminal
-output, send text, use arrow/Enter/Tab/Escape keys, and interrupt the current turn.
+output, send text, attach photos and files, use arrow/Enter/Tab/Escape keys, and
+interrupt the current turn.
 The phone layout uses one session header and one bottom message box.
 Readable output removes a recognized idle Grok composer and empty screen padding.
 Connection settings → Show raw terminal keeps the complete snapshot available.
 Unknown prompts and Mac-side drafts stay visible in both views.
-Keys opens terminal controls, including Stop. Latest returns to the newest output.
+The paperclip attaches photos or files from the phone; Sigil writes them on the Mac
+and pastes their paths into the session. Keys opens terminal controls. Stop appears
+while a turn is running. Latest returns to the newest output.
 Drafts stay with each session until the page closes; a lost connection keeps them editable.
 Connection settings are under the status in the top-right corner.
 
@@ -50,8 +53,9 @@ New starts a session in Sigil's current folder. Paste fills the prompt without
 submitting it. Send pastes, then presses Enter.
 
 The terminal view is bounded plain text, not a pixel-perfect terminal emulator.
-It shows up to 100 open tabs and the latest 12 KB of readable output. It does not
-list closed conversations, transfer files, resize the Mac terminal, or expose MCP.
+It shows up to 100 open tabs and the latest 12 KB of readable output. Phone files
+are written into Sigil’s drop cache (4 MB each) and pasted as paths. It does not
+list closed conversations, resize the Mac terminal, or expose MCP.
 
 The Mac must remain awake with Sigil running. Disconnect in Sigil revokes access;
 quitting the app also revokes it. Phone reloads can reconnect while Sigil remains

@@ -42,6 +42,7 @@ async function pair(page, origin, initialOutput, options = {}) {
         if (request.action === 'select') selected = request.tabID;
         if (request.action === 'new') selected = 'two';
         if (request.action === 'input') outputs[selected] += `\n\nYou: ${request.text}`;
+        if (request.action === 'file') outputs[selected] += `\n\nAttached ${request.name || 'file'}`;
         const state = options.state ?? { tabs: [
           { id: 'one', title: 'Mobile layout review', status: options.statuses?.one ?? 'working' },
           { id: 'two', title: 'Release checks', status: options.statuses?.two ?? 'idle' }],
@@ -197,7 +198,7 @@ for (const width of [400, 414, 430]) {
     const mac = await pair(page, baseURL);
     try {
       await page.locator('#keys-toggle').click();
-      for (const control of await page.locator('#keys button:visible, #new, #keys-toggle, #connection-toggle').all()) {
+      for (const control of await page.locator('#keys button:visible, #new, #keys-toggle, #attach-toggle, #connection-toggle, #stop').all()) {
         const box = await control.boundingBox();
         expect(box.width).toBeGreaterThanOrEqual(44);
         expect(box.height).toBeGreaterThanOrEqual(44);
@@ -246,6 +247,39 @@ test('an empty session list keeps New available and disables the picker', async 
     await expect(page.locator('#message')).toBeDisabled();
     expect(consoleErrors).toEqual([]);
     await page.screenshot({ path: testInfo.outputPath('empty.png') });
+  } finally { mac.close(); }
+});
+
+test('a photo from the phone is queued as a chip and sent as a file', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64');
+  const mac = await pair(page, baseURL);
+  try {
+    await page.locator('#attach').setInputFiles({ name: 'shot.png', mimeType: 'image/png', buffer: png });
+    await expect(page.locator('#attachments')).toContainText('shot.png');
+    await expect(page.locator('#send')).toBeEnabled();
+    await page.screenshot({ path: testInfo.outputPath('attach.png') });
+    await page.locator('#send').click();
+    await expect.poll(() => mac.actions.filter(a => a.action === 'file').length).toBeGreaterThan(0);
+    await expect.poll(() => mac.actions.filter(a => a.action === 'key' && a.text === 'enter').length).toBe(1);
+    await expect(page.locator('#attachments')).toBeHidden();
+    await page.screenshot({ path: testInfo.outputPath('attach.png') });
+  } finally { mac.close(); }
+});
+
+test('the live Grok composer becomes readable status on a phone', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const raw = Array.from({ length: 18 }, () => ' '.repeat(120)).join('\n') + '\n'
+    + '█\n\n         ∴ Thinking... 2.7s\n3m28s ↓328k [stop]\n\n'
+    + `${'─'.repeat(40)}\n${'─'.repeat(40)}\n${'─'.repeat(40)}\n  | >\nGrok 4.6 (xhigh) · always-approve\n  Shift+Tab:mode | Esc:cancel |\nCtrl+x:shortcuts`;
+  const mac = await pair(page, baseURL, raw);
+  try {
+    await expect(page.locator('#terminal')).toHaveText('∴ Thinking... 2.7s\n3m28s ↓328k [stop]');
+    await expect(page.locator('#terminal')).not.toContainText('Shift+Tab');
+    await expect(page.locator('#stop')).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath('thinking.png') });
   } finally { mac.close(); }
 });
 

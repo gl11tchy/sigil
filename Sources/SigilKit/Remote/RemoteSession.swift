@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-public enum RemoteError: Error {
+public enum RemoteError: Error, Equatable {
     case invalidMessage
     case pairingExpired
 }
@@ -12,13 +12,24 @@ public struct RemoteRequest: Codable, Sendable {
     public let action: String
     public var tabID: String?
     public var text: String?
+    public var name: String?
+    public var index: Int?
+    public var count: Int?
+    public var transfer: String?
 
-    public init(challenge: String, sequence: Int, action: String, tabID: String? = nil, text: String? = nil) {
+    public init(
+        challenge: String, sequence: Int, action: String, tabID: String? = nil, text: String? = nil,
+        name: String? = nil, index: Int? = nil, count: Int? = nil, transfer: String? = nil
+    ) {
         self.challenge = challenge
         self.sequence = sequence
         self.action = action
         self.tabID = tabID
         self.text = text
+        self.name = name
+        self.index = index
+        self.count = count
+        self.transfer = transfer
     }
 }
 
@@ -43,10 +54,12 @@ public struct RemoteSession: Sendable {
 
     public mutating func accept(_ frame: String, now: Date = Date()) throws -> RemoteRequest {
         let request: RemoteRequest = try RemoteCrypto.open(frame, key: deviceKey ?? pairingKey, direction: "phone")
+        let textLimit = request.action == "file" ? 48_000 : 8_192
         guard request.challenge == challenge, request.sequence > lastSequence,
             request.sequence <= 9_007_199_254_740_991,
-            request.action.utf8.count <= 32, (request.text?.utf8.count ?? 0) <= 8_192,
-            (request.tabID?.utf8.count ?? 0) <= 64
+            request.action.utf8.count <= 32, (request.text?.utf8.count ?? 0) <= textLimit,
+            (request.tabID?.utf8.count ?? 0) <= 64, (request.name?.utf8.count ?? 0) <= 80,
+            (request.transfer?.utf8.count ?? 0) <= 64
         else { throw RemoteError.invalidMessage }
         if deviceKey == nil {
             guard now < expiresAt else { throw RemoteError.pairingExpired }

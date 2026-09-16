@@ -48,10 +48,16 @@
           <button id="paste" type="button">Paste without sending</button>
           <button id="interrupt" type="button" aria-label="Stop current response">Stop</button>
         </div>
+        <ul id="attachments" class="attachments" hidden></ul>
+        <button id="stop" type="button" hidden>Stop</button>
         <div class="entry">
+          <button id="attach-toggle" type="button" aria-label="Add photo or file">
+            <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.2 10.2 11 20.4a5.2 5.2 0 0 1-7.4-7.4l10.2-10.2a3.5 3.5 0 0 1 4.9 4.9L8.6 18.8a1.7 1.7 0 1 1-2.5-2.5l9.2-9.2"/></svg>
+          </button>
+          <input id="attach" type="file" accept="image/*,application/pdf,text/plain,text/markdown,.md,.txt,.pdf,.png,.jpg,.jpeg,.gif,.webp,.heic,.csv,.json" multiple hidden>
           <button id="keys-toggle" type="button" aria-expanded="false" aria-controls="keys">Keys</button>
           <label class="sr-only" for="message">Message</label>
-          <textarea id="message" rows="1" placeholder="Message…" maxlength="8192" autocapitalize="sentences"></textarea>
+          <textarea id="message" rows="1" placeholder="Message…" maxlength="8192" autocapitalize="sentences" enterkeyhint="send"></textarea>
           <button id="send" type="submit" aria-label="Send message">↑</button>
         </div>
       </form>

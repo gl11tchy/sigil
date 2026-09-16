@@ -2,6 +2,23 @@ import { importKey, randomKey, seal, open } from './crypto.mjs';
 import { readableOutput } from './output.mjs';
 const $ = id => document.getElementById(id);
 const drafts = new Map();
+const attachmentDrafts = new Map();
+const MAX_REMOTE_BYTES = 4 * 1024 * 1024;
+const CHUNK = 32 * 1024;
+function attachmentsFor(id = selected) {
+  if (!id) return [];
+  if (!attachmentDrafts.has(id)) attachmentDrafts.set(id, []);
+  return attachmentDrafts.get(id);
+}
+function remoteFileName(name) {
+  const base = String(name || 'file').split(/[/\\]/).pop();
+  const mapped = [...base].map(ch => /[A-Za-z0-9._-]/.test(ch) ? ch : '-').join('')
+    .replace(/-+/g, '-').replace(/^[.-]+|[.-]+$/g, '') || 'file';
+  const bytes = new TextEncoder();
+  let out = mapped;
+  while (bytes.encode(out).length > 80) out = out.slice(0, -1);
+  return out || 'file';
+}
 let tabsSignature = '';
 let rawOutput = '', rawMode = false;
 let credential, bootstrap, newDeviceKey, socket, challenge, sequence = 0, selected;
@@ -37,9 +54,13 @@ function updateControls() {
     if (element.id === 'keys-toggle' || element.id === 'latest') { element.disabled = false; return; }
     if (element.id === 'new') { element.disabled = disabled; return; }
     if (element.id === 'tabs') { element.disabled = disabled || tabCount === 0; return; }
+    if (element.id === 'stop' || element.id === 'interrupt') {
+      element.disabled = !connected || !selected || ended; return;
+    }
     element.disabled = disabled || !selected || ended;
   });
-  $('send').disabled = disabled || !selected || ended || !$('message').value.trim();
+  $('send').disabled = disabled || !selected || ended || !($('message').value.trim() || attachmentsFor().length);
+  $('stop').hidden = selectedStatus !== 'working';
   $('raw-toggle').hidden = !selected;
   $('forget').hidden = !credential;
   $('reconnect').hidden = !credential || connected;
@@ -77,6 +98,12 @@ function render(state) {
   selectedStatus = selected ? state.tabs.find(tab => tab.id === selected).status : null;
   tabCount = state.tabs.length;
   for (const id of drafts.keys()) { if (!state.tabs.some(tab => tab.id === id)) drafts.delete(id); }
+  for (const id of attachmentDrafts.keys()) {
+    if (!state.tabs.some(tab => tab.id === id)) {
+      for (const item of attachmentDrafts.get(id) || []) if (item.preview) URL.revokeObjectURL(item.preview);
+      attachmentDrafts.delete(id);
+    }
+  }
   const tabs = state.tabs.map(tab => {
     const option = document.createElement('option');
     option.value = tab.id;
@@ -95,7 +122,7 @@ function render(state) {
   $('session-toolbar').hidden = false;
   $('brand').hidden = true;
   renderOutput(changedSession);
-  if (changedSession) resizeMessage();
+  if (changedSession) { resizeMessage(); renderAttachments(); }
   updateControls();
 }
 function renderOutput(changedSession = false) {
@@ -114,7 +141,7 @@ function renderOutput(changedSession = false) {
   updateLatest();
 }
 
-async function request(action, text, tabID = selected, pairing = false) {
+async function request(action, text, tabID = selected, pairing = false, extra = {}) {
   const current = generation;
   const previous = outgoing;
   let release;
@@ -122,13 +149,13 @@ async function request(action, text, tabID = selected, pairing = false) {
   await previous;
   try {
     if (current !== generation) throw new Error("Connection changed. Check the terminal before sending again.");
-    return await transmit(action, text, tabID, pairing);
+    return await transmit(action, text, tabID, pairing, extra);
   } finally { release(); }
 }
-async function transmit(action, text, tabID, pairing) {
+async function transmit(action, text, tabID, pairing, extra = {}) {
   if (!socket || socket.readyState !== WebSocket.OPEN || !challenge || (!connected && !pairing && action !== 'state')) throw new Error('Not connected.');
   const ws = socket, current = generation, seq = ++sequence;
-  const message = { challenge, sequence: seq, action, ...(tabID ? { tabID } : {}), ...(text !== undefined ? { text } : {}) };
+  const message = { challenge, sequence: seq, action, ...(tabID ? { tabID } : {}), ...(text !== undefined ? { text } : {}), ...extra };
   const data = await seal(message, pairing ? bootstrap : credential.key, 'phone');
   if (current !== generation || ws.readyState !== WebSocket.OPEN) throw new Error('Connection lost.');
   return new Promise((resolve, reject) => {
@@ -218,20 +245,105 @@ async function perform(work) {
   catch (error) { showError(error.message); $('tabs').value = selected || ''; }
   finally { if (generation === current) { busy = false; updateControls(); } }
 }
+function isImageFile(file) {
+  return (file.type || '').startsWith('image/') || /\.(png|jpe?g|gif|webp|heic|heif|bmp|tiff?)$/i.test(file.name || '');
+}
+function bytesToBase64(bytes) {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+  return btoa(binary);
+}
+async function compressImage(file) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 1920 / Math.max(bitmap.width, bitmap.height));
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = typeof OffscreenCanvas === 'function'
+    ? new OffscreenCanvas(width, height)
+    : Object.assign(document.createElement('canvas'), { width, height });
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+  const blob = canvas.convertToBlob
+    ? await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.82 })
+    : await new Promise((resolve, reject) => canvas.toBlob(
+      value => { if (value) resolve(value); else reject(new Error('Could not compress that photo.')); },
+      'image/jpeg', 0.82));
+  if (blob.size > MAX_REMOTE_BYTES) throw new Error('Keep files under 4 MB.');
+  return { name: remoteFileName(`${(file.name || 'photo').replace(/\.[^.]+$/, '')}.jpg`), bytes: new Uint8Array(await blob.arrayBuffer()) };
+}
+async function prepareFile(file) {
+  if (isImageFile(file)) {
+    try { return await compressImage(file); } catch { /* send the original if it still fits */ }
+  }
+  if (file.size > MAX_REMOTE_BYTES) throw new Error('Keep files under 4 MB.');
+  return { name: remoteFileName(file.name), bytes: new Uint8Array(await file.arrayBuffer()) };
+}
+async function uploadFile(file, tabID) {
+  const payload = await prepareFile(file);
+  const transfer = randomKey().slice(0, 32);
+  const count = Math.max(1, Math.ceil(payload.bytes.length / CHUNK));
+  for (let index = 0; index < count; index++) {
+    const piece = payload.bytes.subarray(index * CHUNK, index * CHUNK + CHUNK);
+    await request('file', bytesToBase64(piece), tabID, false, { name: payload.name, index, count, transfer });
+  }
+}
+function renderAttachments() {
+  const items = attachmentsFor();
+  $('attachments').hidden = items.length === 0;
+  $('attachments').replaceChildren(...items.map((item, index) => {
+    const row = document.createElement('li');
+    if (item.preview) {
+      const image = document.createElement('img');
+      image.src = item.preview;
+      image.alt = '';
+      row.append(image);
+    }
+    const label = document.createElement('span');
+    label.textContent = item.name;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.setAttribute('aria-label', `Remove ${item.name}`);
+    remove.textContent = '×';
+    remove.onclick = () => {
+      const [taken] = attachmentsFor().splice(index, 1);
+      if (taken?.preview) URL.revokeObjectURL(taken.preview);
+      renderAttachments();
+    };
+    row.append(label, remove);
+    return row;
+  }));
+  updateControls();
+}
+function clearAttachments(id = selected) {
+  const items = id ? attachmentDrafts.get(id) : null;
+  if (items) for (const item of items) if (item.preview) URL.revokeObjectURL(item.preview);
+  if (id) attachmentDrafts.delete(id);
+  else {
+    for (const list of attachmentDrafts.values()) {
+      for (const item of list) if (item.preview) URL.revokeObjectURL(item.preview);
+    }
+    attachmentDrafts.clear();
+  }
+  renderAttachments();
+}
 async function sendText(submit) {
   const text = $('message').value;
-  if (!text.trim()) return;
+  const files = attachmentsFor().slice();
+  if (!text.trim() && !files.length) return;
   if (new TextEncoder().encode(text).length > 8192) { showError('Keep the message under 8 KB.'); return; }
   const target = selected, current = generation;
-  await request('input', text, target);
+  for (const item of files) await uploadFile(item.file, target);
+  if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
+  if (text.trim()) await request('input', files.length ? ` ${text}` : text, target);
   if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
   if (submit) {
     await new Promise(resolve => setTimeout(resolve, 100));
     if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
     await request('key', 'enter', target);
   }
-  if (selected === target && $('message').value === text) {
-    $('message').value = ''; resizeMessage();
+  if (selected === target) {
+    if ($('message').value === text) { $('message').value = ''; resizeMessage(); }
+    if (files.length) clearAttachments();
   } else if (selected !== target && drafts.get(target) === text) {
     drafts.delete(target);
   }
@@ -285,7 +397,27 @@ $('compose').onsubmit = event => { event.preventDefault(); void perform(() => se
 $('paste').onclick = () => void perform(() => sendText(false));
 $('tabs').onchange = () => void perform(() => request('select', undefined, $('tabs').value));
 $('new').onclick = () => void perform(() => request('new'));
-$('interrupt').onclick = () => void perform(() => request('key', 'interrupt'));
+$('interrupt').onclick = () => { if (connected && selected) void request('key', 'interrupt'); };
+$('stop').onclick = () => { if (connected && selected) void request('key', 'interrupt'); };
+$('attach-toggle').onclick = () => $('attach').click();
+$('attach').onchange = () => {
+  const list = attachmentsFor();
+  const room = 16 - list.length;
+  for (const file of [...$('attach').files].slice(0, Math.max(0, room))) {
+    list.push({
+      file, name: file.name || 'file',
+      preview: isImageFile(file) ? URL.createObjectURL(file) : '',
+    });
+  }
+  $('attach').value = '';
+  renderAttachments();
+};
+$('message').addEventListener('keydown', event => {
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+  if (!window.matchMedia('(pointer: coarse)').matches) return;
+  event.preventDefault();
+  void perform(() => sendText(true));
+});
 document.querySelectorAll('[data-key]').forEach(button => { button.onclick = () => void perform(() => request('key', button.dataset.key)); });
 $('reconnect').onclick = () => { stopped = false; connect(); };
 $('forget').onclick = async () => {
@@ -293,6 +425,7 @@ $('forget').onclick = async () => {
   credential = null; bootstrap = null; newDeviceKey = null; selected = null; drafts.clear(); tabsSignature = '';
   selectedStatus = null; tabCount = 0;
   $('keys').hidden = true; $('keys-toggle').setAttribute('aria-expanded', 'false');
+  clearAttachments();
   rawOutput = ''; rawMode = false;
   $('raw-toggle').setAttribute('aria-pressed', 'false'); $('raw-toggle').textContent = 'Show raw terminal';
   $('session-toolbar').hidden = true; $('brand').hidden = false;

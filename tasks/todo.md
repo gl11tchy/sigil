@@ -1,6 +1,6 @@
-# App dark themes
+# Phone remote
 
-- [x] Failing tests for 16 app dark themes
-- [x] Palettes pass AA and uniqueness
-- [x] Settings picker wraps
-- [x] Tests, format, real window
+- [x] Readable output strips Grok 4.6 composer and TUI padding
+- [x] Encrypted chunked file upload pastes a Mac path
+- [x] Phone attach, chips, Stop, 44px targets
+- [ ] Tests, browser, deploy
