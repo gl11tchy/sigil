@@ -64,3 +64,41 @@ test('keeps a typed Mac draft in the new composer', () => {
   const draft = '─'.repeat(40) + '\n  | > look at this screenshot\nGrok 4.6 (xhigh) · always-approve\nShift+Tab:mode | Esc:cancel |\nCtrl+x:shortcuts';
   assert.equal(readableOutput(draft), draft.replaceAll(/[ \t]+$/gm, ''));
 });
+
+const boxed = [
+  '> Testing 123',
+  '6:56 PM',
+  '',
+  '♦ user_prompt_submit  [hooks: 1/2]',
+  '',
+  ': Waiting for response... 9.9s',
+  '9.9s ↓318k [stop]',
+  '',
+  `┌${'─'.repeat(62)}┐`,
+  `│${' '.repeat(62)}│`,
+  '│  | >                                                         │',
+  `│${' '.repeat(62)}│`,
+  `└${'─'.repeat(62)}┘`,
+  ' Grok 4.6 (xhigh) · always-approve ↩',
+  ' Shift+Tab:mode | Esc:cancel | Ctrl+x:shortcuts',
+].join('\n');
+
+test('strips a boxed Grok 4.6 composer while a turn is waiting', () => {
+  assert.equal(
+    readableOutput(boxed),
+    '> Testing 123\n6:56 PM\n\n♦ user_prompt_submit  [hooks: 1/2]\n\n: Waiting for response... 9.9s\n9.9s ↓318k [stop]',
+  );
+});
+
+test('keeps a trailing table box and does not treat Grok in a sentence as chrome', () => {
+  const table = 'Table:\n┌────┐\n│ data │\n└────┘';
+  assert.equal(readableOutput(table), table);
+  const about = 'Grok 4.6 is the newest model.\n\n' + boxed.slice(boxed.indexOf('┌'));
+  assert.equal(readableOutput(about), 'Grok 4.6 is the newest model.');
+});
+
+test('still strips a boxed composer after a greater-than in the last result line', () => {
+  const text = 'comparison: x > y\n\n' + boxed.slice(boxed.indexOf('┌'));
+  assert.equal(readableOutput(text), 'comparison: x > y');
+});
+
