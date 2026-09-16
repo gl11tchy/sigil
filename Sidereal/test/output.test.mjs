@@ -102,3 +102,19 @@ test('still strips a boxed composer after a greater-than in the last result line
   assert.equal(readableOutput(text), 'comparison: x > y');
 });
 
+test('strips TUI tree gutters so phone code is not a column of pipes', () => {
+  const tree = [
+    '|     1 const CACHE = \'sidereal-shell-v7\';',
+    '|',
+    '|     2 const SHELL = [\'/\', \'/app.mjs\'];',
+    '|          pre_tool_use',
+  ].join('\n');
+  assert.equal(
+    readableOutput(tree),
+    "1 const CACHE = 'sidereal-shell-v7';\n\n2 const SHELL = ['/', '/app.mjs'];\npre_tool_use",
+  );
+  const table = 'Table:\n┌────┐\n│ data │\n└────┘';
+  assert.equal(readableOutput(table), table);
+  assert.equal(readableOutput('| "idle"\n| grep needle'), '| "idle"\n| grep needle');
+});
+
