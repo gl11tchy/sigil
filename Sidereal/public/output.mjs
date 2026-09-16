@@ -11,8 +11,7 @@ const GROK_NAME = /^Grok [\w.-]+$/;
 const GROK_MODEL = /^\([\w-]+\) · [\w-]+$/;
 
 function tidy(line) {
-  const trimmed = line.trimEnd();
-  return trimmed.replace(/^ {9,}/, '');
+  return line.trimEnd();
 }
 
 function isPadding(line) {

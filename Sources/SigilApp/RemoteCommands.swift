@@ -25,6 +25,7 @@ enum RemoteCommands {
     static var uploads = RemoteUpload.Inbox()
 
     static func execute(_ request: RemoteRequest, model: AppModel) -> RemoteReply {
+        uploads.prune()
         var reply = RemoteReply(challenge: request.challenge, sequence: request.sequence)
         let tab = model.tabs.first { $0.id.uuidString == request.tabID }
         switch request.action {
@@ -63,7 +64,7 @@ enum RemoteCommands {
                     transfer: transfer, name: name, index: index, count: count, base64: text,
                     directory: TerminalDrop.cacheDirectory())
                 {
-                    let paste = TerminalDrop.pasteText(for: [url.path])
+                    let paste = TerminalDrop.pasteText(for: [url.path]) + " "
                     guard tab.controller.pasteRemoteText(paste) else {
                         return failure(request, "This prompt does not support file paste.")
                     }

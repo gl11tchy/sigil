@@ -28,6 +28,18 @@ struct RemoteUploadTests {
         #expect(try Data(contentsOf: url) == png)
     }
 
+    @Test func emptyFilesAreWritten() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "sigil-upload-empty-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var inbox = RemoteUpload.Inbox()
+        let url = try #require(
+            try inbox.receive(
+                transfer: String(repeating: "ee", count: 16), name: "empty.txt", index: 0, count: 1,
+                base64: Data().base64EncodedString(), directory: root))
+        #expect(try Data(contentsOf: url).isEmpty)
+    }
+
     @Test func rejectsBadIdentifiersMismatchedChunksAndOversize() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "sigil-upload-bad-\(UUID().uuidString)", isDirectory: true)

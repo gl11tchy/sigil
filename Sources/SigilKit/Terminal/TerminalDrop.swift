@@ -87,7 +87,6 @@ public enum TerminalDrop {
     }
 
     public static func writeRemoteFile(_ data: Data, name: String, to directory: URL) throws -> URL {
-        guard !data.isEmpty else { throw Error.nothingToPaste }
         guard data.count <= maxRemoteBytes else { throw Error.tooLarge }
         if imageExtension(for: data) != nil {
             return try writeImage(data, to: directory)
@@ -95,7 +94,7 @@ public enum TerminalDrop {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("drop-\(UUID().uuidString)-\(sanitizedFileName(name))")
         try data.write(to: url, options: .withoutOverwriting)
-        pruneCache(in: directory, keeping: cacheKeepCount, protecting: url)
+        pruneCache(in: directory, keeping: max(cacheKeepCount, maxFiles), protecting: url)
         return url
     }
 

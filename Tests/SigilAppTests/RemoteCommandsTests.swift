@@ -127,7 +127,8 @@ struct RemoteCommandsTests {
         }
         let pasted = try String(contentsOf: received, encoding: .utf8)
         #expect(pasted.contains(".png"))
-        #expect(FileManager.default.fileExists(atPath: pasted))
+        #expect(pasted.hasSuffix(" ") || pasted.contains(".png "))
+        #expect(FileManager.default.fileExists(atPath: pasted.trimmingCharacters(in: .whitespaces)))
         tab.terminateAndWait()
     }
 

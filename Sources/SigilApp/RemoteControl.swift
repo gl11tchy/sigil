@@ -157,6 +157,7 @@ final class RemoteControl {
         socket = nil
         network?.invalidateAndCancel()
         network = nil
+        RemoteCommands.uploads = RemoteUpload.Inbox()
         isEnabled = false
         isPaired = false
         pairingURL = nil

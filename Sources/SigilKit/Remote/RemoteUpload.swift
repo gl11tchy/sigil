@@ -27,9 +27,8 @@ public enum RemoteUpload: Sendable {
             guard isTransferID(transfer), count >= 1, count <= RemoteUpload.maxChunks, index >= 0,
                 index < count
             else { throw RemoteError.invalidMessage }
-            guard let data = Data(base64Encoded: base64), !data.isEmpty,
-                data.count <= RemoteUpload.maxChunkBytes
-            else { throw RemoteError.invalidMessage }
+            let data = base64.isEmpty ? Data() : Data(base64Encoded: base64)
+            guard let data, data.count <= RemoteUpload.maxChunkBytes else { throw RemoteError.invalidMessage }
             if pending[transfer] == nil, pending.count >= RemoteUpload.maxPending {
                 throw RemoteError.invalidMessage
             }
@@ -53,7 +52,7 @@ public enum RemoteUpload: Sendable {
             return try TerminalDrop.writeRemoteFile(assembled, name: name, to: directory)
         }
 
-        private mutating func prune(now: Date) {
+        public mutating func prune(now: Date = Date()) {
             pending = pending.filter { now.timeIntervalSince($0.value.updated) < RemoteUpload.timeout }
         }
 

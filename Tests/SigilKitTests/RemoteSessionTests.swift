@@ -84,8 +84,13 @@ struct RemoteSessionTests {
             text: String(repeating: "a", count: 20_000), name: "shot.jpg", index: 0, count: 1,
             transfer: String(repeating: "ab", count: 16))
         #expect(try session.accept(RemoteCrypto.seal(chunk, key: device, direction: "phone")).action == "file")
+        let named = RemoteRequest(
+            challenge: session.challenge, sequence: 3, action: "file", text: "YQ==",
+            name: String(repeating: "n", count: 80), index: 0, count: 1,
+            transfer: String(repeating: "ab", count: 16))
+        #expect(try session.accept(RemoteCrypto.seal(named, key: device, direction: "phone")).action == "file")
         let oversizedInput = RemoteRequest(
-            challenge: session.challenge, sequence: 3, action: "input",
+            challenge: session.challenge, sequence: 4, action: "input",
             text: String(repeating: "b", count: 8_193))
         #expect(throws: (any Error).self) {
             _ = try session.accept(RemoteCrypto.seal(oversizedInput, key: device, direction: "phone"))

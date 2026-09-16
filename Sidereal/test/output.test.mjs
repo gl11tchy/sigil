@@ -12,6 +12,8 @@ test('removes the idle desktop composer and screen padding from the phone reader
 test('retains real output, code indentation, and unknown terminal prompts', () => {
   const text = 'Result\n\n  if (ready) {\n    send();\n  }\n\nPermission required: approve?';
   assert.equal(readableOutput(text), text);
+  const nested = 'root:\n         nested: value';
+  assert.equal(readableOutput(nested), nested);
   assert.equal(readableOutput('Do not remove Ctrl+x:shortcuts from this example.'), 'Do not remove Ctrl+x:shortcuts from this example.');
   assert.equal(readableOutput('─'.repeat(70) + '\n❯ My unsent Mac draft\nCtrl+e:collapse thinking | Ctrl+x:shortcuts'), '─'.repeat(70) + '\n❯ My unsent Mac draft\nCtrl+e:collapse thinking | Ctrl+x:shortcuts');
 });
@@ -19,7 +21,7 @@ test('retains real output, code indentation, and unknown terminal prompts', () =
 test('keeps content after a footer and only simplifies the final idle composer', () => {
   assert.equal(
     readableOutput('Example' + footer + '\nImportant result'),
-    'Example' + footer.replace('                 Grok 4.6', 'Grok 4.6') + '\nImportant result',
+    'Example' + footer + '\nImportant result',
   );
 });
 
@@ -30,7 +32,7 @@ test('recognizes a wide-screen composer without mistaking a result for chrome', 
   const withResult = footer.replace('Grok 4.6', 'Important result\nGrok 4.6');
   assert.equal(
     readableOutput('Result' + withResult),
-    'Result' + withResult.replace('                 Important result', 'Important result'),
+    'Result' + withResult,
   );
 });
 
@@ -54,7 +56,7 @@ test('strips the live Grok 4.6 phone composer and space-padded TUI rows', () => 
   assert.equal(readableOutput(padded), '∴ Thinking... 2.7s\n3m28s ↓328k [stop]');
   assert.equal(
     readableOutput('Finished the layout.\n\n' + liveFooter),
-    'Finished the layout.\n\n∴ Thinking... 2.7s\n3m28s ↓328k [stop]',
+    'Finished the layout.\n\n         ∴ Thinking... 2.7s\n3m28s ↓328k [stop]',
   );
 });
 

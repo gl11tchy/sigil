@@ -2,9 +2,23 @@ import { importKey, randomKey, seal, open } from './crypto.mjs';
 import { readableOutput } from './output.mjs';
 const $ = id => document.getElementById(id);
 const drafts = new Map();
-const attachments = [];
+const attachmentDrafts = new Map();
 const MAX_REMOTE_BYTES = 4 * 1024 * 1024;
 const CHUNK = 32 * 1024;
+function attachmentsFor(id = selected) {
+  if (!id) return [];
+  if (!attachmentDrafts.has(id)) attachmentDrafts.set(id, []);
+  return attachmentDrafts.get(id);
+}
+function remoteFileName(name) {
+  const base = String(name || 'file').split(/[/\\]/).pop();
+  const mapped = [...base].map(ch => /[A-Za-z0-9._-]/.test(ch) ? ch : '-').join('')
+    .replace(/-+/g, '-').replace(/^[.-]+|[.-]+$/g, '') || 'file';
+  const bytes = new TextEncoder();
+  let out = mapped;
+  while (bytes.encode(out).length > 80) out = out.slice(0, -1);
+  return out || 'file';
+}
 let tabsSignature = '';
 let rawOutput = '', rawMode = false;
 let credential, bootstrap, newDeviceKey, socket, challenge, sequence = 0, selected;
@@ -45,7 +59,7 @@ function updateControls() {
     }
     element.disabled = disabled || !selected || ended;
   });
-  $('send').disabled = disabled || !selected || ended || !($('message').value.trim() || attachments.length);
+  $('send').disabled = disabled || !selected || ended || !($('message').value.trim() || attachmentsFor().length);
   $('stop').hidden = selectedStatus !== 'working';
   $('raw-toggle').hidden = !selected;
   $('forget').hidden = !credential;
@@ -84,6 +98,12 @@ function render(state) {
   selectedStatus = selected ? state.tabs.find(tab => tab.id === selected).status : null;
   tabCount = state.tabs.length;
   for (const id of drafts.keys()) { if (!state.tabs.some(tab => tab.id === id)) drafts.delete(id); }
+  for (const id of attachmentDrafts.keys()) {
+    if (!state.tabs.some(tab => tab.id === id)) {
+      for (const item of attachmentDrafts.get(id) || []) if (item.preview) URL.revokeObjectURL(item.preview);
+      attachmentDrafts.delete(id);
+    }
+  }
   const tabs = state.tabs.map(tab => {
     const option = document.createElement('option');
     option.value = tab.id;
@@ -102,7 +122,7 @@ function render(state) {
   $('session-toolbar').hidden = false;
   $('brand').hidden = true;
   renderOutput(changedSession);
-  if (changedSession) resizeMessage();
+  if (changedSession) { resizeMessage(); renderAttachments(); }
   updateControls();
 }
 function renderOutput(changedSession = false) {
@@ -249,14 +269,14 @@ async function compressImage(file) {
       value => { if (value) resolve(value); else reject(new Error('Could not compress that photo.')); },
       'image/jpeg', 0.82));
   if (blob.size > MAX_REMOTE_BYTES) throw new Error('Keep files under 4 MB.');
-  return { name: `${(file.name || 'photo').replace(/\.[^.]+$/, '')}.jpg`, bytes: new Uint8Array(await blob.arrayBuffer()) };
+  return { name: remoteFileName(`${(file.name || 'photo').replace(/\.[^.]+$/, '')}.jpg`), bytes: new Uint8Array(await blob.arrayBuffer()) };
 }
 async function prepareFile(file) {
   if (isImageFile(file)) {
     try { return await compressImage(file); } catch { /* send the original if it still fits */ }
   }
   if (file.size > MAX_REMOTE_BYTES) throw new Error('Keep files under 4 MB.');
-  return { name: file.name || 'file', bytes: new Uint8Array(await file.arrayBuffer()) };
+  return { name: remoteFileName(file.name), bytes: new Uint8Array(await file.arrayBuffer()) };
 }
 async function uploadFile(file, tabID) {
   const payload = await prepareFile(file);
@@ -268,8 +288,9 @@ async function uploadFile(file, tabID) {
   }
 }
 function renderAttachments() {
-  $('attachments').hidden = attachments.length === 0;
-  $('attachments').replaceChildren(...attachments.map((item, index) => {
+  const items = attachmentsFor();
+  $('attachments').hidden = items.length === 0;
+  $('attachments').replaceChildren(...items.map((item, index) => {
     const row = document.createElement('li');
     if (item.preview) {
       const image = document.createElement('img');
@@ -284,7 +305,7 @@ function renderAttachments() {
     remove.setAttribute('aria-label', `Remove ${item.name}`);
     remove.textContent = '×';
     remove.onclick = () => {
-      const [taken] = attachments.splice(index, 1);
+      const [taken] = attachmentsFor().splice(index, 1);
       if (taken?.preview) URL.revokeObjectURL(taken.preview);
       renderAttachments();
     };
@@ -293,20 +314,27 @@ function renderAttachments() {
   }));
   updateControls();
 }
-function clearAttachments() {
-  for (const item of attachments) if (item.preview) URL.revokeObjectURL(item.preview);
-  attachments.length = 0;
+function clearAttachments(id = selected) {
+  const items = id ? attachmentDrafts.get(id) : null;
+  if (items) for (const item of items) if (item.preview) URL.revokeObjectURL(item.preview);
+  if (id) attachmentDrafts.delete(id);
+  else {
+    for (const list of attachmentDrafts.values()) {
+      for (const item of list) if (item.preview) URL.revokeObjectURL(item.preview);
+    }
+    attachmentDrafts.clear();
+  }
   renderAttachments();
 }
 async function sendText(submit) {
   const text = $('message').value;
-  const files = attachments.slice();
+  const files = attachmentsFor().slice();
   if (!text.trim() && !files.length) return;
   if (new TextEncoder().encode(text).length > 8192) { showError('Keep the message under 8 KB.'); return; }
   const target = selected, current = generation;
   for (const item of files) await uploadFile(item.file, target);
   if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
-  if (text.trim()) await request('input', text, target);
+  if (text.trim()) await request('input', files.length ? ` ${text}` : text, target);
   if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
   if (submit) {
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -369,13 +397,14 @@ $('compose').onsubmit = event => { event.preventDefault(); void perform(() => se
 $('paste').onclick = () => void perform(() => sendText(false));
 $('tabs').onchange = () => void perform(() => request('select', undefined, $('tabs').value));
 $('new').onclick = () => void perform(() => request('new'));
-$('interrupt').onclick = () => void perform(() => request('key', 'interrupt'));
-$('stop').onclick = () => void perform(() => request('key', 'interrupt'));
+$('interrupt').onclick = () => { if (connected && selected) void request('key', 'interrupt'); };
+$('stop').onclick = () => { if (connected && selected) void request('key', 'interrupt'); };
 $('attach-toggle').onclick = () => $('attach').click();
 $('attach').onchange = () => {
-  const room = 16 - attachments.length;
+  const list = attachmentsFor();
+  const room = 16 - list.length;
   for (const file of [...$('attach').files].slice(0, Math.max(0, room))) {
-    attachments.push({
+    list.push({
       file, name: file.name || 'file',
       preview: isImageFile(file) ? URL.createObjectURL(file) : '',
     });
