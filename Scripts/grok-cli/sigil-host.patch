@@ -1,0 +1,287 @@
+From 877d9ae4f863b926ecadd5e39c8a0518bb0971e5 Mon Sep 17 00:00:00 2001
+From: gl11tchy <gl11tchy@users.noreply.github.com>
+Date: Wed, 16 Sep 2026 10:57:33 -0400
+Subject: [PATCH] feat(theme): paint the TUI from GROK_THEME_* host colours
+
+Sigil can push a window palette into grok-sigil without a named
+CLI theme. GROK_THEME=sigil-host plus GROK_THEME_* hex keys.
+
+Co-authored-by: gl11tchy <gl11tchy@users.noreply.github.com>
+---
+ .../xai-grok-pager-render/src/syntax.rs       |   9 ++
+ .../xai-grok-pager-render/src/theme/cache.rs  |   1 +
+ .../xai-grok-pager-render/src/theme/host.rs   | 145 ++++++++++++++++++
+ .../xai-grok-pager-render/src/theme/mod.rs    |  10 ++
+ .../src/views/settings_modal/tests.rs         |   2 +
+ 5 files changed, 167 insertions(+)
+ create mode 100644 crates/codegen/xai-grok-pager-render/src/theme/host.rs
+
+diff --git a/crates/codegen/xai-grok-pager-render/src/syntax.rs b/crates/codegen/xai-grok-pager-render/src/syntax.rs
+index 4d729b9..875bdef 100644
+--- a/crates/codegen/xai-grok-pager-render/src/syntax.rs
++++ b/crates/codegen/xai-grok-pager-render/src/syntax.rs
+@@ -155,6 +155,15 @@ pub fn get_syntect() -> &'static Syntect {
+             .get_or_init(|| Syntect::new(include_bytes!("../assets/tokyo-night.tmTheme"))),
+         ThemeKind::SigilNeon => SYNTECT_SIGILNEON
+             .get_or_init(|| Syntect::new(include_bytes!("../assets/sigil-neon.tmTheme"))),
++        ThemeKind::SigilHost => {
++            if std::env::var("GROK_THEME_DARK").ok().as_deref() == Some("0") {
++                SYNTECT_GROKDAY
++                    .get_or_init(|| Syntect::new(include_bytes!("../assets/grok-day.tmTheme")))
++            } else {
++                SYNTECT_GROKNIGHT
++                    .get_or_init(|| Syntect::new(include_bytes!("../assets/grok-night.tmTheme")))
++            }
++        }
+         ThemeKind::GrokDay => SYNTECT_GROKDAY
+             .get_or_init(|| Syntect::new(include_bytes!("../assets/grok-day.tmTheme"))),
+     }
+diff --git a/crates/codegen/xai-grok-pager-render/src/theme/cache.rs b/crates/codegen/xai-grok-pager-render/src/theme/cache.rs
+index 68e860f..7f1e59b 100644
+--- a/crates/codegen/xai-grok-pager-render/src/theme/cache.rs
++++ b/crates/codegen/xai-grok-pager-render/src/theme/cache.rs
+@@ -49,6 +49,7 @@ fn theme_kind_from_u8(byte: u8) -> ThemeKind {
+         x if x == ThemeKind::RosePineMoon as u8 => ThemeKind::RosePineMoon,
+         x if x == ThemeKind::OscuraMidnight as u8 => ThemeKind::OscuraMidnight,
+         x if x == ThemeKind::SigilNeon as u8 => ThemeKind::SigilNeon,
++        x if x == ThemeKind::SigilHost as u8 => ThemeKind::SigilHost,
+         x if x == ThemeKind::Auto as u8 => ThemeKind::Auto,
+         _ => ThemeKind::GrokNight,
+     }
+diff --git a/crates/codegen/xai-grok-pager-render/src/theme/host.rs b/crates/codegen/xai-grok-pager-render/src/theme/host.rs
+new file mode 100644
+index 0000000..52ec16f
+--- /dev/null
++++ b/crates/codegen/xai-grok-pager-render/src/theme/host.rs
+@@ -0,0 +1,145 @@
++use ratatui::style::{Color, Modifier};
++
++use super::tokyonight::Theme;
++
++const fn rgb(r: u8, g: u8, b: u8) -> Color {
++    Color::Rgb(r, g, b)
++}
++
++fn rgb_parts(c: Color) -> (u8, u8, u8) {
++    match c {
++        Color::Rgb(r, g, b) => (r, g, b),
++        _ => (0, 0, 0),
++    }
++}
++
++fn mix(from: Color, to: Color, amount: f32) -> Color {
++    let (r1, g1, b1) = rgb_parts(from);
++    let (r2, g2, b2) = rgb_parts(to);
++    let t = amount.clamp(0.0, 1.0);
++    Color::Rgb(
++        (r1 as f32 + (r2 as f32 - r1 as f32) * t).round() as u8,
++        (g1 as f32 + (g2 as f32 - g1 as f32) * t).round() as u8,
++        (b1 as f32 + (b2 as f32 - b1 as f32) * t).round() as u8,
++    )
++}
++
++fn hex_env(key: &str) -> Option<Color> {
++    let raw = std::env::var(key).ok()?;
++    let s = raw.trim().trim_start_matches('#');
++    if s.len() != 6 {
++        return None;
++    }
++    let n = u32::from_str_radix(s, 16).ok()?;
++    Some(rgb(
++        ((n >> 16) & 0xff) as u8,
++        ((n >> 8) & 0xff) as u8,
++        (n & 0xff) as u8,
++    ))
++}
++
++fn dark_env() -> bool {
++    match std::env::var("GROK_THEME_DARK") {
++        Ok(v) => v != "0" && v != "false",
++        Err(_) => true,
++    }
++}
++
++impl Theme {
++    /// Palette pushed in by a host app (Sigil) via `GROK_THEME_*`.
++    ///
++    /// Missing keys fall back to Grok Night so a half-set environment still
++    /// renders. This kind is not in the CLI theme picker.
++    pub fn sigil_host() -> Self {
++        let dark = dark_env();
++        let bg = hex_env("GROK_THEME_BG").unwrap_or(rgb(10, 10, 10));
++        let fg = hex_env("GROK_THEME_FG").unwrap_or(rgb(210, 210, 210));
++        let accent = hex_env("GROK_THEME_ACCENT").unwrap_or(rgb(78, 240, 196));
++        let user = hex_env("GROK_THEME_USER").unwrap_or(rgb(169, 139, 255));
++        let error = hex_env("GROK_THEME_ERROR").unwrap_or(rgb(255, 95, 158));
++        let warn = hex_env("GROK_THEME_WARN").unwrap_or(rgb(255, 196, 107));
++        let link = hex_env("GROK_THEME_LINK").unwrap_or(rgb(90, 217, 255));
++        let ok = hex_env("GROK_THEME_OK").unwrap_or(rgb(78, 240, 196));
++        let select = hex_env("GROK_THEME_SELECT").unwrap_or(mix(bg, fg, 0.18));
++        let step = if dark { rgb(255, 255, 255) } else { rgb(0, 0, 0) };
++        let surface = mix(bg, step, if dark { 0.04 } else { 0.06 });
++        let elevated = mix(bg, step, if dark { 0.10 } else { 0.08 });
++        let hover = mix(bg, step, if dark { 0.14 } else { 0.12 });
++        let dim = mix(fg, bg, 0.22);
++        let muted = mix(fg, bg, 0.42);
++        let subtle = mix(fg, bg, 0.62);
++        let line_low = mix(bg, step, if dark { 0.08 } else { 0.10 });
++        let line = mix(bg, step, if dark { 0.16 } else { 0.18 });
++        let line_high = mix(bg, step, if dark { 0.28 } else { 0.32 });
++        let thinking = mix(user, bg, 0.35);
++        let skill = mix(accent, bg, 0.35);
++
++        Self {
++            bg_base: bg,
++            bg_light: elevated,
++            bg_dark: surface,
++            bg_highlight: elevated,
++            bg_hover: hover,
++            bg_terminal: surface,
++            accent_user: user,
++            accent_assistant: accent,
++            accent_thinking: thinking,
++            accent_tool: subtle,
++            accent_system: link,
++            accent_error: error,
++            accent_success: ok,
++            accent_running: link,
++            accent_skill: skill,
++            text_primary: fg,
++            text_secondary: dim,
++            gray_dim: subtle,
++            gray: muted,
++            gray_bright: dim,
++            command: warn,
++            path: link,
++            running: link,
++            warning: warn,
++            fuzzy_accent: accent,
++            accent_plan: warn,
++            accent_verify: user,
++            accent_remember: ok,
++            selection_border: line_high,
++            hover_border: line,
++            prompt_border: line,
++            prompt_border_active: skill,
++            accent_model: accent,
++            scrollbar_bg: line_low,
++            scrollbar_fg: line_high,
++            diff_delete_bg: mix(bg, error, 0.28),
++            diff_delete_fg: error,
++            diff_insert_bg: mix(bg, ok, 0.28),
++            diff_insert_fg: ok,
++            diff_equal_fg: muted,
++            diff_gutter_fg: subtle,
++            bg_visual: select,
++            paste_bg: surface,
++            paste_fg: dim,
++            paste_dim: muted,
++            md_heading_h1: fg,
++            md_heading_h1_mod: Modifier::BOLD,
++            md_heading_h2: accent,
++            md_heading_h2_mod: Modifier::BOLD,
++            md_heading_h3: link,
++            md_heading_h3_mod: Modifier::BOLD,
++            md_heading_h4: user,
++            md_heading_h4_mod: Modifier::BOLD,
++            md_heading_h5: warn,
++            md_heading_h5_mod: Modifier::BOLD,
++            md_heading_h6: dim,
++            md_heading_h6_mod: Modifier::BOLD,
++            md_code: accent,
++            md_task_checked: ok,
++            md_task_unchecked: muted,
++            md_muted: muted,
++            md_code_bg: surface,
++            md_text: fg,
++            link_fg: link,
++            logo_shine: accent,
++        }
++    }
++}
+diff --git a/crates/codegen/xai-grok-pager-render/src/theme/mod.rs b/crates/codegen/xai-grok-pager-render/src/theme/mod.rs
+index 1e1da70..2a9bb74 100644
+--- a/crates/codegen/xai-grok-pager-render/src/theme/mod.rs
++++ b/crates/codegen/xai-grok-pager-render/src/theme/mod.rs
+@@ -19,6 +19,7 @@ pub mod md_style;
+ pub mod osc11;
+ mod oscura;
+ mod rosepine;
++mod host;
+ mod sigil;
+ pub mod system_appearance;
+ mod terminal_default;
+@@ -37,6 +38,8 @@ pub enum ThemeKind {
+     OscuraMidnight = 5,
+     /// Sigil Neon — neutral near-black ground, mint/cyan neon accents.
+     SigilNeon = 6,
++    /// Palette pushed by a host app through `GROK_THEME_*`. Not in the picker.
++    SigilHost = 7,
+     /// Meta-variant: follow system dark/light appearance.
+     ///
+     /// Never stored in `cache::CURRENT` — resolved to a concrete
+@@ -84,6 +87,7 @@ impl ThemeKind {
+             Self::RosePineMoon => "rosepine-moon",
+             Self::OscuraMidnight => "oscura-midnight",
+             Self::SigilNeon => "sigil-neon",
++            Self::SigilHost => "sigil-host",
+             Self::Auto => "auto",
+         }
+     }
+@@ -101,6 +105,7 @@ impl ThemeKind {
+             Self::RosePineMoon => true,
+             Self::OscuraMidnight => true,
+             Self::SigilNeon => true,
++            Self::SigilHost => true,
+             // Auto is resolved to a concrete theme before rendering.
+             Self::Auto => false,
+         }
+@@ -120,6 +125,7 @@ impl ThemeKind {
+             }
+             "oscura" | "oscura-midnight" => Some(Self::OscuraMidnight),
+             "sigil" | "sigil-neon" | "neon" => Some(Self::SigilNeon),
++            "sigil-host" | "host" => Some(Self::SigilHost),
+             _ => None,
+         }
+     }
+@@ -157,6 +163,7 @@ pub fn display_name_for_canonical(value: &str) -> &str {
+         "rosepine-moon" => "Rose Pine Moon",
+         "oscura-midnight" => "Oscura Midnight",
+         "sigil-neon" => "Sigil Neon",
++        "sigil-host" => "Host",
+         other => other,
+     }
+ }
+@@ -285,6 +292,7 @@ impl Theme {
+             ThemeKind::RosePineMoon => Self::rosepine_moon(),
+             ThemeKind::OscuraMidnight => Self::oscura_midnight(),
+             ThemeKind::SigilNeon => Self::sigil(),
++            ThemeKind::SigilHost => Self::sigil_host(),
+             // Auto is resolved to a concrete theme before being stored;
+             // if reached, fall back to GrokNight.
+             ThemeKind::Auto => Self::groknight(),
+@@ -1075,6 +1083,8 @@ mod tests {
+                 ThemeKind::TokyoNight => Theme::tokyonight(),
+                 ThemeKind::RosePineMoon => Theme::rosepine_moon(),
+                 ThemeKind::OscuraMidnight => Theme::oscura_midnight(),
++                ThemeKind::SigilNeon => Theme::sigil(),
++                ThemeKind::SigilHost => unreachable!("ALL excludes SigilHost"),
+                 ThemeKind::Auto => unreachable!("ALL excludes Auto"),
+             };
+             let track = lum(theme.scrollbar_bg, "scrollbar_bg", kind);
+diff --git a/crates/codegen/xai-grok-pager/src/views/settings_modal/tests.rs b/crates/codegen/xai-grok-pager/src/views/settings_modal/tests.rs
+index 7fedc38..1e96517 100644
+--- a/crates/codegen/xai-grok-pager/src/views/settings_modal/tests.rs
++++ b/crates/codegen/xai-grok-pager/src/views/settings_modal/tests.rs
+@@ -7163,6 +7163,8 @@ fn max_thoughts_width_preview_title_styling_distinguishes_from_content() {
+         // Resolved via `Theme::current()` rather than a constructor
+         // because `theme::oscura` is a private module.
+         crate::theme::ThemeKind::OscuraMidnight => crate::theme::Theme::current(),
++        crate::theme::ThemeKind::SigilNeon => crate::theme::Theme::sigil(),
++        crate::theme::ThemeKind::SigilHost => crate::theme::Theme::sigil_host(),
+         crate::theme::ThemeKind::Auto => crate::theme::Theme::groknight(),
+     };
+     assert_ne!(
+-- 
+2.54.0
+

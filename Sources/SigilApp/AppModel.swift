@@ -1161,7 +1161,8 @@ final class AppModel {
             mode: .new(sessionID: UUID()),
             model: (model ?? settings.model).nilIfEmpty,
             reasoningEffort: (effort ?? settings.effort).nilIfEmpty,
-            themeName: settings.theme.grokThemeName
+            themeName: settings.theme.grokThemeName,
+            themeVariables: settings.theme.grokThemeEnvironment
         )
         return add(spec)
     }
@@ -1192,7 +1193,8 @@ final class AppModel {
             mode: .resume(sessionID: session.id),
             model: settings.model.nilIfEmpty,
             reasoningEffort: settings.effort.nilIfEmpty,
-            themeName: settings.theme.grokThemeName
+            themeName: settings.theme.grokThemeName,
+            themeVariables: settings.theme.grokThemeEnvironment
         )
         let tab = add(spec)
         tab.sessionTitle = title(for: session)
@@ -1256,6 +1258,7 @@ final class AppModel {
             spec.mode = .resume(sessionID: sessionID)
         }
         spec.themeName = settings.theme.grokThemeName
+        spec.themeVariables = settings.theme.grokThemeEnvironment
         spec.bridgeTabID = nil
         spec.bridgeSocketPath = nil
         let tabID = UUID()
@@ -1976,7 +1979,8 @@ final class AppModel {
                 mode: .resume(sessionID: entry.sessionID),
                 model: settings.model.nilIfEmpty,
                 reasoningEffort: settings.effort.nilIfEmpty,
-                themeName: settings.theme.grokThemeName
+                themeName: settings.theme.grokThemeName,
+                themeVariables: settings.theme.grokThemeEnvironment
             )
             let tab = add(spec)
             if deferredSelectedEntry.map({ sameEntry($0, entry) }) == true

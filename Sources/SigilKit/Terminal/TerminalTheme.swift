@@ -74,7 +74,8 @@ public struct TerminalTheme: Sendable, Hashable, Identifiable {
         foreground: 0xD2D2D2,
         cursor: 0xE8E8E8,
         selection: 0x2E2E2E,
-        accent: 0xE8934A
+        accent: 0xE8934A,
+        cliTheme: "groknight"
     )
     public static let grokDay = make(
         name: "Grok Day",
@@ -385,7 +386,7 @@ extension TerminalTheme {
         cursor: UInt32,
         selection: UInt32,
         accent: UInt32,
-        cliTheme: String = "groknight"
+        cliTheme: String = "sigil-host"
     ) -> TerminalTheme {
         TerminalTheme(
             name: name,
@@ -427,4 +428,24 @@ extension TerminalTheme {
     /// The name of the CLI theme that matches this one. It reaches the CLI as
     /// `GROK_THEME`, which a build that does not know the name simply ignores.
     public var grokThemeName: String { cliTheme }
+
+    /// Extra `GROK_THEME_*` keys so `grok-sigil` can paint the TUI in this palette.
+    /// Empty for named CLI themes that already have a built-in colour table.
+    public var grokThemeEnvironment: [String: String] {
+        guard grokThemeName == "sigil-host" else { return [:] }
+        let ansi = hex.ansi
+        func hexString(_ value: UInt32) -> String { String(format: "%06X", value) }
+        return [
+            "GROK_THEME_BG": hexString(hex.background),
+            "GROK_THEME_FG": hexString(hex.foreground),
+            "GROK_THEME_ACCENT": hexString(hex.accent),
+            "GROK_THEME_USER": hexString(ansi[5]),
+            "GROK_THEME_ERROR": hexString(ansi[1]),
+            "GROK_THEME_WARN": hexString(ansi[3]),
+            "GROK_THEME_LINK": hexString(ansi[6]),
+            "GROK_THEME_OK": hexString(ansi[2]),
+            "GROK_THEME_SELECT": hexString(hex.selection),
+            "GROK_THEME_DARK": isDark ? "1" : "0",
+        ]
+    }
 }
