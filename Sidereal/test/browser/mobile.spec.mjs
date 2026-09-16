@@ -75,6 +75,7 @@ for (const width of [320, 390, 768, 1280]) {
       expect(geometry.send.bottom).toBeLessThanOrEqual(geometry.height);
       expect(geometry.terminal.height).toBeGreaterThan(geometry.height * .5);
       expect(geometry.font).toBeGreaterThanOrEqual(14);
+      expect(await page.evaluate(() => getComputedStyle(document.getElementById('terminal')).overflowWrap)).toBe('break-word');
       expect((await page.locator('#tabs').boundingBox()).height).toBeGreaterThanOrEqual(44);
       await page.locator('#message').fill('Check the mobile composer');
       await page.locator('#send').click();
@@ -310,6 +311,24 @@ test('a boxed waiting composer does not cover the phone transcript', async ({ pa
     await expect(page.locator('#terminal')).not.toContainText('always-approve');
     await expect(page.locator('#stop')).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath('waiting.png') });
+  } finally { mac.close(); }
+});
+
+test('tree gutters do not wrap into a column of pipes on a phone', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const raw = [
+    '|     1 const CACHE = \'sidereal-shell-v7\';',
+    '|',
+    '|     2 const SHELL = [\'/\', \'/app.mjs\', \'/output.mjs\'];',
+    '|          pre_tool_use',
+    'Ready for your next message.',
+  ].join('\n');
+  const mac = await pair(page, baseURL, raw);
+  try {
+    await expect(page.locator('#terminal')).toContainText("1 const CACHE = 'sidereal-shell-v7';");
+    await expect(page.locator('#terminal')).not.toHaveText(/^\s*\|/m);
+    await expect(page.locator('#terminal')).toContainText('pre_tool_use');
+    await page.screenshot({ path: testInfo.outputPath('gutter.png') });
   } finally { mac.close(); }
 });
 

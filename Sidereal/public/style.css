@@ -58,13 +58,13 @@ button:disabled, select:disabled { opacity: .45; cursor: default; }
 #empty-output p { font-size: 14px; margin: 0; }
 #terminal[data-raw="true"] { white-space: pre; overflow-wrap: normal; }
 #terminal {
-  white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; overscroll-behavior: contain;
-  height: 100%; padding: 16px; margin: 0;
-  font: 15px/1.55 "SF Mono", Menlo, monospace; tab-size: 4;
+  white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; overflow: auto; overscroll-behavior: contain;
+  height: 100%; padding: 16px 16px 56px; margin: 0;
+  font: 16px/1.5 ui-monospace, "SF Mono", Menlo, monospace; tab-size: 4;
 }
 #latest {
   position: absolute; right: 16px; bottom: 12px; border-radius: 6px;
-  background: var(--raised); font-size: 14px;
+  background: var(--raised); font-size: 14px; z-index: 1;
 }
 #compose { flex-shrink: 0; padding: 8px 16px max(12px, env(safe-area-inset-bottom)); }
 .attachments {

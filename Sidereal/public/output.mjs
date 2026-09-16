@@ -54,6 +54,16 @@ function isDraftPrompt(line) {
   return /^[❯›>] \S/.test(text);
 }
 
+function isTreeOnly(line) {
+  return /^[│| \t]+$/.test(line);
+}
+
+function stripTreeGutter(line) {
+  const trimmed = line.trimEnd();
+  if (/[│|]$/.test(trimmed) && /^[│|]/.test(trimmed.trimStart())) return line;
+  return line.replace(/^(?:[ \t]*[│|])+[ \t]*/, '');
+}
+
 function trailingComposerStart(lines) {
   let index = lines.length - 1;
   while (index >= 0 && isComposerChrome(lines[index])) index--;
@@ -84,11 +94,11 @@ export function readableOutput(snapshot) {
   const compact = [];
   let blanks = 0;
   for (const line of lines) {
-    if (isPadding(line)) {
+    if (isPadding(line) || isTreeOnly(line)) {
       if (++blanks === 1) compact.push('');
     } else {
       blanks = 0;
-      compact.push(line);
+      compact.push(stripTreeGutter(line));
     }
   }
   const output = compact.join('\n').trim();
