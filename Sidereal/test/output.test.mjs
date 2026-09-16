@@ -21,7 +21,7 @@ test('retains real output, code indentation, and unknown terminal prompts', () =
 test('keeps content after a footer and only simplifies the final idle composer', () => {
   assert.equal(
     readableOutput('Example' + footer + '\nImportant result'),
-    'Example' + footer.replace('│ ❯ Build anything', '❯ Build anything') + '\nImportant result',
+    'Example' + footer + '\nImportant result',
   );
 });
 
@@ -32,7 +32,7 @@ test('recognizes a wide-screen composer without mistaking a result for chrome', 
   const withResult = footer.replace('Grok 4.6', 'Important result\nGrok 4.6');
   assert.equal(
     readableOutput('Result' + withResult),
-    'Result' + withResult.replace('│ ❯ Build anything', '❯ Build anything'),
+    'Result' + withResult,
   );
 });
 
@@ -62,10 +62,7 @@ test('strips the live Grok 4.6 phone composer and space-padded TUI rows', () => 
 
 test('keeps a typed Mac draft in the new composer', () => {
   const draft = '─'.repeat(40) + '\n  | > look at this screenshot\nGrok 4.6 (xhigh) · always-approve\nShift+Tab:mode | Esc:cancel |\nCtrl+x:shortcuts';
-  assert.equal(
-    readableOutput(draft),
-    draft.replaceAll(/[ \t]+$/gm, '').replace('  | > look at this screenshot', '> look at this screenshot'),
-  );
+  assert.equal(readableOutput(draft), draft.replaceAll(/[ \t]+$/gm, ''));
 });
 
 const boxed = [
@@ -118,5 +115,6 @@ test('strips TUI tree gutters so phone code is not a column of pipes', () => {
   );
   const table = 'Table:\n┌────┐\n│ data │\n└────┘';
   assert.equal(readableOutput(table), table);
+  assert.equal(readableOutput('| "idle"\n| grep needle'), '| "idle"\n| grep needle');
 });
 

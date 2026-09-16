@@ -61,7 +61,7 @@ function isTreeOnly(line) {
 function stripTreeGutter(line) {
   const trimmed = line.trimEnd();
   if (/[│|]$/.test(trimmed) && /^[│|]/.test(trimmed.trimStart())) return line;
-  return line.replace(/^(?:[ \t]*[│|])+[ \t]*/, '');
+  return line.replace(/^(?:[ \t]*[│|])+[ \t]{2,}/, '');
 }
 
 function trailingComposerStart(lines) {
