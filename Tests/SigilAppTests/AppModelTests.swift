@@ -125,6 +125,27 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func changingThemeDoesNotKillATabThatIsStillWorking() throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        let original = try #require(model.newTab(in: cwd))
+        original.noteTurnStarted()
+        #expect(original.shouldWarnBeforeStopping)
+        let originalID = original.id
+
+        fixture.settings.themeName = TerminalTheme.twitch.name
+        model.applyTheme()
+
+        let still = try #require(model.tabs.first)
+        #expect(still.id == originalID)
+        #expect(still.spec.themeName == TerminalTheme.sigilNeon.grokThemeName)
+    }
+
+    @Test @MainActor
     func failedTrashRestartsOnlyStoppedTabAndPreservesSelectionAndSnapshot() throws {
         let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
         defer { fixture.cleanup() }
