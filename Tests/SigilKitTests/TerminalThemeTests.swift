@@ -20,7 +20,9 @@ struct TerminalThemeTests {
         for name in Self.appDarkThemeNames {
             let theme = try #require(TerminalTheme.all.first { $0.name == name })
             #expect(theme.isDark)
-            #expect(theme.grokThemeName == "groknight")
+            #expect(theme.grokThemeName == "sigil-host")
+            #expect(theme.grokThemeEnvironment["GROK_THEME_BG"] != nil)
+            #expect(theme.grokThemeEnvironment["GROK_THEME_ACCENT"] != nil)
         }
     }
 
@@ -46,7 +48,9 @@ struct TerminalThemeTests {
         #expect(TerminalTheme.sigilNeon.grokThemeName == "sigil-neon")
         #expect(TerminalTheme.grokDay.grokThemeName == "grokday")
         #expect(TerminalTheme.grokNight.grokThemeName == "groknight")
-        #expect(TerminalTheme.grokEmber.grokThemeName == "groknight")
+        #expect(TerminalTheme.grokEmber.grokThemeName == "sigil-host")
+        #expect(TerminalTheme.sigilNeon.grokThemeEnvironment.isEmpty)
+        #expect(TerminalTheme.githubDark.grokThemeEnvironment["GROK_THEME_BG"] == "0D1117")
     }
 
     private static let appDarkThemeNames = [

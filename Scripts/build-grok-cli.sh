@@ -13,6 +13,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PATCH="$SCRIPT_DIR/grok-cli/sigil-neon.patch"
+HOST_PATCH="$SCRIPT_DIR/grok-cli/sigil-host.patch"
 # The upstream commit the patch is written against.
 UPSTREAM_REV="${GROK_CLI_REV:-9684fa3cdbf2995e30ea8b9b637f1db008f144fc}"
 REPO="${GROK_CLI_SRC:-$HOME/Documents/grok-build-sigil}"
@@ -36,10 +37,16 @@ if ! git cat-file -e "$UPSTREAM_REV^{commit}" 2>/dev/null; then
 fi
 
 if git log --oneline -20 | grep -q "Sigil Neon"; then
-  echo "==> patch already applied"
+  echo "==> neon patch already applied"
 else
   echo "==> applying $PATCH"
   git am --keep-cr <"$PATCH"
+fi
+if git log --oneline -20 | grep -q "GROK_THEME_\\*"; then
+  echo "==> host patch already applied"
+else
+  echo "==> applying $HOST_PATCH"
+  git am --keep-cr <"$HOST_PATCH"
 fi
 
 echo "==> cargo build -p xai-grok-pager-bin --release"

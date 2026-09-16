@@ -213,9 +213,12 @@ Scripts/build-grok-cli.sh
 ```
 
 The app prefers `grok-sigil` when it is there and starts each tab with
-`GROK_THEME` set to the window's theme. Delete the binary and the app falls
-back to the installed `grok`, which ignores the variable and runs as before.
-The patch is `Scripts/grok-cli/sigil-neon.patch`.
+`GROK_THEME` set to the window's theme. App palettes without a named CLI
+theme send `sigil-host` plus `GROK_THEME_*` colour keys so the TUI matches
+the window. Delete the binary and the app falls back to the installed
+`grok`, which ignores those variables and runs as before.
+The patches are `Scripts/grok-cli/sigil-neon.patch` and
+`Scripts/grok-cli/sigil-host.patch`.
 
 ## Verify
 
