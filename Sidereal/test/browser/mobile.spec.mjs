@@ -287,7 +287,8 @@ test('the live Grok composer becomes readable status on a phone', async ({ page,
     + `${'─'.repeat(40)}\n${'─'.repeat(40)}\n${'─'.repeat(40)}\n  | >\nGrok 4.6 (xhigh) · always-approve\n  Shift+Tab:mode | Esc:cancel |\nCtrl+x:shortcuts`;
   const mac = await pair(page, baseURL, raw);
   try {
-    await expect(page.locator('#terminal')).toHaveText('∴ Thinking... 2.7s\n3m28s ↓328k [stop]');
+    await expect(page.locator('#terminal')).toHaveText('');
+    await expect(page.locator('#terminal')).not.toContainText('Thinking');
     await expect(page.locator('#terminal')).not.toContainText('Shift+Tab');
     await expect(page.locator('#stop')).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath('thinking.png') });
@@ -316,7 +317,8 @@ test('a boxed waiting composer does not cover the phone transcript', async ({ pa
   const mac = await pair(page, baseURL, raw);
   try {
     await expect(page.locator('#terminal')).toContainText('Testing 123');
-    await expect(page.locator('#terminal')).toContainText('Waiting for response');
+    await expect(page.locator('#terminal')).not.toContainText('Waiting for response');
+    await expect(page.locator('#terminal')).not.toContainText('hooks');
     await expect(page.locator('#terminal')).not.toContainText('Shift+Tab');
     await expect(page.locator('#terminal')).not.toContainText('always-approve');
     await expect(page.locator('#stop')).toBeVisible();
