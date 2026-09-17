@@ -23,11 +23,12 @@ final class RemoteControl {
         self.store = store
     }
 
-    static let productionOrigin = "https://sigilapp.dev"
+    static let productionOrigin = "https://remote.sigilapp.dev"
     static let legacyRailwayOrigin = "https://sidereal-production-587c.up.railway.app"
+    static let legacyApexOrigin = "https://sigilapp.dev"
 
     static func preferredOrigin(_ text: String) -> String {
-        text == legacyRailwayOrigin ? productionOrigin : text
+        text == legacyRailwayOrigin || text == legacyApexOrigin ? productionOrigin : text
     }
 
     static func origin(_ text: String) -> URL? {
@@ -49,12 +50,13 @@ final class RemoteControl {
 
     func resumeIfPaired(model: AppModel) {
         guard let pairing = store.load(), Self.origin(pairing.origin) != nil else { return }
+        guard Self.preferredOrigin(pairing.origin) == pairing.origin else { return }
         start(urlText: pairing.origin, model: model)
     }
 
     func start(urlText: String, model: AppModel) {
         stop()
-        guard let origin = Self.origin(urlText) else {
+        guard let origin = Self.origin(Self.preferredOrigin(urlText)) else {
             error = "Enter the HTTPS address of your Sidereal server."
             return
         }
@@ -192,6 +194,7 @@ final class RemoteControl {
 
     private func restoredSession(for origin: URL) -> RemoteSession {
         guard let saved = store.load(),
+            Self.preferredOrigin(saved.origin) == saved.origin,
             RemoteControl.origin(saved.origin)?.absoluteString == origin.absoluteString,
             RemoteCrypto.isValidKey(saved.deviceKey), RemoteCrypto.isValidKey(saved.ticket)
         else { return RemoteSession() }

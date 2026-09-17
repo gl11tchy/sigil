@@ -54,6 +54,11 @@ npm --prefix "$ROOT/Sidereal" ci --ignore-scripts || fail "Sidereal dependencies
 npm --prefix "$ROOT/Sidereal" test || fail "Sidereal tests"
 npm --prefix "$ROOT/Sidereal" audit --omit=dev || fail "Sidereal dependency audit"
 
+echo "==> Site dependencies and tests"
+npm --prefix "$ROOT/Site" ci --ignore-scripts || fail "Site dependencies"
+npm --prefix "$ROOT/Site" test || fail "Site tests"
+npm --prefix "$ROOT/Site" audit --omit=dev || fail "Site dependency audit"
+
 echo "==> Sidereal mobile browser checks"
 npm --prefix "$ROOT/Sidereal" exec -- playwright install chromium webkit || fail "Sidereal browsers"
 npm --prefix "$ROOT/Sidereal" run test:browser || fail "Sidereal browser tests"

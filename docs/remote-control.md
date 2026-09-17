@@ -87,7 +87,7 @@ Hosting needs a real HTTPS deployment; local tests do not prove cellular/iPhone 
   unauthorized peer eviction, connection-bound Send, and terminal input-mode handling.
 - Railway deployment `4dbae614-d6c6-4aa6-8bff-450204cd5e24` reached SUCCESS.
   Public HTTPS health, security headers, and the deployed browser page passed.
-- `SIGIL_REMOTE_TEST_ORIGIN=https://sigilapp.dev swift test --no-parallel --filter RemoteIntegrationTests`
+- `SIGIL_REMOTE_TEST_ORIGIN=https://remote.sigilapp.dev swift test --no-parallel --filter RemoteIntegrationTests`
   passed against the deployed relay: encrypted pairing, PTY input/output, and revocation.
 - Physical camera scan, cellular access, and iOS Home Screen installation remain
   device-only checks; no physical phone was available to the agent.
@@ -96,11 +96,14 @@ Hosting needs a real HTTPS deployment; local tests do not prove cellular/iPhone 
 
 - Project: `26f52bc8-daae-4371-aa70-4cebb2d0f222` (sidereal).
 - Environment: `1a3850e2-c49f-45c4-bb54-627dd102c646` (production).
-- Service: `d7e3c251-0ae2-45f9-b4b1-c819d3fa9ece` (sidereal).
-- Origin: `https://sigilapp.dev`.
+- Sidereal service: `d7e3c251-0ae2-45f9-b4b1-c819d3fa9ece`.
+- Site service: `060788b3-4ab1-45fb-8623-68027835cbc0`.
+- Intended companion origin: `https://remote.sigilapp.dev`. Namecheap does not point that host yet; Railway wants CNAME `remote` → `1bkrlt5p.up.railway.app` and TXT `_railway-verify.remote` → `railway-verify=fcc2e74a0b9e02bcb9504509004d7d783853f0086368e85cf4cbe618262558a8`.
+- Site preview: `https://site-production-c4d1.up.railway.app`. Apex still serves Sidereal until that host is healthy and the owner moves the ALIAS.
 - Single replica in `sfo`; `/health`; app sleeping disabled through service settings.
-- Source: local upload of `Sidereal` from commit `f412eaf`; no GitHub auto-deploy yet.
-- Re-deploy with `railway up ./Sidereal --path-as-root --project 26f52bc8-daae-4371-aa70-4cebb2d0f222 --environment 1a3850e2-c49f-45c4-bb54-627dd102c646 --service d7e3c251-0ae2-45f9-b4b1-c819d3fa9ece --detach`.
+- Source: local upload; no GitHub auto-deploy yet.
+- Re-deploy Sidereal with `railway up ./Sidereal --path-as-root --project 26f52bc8-daae-4371-aa70-4cebb2d0f222 --environment 1a3850e2-c49f-45c4-bb54-627dd102c646 --service d7e3c251-0ae2-45f9-b4b1-c819d3fa9ece --detach`.
+- Re-deploy the site with `railway up ./Site --path-as-root --project 26f52bc8-daae-4371-aa70-4cebb2d0f222 --environment 1a3850e2-c49f-45c4-bb54-627dd102c646 --service 060788b3-4ab1-45fb-8623-68027835cbc0 --detach`.
 - Rollback: remove/revert the active Railway deployment. This only ends remote
   sessions; it does not alter Mac sessions or files. Restarting the relay drops
   live sockets; a stored ticket reconnects when Sigil is running.
