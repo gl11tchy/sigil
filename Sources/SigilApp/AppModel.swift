@@ -13,6 +13,7 @@ final class AppModel {
 
     typealias TrashConversation = (URL) throws -> Void
     typealias ErrorPresenter = (Error) -> Void
+    typealias ConfirmStopWorking = () -> Bool
 
     let settings: AppSettings
     let store: SessionStore
@@ -69,6 +70,9 @@ final class AppModel {
     private var deferredLegacySelectedSessionID: String?
     private let trashConversation: TrashConversation
     private let presentError: ErrorPresenter
+    /// Shown before a close or archive kills a tab that is mid-turn.
+    @ObservationIgnored
+    var confirmStopWorking: ConfirmStopWorking = { AppModel.promptToStopWorking() }
     @ObservationIgnored private let registrationRunner: BridgeRegistration.Runner
     @ObservationIgnored private let mcpBinaryOverride: URL?
     @ObservationIgnored private let tabMessagingSocketURL: URL
@@ -316,11 +320,22 @@ final class AppModel {
     }
 
     func archive(_ session: GrokSession) {
+        archive(session, confirmIfWorking: true)
+    }
+
+    private func archive(_ session: GrokSession, confirmIfWorking: Bool) {
+        let matching = tabs.filter { tabMatches($0, sessionID: session.id, cwd: session.cwd) }
+        if confirmIfWorking, matching.contains(where: \.shouldWarnBeforeStopping),
+            !confirmStopWorking()
+        {
+            return
+        }
         unpin(session)
         settings.archivedConversations = SidebarOrganization.inserting(
             session, onto: settings.archivedConversations, samePath: samePath)
-        let ids = tabs.filter { tabMatches($0, sessionID: session.id, cwd: session.cwd) }.map(\.id)
-        for id in ids { closeTab(id) }
+        for tab in matching { closeTab(tab.id) }
+        dropDeferred(matching: session)
+        persistOpenTabs()
     }
 
     func unarchive(_ session: GrokSession) {
@@ -333,10 +348,18 @@ final class AppModel {
     }
 
     func archive(_ project: SidebarProject) {
+        let projectTabs = tabs.filter { samePath($0.workingDirectory.path, project.cwd) }
+        if projectTabs.contains(where: \.shouldWarnBeforeStopping), !confirmStopWorking() {
+            return
+        }
         unpin(project)
         for session in store.sessions where samePath(session.cwd, project.cwd) {
-            archive(session)
+            archive(session, confirmIfWorking: false)
         }
+        let leftover = tabs.filter { samePath($0.workingDirectory.path, project.cwd) }.map(\.id)
+        for id in leftover { closeTab(id) }
+        dropDeferred(inProjectPath: project.cwd)
+        persistOpenTabs()
         if focusedProject.map({ samePath($0.cwd, project.cwd) }) == true {
             leaveProject()
         }
@@ -1298,14 +1321,16 @@ final class AppModel {
     /// User-facing close: warn when the agent is mid-turn so a click does not kill work.
     func requestCloseTab(_ id: TerminalTab.ID) {
         guard let tab = tabs.first(where: { $0.id == id }) else { return }
-        if tab.shouldWarnBeforeStopping {
-            let alert = NSAlert()
-            alert.messageText = "This session is still working."
-            alert.addButton(withTitle: "Close Tab")
-            alert.addButton(withTitle: "Cancel")
-            if alert.runModal() != .alertFirstButtonReturn { return }
-        }
+        if tab.shouldWarnBeforeStopping, !confirmStopWorking() { return }
         closeTab(id)
+    }
+
+    private static func promptToStopWorking() -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "This session is still working."
+        alert.addButton(withTitle: "Close Tab")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     func closeSelectedTab() {
@@ -2082,6 +2107,26 @@ final class AppModel {
     private func clearDeferredSelection() {
         deferredSelectedEntry = nil
         deferredLegacySelectedSessionID = nil
+    }
+
+    private func dropDeferred(matching session: GrokSession) {
+        deferredOpenTabs.removeAll {
+            entryMatches($0, sessionID: session.id, cwd: session.cwd)
+        }
+        if let deferredSelectedEntry,
+            entryMatches(deferredSelectedEntry, sessionID: session.id, cwd: session.cwd)
+        {
+            clearDeferredSelection()
+        } else if deferredLegacySelectedSessionID == session.id {
+            deferredLegacySelectedSessionID = nil
+        }
+    }
+
+    private func dropDeferred(inProjectPath path: String) {
+        deferredOpenTabs.removeAll { samePath($0.cwd, path) }
+        if let deferredSelectedEntry, samePath(deferredSelectedEntry.cwd, path) {
+            clearDeferredSelection()
+        }
     }
 
     func pickDirectory(startingAt directory: URL? = nil) -> URL? {

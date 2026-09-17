@@ -2901,6 +2901,93 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func archivingAWorkingChatKeepsTheTabIfYouCancel() throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        let tab = try #require(model.newTab(in: cwd))
+        tab.noteTurnStarted()
+        #expect(tab.shouldWarnBeforeStopping)
+        let session = makeSession(id: try #require(tab.sessionID), cwd: cwd)
+        model.confirmStopWorking = { false }
+        model.archive(session)
+
+        #expect(model.tabs.map(\.id) == [tab.id])
+        #expect(!model.isArchived(session))
+        #expect(model.isOpen(session))
+    }
+
+    @Test @MainActor
+    func archivingAWorkingChatClosesTheTabIfYouConfirm() throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        let tab = try #require(model.newTab(in: cwd))
+        tab.noteTurnStarted()
+        #expect(tab.shouldWarnBeforeStopping)
+        let session = makeSession(id: try #require(tab.sessionID), cwd: cwd)
+        model.confirmStopWorking = { true }
+        model.archive(session)
+
+        #expect(model.tabs.isEmpty)
+        #expect(model.isArchived(session))
+        #expect(!model.isOpen(session))
+    }
+
+    @Test @MainActor
+    func archivingDropsADeferredTabSoItDoesNotRestore() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let available = try fixture.directory("available")
+        let missing = fixture.root.appendingPathComponent("missing")
+        try fixture.createSession(id: "available-id", cwd: available)
+        fixture.settings.openTabs = OpenTabsSnapshot(
+            tabs: [
+                .init(sessionID: "available-id", cwd: available.path),
+                .init(sessionID: "missing-id", cwd: missing.path),
+            ],
+            selectedSessionID: "missing-id",
+            selectedCWD: missing.path
+        )
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        model.restoreOpenTabs()
+        #expect(model.tabs.count == 1)
+
+        model.archive(makeSession(id: "missing-id", cwd: missing))
+        #expect(fixture.settings.openTabs.tabs.map(\.sessionID) == ["available-id"])
+        #expect(fixture.settings.openTabs.selectedSessionID == "available-id")
+    }
+
+    @Test @MainActor
+    func archivingAProjectClosesATabNotYetInTheStore() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let projectDir = try fixture.directory("acme-api")
+        try fixture.writeListedSession(id: "a", cwd: projectDir.path, summary: "A")
+        fixture.settings.showWorktreeSessions = true
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let project = try #require(model.sidebarProjects.first { $0.name == "acme-api" })
+        let fresh = try #require(model.newTab(in: projectDir))
+        #expect(model.store.sessions.map(\.id) == ["a"])
+        #expect(model.tabs.map(\.id) == [fresh.id])
+
+        model.archive(project)
+        #expect(model.tabs.isEmpty)
+        #expect(model.store.sessions.first { $0.id == "a" }.map(model.isArchived) == true)
+    }
+
+    @Test @MainActor
     func sidebarDismissClosesAnOpenTabAndDeletesAClosedChat() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
