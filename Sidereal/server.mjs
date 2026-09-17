@@ -96,6 +96,11 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
       };
       if (role === 'host') {
         take('host');
+        if (room.phone) {
+          const previousPhone = room.phone;
+          room.phone = null;
+          previousPhone.terminate();
+        }
         if (ticket) {
           if (room.ticket && room.ticket !== ticket && tickets.get(room.ticket) === id) tickets.delete(room.ticket);
           tickets.set(ticket, id);

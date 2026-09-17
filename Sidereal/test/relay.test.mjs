@@ -131,6 +131,25 @@ test('a host reconnect with the same token replaces the old socket', async t => 
   await firstClosed;
 });
 
+test('a host reconnect drops the current phone so it can pair again', async t => {
+  const { base, room, hostToken } = await setup(t);
+  const options = { headers: { Authorization: `Bearer ${hostToken}` } };
+  const first = connect(base, room, 'host', options);
+  await message(first);
+  const firstPeer = message(first);
+  const phone = connect(base, room, 'phone', { origin: 'http://localhost:3099' });
+  await firstPeer;
+  if (phone.readyState !== WebSocket.OPEN) await once(phone, 'open');
+  const phoneClosed = once(phone, 'close');
+  const second = connect(base, room, 'host', options);
+  assert.equal((await message(second)).type, 'ready');
+  await phoneClosed;
+  const nextPeer = message(second);
+  const next = connect(base, room, 'phone', { origin: 'http://localhost:3099' });
+  await once(next, 'open');
+  assert.equal((await nextPeer).type, 'peer');
+});
+
 test('a host with the wrong token still cannot take the slot', async t => {
   const { base, room, hostToken } = await setup(t);
   const host = connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` } });
