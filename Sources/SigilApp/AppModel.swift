@@ -19,7 +19,7 @@ final class AppModel {
     let store: SessionStore
     /// The right-hand utility column: scratch shell and per-folder notes.
     let panel: RightPanel
-    let remoteControl = RemoteControl()
+    let remoteControl: RemoteControl
 
     private(set) var tabs: [TerminalTab] = []
     var selectedTabID: TerminalTab.ID? {
@@ -96,11 +96,13 @@ final class AppModel {
         mcpBinary: URL? = nil,
         tabMessagingSocketURL: URL? = nil,
         canonicalPath: (@Sendable (String) -> String)? = nil,
-        panel: RightPanel? = nil
+        panel: RightPanel? = nil,
+        pairingStore: (any RemotePairingStore)? = nil
     ) {
         self.settings = settings
         self.store = store
         self.panel = panel ?? RightPanel()
+        self.remoteControl = RemoteControl(store: pairingStore ?? KeychainRemotePairingStore())
         self.trashConversation = trashConversation
         self.presentError = presentError
         self.registrationRunner = registrationRunner ?? BridgeRegistration.processRunner
@@ -122,6 +124,9 @@ final class AppModel {
         applyAppearance()
         restoreOpenTabs()
         preparePanel()
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
+            remoteControl.resumeIfPaired(model: self)
+        }
         await reconcileTabMessaging()
     }
 

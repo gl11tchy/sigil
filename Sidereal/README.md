@@ -57,11 +57,11 @@ It shows up to 100 open tabs and the latest 12 KB of readable output. Phone file
 are written into Sigil’s drop cache (4 MB each) and pasted as paths. It does not
 list closed conversations, resize the Mac terminal, or expose MCP.
 
-The Mac must remain awake with Sigil running. Disconnect in Sigil revokes access;
-quitting the app also revokes it. Phone reloads can reconnect while Sigil remains
-open. A relay restart or the 24-hour session limit requires a new QR scan.
-The phone stores a non-extractable key in IndexedDB, not localStorage. If installing
-the PWA creates a separate browser storage area, disconnect and scan again there.
+Sigil must be running to control sessions. Scan once; the phone reconnects after
+a Sigil restart, a Mac sleep, a relay restart, or a new room. Disconnect in Sigil
+revokes the Mac pairing. Quitting does not. The phone stores a non-extractable
+key and a reconnect ticket in IndexedDB, not localStorage. If installing the PWA
+creates a separate browser storage area, disconnect and scan again there.
 Forget this Mac clears the phone's stored key; it does not revoke other copies of
 that credential. Use Disconnect on the Mac to revoke authorization.
 
@@ -82,7 +82,8 @@ The relay limits itself to 100 rooms, 20 room allocations/minute, one phone per 
 30 frames/second per socket, 110 KB frames, and bounded outgoing buffers. These are
 single-process limits, not a replacement for an internet-edge DoS/WAF policy.
 Pending rooms and disconnected hosts expire after five minutes. Host reconnection
-within that grace interval preserves pairing. Rooms expire after 24 hours.
+within that grace interval preserves the room. After that the Mac allocates a
+new room and re-registers the same ticket. Rooms expire after 24 hours.
 
 ## Verify
 

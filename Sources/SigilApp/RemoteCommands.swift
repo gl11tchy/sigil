@@ -18,6 +18,7 @@ struct RemoteReply: Codable, Sendable {
     var ok = true
     var error: String?
     var state: RemoteState?
+    var ticket: String?
 }
 
 @MainActor

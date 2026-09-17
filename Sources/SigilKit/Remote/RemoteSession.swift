@@ -33,9 +33,10 @@ public struct RemoteRequest: Codable, Sendable {
     }
 }
 
-/// One phone authorization. Credentials deliberately do not survive a Mac app restart.
+/// One phone authorization. The Mac may restore a paired device key and ticket.
 public struct RemoteSession: Sendable {
     public let pairingKey: String
+    public let ticket: String
     public let expiresAt: Date
     public private(set) var challenge = RemoteCrypto.randomKey()
     public private(set) var deviceKey: String?
@@ -44,6 +45,14 @@ public struct RemoteSession: Sendable {
 
     public init(now: Date = Date()) {
         pairingKey = RemoteCrypto.randomKey()
+        ticket = RemoteCrypto.randomKey()
+        expiresAt = now.addingTimeInterval(300)
+    }
+
+    public init(deviceKey: String, ticket: String, now: Date = Date()) {
+        pairingKey = RemoteCrypto.randomKey()
+        self.ticket = ticket
+        self.deviceKey = deviceKey
         expiresAt = now.addingTimeInterval(300)
     }
 

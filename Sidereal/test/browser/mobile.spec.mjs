@@ -17,13 +17,14 @@ async function pair(page, origin, initialOutput, options = {}) {
     await once(previousHost, 'close');
   }
   const bootstrap = randomKey();
+  const ticket = randomKey();
   let key = await importKey(bootstrap), selected = 'one', peer, challenge, serial = Promise.resolve();
   const actions = [], errors = [];
   const terminal = title => `${title}\n\n${Array.from({ length: 35 }, (_, i) => `Line ${i + 1}: Verified the mobile layout and terminal output.`).join('\n')}\n\nReady for your next message.`;
   const outputs = { one: initialOutput ?? terminal('Mobile layout review'), two: terminal('Release checks') };
   let ws;
   for (let attempt = 0; ; attempt++) {
-    ws = new WebSocket(`${origin.replace(/^http/, 'ws')}/connect?room=${room}&role=host`, { headers: { Authorization: `Bearer ${hostToken}` } });
+    ws = new WebSocket(`${origin.replace(/^http/, 'ws')}/connect?room=${room}&role=host&ticket=${ticket}`, { headers: { Authorization: `Bearer ${hostToken}` } });
     try { await once(ws, 'open'); break; }
     catch (error) { if (attempt >= 9) throw error; await new Promise(resolve => setTimeout(resolve, 100)); }
   }
@@ -47,7 +48,7 @@ async function pair(page, origin, initialOutput, options = {}) {
           { id: 'one', title: 'Mobile layout review', status: options.statuses?.one ?? 'working' },
           { id: 'two', title: 'Release checks', status: options.statuses?.two ?? 'idle' }],
           selectedTabID: selected, terminal: outputs[selected] };
-        ws.send(JSON.stringify({ peer, data: await seal({ challenge, sequence: request.sequence, ok: true, state }, key, 'mac') }));
+        ws.send(JSON.stringify({ peer, data: await seal({ challenge, sequence: request.sequence, ok: true, ticket, state }, key, 'mac') }));
       }
     }).catch(error => errors.push(error));
   });
@@ -55,6 +56,15 @@ async function pair(page, origin, initialOutput, options = {}) {
   await expect(page.locator('#status')).toHaveText('Connected');
   return { actions, errors, close: () => ws.close() };
 }
+
+test('a stored ticket reconnects without a QR fragment', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mac = await pair(page, baseURL);
+  try {
+    await page.goto(baseURL);
+    await expect(page.locator('#status')).toHaveText('Connected');
+  } finally { mac.close(); }
+});
 
 for (const width of [320, 390, 768, 1280]) {
   test(`reading and sending fit the ${width}px viewport`, async ({ page, baseURL }, testInfo) => {

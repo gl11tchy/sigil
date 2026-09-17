@@ -185,7 +185,9 @@ function connect() {
   challenge = null; sequence = 0;
   const url = new URL('/connect', location.origin);
   url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  url.search = new URLSearchParams({ room: credential.room, role: 'phone' });
+  url.search = credential.ticket
+    ? new URLSearchParams({ ticket: credential.ticket, role: 'phone' })
+    : new URLSearchParams({ room: credential.room, role: 'phone' });
   const ws = socket = new WebSocket(url);
   connectTimer = setTimeout(() => {
     if (current !== generation || socket !== ws) return;
@@ -223,6 +225,11 @@ function connect() {
           pending.delete(reply.sequence); clearTimeout(item.timer);
           item.reject(new Error(reply.error || 'The Mac could not complete this action.'));
           return;
+        }
+        if (typeof reply.ticket === 'string' && /^[a-f0-9]{64}$/.test(reply.ticket)
+            && reply.ticket !== credential.ticket) {
+          credential.ticket = reply.ticket;
+          try { await storage('put', credential); } catch { /* keep the in-memory ticket */ }
         }
         if (reply.state) render(reply.state);
         pending.delete(reply.sequence); clearTimeout(item.timer);

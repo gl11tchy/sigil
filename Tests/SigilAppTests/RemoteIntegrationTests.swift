@@ -55,7 +55,8 @@ struct RemoteIntegrationTests {
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
         let settings = AppSettings(defaults: defaults)
         settings.executablePath = executable.path
-        let model = AppModel(settings: settings, presentError: { _ in })
+        let pairingStore = InMemoryRemotePairingStore()
+        let model = AppModel(settings: settings, presentError: { _ in }, pairingStore: pairingStore)
         defer { model.closeAllTabsAndWait() }
         let tab = try #require(model.newTab(in: root))
         for _ in 0..<100 {
@@ -103,6 +104,8 @@ struct RemoteIntegrationTests {
             try #require(pairFrame["data"]), key: device, direction: "mac")
         #expect(pairReply.ok)
         #expect(pairReply.state?.tabs.first?.id == tab.id.uuidString)
+        let ticket = try #require(pairReply.ticket)
+        #expect(RemoteCrypto.isValidKey(ticket))
         #expect(model.remoteControl.isPaired)
         #expect(model.remoteControl.pairingURL == nil)
         for command in [
@@ -130,8 +133,40 @@ struct RemoteIntegrationTests {
         model.remoteControl.stop()
         do {
             _ = try await phone.receive()
-            Issue.record("Phone remained connected after revocation")
+            Issue.record("Phone remained connected after the Mac closed the socket")
         } catch {}
+        #expect(!model.remoteControl.isEnabled)
+        #expect(pairingStore.load() != nil)
+        model.remoteControl.start(urlText: origin, model: model)
+        #expect(model.remoteControl.isPaired)
+        for _ in 0..<200 {
+            if model.remoteControl.status == "Phone disconnected" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(model.remoteControl.status == "Phone disconnected")
+        endpoint.queryItems = [
+            URLQueryItem(name: "ticket", value: ticket), URLQueryItem(name: "role", value: "phone"),
+        ]
+        var restoredRequest = URLRequest(url: try #require(endpoint.url))
+        restoredRequest.setValue(phoneOrigin, forHTTPHeaderField: "Origin")
+        let restored = network.webSocketTask(with: restoredRequest)
+        restored.resume()
+        defer { restored.cancel(with: .goingAway, reason: nil) }
+        let restoredHello = try await receive(restored)
+        let restoredChallenge = try #require(restoredHello["hello"])
+        try await send(
+            [
+                "data": RemoteCrypto.seal(
+                    RemoteRequest(challenge: restoredChallenge, sequence: 1, action: "state"), key: device,
+                    direction: "phone")
+            ], restored)
+        let restoredFrame = try await receive(restored)
+        let restoredReply: RemoteReply = try RemoteCrypto.open(
+            try #require(restoredFrame["data"]), key: device, direction: "mac")
+        #expect(restoredReply.ok)
+        #expect(restoredReply.ticket == ticket)
+        model.remoteControl.stop(revoke: true)
+        #expect(pairingStore.load() == nil)
         #expect(!model.remoteControl.isEnabled)
     }
 
