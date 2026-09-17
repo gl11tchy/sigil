@@ -104,15 +104,76 @@ test('an older room survives a brief host disconnect and accepts reconnect', asy
   assert.equal((await message(restored)).type, 'ready');
 });
 
-test('an occupied phone slot and oversized frames are rejected', async t => {
+test('a second phone takes over the occupied slot', async t => {
+  const { base, room, hostToken } = await setup(t);
+  const host = connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` } });
+  await message(host);
+  const firstPeer = message(host);
+  const first = connect(base, room, 'phone', { origin: 'http://localhost:3099' });
+  await firstPeer;
+  if (first.readyState !== WebSocket.OPEN) await once(first, 'open');
+  const nextPeer = message(host);
+  const firstClosed = once(first, 'close');
+  const second = connect(base, room, 'phone', { origin: 'http://localhost:3099' });
+  await once(second, 'open');
+  await firstClosed;
+  assert.equal((await nextPeer).type, 'peer');
+});
+
+test('a host reconnect with the same token replaces the old socket', async t => {
+  const { base, room, hostToken } = await setup(t);
+  const options = { headers: { Authorization: `Bearer ${hostToken}` } };
+  const first = connect(base, room, 'host', options);
+  await message(first);
+  const firstClosed = once(first, 'close');
+  const second = connect(base, room, 'host', options);
+  assert.equal((await message(second)).type, 'ready');
+  await firstClosed;
+});
+
+test('a host reconnect drops the current phone so it can pair again', async t => {
+  const { base, room, hostToken } = await setup(t);
+  const options = { headers: { Authorization: `Bearer ${hostToken}` } };
+  const first = connect(base, room, 'host', options);
+  await message(first);
+  const firstPeer = message(first);
+  const phone = connect(base, room, 'phone', { origin: 'http://localhost:3099' });
+  await firstPeer;
+  if (phone.readyState !== WebSocket.OPEN) await once(phone, 'open');
+  const phoneClosed = once(phone, 'close');
+  const second = connect(base, room, 'host', options);
+  assert.equal((await message(second)).type, 'ready');
+  await phoneClosed;
+  const nextPeer = message(second);
+  const next = connect(base, room, 'phone', { origin: 'http://localhost:3099' });
+  await once(next, 'open');
+  assert.equal((await nextPeer).type, 'peer');
+});
+
+test('a host with the wrong token still cannot take the slot', async t => {
+  const { base, room, hostToken } = await setup(t);
+  const host = connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` } });
+  await message(host);
+  await once(connect(base, room, 'host'), 'error');
+});
+
+test('an unknown ticket still connects when the room id is present', async t => {
+  const { base, room, hostToken } = await setup(t);
+  const host = connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` } });
+  await message(host);
+  const notice = message(host);
+  const phone = connect(base, room, 'phone', { origin: 'http://localhost:3099', ticket: ticket() });
+  await once(phone, 'open');
+  assert.equal((await notice).type, 'peer');
+});
+
+test('oversized frames are rejected', async t => {
   const { base, room, hostToken } = await setup(t);
   const host = connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` } });
   await message(host);
   const peer = message(host);
   const phone = connect(base, room, 'phone', { origin: 'http://localhost:3099' });
   await peer;
-  await once(connect(base, room, 'phone', { origin: 'http://localhost:3099' }), 'error');
-  await once(connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` } }), 'error');
   const closed = once(phone, 'close');
   phone.send('x'.repeat(110001));
   assert.equal((await closed)[0], 1009);

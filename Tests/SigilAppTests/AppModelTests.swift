@@ -440,6 +440,7 @@ struct AppModelTests {
 
         await model.onAppear()
 
+        #expect(!model.remoteControl.isEnabled)
         #expect(model.tabs.count == 1)
         #expect(fixture.settings.isTabMessagingEnabled)
         #expect(
@@ -3141,7 +3142,8 @@ private final class ModelFixture {
                 mcpBinary: mcpBinary,
                 tabMessagingSocketURL: socketURL,
                 canonicalPath: canonicalPath ?? { GrokPaths.canonicalPath($0) },
-                panel: RightPanel(defaults: defaults)
+                panel: RightPanel(defaults: defaults),
+                pairingStore: InMemoryRemotePairingStore()
             )
         }
         if let canonicalPath {
@@ -3151,7 +3153,8 @@ private final class ModelFixture {
                 trashConversation: trashConversation,
                 presentError: presentError,
                 canonicalPath: canonicalPath,
-                panel: RightPanel(defaults: defaults)
+                panel: RightPanel(defaults: defaults),
+                pairingStore: InMemoryRemotePairingStore()
             )
         }
         return AppModel(
@@ -3159,7 +3162,8 @@ private final class ModelFixture {
             store: store,
             trashConversation: trashConversation,
             presentError: presentError,
-            panel: RightPanel(defaults: defaults)
+            panel: RightPanel(defaults: defaults),
+            pairingStore: InMemoryRemotePairingStore()
         )
     }
 

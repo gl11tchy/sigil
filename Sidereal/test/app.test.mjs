@@ -342,7 +342,7 @@ test('a ticket in a Mac reply is stored and used on reconnect', async () => {
   await settle();
   const next = String(page.sockets.at(-1).url);
   assert.match(next, new RegExp(`ticket=${ticket}`));
-  assert.equal(next.includes('room='), false);
+  assert.match(next, new RegExp(`room=${'a'.repeat(32)}`));
 });
 
 test('a same-document QR fragment reloads the app but an empty fragment does not', async () => {

@@ -185,9 +185,10 @@ function connect() {
   challenge = null; sequence = 0;
   const url = new URL('/connect', location.origin);
   url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  url.search = credential.ticket
-    ? new URLSearchParams({ ticket: credential.ticket, role: 'phone' })
-    : new URLSearchParams({ room: credential.room, role: 'phone' });
+  const params = new URLSearchParams({ role: 'phone' });
+  if (credential.room) params.set('room', credential.room);
+  if (credential.ticket) params.set('ticket', credential.ticket);
+  url.search = params;
   const ws = socket = new WebSocket(url);
   connectTimer = setTimeout(() => {
     if (current !== generation || socket !== ws) return;
