@@ -18,6 +18,13 @@ final class RemoteControl {
     @ObservationIgnored private var generation = UUID()
     @ObservationIgnored private var network: URLSession?
 
+    static let productionOrigin = "https://sigilapp.dev"
+    static let legacyRailwayOrigin = "https://sidereal-production-587c.up.railway.app"
+
+    static func preferredOrigin(_ text: String) -> String {
+        text == legacyRailwayOrigin ? productionOrigin : text
+    }
+
     static func origin(_ text: String) -> URL? {
         guard let url = URL(string: text.trimmingCharacters(in: .whitespacesAndNewlines)),
             let components = URLComponents(url: url, resolvingAgainstBaseURL: false),

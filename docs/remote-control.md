@@ -81,7 +81,7 @@ Hosting needs a real HTTPS deployment; local tests do not prove cellular/iPhone 
   unauthorized peer eviction, connection-bound Send, and terminal input-mode handling.
 - Railway deployment `4dbae614-d6c6-4aa6-8bff-450204cd5e24` reached SUCCESS.
   Public HTTPS health, security headers, and the deployed browser page passed.
-- `SIGIL_REMOTE_TEST_ORIGIN=https://sidereal-production-587c.up.railway.app swift test --no-parallel --filter RemoteIntegrationTests`
+- `SIGIL_REMOTE_TEST_ORIGIN=https://sigilapp.dev swift test --no-parallel --filter RemoteIntegrationTests`
   passed against the deployed relay: encrypted pairing, PTY input/output, and revocation.
 - Physical camera scan, cellular access, and iOS Home Screen installation remain
   device-only checks; no physical phone was available to the agent.
@@ -91,7 +91,7 @@ Hosting needs a real HTTPS deployment; local tests do not prove cellular/iPhone 
 - Project: `26f52bc8-daae-4371-aa70-4cebb2d0f222` (sidereal).
 - Environment: `1a3850e2-c49f-45c4-bb54-627dd102c646` (production).
 - Service: `d7e3c251-0ae2-45f9-b4b1-c819d3fa9ece` (sidereal).
-- Origin: `https://sidereal-production-587c.up.railway.app`.
+- Origin: `https://sigilapp.dev`.
 - Single replica in `sfo`; `/health`; app sleeping disabled through service settings.
 - Source: local upload of `Sidereal` from commit `f412eaf`; no GitHub auto-deploy yet.
 - Re-deploy with `railway up ./Sidereal --path-as-root --project 26f52bc8-daae-4371-aa70-4cebb2d0f222 --environment 1a3850e2-c49f-45c4-bb54-627dd102c646 --service d7e3c251-0ae2-45f9-b4b1-c819d3fa9ece --detach`.

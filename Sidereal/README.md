@@ -1,6 +1,6 @@
 # Sidereal
 
-Live companion: https://sidereal-production-587c.up.railway.app
+Live companion: https://sigilapp.dev
 Sigil uses this address by default.
 
 Phone companion and encrypted relay for Sigil. Deploy this directory as a single
