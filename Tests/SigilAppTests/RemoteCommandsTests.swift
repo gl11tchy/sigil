@@ -140,6 +140,10 @@ struct RemoteCommandsTests {
             #expect(RemoteControl.origin(address) == nil)
         }
         #expect(RemoteControl.origin("https://example.com/")?.absoluteString == "https://example.com")
+        #expect(RemoteControl.origin(RemoteControl.productionOrigin)?.absoluteString == RemoteControl.productionOrigin)
+        #expect(RemoteControl.preferredOrigin(RemoteControl.legacyRailwayOrigin) == RemoteControl.productionOrigin)
+        #expect(RemoteControl.preferredOrigin(RemoteControl.productionOrigin) == RemoteControl.productionOrigin)
+        #expect(RemoteControl.preferredOrigin("https://example.com") == "https://example.com")
         let value =
             "https://example.com/#room=\(String(repeating: "a", count: 32))&key=\(String(repeating: "b", count: 64))"
         let image = try #require(RemoteControlView.qrImage(value))

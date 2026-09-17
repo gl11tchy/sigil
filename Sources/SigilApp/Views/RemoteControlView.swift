@@ -4,7 +4,7 @@ import SwiftUI
 
 struct RemoteControlView: View {
     @Bindable var model: AppModel
-    @AppStorage("remoteServerURL") private var serverURL = "https://sidereal-production-587c.up.railway.app"
+    @AppStorage("remoteServerURL") private var serverURL = RemoteControl.productionOrigin
 
     var body: some View {
         Form {
@@ -57,6 +57,7 @@ struct RemoteControlView: View {
         }
         .formStyle(.grouped)
         .frame(minHeight: model.remoteControl.pairingURL == nil ? 280 : 550)
+        .onAppear { serverURL = RemoteControl.preferredOrigin(serverURL) }
     }
 
     static func qrImage(_ text: String) -> NSImage? {
