@@ -319,6 +319,8 @@ final class AppModel {
         unpin(session)
         settings.archivedConversations = SidebarOrganization.inserting(
             session, onto: settings.archivedConversations, samePath: samePath)
+        let ids = tabs.filter { tabMatches($0, sessionID: session.id, cwd: session.cwd) }.map(\.id)
+        for id in ids { closeTab(id) }
     }
 
     func unarchive(_ session: GrokSession) {
