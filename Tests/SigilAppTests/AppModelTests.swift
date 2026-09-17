@@ -298,6 +298,49 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func readingAChatThenLeavingClearsItsUnreadDot() throws {
+        _ = NSApplication.shared
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        let first = try #require(model.newTab(in: cwd))
+        let second = try #require(model.newTab(in: cwd))
+        first.enqueueBridgePrompt("turn finished")
+
+        #expect(first.hasUnseenActivity)
+        #expect(
+            SidebarActivityDot.isVisible(
+                activity: first.activity,
+                hasUnseenActivity: first.hasUnseenActivity,
+                isActive: false
+            )
+        )
+
+        model.select(first.id)
+        #expect(!first.hasUnseenActivity)
+        #expect(
+            !SidebarActivityDot.isVisible(
+                activity: first.activity,
+                hasUnseenActivity: first.hasUnseenActivity,
+                isActive: true
+            )
+        )
+
+        model.select(second.id)
+        #expect(!first.hasUnseenActivity)
+        #expect(
+            !SidebarActivityDot.isVisible(
+                activity: first.activity,
+                hasUnseenActivity: first.hasUnseenActivity,
+                isActive: false
+            )
+        )
+    }
+
+    @Test @MainActor
     func newTabTrimsWhitespaceInModelAndEffort() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }

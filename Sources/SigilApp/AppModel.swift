@@ -264,6 +264,11 @@ final class AppModel {
         tabs.first { tabMatches($0, sessionID: session.id, cwd: session.cwd) }?.activity
     }
 
+    func hasUnseenActivity(of session: GrokSession) -> Bool {
+        tabs.first { tabMatches($0, sessionID: session.id, cwd: session.cwd) }?.hasUnseenActivity
+            ?? false
+    }
+
     func isWorking(_ session: GrokSession) -> Bool {
         activity(of: session) == .working
     }

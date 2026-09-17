@@ -8,6 +8,19 @@ private enum SidebarFocus: Hashable {
     case rename
 }
 
+/// Sidebar row light: work in flight, or a finished turn that has not been read.
+enum SidebarActivityDot {
+    static func isVisible(
+        activity: TerminalTab.Activity?,
+        hasUnseenActivity: Bool,
+        isActive: Bool
+    ) -> Bool {
+        guard let activity else { return false }
+        if activity == .working { return true }
+        return hasUnseenActivity && !isActive
+    }
+}
+
 /// The thread viewer: every Grok Build conversation on this machine.
 ///
 /// Home is the project list. Recents and Archived sit under it as destinations
@@ -518,6 +531,7 @@ struct SidebarView: View {
             searchQuery: model.searchText,
             state: state(of: session),
             activity: model.activity(of: session),
+            hasUnseenActivity: model.hasUnseenActivity(of: session),
             isPinned: isPinned,
             isArchived: isArchived,
             isKeyboardSelected: model.sessionKey(session) == keyboardSelectionID,
@@ -1370,6 +1384,7 @@ private struct SessionRow: View {
     let searchQuery: String
     let state: State
     let activity: TerminalTab.Activity?
+    let hasUnseenActivity: Bool
     let isPinned: Bool
     let isArchived: Bool
     let isKeyboardSelected: Bool
@@ -1476,7 +1491,13 @@ private struct SessionRow: View {
                 .truncationMode(textTruncationMode(paint.subtitleTruncation))
             }
             Spacer(minLength: 8)
-            if let activity, activity == .working || state == .open, !isRenaming {
+            if let activity, !isRenaming,
+                SidebarActivityDot.isVisible(
+                    activity: activity,
+                    hasUnseenActivity: hasUnseenActivity,
+                    isActive: state == .active
+                )
+            {
                 StatusDot(activity: activity)
             }
         }
@@ -1514,7 +1535,11 @@ private struct SessionRow: View {
         case .open: value = "Open in another tab"
         case .closed: value = "Closed"
         }
-        if activity == .working { value += ", working" }
+        if activity == .working {
+            value += ", working"
+        } else if hasUnseenActivity {
+            value += ", unread"
+        }
         return value
     }
 
