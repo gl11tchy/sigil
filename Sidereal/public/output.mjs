@@ -58,6 +58,37 @@ function isTreeOnly(line) {
   return /^[│| \t]+$/.test(line);
 }
 
+function isTurnChrome(line, previous) {
+  const whole = line.trim();
+  if (!whole) return false;
+  if (/\[hooks:\s*\d+\/\d+\]/.test(whole)) return true;
+  if (/^(?:[♦◆∴:]\s*)?(?:Thought for \d|Thinking\.{3}|Waiting for response|Worked for \d)/i.test(whole)) return true;
+  if (/^\d+[hms]?[\d.]*s?\s*↓/.test(whole)) return true;
+  if (/^\d{1,2}:\d{2} [AP]M$/.test(whole)) return Boolean(previous);
+  if (/^∴\s/.test(whole)) return true;
+  return false;
+}
+
+function stripClock(line) {
+  return line.replace(/\s{2,}\d{1,2}:\d{2} [AP]M\s*$/, '');
+}
+
+function unindentBubble(line) {
+  const match = line.match(/^(\s{6,})([A-Z].*)/);
+  if (!match || match[2].trim().split(/\s+/).length < 4) return line;
+  return match[2];
+}
+
+function isProseWrap(previous, line) {
+  if (!previous || !line) return false;
+  const prev = previous.trim();
+  const next = line.trim();
+  if (!prev || !next) return false;
+  if (/[.!?:;{}]$/.test(prev)) return false;
+  if (/^\s{1,4}\S/.test(line) && !/^\s{6,}/.test(line)) return false;
+  return /^[a-z0-9]/.test(next);
+}
+
 function stripTreeGutter(line) {
   const trimmed = line.trimEnd();
   if (/[│|]$/.test(trimmed) && /^[│|]/.test(trimmed.trimStart())) return line;
@@ -93,14 +124,26 @@ export function readableOutput(snapshot) {
   while (lines.length && isPadding(lines.at(-1))) lines.pop();
   const compact = [];
   let blanks = 0;
+  let inBubble = false;
   for (const line of lines) {
-    if (isPadding(line) || isTreeOnly(line)) {
+    const cleaned = stripClock(stripTreeGutter(line));
+    const previous = compact.at(-1);
+    if (isPadding(cleaned) || isTreeOnly(cleaned) || isTurnChrome(cleaned, previous && previous !== '' ? previous : '')) {
       if (++blanks === 1) compact.push('');
+      inBubble = false;
     } else {
       blanks = 0;
-      compact.push(stripTreeGutter(line));
+      const bubble = /^\s{6,}/.test(cleaned) || inBubble;
+      if (inBubble && isProseWrap(previous, cleaned)) {
+        compact[compact.length - 1] = `${previous.trim()} ${cleaned.trim()}`;
+      } else {
+        compact.push(unindentBubble(cleaned));
+        inBubble = bubble && /^[A-Z]/.test(cleaned.trim());
+      }
     }
   }
-  const output = compact.join('\n').trim();
+  while (compact.length && !compact[0].trim()) compact.shift();
+  while (compact.length && !compact.at(-1).trim()) compact.pop();
+  const output = compact.join('\n');
   return /^[\s┌┐└┘│─━]*$/.test(output) ? '' : output;
 }
