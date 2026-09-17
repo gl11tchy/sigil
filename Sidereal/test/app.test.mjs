@@ -57,9 +57,13 @@ async function browser() {
           close() {},
           transaction() {
             const transaction = {
-              objectStore: () => ({ get: () => ({ result: { room: 'a'.repeat(32), key: {} } }) }),
+              objectStore: () => ({
+                get: () => ({ result: { room: 'a'.repeat(32), key: {} } }),
+                put: () => ({}),
+                delete: () => ({}),
+              }),
             };
-            queueMicrotask(() => transaction.oncomplete());
+            queueMicrotask(() => { transaction.oncomplete?.(); });
             return transaction;
           },
         };
@@ -321,6 +325,24 @@ test('a command waiting behind a poll never crosses a reconnect', async () => {
   assert.deepEqual(original.sent.map(request => request.action), ['state', 'state']);
   assert.deepEqual(replacement.sent.map(request => request.action), ['state']);
   assert.equal(page.element('message').value, 'fixture input');
+});
+
+test('a ticket in a Mac reply is stored and used on reconnect', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  await page.fireTimer(1000);
+  const poll = socket.sent.at(-1);
+  const ticket = 'cd'.repeat(32);
+  socket.receive({ data: JSON.stringify({
+    challenge: poll.challenge, sequence: poll.sequence, ok: true, ticket,
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
+  }) });
+  await settle();
+  page.element('reconnect').onclick();
+  await settle();
+  const next = String(page.sockets.at(-1).url);
+  assert.match(next, new RegExp(`ticket=${ticket}`));
+  assert.equal(next.includes('room='), false);
 });
 
 test('a same-document QR fragment reloads the app but an empty fragment does not', async () => {

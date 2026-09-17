@@ -74,6 +74,26 @@ struct RemoteSessionTests {
         #expect(try session.accept(RemoteCrypto.seal(fresh, key: device, direction: "phone")).action == "state")
     }
 
+    @Test func restoredPairingAcceptsCommandsWithoutAQR() throws {
+        let device = RemoteCrypto.randomKey()
+        let ticket = RemoteCrypto.randomKey()
+        let start = Date(timeIntervalSince1970: 1_000)
+        var session = RemoteSession(deviceKey: device, ticket: ticket, now: start)
+        #expect(session.isPaired)
+        #expect(session.ticket == ticket)
+        #expect(RemoteCrypto.isValidKey(RemoteSession().ticket))
+        let state = RemoteRequest(challenge: session.challenge, sequence: 1, action: "state")
+        #expect(
+            try session.accept(
+                RemoteCrypto.seal(state, key: device, direction: "phone"), now: start.addingTimeInterval(301)
+            ).action == "state")
+        let pair = RemoteRequest(
+            challenge: session.challenge, sequence: 2, action: "pair", text: RemoteCrypto.randomKey())
+        #expect(throws: (any Error).self) {
+            _ = try session.accept(RemoteCrypto.seal(pair, key: device, direction: "phone"), now: start)
+        }
+    }
+
     @Test func fileChunksMayBeLargerThanPromptText() throws {
         var session = RemoteSession()
         let device = RemoteCrypto.randomKey()

@@ -6,6 +6,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 
 const token = () => randomBytes(32).toString('hex');
 const equal = (a, b) => typeof a === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+const hex64 = value => typeof value === 'string' && value.length === 64 && /^[a-f0-9]+$/.test(value);
 const assets = new Map([
   ['/', ['index.html', 'text/html']], ['/app.mjs', ['app.mjs', 'text/javascript']],
   ['/output.mjs', ['output.mjs', 'text/javascript']],
@@ -22,6 +23,7 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
     throw new Error('PUBLIC_ORIGIN must be an HTTPS origin (HTTP is allowed only on loopback).');
   }
   const rooms = new Map();
+  const tickets = new Map();
   let creationWindow = now(), creations = 0;
   const wss = new WebSocketServer({ noServer: true, maxPayload: 110000, perMessageDeflate: false });
   const server = http.createServer(async (req, res) => {
@@ -63,13 +65,17 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
     const room = rooms.get(id);
     if (!room) return;
     rooms.delete(id);
+    if (room.ticket && tickets.get(room.ticket) === id) tickets.delete(room.ticket);
     room.phone?.terminate(); room.host?.terminate();
   };
   server.on('upgrade', (req, socket, head) => {
     const reject = () => { socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); };
     let url;
     try { url = new URL(req.url, publicOrigin); } catch { reject(); return; }
-    const id = url.searchParams.get('room'), role = url.searchParams.get('role');
+    const role = url.searchParams.get('role'), ticket = url.searchParams.get('ticket');
+    if (ticket != null && !hex64(ticket)) { reject(); return; }
+    let id = url.searchParams.get('room');
+    if (role === 'phone' && ticket) id = tickets.get(ticket);
     const room = rooms.get(id);
     if (url.pathname !== '/connect' || !room) { reject(); return; }
     if (role === 'host') {
@@ -83,7 +89,11 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
       ws.on('pong', () => { ws.alive = true; });
       let windowStart = now(), count = 0;
       const peer = randomBytes(16).toString('hex');
-      if (role === 'host') { room.host = ws; send(ws, { type: 'ready' }); }
+      if (role === 'host') {
+        room.host = ws;
+        if (ticket) { tickets.set(ticket, id); room.ticket = ticket; }
+        send(ws, { type: 'ready' });
+      }
       else { room.phone = ws; room.peer = peer; send(room.host, { type: 'peer', peer }); }
       ws.on('message', (bytes, binary) => {
         if (now() - windowStart >= 1000) { count = 0; windowStart = now(); }

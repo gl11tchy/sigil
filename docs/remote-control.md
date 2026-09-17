@@ -19,11 +19,17 @@ Remote input has the same authority as typing in an open Grok session.
 - QR pairing uses a random 256-bit secret in the URL fragment, never a query.
 - Pairing expires after five minutes and is consumed once. A phone supplies a
   different 256-bit device key through the encrypted pairing exchange.
+- After that exchange the Mac stores origin, device key, and a 256-bit ticket
+  in Keychain. Encrypted replies carry the ticket. The phone stores it in
+  IndexedDB and reconnects with it. Disconnect on the Mac revokes storage;
+  quitting does not. Rooms stay ephemeral; the host re-registers the same
+  ticket on a new room after a drop.
 - Commands and responses use AES-256-GCM (96-bit random nonce, 128-bit tag).
   Direction is authenticated. Each connection has a fresh Mac-generated challenge;
   each request has a strictly increasing sequence. No command retries or offline queue.
-- The Mac keeps device credentials in memory. The phone stores a non-extractable
-  CryptoKey in IndexedDB. Disconnecting in Sigil or quitting revokes access.
+- The Mac keeps the device key and ticket in Keychain (`AfterFirstUnlockThisDeviceOnly`).
+  The phone stores a non-extractable CryptoKey and the ticket in IndexedDB.
+  Disconnecting in Sigil revokes Mac storage. Quitting does not.
 - The relay routes bounded ciphertext, not terminal contents or encryption keys.
   The web host is trusted to serve the correct client code (as with any web app).
 - Frames, peers, rooms, request rates and send buffers have explicit limits.
@@ -96,4 +102,5 @@ Hosting needs a real HTTPS deployment; local tests do not prove cellular/iPhone 
 - Source: local upload of `Sidereal` from commit `f412eaf`; no GitHub auto-deploy yet.
 - Re-deploy with `railway up ./Sidereal --path-as-root --project 26f52bc8-daae-4371-aa70-4cebb2d0f222 --environment 1a3850e2-c49f-45c4-bb54-627dd102c646 --service d7e3c251-0ae2-45f9-b4b1-c819d3fa9ece --detach`.
 - Rollback: remove/revert the active Railway deployment. This only ends remote
-  sessions; it does not alter Mac sessions or files. Restarting the relay requires re-pairing.
+  sessions; it does not alter Mac sessions or files. Restarting the relay drops
+  live sockets; a stored ticket reconnects when Sigil is running.

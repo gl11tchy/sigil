@@ -14,13 +14,13 @@ struct RemoteControlView: View {
                     .disabled(model.remoteControl.isEnabled)
                 if model.remoteControl.isEnabled {
                     LabeledContent("Status", value: model.remoteControl.status)
-                    Button("Disconnect", role: .destructive) { model.remoteControl.stop() }
+                    Button("Disconnect", role: .destructive) { model.remoteControl.stop(revoke: true) }
                 } else {
                     Button("Connect Phone") { model.remoteControl.start(urlText: serverURL, model: model) }
                         .disabled(serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             } footer: {
-                Text("Your phone can read and control open sessions. Keep this Mac awake.")
+                Text("Your phone can read and control open sessions. Scan once; Disconnect revokes access.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
