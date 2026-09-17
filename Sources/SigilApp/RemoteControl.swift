@@ -121,6 +121,7 @@ final class RemoteControl {
                             self.status = session.isPaired ? "Phone disconnected" : "Scan to connect"
                         } else if let id = frame.peer, id == peer, let ciphertext = frame.data {
                             do {
+                                let firstPair = !session.isPaired
                                 let command = try session.accept(ciphertext)
                                 guard let model else {
                                     self.stop()
@@ -130,7 +131,7 @@ final class RemoteControl {
                                 self.pairingURL = nil
                                 self.expiresAt = nil
                                 self.status = "Phone connected"
-                                if let key = session.deviceKey {
+                                if firstPair, let key = session.deviceKey {
                                     self.store.save(
                                         RemotePairing(
                                             origin: origin.absoluteString, deviceKey: key, ticket: session.ticket))
@@ -165,6 +166,7 @@ final class RemoteControl {
     }
 
     func stop(revoke: Bool = false) {
+        let forgotten = !revoke || store.clear()
         generation = UUID()
         task?.cancel()
         task = nil
@@ -178,8 +180,7 @@ final class RemoteControl {
         pairingURL = nil
         expiresAt = nil
         status = "Off"
-        error = nil
-        if revoke { store.clear() }
+        error = forgotten ? nil : "Could not forget this phone. Try Disconnect again."
     }
 
     private func restoredSession(for origin: URL) -> RemoteSession {

@@ -11,7 +11,7 @@ struct RemotePairing: Codable, Equatable, Sendable {
 protocol RemotePairingStore: AnyObject {
     func load() -> RemotePairing?
     func save(_ pairing: RemotePairing)
-    func clear()
+    func clear() -> Bool
 }
 
 final class InMemoryRemotePairingStore: RemotePairingStore {
@@ -19,7 +19,10 @@ final class InMemoryRemotePairingStore: RemotePairingStore {
 
     func load() -> RemotePairing? { pairing }
     func save(_ pairing: RemotePairing) { self.pairing = pairing }
-    func clear() { pairing = nil }
+    @discardableResult func clear() -> Bool {
+        pairing = nil
+        return true
+    }
 }
 
 final class KeychainRemotePairingStore: RemotePairingStore {
@@ -60,13 +63,14 @@ final class KeychainRemotePairingStore: RemotePairingStore {
         SecItemAdd(query as CFDictionary, nil)
     }
 
-    func clear() {
+    @discardableResult func clear() -> Bool {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
-        SecItemDelete(query as CFDictionary)
+        let status = SecItemDelete(query as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
     }
 }
 

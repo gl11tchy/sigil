@@ -31,6 +31,20 @@ struct RemoteControlTests {
         #expect(store.load() == nil)
     }
 
+    @Test @MainActor func failedRevokeKeepsTheStoredPairing() {
+        let store = FailingClearStore(
+            pairing: RemotePairing(
+                origin: "https://example.com", deviceKey: RemoteCrypto.randomKey(),
+                ticket: RemoteCrypto.randomKey()))
+        let remote = RemoteControl(store: store)
+        let model = AppModel()
+        remote.start(urlText: "https://example.com", model: model)
+        remote.stop(revoke: true)
+        #expect(store.load() != nil)
+        #expect(remote.error == "Could not forget this phone. Try Disconnect again.")
+        #expect(!remote.isEnabled)
+    }
+
     @Test @MainActor func restoredPairingDoesNotShowAQRAndSurvivesStop() {
         let store = InMemoryRemotePairingStore()
         store.save(
@@ -87,4 +101,12 @@ struct RemoteControlTests {
             RemoteReply.self, from: try JSONEncoder().encode(RemoteReply(challenge: "c", sequence: 2)))
         #expect(bare.ticket == nil)
     }
+}
+
+private final class FailingClearStore: RemotePairingStore {
+    private var pairing: RemotePairing?
+    init(pairing: RemotePairing) { self.pairing = pairing }
+    func load() -> RemotePairing? { pairing }
+    func save(_ pairing: RemotePairing) { self.pairing = pairing }
+    func clear() -> Bool { false }
 }

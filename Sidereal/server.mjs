@@ -91,7 +91,11 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
       const peer = randomBytes(16).toString('hex');
       if (role === 'host') {
         room.host = ws;
-        if (ticket) { tickets.set(ticket, id); room.ticket = ticket; }
+        if (ticket) {
+          if (room.ticket && room.ticket !== ticket && tickets.get(room.ticket) === id) tickets.delete(room.ticket);
+          tickets.set(ticket, id);
+          room.ticket = ticket;
+        }
         send(ws, { type: 'ready' });
       }
       else { room.phone = ws; room.peer = peer; send(room.host, { type: 'peer', peer }); }

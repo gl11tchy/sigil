@@ -173,6 +173,27 @@ test('deleting an old room does not drop a ticket that moved to a newer room', a
   assert.equal((await notice).type, 'peer');
 });
 
+test('rebinding a room ticket drops the previous mapping', async t => {
+  const { base, room, hostToken } = await setup(t);
+  const first = 'ab'.repeat(32);
+  const second = 'cd'.repeat(32);
+  const host = connect(base, room, 'host', {
+    headers: { Authorization: `Bearer ${hostToken}` }, ticket: first,
+  });
+  await message(host);
+  host.close();
+  await once(host, 'close');
+  const restored = connect(base, room, 'host', {
+    headers: { Authorization: `Bearer ${hostToken}` }, ticket: second,
+  });
+  await message(restored);
+  await once(connect(base, null, 'phone', { origin: 'http://localhost:3099', ticket: first }), 'error');
+  const notice = message(restored);
+  const phone = connect(base, null, 'phone', { origin: 'http://localhost:3099', ticket: second });
+  await once(phone, 'open');
+  assert.equal((await notice).type, 'peer');
+});
+
 test('ticket connects reject a short token and a missing host', async t => {
   const { base, room, hostToken } = await setup(t);
   await once(connect(base, null, 'phone', { origin: 'http://localhost:3099', ticket: ticket() }), 'error');
