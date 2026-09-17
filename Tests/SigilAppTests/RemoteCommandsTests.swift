@@ -141,7 +141,14 @@ struct RemoteCommandsTests {
         }
         #expect(RemoteControl.origin("https://example.com/")?.absoluteString == "https://example.com")
         #expect(RemoteControl.origin(RemoteControl.productionOrigin)?.absoluteString == RemoteControl.productionOrigin)
+        #expect(RemoteControl.productionOrigin == "https://sigilapp.dev")
         #expect(RemoteControl.preferredOrigin(RemoteControl.legacyRailwayOrigin) == RemoteControl.productionOrigin)
+        #expect(
+            RemoteControl.preferredOrigin("https://sidereal-production-587c.up.railway.app/")
+                == RemoteControl.productionOrigin)
+        #expect(
+            RemoteControl.preferredOrigin("  https://sidereal-production-587c.up.railway.app  ")
+                == RemoteControl.productionOrigin)
         #expect(RemoteControl.preferredOrigin(RemoteControl.productionOrigin) == RemoteControl.productionOrigin)
         #expect(RemoteControl.preferredOrigin("https://example.com") == "https://example.com")
         let value =

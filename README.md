@@ -62,6 +62,10 @@ Open **Settings → Remote** to connect a phone using a QR code. The included
 small encrypted relay over HTTPS, then enter that address in Sigil. The Mac makes
 outbound connections only; no router ports need opening.
 
+The product page is in `Site/` and currently at
+[https://site-production-c4d1.up.railway.app](https://site-production-c4d1.up.railway.app).
+The live companion stays on [https://sigilapp.dev](https://sigilapp.dev) until
+`remote.sigilapp.dev` is healthy.
 See [Sidereal setup](Sidereal/README.md) for hosting, pairing, controls, and limits.
 Remote access is off by default. Disconnecting or quitting Sigil revokes it.
 

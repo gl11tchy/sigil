@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sigil docs</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <p class="wordmark"><a href="/">Sigil</a></p>
+    <nav>
+      <a href="/docs">Docs</a>
+      <a class="download" href="https://github.com/gl11tchy/sigil/releases/latest/download/Sigil.zip">Download Sigil.zip</a>
+    </nav>
+  </header>
+  <main>
+    <h1>Docs</h1>
+    <section>
+      <h2>Install</h2>
+      <p>Download <code>Sigil.zip</code> from the latest GitHub release. Unzip it and replace <code>/Applications/Sigil.app</code>.</p>
+      <p>Needs macOS 14 or later on Apple silicon, and the <code>grok</code> CLI at <code>~/.grok/bin/grok</code>. The zip is the GitHub Actions Mac build, not a universal binary. You can set another path in Settings.</p>
+    </section>
+    <section>
+      <h2>Sidebar, search, and tabs</h2>
+      <p>The sidebar lists every conversation on this Mac. Home is the project list. Open a folder to see its chats.</p>
+      <p>Search by title, folder, or path. Click a chat to reopen it. If it is already open, Sigil moves to that tab.</p>
+      <p>Tabs keep several sessions at once, each in its own folder. The sessions you had open come back on the next launch.</p>
+    </section>
+    <section>
+      <h2>Keyboard</h2>
+      <table>
+        <thead>
+          <tr><th>Shortcut</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><kbd>⌘T</kbd></td><td>New session in the current folder</td></tr>
+          <tr><td><kbd>⌘⇧N</kbd></td><td>New session in another folder</td></tr>
+          <tr><td><kbd>⌘W</kbd></td><td>Close tab</td></tr>
+          <tr><td><kbd>⌘⇧F</kbd></td><td>Find conversations</td></tr>
+          <tr><td><kbd>⌘B</kbd></td><td>Hide or show the thread list</td></tr>
+          <tr><td><kbd>⌘,</kbd></td><td>Settings</td></tr>
+        </tbody>
+      </table>
+      <p>In the thread list, arrow keys move the selection, Return opens it, and <kbd>F2</kbd> renames it.</p>
+    </section>
+    <section>
+      <h2>Pair a phone</h2>
+      <p>Remote access is off by default. Open Settings, then Remote. The companion is <a href="https://remote.sigilapp.dev">https://remote.sigilapp.dev</a>.</p>
+      <ol>
+        <li>Confirm that address and select Connect Phone.</li>
+        <li>Scan the QR with the phone camera.</li>
+        <li>Add the companion to the Home Screen from the browser Share menu.</li>
+      </ol>
+      <p>Sigil must stay open to control sessions. Disconnect revokes the pairing. If you paired before the companion moved to <a href="https://remote.sigilapp.dev">https://remote.sigilapp.dev</a>, scan again.</p>
+      <p>To host your own companion, deploy the Sidereal directory over HTTPS and enter that origin in Settings → Remote. A phone cannot use localhost.</p>
+    </section>
+    <section>
+      <h2>Limits</h2>
+      <p>The phone can select open sessions, read recent terminal output, send text, attach files, and stop a running turn. It does not list closed conversations.</p>
+      <p>Pair one phone at a time. Do not share pairing QR screenshots.</p>
+    </section>
+  </main>
+  <footer>
+    <p>MIT. <a href="https://github.com/gl11tchy/sigil">GitHub</a>. gl11tchy.</p>
+  </footer>
+</body>
+</html>

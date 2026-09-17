@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sigil</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1><a href="/">Sigil</a></h1>
+    <nav>
+      <a href="/docs">Docs</a>
+      <a class="download" href="https://github.com/gl11tchy/sigil/releases/latest/download/Sigil.zip">Download Sigil.zip</a>
+    </nav>
+  </header>
+  <main>
+    <p class="claim">A native macOS shell for the Grok Build CLI that runs the real grok terminal UI and lists every conversation you have ever had, searchable, one click from resuming.</p>
+    <p>
+      <a class="download" href="https://github.com/gl11tchy/sigil/releases/latest/download/Sigil.zip">Download Sigil.zip</a>
+    </p>
+    <p>Unzip the file and replace <code>/Applications/Sigil.app</code>. Needs macOS 14 or later on Apple silicon. The zip is the GitHub Actions Mac build, not a universal binary.</p>
+    <figure>
+      <img src="/screenshot.png" width="1800" height="984" alt="Sigil window with a searchable thread list on the left and a running Grok session on the right">
+      <figcaption>Demo data. The conversations shown are invented; the session on the right is real.</figcaption>
+    </figure>
+    <section>
+      <h2>Pair a phone</h2>
+      <ol>
+        <li>Open Settings, then Remote.</li>
+        <li>Select Connect Phone. The companion is <a href="https://remote.sigilapp.dev">https://remote.sigilapp.dev</a>.</li>
+        <li>Scan the QR with the phone camera.</li>
+        <li>Use the companion on the phone. A phone cannot use localhost.</li>
+      </ol>
+    </section>
+  </main>
+  <footer>
+    <p>MIT. <a href="https://github.com/gl11tchy/sigil">GitHub</a>. gl11tchy.</p>
+  </footer>
+</body>
+</html>

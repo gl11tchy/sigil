@@ -81,6 +81,62 @@ struct RemoteControlTests {
         remote.stop(revoke: true)
     }
 
+    @Test @MainActor func retiredOriginDoesNotResume() {
+        let store = InMemoryRemotePairingStore()
+        store.save(
+            RemotePairing(
+                origin: RemoteControl.legacyRailwayOrigin, deviceKey: RemoteCrypto.randomKey(),
+                ticket: RemoteCrypto.randomKey()))
+        let remote = RemoteControl(store: store)
+        let model = AppModel()
+        remote.resumeIfPaired(model: model)
+        #expect(!remote.isEnabled)
+        #expect(!remote.isPaired)
+        #expect(store.load() != nil)
+    }
+
+    @Test @MainActor func retiredOriginDoesNotRestoreWhenStartingAtProduction() {
+        let store = InMemoryRemotePairingStore()
+        store.save(
+            RemotePairing(
+                origin: RemoteControl.legacyRailwayOrigin, deviceKey: RemoteCrypto.randomKey(),
+                ticket: RemoteCrypto.randomKey()))
+        let remote = RemoteControl(store: store)
+        let model = AppModel()
+        remote.start(urlText: RemoteControl.productionOrigin, model: model)
+        #expect(remote.isEnabled)
+        #expect(!remote.isPaired)
+        remote.stop()
+    }
+
+    @Test @MainActor func startRewritesRetiredOriginOntoALivePairing() {
+        let store = InMemoryRemotePairingStore()
+        store.save(
+            RemotePairing(
+                origin: RemoteControl.productionOrigin, deviceKey: RemoteCrypto.randomKey(),
+                ticket: RemoteCrypto.randomKey()))
+        let remote = RemoteControl(store: store)
+        let model = AppModel()
+        remote.start(urlText: RemoteControl.legacyRailwayOrigin, model: model)
+        #expect(remote.isEnabled)
+        #expect(remote.isPaired)
+        remote.stop(revoke: true)
+    }
+
+    @Test @MainActor func productionOriginPairingStillResumes() {
+        let store = InMemoryRemotePairingStore()
+        store.save(
+            RemotePairing(
+                origin: RemoteControl.productionOrigin, deviceKey: RemoteCrypto.randomKey(),
+                ticket: RemoteCrypto.randomKey()))
+        let remote = RemoteControl(store: store)
+        let model = AppModel()
+        remote.resumeIfPaired(model: model)
+        #expect(remote.isEnabled)
+        #expect(remote.isPaired)
+        remote.stop(revoke: true)
+    }
+
     @Test func reconnectPolicyNeverGivesUpAndReallocatesEveryThreeFailures() {
         #expect(RemoteReconnectPolicy.retrySeconds(failures: 1) == 1)
         #expect(RemoteReconnectPolicy.retrySeconds(failures: 2) == 2)
