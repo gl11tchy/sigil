@@ -113,8 +113,8 @@ as destinations — a hairline, then one-line rows with an icon — not as folde
 in the same stack. Chat pins sit at the top of Recents and of an open project.
 Project pins sit at the top of the folder list, newest-pinned first. A plus on
 a folder row, and in an open project, starts a chat there. Hover archive on a
-chat or a project sends it to Archived. Hover X on a chat closes its tab, or
-deletes it if it is not open.
+chat or a project sends it to Archived and closes its tab. Hover X on a chat
+closes its tab, or deletes it if it is not open.
 
 ## Type ramp and the contrast floor
 
