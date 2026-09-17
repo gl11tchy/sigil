@@ -27,7 +27,8 @@ function assertSecurityHeaders(res, { https = false, html = false } = {}) {
   assert.ok(csp);
   assert.doesNotMatch(csp, /unsafe-inline/);
   assert.match(csp, /default-src 'self'/);
-  assert.match(csp, /script-src 'self'/);
+  assert.match(csp, /script-src 'none'/);
+  assert.doesNotMatch(csp, /script-src 'self'/);
   assert.match(csp, /style-src 'self'/);
   assert.match(csp, /img-src 'self'/);
   assert.match(csp, /connect-src 'none'/);

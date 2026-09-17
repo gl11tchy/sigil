@@ -85,7 +85,7 @@ struct RemoteControlTests {
         let store = InMemoryRemotePairingStore()
         store.save(
             RemotePairing(
-                origin: RemoteControl.legacyApexOrigin, deviceKey: RemoteCrypto.randomKey(),
+                origin: RemoteControl.legacyRailwayOrigin, deviceKey: RemoteCrypto.randomKey(),
                 ticket: RemoteCrypto.randomKey()))
         let remote = RemoteControl(store: store)
         let model = AppModel()
@@ -99,7 +99,7 @@ struct RemoteControlTests {
         let store = InMemoryRemotePairingStore()
         store.save(
             RemotePairing(
-                origin: RemoteControl.legacyApexOrigin, deviceKey: RemoteCrypto.randomKey(),
+                origin: RemoteControl.legacyRailwayOrigin, deviceKey: RemoteCrypto.randomKey(),
                 ticket: RemoteCrypto.randomKey()))
         let remote = RemoteControl(store: store)
         let model = AppModel()
@@ -117,7 +117,7 @@ struct RemoteControlTests {
                 ticket: RemoteCrypto.randomKey()))
         let remote = RemoteControl(store: store)
         let model = AppModel()
-        remote.start(urlText: RemoteControl.legacyApexOrigin, model: model)
+        remote.start(urlText: RemoteControl.legacyRailwayOrigin, model: model)
         #expect(remote.isEnabled)
         #expect(remote.isPaired)
         remote.stop(revoke: true)
