@@ -58,13 +58,13 @@ function isTreeOnly(line) {
   return /^[│| \t]+$/.test(line);
 }
 
-function isTurnChrome(line) {
+function isTurnChrome(line, previous) {
   const whole = line.trim();
   if (!whole) return false;
   if (/\[hooks:\s*\d+\/\d+\]/.test(whole)) return true;
   if (/^(?:[♦◆∴:]\s*)?(?:Thought for \d|Thinking\.{3}|Waiting for response|Worked for \d)/i.test(whole)) return true;
   if (/^\d+[hms]?[\d.]*s?\s*↓/.test(whole)) return true;
-  if (/^\d{1,2}:\d{2} [AP]M$/.test(whole)) return true;
+  if (/^\d{1,2}:\d{2} [AP]M$/.test(whole)) return Boolean(previous);
   if (/^∴\s/.test(whole)) return true;
   return false;
 }
@@ -74,7 +74,7 @@ function stripClock(line) {
 }
 
 function unindentBubble(line) {
-  const match = line.match(/^(\s{4,})([A-Z].*)/);
+  const match = line.match(/^(\s{6,})([A-Z].*)/);
   if (!match || match[2].trim().split(/\s+/).length < 4) return line;
   return match[2];
 }
@@ -124,19 +124,26 @@ export function readableOutput(snapshot) {
   while (lines.length && isPadding(lines.at(-1))) lines.pop();
   const compact = [];
   let blanks = 0;
+  let inBubble = false;
   for (const line of lines) {
     const cleaned = stripClock(stripTreeGutter(line));
-    if (isPadding(cleaned) || isTreeOnly(cleaned) || isTurnChrome(cleaned)) {
+    const previous = compact.at(-1);
+    if (isPadding(cleaned) || isTreeOnly(cleaned) || isTurnChrome(cleaned, previous && previous !== '' ? previous : '')) {
       if (++blanks === 1) compact.push('');
+      inBubble = false;
     } else {
       blanks = 0;
-      if (isProseWrap(compact.at(-1), cleaned)) {
-        compact[compact.length - 1] = `${compact.at(-1).trim()} ${cleaned.trim()}`;
+      const bubble = /^\s{6,}/.test(cleaned) || inBubble;
+      if (inBubble && isProseWrap(previous, cleaned)) {
+        compact[compact.length - 1] = `${previous.trim()} ${cleaned.trim()}`;
       } else {
         compact.push(unindentBubble(cleaned));
+        inBubble = bubble && /^[A-Z]/.test(cleaned.trim());
       }
     }
   }
-  const output = compact.join('\n').trim();
+  while (compact.length && !compact[0].trim()) compact.shift();
+  while (compact.length && !compact.at(-1).trim()) compact.pop();
+  const output = compact.join('\n');
   return /^[\s┌┐└┘│─━]*$/.test(output) ? '' : output;
 }

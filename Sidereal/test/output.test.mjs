@@ -96,6 +96,15 @@ test('still strips a boxed composer after a greater-than in the last result line
   assert.equal(readableOutput(text), 'comparison: x > y');
 });
 
+test('does not reflow code, a lone clock, or indented SQL', () => {
+  assert.equal(readableOutput('const first = 1\ncontinue'), 'const first = 1\ncontinue');
+  assert.equal(readableOutput('9:46 AM'), '9:46 AM');
+  assert.equal(
+    readableOutput('    SELECT first column FROM table'),
+    '    SELECT first column FROM table',
+  );
+});
+
 test('phone transcript is the messages, not TUI chrome or wrap artifacts', () => {
   const raw = [
     '          That stopped check was the hung',
