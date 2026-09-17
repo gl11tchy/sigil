@@ -183,7 +183,10 @@ Scripts/install.sh
 That copies `dist/Sigil.app` to `/Applications/Sigil.app` and opens it. GitHub
 cannot write to this Mac. After a merge to `main`, CI builds a zip and attaches
 it to the rolling [latest release](https://github.com/gl11tchy/sigil/releases/latest).
-Download that zip, or rebuild locally and run `Scripts/install.sh`.
+On this Mac, agents must run `Scripts/install-latest.sh` after that merge. It
+rebuilds HEAD and copies over a running app without quitting. Restart Sigil to
+load the new binary. Download the zip, or rebuild locally and run
+`Scripts/install.sh`, if you are installing by hand.
 
 Double-click the finished app, or run `open dist/Sigil.app`.
 
