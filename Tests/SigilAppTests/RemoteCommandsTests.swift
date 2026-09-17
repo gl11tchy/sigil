@@ -184,8 +184,8 @@ struct RemoteCommandsTests {
     }
 
     @Test @MainActor func stopRevokesPendingStartup() async {
-        let remote = RemoteControl()
-        let model = AppModel()
+        let remote = RemoteControl(store: InMemoryRemotePairingStore())
+        let model = AppModel(pairingStore: InMemoryRemotePairingStore())
         remote.start(urlText: "http://127.0.0.1:1", model: model)
         remote.stop()
         await Task.yield()

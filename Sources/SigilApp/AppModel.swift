@@ -102,7 +102,13 @@ final class AppModel {
         self.settings = settings
         self.store = store
         self.panel = panel ?? RightPanel()
-        self.remoteControl = RemoteControl(store: pairingStore ?? KeychainRemotePairingStore())
+        if let pairingStore {
+            self.remoteControl = RemoteControl(store: pairingStore)
+        } else if Self.isRunningAutomatedTests {
+            self.remoteControl = RemoteControl(store: InMemoryRemotePairingStore())
+        } else {
+            self.remoteControl = RemoteControl(store: KeychainRemotePairingStore())
+        }
         self.trashConversation = trashConversation
         self.presentError = presentError
         self.registrationRunner = registrationRunner ?? BridgeRegistration.processRunner
@@ -124,7 +130,7 @@ final class AppModel {
         applyAppearance()
         restoreOpenTabs()
         preparePanel()
-        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
+        if !Self.isRunningAutomatedTests {
             remoteControl.resumeIfPaired(model: self)
         }
         await reconcileTabMessaging()
@@ -2152,6 +2158,13 @@ final class AppModel {
     private static var isSmokeTest: Bool {
         ProcessInfo.processInfo.environment["SIGIL_SMOKE_TEST"] == "1"
             || ProcessInfo.processInfo.arguments.contains("--smoke-test")
+    }
+
+    /// Swift Testing does not set XCTestConfigurationFilePath.
+    private static var isRunningAutomatedTests: Bool {
+        let info = ProcessInfo.processInfo
+        return info.environment["XCTestConfigurationFilePath"] != nil
+            || info.arguments.contains { $0.contains(".xctest") }
     }
 
     private static func isUsableDirectory(_ url: URL) -> Bool {

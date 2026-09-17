@@ -75,13 +75,13 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
     const role = url.searchParams.get('role'), ticket = url.searchParams.get('ticket');
     if (ticket != null && !hex64(ticket)) { reject(); return; }
     let id = url.searchParams.get('room');
-    if (role === 'phone' && ticket) id = tickets.get(ticket);
+    if (role === 'phone' && ticket) id = tickets.get(ticket) || id;
     const room = rooms.get(id);
     if (url.pathname !== '/connect' || !room) { reject(); return; }
     if (role === 'host') {
-      if (req.headers.origin || room.host || !equal(req.headers.authorization, `Bearer ${room.hostToken}`)) { reject(); return; }
+      if (req.headers.origin || !equal(req.headers.authorization, `Bearer ${room.hostToken}`)) { reject(); return; }
     } else if (role === 'phone') {
-      if (req.headers.origin !== publicOrigin || !room.host || room.phone) { reject(); return; }
+      if (req.headers.origin !== publicOrigin || !room.host) { reject(); return; }
     } else { reject(); return; }
     wss.handleUpgrade(req, socket, head, ws => {
       ws.on('error', () => {});
@@ -89,8 +89,13 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
       ws.on('pong', () => { ws.alive = true; });
       let windowStart = now(), count = 0;
       const peer = randomBytes(16).toString('hex');
+      const take = slot => {
+        const previous = room[slot];
+        room[slot] = ws;
+        if (previous && previous !== ws) previous.terminate();
+      };
       if (role === 'host') {
-        room.host = ws;
+        take('host');
         if (ticket) {
           if (room.ticket && room.ticket !== ticket && tickets.get(room.ticket) === id) tickets.delete(room.ticket);
           tickets.set(ticket, id);
@@ -98,7 +103,7 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
         }
         send(ws, { type: 'ready' });
       }
-      else { room.phone = ws; room.peer = peer; send(room.host, { type: 'peer', peer }); }
+      else { take('phone'); room.peer = peer; send(room.host, { type: 'peer', peer }); }
       ws.on('message', (bytes, binary) => {
         if (now() - windowStart >= 1000) { count = 0; windowStart = now(); }
         if (binary || ++count > 30) { ws.close(1008); return; }
