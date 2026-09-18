@@ -141,7 +141,7 @@ struct RemoteCommandsTests {
         }
         #expect(RemoteControl.origin("https://example.com/")?.absoluteString == "https://example.com")
         #expect(RemoteControl.origin(RemoteControl.productionOrigin)?.absoluteString == RemoteControl.productionOrigin)
-        #expect(RemoteControl.productionOrigin == "https://sigilapp.dev")
+        #expect(RemoteControl.productionOrigin == "https://remote.sigilapp.dev")
         #expect(RemoteControl.preferredOrigin(RemoteControl.legacyRailwayOrigin) == RemoteControl.productionOrigin)
         #expect(
             RemoteControl.preferredOrigin("https://sidereal-production-587c.up.railway.app/")
@@ -149,6 +149,12 @@ struct RemoteCommandsTests {
         #expect(
             RemoteControl.preferredOrigin("  https://sidereal-production-587c.up.railway.app  ")
                 == RemoteControl.productionOrigin)
+        #expect(RemoteControl.preferredOrigin(RemoteControl.legacyApexOrigin) == RemoteControl.productionOrigin)
+        #expect(RemoteControl.preferredOrigin("https://sigilapp.dev/") == RemoteControl.productionOrigin)
+        #expect(RemoteControl.preferredOrigin("https://SIGILAPP.DEV") == RemoteControl.productionOrigin)
+        #expect(RemoteControl.preferredOrigin("https://sigilapp.dev:443") == RemoteControl.productionOrigin)
+        #expect(RemoteControl.origin("https://SIGILAPP.DEV")?.absoluteString == RemoteControl.legacyApexOrigin)
+        #expect(RemoteControl.origin("https://sigilapp.dev:443")?.absoluteString == RemoteControl.legacyApexOrigin)
         #expect(RemoteControl.preferredOrigin(RemoteControl.productionOrigin) == RemoteControl.productionOrigin)
         #expect(RemoteControl.preferredOrigin("https://example.com") == "https://example.com")
         let value =

@@ -1,6 +1,6 @@
 # Sidereal
 
-Live companion: https://sigilapp.dev
+Live companion: https://remote.sigilapp.dev
 Sigil uses this address by default.
 
 Phone companion and encrypted relay for Sigil. Deploy this directory as a single

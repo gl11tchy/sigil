@@ -93,6 +93,13 @@ struct RemoteControlTests {
         #expect(!remote.isEnabled)
         #expect(!remote.isPaired)
         #expect(store.load() != nil)
+        store.save(
+            RemotePairing(
+                origin: RemoteControl.legacyApexOrigin, deviceKey: RemoteCrypto.randomKey(),
+                ticket: RemoteCrypto.randomKey()))
+        remote.resumeIfPaired(model: model)
+        #expect(!remote.isEnabled)
+        #expect(!remote.isPaired)
     }
 
     @Test @MainActor func retiredOriginDoesNotRestoreWhenStartingAtProduction() {
