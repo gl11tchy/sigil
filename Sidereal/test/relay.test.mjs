@@ -56,6 +56,21 @@ test('foreign browser origins and unknown rooms cannot connect', async t => {
   }
 });
 
+test('a host websocket may send the companion origin the way a bundled Mac app does', async t => {
+  const { base, room, hostToken } = await setup(t);
+  const allowed = connect(base, room, 'host', {
+    headers: { Authorization: `Bearer ${hostToken}`, Origin: 'http://localhost:3099' },
+  });
+  assert.equal((await message(allowed)).type, 'ready');
+  allowed.close();
+  await once(
+    connect(base, room, 'host', {
+      headers: { Authorization: `Bearer ${hostToken}`, Origin: 'https://evil.example' },
+    }),
+    'error',
+  );
+});
+
 test('HTTP has fixed asset routes and security headers', async t => {
   const { base } = await setup(t);
   const res = await fetch(`${base}/does-not-exist`);
