@@ -151,6 +151,10 @@ struct RemoteCommandsTests {
                 == RemoteControl.productionOrigin)
         #expect(RemoteControl.preferredOrigin(RemoteControl.legacyApexOrigin) == RemoteControl.productionOrigin)
         #expect(RemoteControl.preferredOrigin("https://sigilapp.dev/") == RemoteControl.productionOrigin)
+        #expect(RemoteControl.preferredOrigin("https://SIGILAPP.DEV") == RemoteControl.productionOrigin)
+        #expect(RemoteControl.preferredOrigin("https://sigilapp.dev:443") == RemoteControl.productionOrigin)
+        #expect(RemoteControl.origin("https://SIGILAPP.DEV")?.absoluteString == RemoteControl.legacyApexOrigin)
+        #expect(RemoteControl.origin("https://sigilapp.dev:443")?.absoluteString == RemoteControl.legacyApexOrigin)
         #expect(RemoteControl.preferredOrigin(RemoteControl.productionOrigin) == RemoteControl.productionOrigin)
         #expect(RemoteControl.preferredOrigin("https://example.com") == "https://example.com")
         let value =

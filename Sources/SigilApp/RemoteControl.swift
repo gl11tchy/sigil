@@ -46,6 +46,12 @@ final class RemoteControl {
         guard allowed else { return nil }
         var normalized = components
         normalized.path = ""
+        normalized.host = host.lowercased()
+        if (normalized.scheme == "https" && normalized.port == 443)
+            || (normalized.scheme == "http" && normalized.port == 80)
+        {
+            normalized.port = nil
+        }
         return normalized.url
     }
 
