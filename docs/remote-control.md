@@ -98,8 +98,8 @@ Hosting needs a real HTTPS deployment; local tests do not prove cellular/iPhone 
 - Environment: `1a3850e2-c49f-45c4-bb54-627dd102c646` (production).
 - Sidereal service: `d7e3c251-0ae2-45f9-b4b1-c819d3fa9ece`.
 - Site service: `060788b3-4ab1-45fb-8623-68027835cbc0`.
-- Intended companion origin: `https://remote.sigilapp.dev`. Namecheap does not point that host yet; Railway wants CNAME `remote` → `1bkrlt5p.up.railway.app` and TXT `_railway-verify.remote` → `railway-verify=fcc2e74a0b9e02bcb9504509004d7d783853f0086368e85cf4cbe618262558a8`.
-- Site preview: `https://site-production-c4d1.up.railway.app`. Apex still serves Sidereal until that host is healthy and the owner moves the ALIAS.
+- Companion origin: `https://remote.sigilapp.dev`. `PUBLIC_ORIGIN` matches that host.
+- Site preview: `https://site-production-c4d1.up.railway.app`. Apex still serves Sidereal until the owner points `sigilapp.dev` at the site service.
 - Single replica in `sfo`; `/health`; app sleeping disabled through service settings.
 - Source: local upload; no GitHub auto-deploy yet.
 - Re-deploy Sidereal with `railway up ./Sidereal --path-as-root --project 26f52bc8-daae-4371-aa70-4cebb2d0f222 --environment 1a3850e2-c49f-45c4-bb54-627dd102c646 --service d7e3c251-0ae2-45f9-b4b1-c819d3fa9ece --detach`.

@@ -23,12 +23,13 @@ final class RemoteControl {
         self.store = store
     }
 
-    static let productionOrigin = "https://sigilapp.dev"
+    static let productionOrigin = "https://remote.sigilapp.dev"
     static let legacyRailwayOrigin = "https://sidereal-production-587c.up.railway.app"
+    static let legacyApexOrigin = "https://sigilapp.dev"
 
     static func preferredOrigin(_ text: String) -> String {
         guard let normalized = origin(text)?.absoluteString else { return text }
-        return normalized == legacyRailwayOrigin ? productionOrigin : text
+        return normalized == legacyRailwayOrigin || normalized == legacyApexOrigin ? productionOrigin : text
     }
 
     static func origin(_ text: String) -> URL? {
