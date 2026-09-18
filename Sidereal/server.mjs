@@ -65,6 +65,7 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
     const room = rooms.get(id);
     if (!room) return;
     rooms.delete(id);
+    clearTimeout(room.dropPhone);
     if (room.ticket && tickets.get(room.ticket) === id) tickets.delete(room.ticket);
     room.phone?.terminate(); room.host?.terminate();
   };
@@ -97,17 +98,15 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
       };
       if (role === 'host') {
         take('host');
-        if (room.phone) {
-          const previousPhone = room.phone;
-          room.phone = null;
-          previousPhone.terminate();
-        }
+        clearTimeout(room.dropPhone);
+        room.dropPhone = undefined;
         if (ticket) {
           if (room.ticket && room.ticket !== ticket && tickets.get(room.ticket) === id) tickets.delete(room.ticket);
           tickets.set(ticket, id);
           room.ticket = ticket;
         }
         send(ws, { type: 'ready' });
+        if (room.phone) send(ws, { type: 'peer', peer: room.peer });
       }
       else { take('phone'); room.peer = peer; send(room.host, { type: 'peer', peer }); }
       ws.on('message', (bytes, binary) => {
@@ -131,7 +130,14 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
       ws.on('close', () => {
         if (role === 'host' && room.host === ws) {
           room.host = null; room.disconnectedAt = now();
-          room.phone?.terminate(); room.phone = null;
+          clearTimeout(room.dropPhone);
+          const phone = room.phone;
+          room.dropPhone = setTimeout(() => {
+            if (room.host || room.phone !== phone) return;
+            phone?.terminate();
+            if (room.phone === phone) room.phone = null;
+          }, 3000);
+          room.dropPhone?.unref?.();
         } else if (room.phone === ws) {
           room.phone = null;
           send(room.host, { type: 'left', peer });

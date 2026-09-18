@@ -24,6 +24,7 @@ let rawOutput = '', rawMode = false;
 let credential, bootstrap, newDeviceKey, socket, challenge, sequence = 0, selected;
 let selectedStatus = null, tabCount = 0;
 let connected = false, busy = false, stopped = false, reconnectTimer, pollTimer, connectTimer, generation = 0;
+let commandEpoch = 0, reconnectDelay = 500;
 let incoming = Promise.resolve(), outgoing = Promise.resolve(), pending = new Map();
 const showError = text => { $('error').textContent = text; $('error').hidden = !text; };
 
@@ -143,12 +144,15 @@ function renderOutput(changedSession = false) {
 
 async function request(action, text, tabID = selected, pairing = false, extra = {}) {
   const current = generation;
+  const epoch = commandEpoch;
   const previous = outgoing;
   let release;
   outgoing = new Promise(resolve => { release = resolve; });
   await previous;
   try {
-    if (current !== generation) throw new Error("Connection changed. Check the terminal before sending again.");
+    if (current !== generation || epoch !== commandEpoch) {
+      throw new Error("Connection changed. Check the terminal before sending again.");
+    }
     return await transmit(action, text, tabID, pairing, extra);
   } finally { release(); }
 }
@@ -162,7 +166,6 @@ async function transmit(action, text, tabID, pairing, extra = {}) {
     const timer = setTimeout(() => {
       pending.delete(seq);
       reject(new Error('No response. Check the terminal before sending again.'));
-      ws.close();
     }, 10000);
     pending.set(seq, { resolve, reject, timer });
     ws.send(JSON.stringify({ data }));
@@ -202,12 +205,20 @@ function connect() {
       if (typeof event.data !== 'string' || event.data.length > 110000) throw new Error('Invalid response');
       const frame = JSON.parse(event.data);
       if (typeof frame.hello === 'string' && /^[a-f0-9]{64}$/.test(frame.hello)) {
-        if (challenge) throw new Error('Unexpected handshake');
+        if (challenge === frame.hello) return;
+        commandEpoch++;
+        for (const item of pending.values()) {
+          clearTimeout(item.timer);
+          item.reject(new Error('Connection changed. Check the terminal before sending again.'));
+        }
+        pending.clear();
         challenge = frame.hello;
+        sequence = 0;
         const authorization = bootstrap ? request('pair', newDeviceKey, undefined, true) : request('state');
         authorization.then(() => {
           if (current !== generation) return;
           bootstrap = null; newDeviceKey = null;
+          reconnectDelay = 500;
           clearTimeout(connectTimer);
           connected = true; busy = false;
           $('status').textContent = 'Connected'; $('status').dataset.connected = 'true';
@@ -221,7 +232,8 @@ function connect() {
         const reply = await open(frame.data, credential.key, 'mac');
         if (current !== generation) return;
         const item = pending.get(reply.sequence);
-        if (!item || reply.challenge !== challenge) throw new Error('Invalid response');
+        if (!item) return;
+        if (reply.challenge !== challenge) throw new Error('Invalid response');
         if (reply.ok !== true) {
           pending.delete(reply.sequence); clearTimeout(item.timer);
           item.reject(new Error(reply.error || 'The Mac could not complete this action.'));
@@ -240,8 +252,13 @@ function connect() {
   };
   ws.onclose = () => {
     if (current !== generation) return;
-    offline();
-    if (!stopped) reconnectTimer = setTimeout(connect, 3000);
+    if (!stopped) {
+      offline('Connecting…');
+      reconnectTimer = setTimeout(connect, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, 8000);
+    } else {
+      offline();
+    }
   };
   ws.onerror = () => { if (current === generation) showError('Cannot reach Sigil. Keep the Mac awake and connected.'); };
 }
@@ -427,7 +444,7 @@ $('message').addEventListener('keydown', event => {
   void perform(() => sendText(true));
 });
 document.querySelectorAll('[data-key]').forEach(button => { button.onclick = () => void perform(() => request('key', button.dataset.key)); });
-$('reconnect').onclick = () => { stopped = false; connect(); };
+$('reconnect').onclick = () => { stopped = false; reconnectDelay = 500; connect(); };
 $('forget').onclick = async () => {
   stopped = true; ++generation; clearTimeout(reconnectTimer); socket?.close(); offline();
   credential = null; bootstrap = null; newDeviceKey = null; selected = null; drafts.clear(); tabsSignature = '';
