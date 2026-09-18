@@ -162,7 +162,6 @@ async function transmit(action, text, tabID, pairing, extra = {}) {
     const timer = setTimeout(() => {
       pending.delete(seq);
       reject(new Error('No response. Check the terminal before sending again.'));
-      ws.close();
     }, 10000);
     pending.set(seq, { resolve, reject, timer });
     ws.send(JSON.stringify({ data }));
@@ -202,8 +201,14 @@ function connect() {
       if (typeof event.data !== 'string' || event.data.length > 110000) throw new Error('Invalid response');
       const frame = JSON.parse(event.data);
       if (typeof frame.hello === 'string' && /^[a-f0-9]{64}$/.test(frame.hello)) {
-        if (challenge) throw new Error('Unexpected handshake');
+        if (challenge === frame.hello) return;
+        for (const item of pending.values()) {
+          clearTimeout(item.timer);
+          item.reject(new Error('Connection changed. Check the terminal before sending again.'));
+        }
+        pending.clear();
         challenge = frame.hello;
+        sequence = 0;
         const authorization = bootstrap ? request('pair', newDeviceKey, undefined, true) : request('state');
         authorization.then(() => {
           if (current !== generation) return;
@@ -240,8 +245,12 @@ function connect() {
   };
   ws.onclose = () => {
     if (current !== generation) return;
-    offline();
-    if (!stopped) reconnectTimer = setTimeout(connect, 3000);
+    if (!stopped) {
+      offline('Connecting…');
+      reconnectTimer = setTimeout(connect, 500);
+    } else {
+      offline();
+    }
   };
   ws.onerror = () => { if (current === generation) showError('Cannot reach Sigil. Keep the Mac awake and connected.'); };
 }

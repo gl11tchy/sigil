@@ -46,6 +46,7 @@ test('host is authenticated and ciphertext routes only to its paired room', asyn
   assert.deepEqual(await response, { data: 'encrypted-response' });
   const closed = once(phone, 'close');
   host.close();
+  phone.close();
   await closed;
 });
 
@@ -146,7 +147,7 @@ test('a host reconnect with the same token replaces the old socket', async t => 
   await firstClosed;
 });
 
-test('a host reconnect drops the current phone so it can pair again', async t => {
+test('a host reconnect keeps the current phone and re-announces it', async t => {
   const { base, room, hostToken } = await setup(t);
   const options = { headers: { Authorization: `Bearer ${hostToken}` } };
   const first = connect(base, room, 'host', options);
@@ -155,14 +156,31 @@ test('a host reconnect drops the current phone so it can pair again', async t =>
   const phone = connect(base, room, 'phone', { origin: 'http://localhost:3099' });
   await firstPeer;
   if (phone.readyState !== WebSocket.OPEN) await once(phone, 'open');
-  const phoneClosed = once(phone, 'close');
   const second = connect(base, room, 'host', options);
-  assert.equal((await message(second)).type, 'ready');
+  const frames = [];
+  second.on('message', data => frames.push(JSON.parse(data.toString())));
+  while (frames.length < 2) await once(second, 'message');
+  assert.equal(phone.readyState, WebSocket.OPEN);
+  assert.equal(frames[0].type, 'ready');
+  assert.equal(frames[1].type, 'peer');
+  const received = message(phone);
+  second.send(JSON.stringify({ peer: frames[1].peer, hello: 'ab'.repeat(32) }));
+  assert.deepEqual(await received, { hello: 'ab'.repeat(32) });
+});
+
+test('a host that does not return eventually drops the phone', async t => {
+  const { base, room, hostToken } = await setup(t);
+  const host = connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` } });
+  await message(host);
+  const firstPeer = message(host);
+  const phone = connect(base, room, 'phone', { origin: 'http://localhost:3099' });
+  await firstPeer;
+  if (phone.readyState !== WebSocket.OPEN) await once(phone, 'open');
+  const phoneClosed = once(phone, 'close');
+  host.close();
+  await once(host, 'close');
+  assert.equal(phone.readyState, WebSocket.OPEN);
   await phoneClosed;
-  const nextPeer = message(second);
-  const next = connect(base, room, 'phone', { origin: 'http://localhost:3099' });
-  await once(next, 'open');
-  assert.equal((await nextPeer).type, 'peer');
 });
 
 test('a host with the wrong token still cannot take the slot', async t => {

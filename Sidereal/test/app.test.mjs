@@ -239,6 +239,35 @@ test('an unanswered connection reports and closes after ten seconds', async () =
   assert.equal(page.element('status').textContent, 'Connected');
 });
 
+test('a command that times out keeps the socket so later commands can use it', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('new').onclick();
+  await settle();
+  assert.equal(socket.sent.at(-1).action, 'new');
+  await page.fireTimer(10000);
+  assert.equal(socket.readyState, 1);
+  assert.equal(page.element('error').hidden, false);
+  page.element('new').onclick();
+  await settle();
+  assert.equal(socket.sent.at(-1).action, 'new');
+  assert.equal(socket.readyState, 1);
+});
+
+test('a new Mac handshake on the same socket is accepted without disconnecting', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  socket.receive({ hello: 'd'.repeat(64) });
+  await settle();
+  assert.equal(socket.readyState, 1);
+  assert.equal(socket.sent.at(-1).action, 'state');
+  assert.equal(socket.sent.at(-1).challenge, 'd'.repeat(64));
+  socket.reply();
+  await settle();
+  assert.equal(page.element('status').textContent, 'Connected');
+  assert.equal(page.element('status').dataset.connected, 'true');
+});
+
 test('an ended session disables remote actions but keeps local editing and picker', async () => {
   const page = await browser();
   const socket = await page.authorize();
