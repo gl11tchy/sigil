@@ -24,6 +24,7 @@ let rawOutput = '', rawMode = false;
 let credential, bootstrap, newDeviceKey, socket, challenge, sequence = 0, selected;
 let selectedStatus = null, tabCount = 0;
 let connected = false, busy = false, stopped = false, reconnectTimer, pollTimer, connectTimer, generation = 0;
+let commandEpoch = 0, reconnectDelay = 500;
 let incoming = Promise.resolve(), outgoing = Promise.resolve(), pending = new Map();
 const showError = text => { $('error').textContent = text; $('error').hidden = !text; };
 
@@ -143,12 +144,15 @@ function renderOutput(changedSession = false) {
 
 async function request(action, text, tabID = selected, pairing = false, extra = {}) {
   const current = generation;
+  const epoch = commandEpoch;
   const previous = outgoing;
   let release;
   outgoing = new Promise(resolve => { release = resolve; });
   await previous;
   try {
-    if (current !== generation) throw new Error("Connection changed. Check the terminal before sending again.");
+    if (current !== generation || epoch !== commandEpoch) {
+      throw new Error("Connection changed. Check the terminal before sending again.");
+    }
     return await transmit(action, text, tabID, pairing, extra);
   } finally { release(); }
 }
@@ -202,6 +206,7 @@ function connect() {
       const frame = JSON.parse(event.data);
       if (typeof frame.hello === 'string' && /^[a-f0-9]{64}$/.test(frame.hello)) {
         if (challenge === frame.hello) return;
+        commandEpoch++;
         for (const item of pending.values()) {
           clearTimeout(item.timer);
           item.reject(new Error('Connection changed. Check the terminal before sending again.'));
@@ -213,6 +218,7 @@ function connect() {
         authorization.then(() => {
           if (current !== generation) return;
           bootstrap = null; newDeviceKey = null;
+          reconnectDelay = 500;
           clearTimeout(connectTimer);
           connected = true; busy = false;
           $('status').textContent = 'Connected'; $('status').dataset.connected = 'true';
@@ -226,7 +232,8 @@ function connect() {
         const reply = await open(frame.data, credential.key, 'mac');
         if (current !== generation) return;
         const item = pending.get(reply.sequence);
-        if (!item || reply.challenge !== challenge) throw new Error('Invalid response');
+        if (!item) return;
+        if (reply.challenge !== challenge) throw new Error('Invalid response');
         if (reply.ok !== true) {
           pending.delete(reply.sequence); clearTimeout(item.timer);
           item.reject(new Error(reply.error || 'The Mac could not complete this action.'));
@@ -247,7 +254,8 @@ function connect() {
     if (current !== generation) return;
     if (!stopped) {
       offline('Connecting…');
-      reconnectTimer = setTimeout(connect, 500);
+      reconnectTimer = setTimeout(connect, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, 8000);
     } else {
       offline();
     }
@@ -436,7 +444,7 @@ $('message').addEventListener('keydown', event => {
   void perform(() => sendText(true));
 });
 document.querySelectorAll('[data-key]').forEach(button => { button.onclick = () => void perform(() => request('key', button.dataset.key)); });
-$('reconnect').onclick = () => { stopped = false; connect(); };
+$('reconnect').onclick = () => { stopped = false; reconnectDelay = 500; connect(); };
 $('forget').onclick = async () => {
   stopped = true; ++generation; clearTimeout(reconnectTimer); socket?.close(); offline();
   credential = null; bootstrap = null; newDeviceKey = null; selected = null; drafts.clear(); tabsSignature = '';
