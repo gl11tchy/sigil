@@ -79,7 +79,8 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
     const room = rooms.get(id);
     if (url.pathname !== '/connect' || !room) { reject(); return; }
     if (role === 'host') {
-      if (req.headers.origin || !equal(req.headers.authorization, `Bearer ${room.hostToken}`)) { reject(); return; }
+      if ((req.headers.origin && req.headers.origin !== publicOrigin)
+        || !equal(req.headers.authorization, `Bearer ${room.hostToken}`)) { reject(); return; }
     } else if (role === 'phone') {
       if (req.headers.origin !== publicOrigin || !room.host) { reject(); return; }
     } else { reject(); return; }

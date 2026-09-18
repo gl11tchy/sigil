@@ -128,6 +128,7 @@ final class RemoteControl {
                             failures = 0
                             self.status = session.isPaired ? "Phone disconnected" : "Scan to connect"
                             self.pairingURL = session.isPaired ? nil : pairingURL
+                            self.error = nil
                         } else if frame.type == "peer", let id = frame.peer, id.count <= 64 {
                             peer = id
                             session.resetConnection()
@@ -174,7 +175,10 @@ final class RemoteControl {
                     if RemoteReconnectPolicy.shouldReallocate(failures: failures) { room = nil }
                     retry = RemoteReconnectPolicy.retrySeconds(failures: failures)
                     self.status = "Reconnecting…"
-                    if !session.isPaired { self.pairingURL = nil }
+                    if !session.isPaired {
+                        self.pairingURL = nil
+                        self.error = "Could not reach the companion. Retrying."
+                    }
                     try? await Task.sleep(for: .seconds(retry))
                 }
             }
