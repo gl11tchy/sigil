@@ -90,7 +90,8 @@ Hosting needs a real HTTPS deployment; local tests do not prove cellular/iPhone 
 - `SIGIL_REMOTE_TEST_ORIGIN=https://remote.sigilapp.dev swift test --no-parallel --filter RemoteIntegrationTests`
   passed against the deployed relay: encrypted pairing, PTY input/output, and revocation.
 - Physical camera scan, cellular access, and iOS Home Screen installation remain
-  device-only checks; no physical phone was available to the agent.
+  device-only checks; no physical phone was available to the agent. iOS Home Screen
+  apps do not share IndexedDB with Safari, so Sidereal pairs from an in-app scan.
 
 ## Hosted deployment
 

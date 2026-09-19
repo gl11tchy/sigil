@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { readableOutput } from '../public/output.mjs';
+import { pairingFromText } from '../public/pairing.mjs';
 
 const source = (await readFile(new URL('../public/app.mjs', import.meta.url), 'utf8'))
   .replace(/^import .* from '\.\/.*\.mjs';\n/gm, '');
@@ -73,7 +74,7 @@ async function browser() {
     },
   };
   vm.runInNewContext(source, {
-    readableOutput, document, location, history: { replaceState() {} }, indexedDB,
+    readableOutput, pairingFromText, document, location, history: { replaceState() {} }, indexedDB,
     window: { addEventListener: (name, callback) => events.set(name, callback) },
     navigator: {}, crypto: { subtle: {} }, URL, URLSearchParams, TextEncoder,
     WebSocket: FakeSocket, seal: async value => JSON.stringify(value), open: async frame => JSON.parse(frame),

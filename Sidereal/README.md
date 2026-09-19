@@ -33,8 +33,8 @@ use your computer's `localhost`; real phone access requires the HTTPS deployment
 
 1. In Sigil, open Settings → Remote.
 2. Enter the Sidereal HTTPS address and select Connect Phone.
-3. Scan the code with the phone camera. It expires in five minutes.
-4. Add Sidereal to the Home Screen using the browser's Share menu.
+3. Open Sidereal on the phone. Add it to the Home Screen, then open that icon.
+4. Tap Scan code and point at the QR. It expires in five minutes.
 
 Pair one phone at a time. The phone can select sessions, read recent terminal
 output, send text, attach photos and files, use arrow/Enter/Tab/Escape keys, and
@@ -60,8 +60,8 @@ list closed conversations, resize the Mac terminal, or expose MCP.
 Sigil must be running to control sessions. Scan once; the phone reconnects after
 a Sigil restart, a Mac sleep, a relay restart, or a new room. Disconnect in Sigil
 revokes the Mac pairing. Quitting does not. The phone stores a non-extractable
-key and a reconnect ticket in IndexedDB, not localStorage. If installing the PWA
-creates a separate browser storage area, disconnect and scan again there.
+key and a reconnect ticket in IndexedDB, not localStorage. Safari and the Home
+Screen app do not share that store. Scan from the app you want to use.
 Forget this Mac clears the phone's stored key; it does not revoke other copies of
 that credential. Use Disconnect on the Mac to revoke authorization.
 
