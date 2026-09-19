@@ -169,6 +169,19 @@ test('strips the live iPhone idle composer that shows - grok instead of Build an
   );
 });
 
+test('keeps a transcript line that is only - grok before the idle composer', () => {
+  const raw = [
+    'The process name is',
+    '- grok',
+    `╭${'─'.repeat(62)}╮`,
+    '│  | >                                                         │',
+    `╰${'─'.repeat(62)}╯`,
+    ' Grok 4.6 (xhigh) · always-approve',
+    ' Shift+Tab:mode | Ctrl+x:shortcuts',
+  ].join('\n');
+  assert.equal(readableOutput(raw), 'The process name is\n- grok');
+});
+
 test('strips TUI tree gutters so phone code is not a column of pipes', () => {
   const tree = [
     '|     1 const CACHE = \'sidereal-shell-v7\';',

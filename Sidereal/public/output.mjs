@@ -38,11 +38,10 @@ function isComposerChrome(line) {
   const text = ink(line);
   if (!text) return true;
   if (EMPTY_PROMPT.test(line) || EMPTY_PROMPT.test(text)) return true;
-  if (/^- grok$/i.test(text)) return true;
   if (GROK_META.test(text) || GROK_NAME.test(text) || GROK_MODEL.test(text)) return true;
   if (isHintRow(text) || isHintRow(line.trim())) return true;
   if (/^always-?approve$/i.test(text)) return true;
-  if (/Build anything/.test(text) || /- grok/i.test(text)) {
+  if (/Build anything/.test(text) || (/[❯›>]/.test(text) && /- grok/i.test(text))) {
     const rest = text.replace(/Build anything/gi, '').replace(/- grok/gi, '').replace(/Grok [\w.-]+/g, '').replace(/[❯›>]/g, '').trim();
     if (!rest) return true;
   }
@@ -108,7 +107,7 @@ function trailingComposerStart(lines) {
     return -1;
   }
   if (index >= 0 && isDraftPrompt(lines[index])) return -1;
-  const hasPrompt = slice.some(line => EMPTY_PROMPT.test(line) || EMPTY_PROMPT.test(ink(line)) || /Build anything|- grok/i.test(ink(line)));
+  const hasPrompt = slice.some(line => EMPTY_PROMPT.test(line) || EMPTY_PROMPT.test(ink(line)) || /Build anything/.test(line));
   const hasBox = slice.some(isBoxLine);
   if (!hasPrompt && !hasBox) return -1;
   return start;
