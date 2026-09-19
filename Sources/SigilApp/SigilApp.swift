@@ -32,6 +32,12 @@ struct SigilApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor var model: AppModel?
 
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Before anything else can crash: the reporter reserves this run's log
+        // and its buffers here, while allocating is still allowed.
+        CrashReporter.install()
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -157,6 +163,7 @@ struct GrokCommands: Commands {
                 NSWorkspace.shared.open(
                     URL(string: "https://github.com/gl11tchy/sigil/releases/latest")!)
             }
+            Button("Reveal Crash Logs") { model.revealCrashLogs() }
         }
     }
 

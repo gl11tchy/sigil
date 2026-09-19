@@ -188,6 +188,14 @@ Download that zip, or rebuild locally and run `Scripts/install.sh`.
 
 Double-click the finished app, or run `open dist/Sigil.app`.
 
+### Crash logs
+
+If Sigil dies, it writes what it knew to `~/Library/Logs/Sigil/`: the open tabs,
+the tail of the selected terminal, and the signal or exception that ended it.
+Help ▸ Reveal Crash Logs opens the newest one in Finder. Ten reports are kept.
+A run that never crashes leaves no file behind. Set `SIGIL_CRASH_LOG_DIR` to
+write them somewhere else.
+
 Debug build that stays attached to the terminal:
 
 ```sh

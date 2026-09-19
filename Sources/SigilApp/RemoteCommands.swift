@@ -83,13 +83,7 @@ enum RemoteCommands {
 
     static func snapshot(_ model: AppModel) -> RemoteState {
         let tabs = model.tabs.map { tab in
-            let status: String
-            switch tab.activity {
-            case .starting: status = "starting"
-            case .working: status = "working"
-            case .idle: status = "idle"
-            case .exited: status = "exited"
-            }
+            let status = tab.activity.statusName
             return RemoteState.Tab(
                 id: tab.id.uuidString, title: bounded(model.title(for: tab), bytes: 96), status: status)
         }
