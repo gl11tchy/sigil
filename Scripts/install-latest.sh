@@ -47,7 +47,8 @@ normalize_segments() {
       '' | .) ;;
       ..)
         if [[ ${#out[@]} -gt 0 ]]; then
-          unset 'out[-1]'
+          # Not out[-1]: macOS ships bash 3.2, which has no negative subscript.
+          unset "out[$((${#out[@]} - 1))]"
         fi
         ;;
       *) out+=("$seg") ;;
