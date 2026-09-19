@@ -40,7 +40,7 @@ struct RemoteUploadTests {
         #expect(try Data(contentsOf: url).isEmpty)
     }
 
-    @Test func rejectsBadIdentifiersMismatchedChunksAndOversize() throws {
+    @Test func rejectsBadIdentifiersMismatchedChunksAndChunkCounts() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "sigil-upload-bad-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -62,6 +62,13 @@ struct RemoteUploadTests {
             try inbox.receive(
                 transfer: transfer, name: "b.txt", index: 1, count: 2,
                 base64: Data("world".utf8).base64EncodedString(), directory: root)
+        }
+        // maxChunks and maxChunkBytes bound a transfer at exactly TerminalDrop.maxRemoteBytes,
+        // so the chunk count is the reachable half of the 4 MB guard.
+        #expect(throws: RemoteError.invalidMessage) {
+            try inbox.receive(
+                transfer: String(repeating: "ef", count: 16), name: "many.bin", index: 0,
+                count: RemoteUpload.maxChunks + 1, base64: "YQ==", directory: root)
         }
     }
 }

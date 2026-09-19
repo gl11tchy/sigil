@@ -21,7 +21,9 @@ ASSUMPTIONS: Readable companion, not a pixel TUI. Attach writes to SigilDrops an
 
 ### Phase 3: Phone UI
 - [x] Task 5: Attach, chips, Stop while working, composer layout.
-- [x] Task 6: Playwright + native tests, then Railway. Evidence: `tasks/verify.md`.
+- [x] Task 6: Playwright + native tests. Evidence: `tasks/verify.md`.
+- [ ] Task 7: Redeploy Sidereal and record the revision. The last recorded
+  deploy predates the upload and readability work, and #42/#43 changed the relay after it.
 
 ## Risks
 | Risk | Mitigation |
