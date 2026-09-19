@@ -94,10 +94,18 @@ custom domains, sleeping disabled, and now the active deployment. That is routin
 and configuration. This container's egress cannot reach either host, so there is
 no fresh GET to go with it.
 
-`PUBLIC_ORIGIN` is a separate open point. It is set on the service, but a
-connected Railway app is served variable names without values, so this session
-could not read back what it is set to, and setting it is a production write that
-needs the owner.
+`PUBLIC_ORIGIN` is a separate open point, and it stays agent work under Task 11
+rather than becoming an owner action: `tasks/product-site-spec.md` reserves only
+Namecheap for the owner, and moving this variable is Task 11's own acceptance
+criterion. What stopped it here is narrower. A connected Railway app is served
+variable names without values, so this session could not read back what it is set
+to, and this session's own permissions refused the write; a session with Railway
+write access can finish it without the owner touching Railway.
+
+Until the value is confirmed, treat pairing on `remote.sigilapp.dev` as unproven
+rather than working. `Sidereal/server.mjs:86` rejects a phone whose `Origin` does
+not equal `PUBLIC_ORIGIN`, so a value still pointing at the apex would refuse
+every phone on the new host.
 
 What would close Task 7: give the service a source whose revision is readable,
 which means connecting the GitHub repo rather than another `railway up` upload,

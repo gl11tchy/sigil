@@ -98,9 +98,12 @@ Hosting needs a real HTTPS deployment; local tests do not prove cellular/iPhone 
 - Environment: `1a3850e2-c49f-45c4-bb54-627dd102c646` (production).
 - Sidereal service: `d7e3c251-0ae2-45f9-b4b1-c819d3fa9ece`.
 - Site service: `060788b3-4ab1-45fb-8623-68027835cbc0`.
-- Companion origin: `https://remote.sigilapp.dev`. `PUBLIC_ORIGIN` is set on the Sidereal
-  service to match that host. A connected Railway app reads variable names without values,
-  so confirming the value needs the dashboard or the CLI.
+- Companion origin: `https://remote.sigilapp.dev`. `PUBLIC_ORIGIN` has to equal that host:
+  `Sidereal/server.mjs:86` rejects a phone WebSocket whose `Origin` header differs from it,
+  so a value left over from before the cutover stops the companion pairing outright. The
+  current value is **unknown** here, not confirmed: a connected Railway app is served
+  variable names without values. Read it back in the dashboard or the CLI before treating
+  pairing on that host as working.
 - Site preview: `https://site-production-c4d1.up.railway.app`. The apex `sigilapp.dev` is a
   custom domain on the site service, ownership verified, certificate valid. Railway reports
   the apex record as propagated against its target `s00d1xh1.up.railway.app`; an apex alias
