@@ -39,6 +39,10 @@ sigil_running() {
 
 resolve_path() {
   local path="$1" dir base
+  if [[ -d "$path" ]]; then
+    (cd "$path" && pwd -P)
+    return
+  fi
   dir="$(dirname "$path")"
   base="$(basename "$path")"
   if [[ -d "$dir" ]]; then
@@ -62,14 +66,18 @@ path_id() {
   fi
 }
 
-same_bundle() {
+# True when the two paths are the same bundle, or when one sits inside the
+# other: building below the installed app would rewrite it in place.
+overlaps() {
   local a="$1" b="$2" a_id b_id
   a_id="$(path_id "$a")"
   b_id="$(path_id "$b")"
   if [[ -n "$a_id" && "$a_id" == "$b_id" ]]; then
     return 0
   fi
-  [[ "$(resolve_path "$a")" == "$(resolve_path "$b")" ]]
+  a="$(resolve_path "$a")"
+  b="$(resolve_path "$b")"
+  [[ "$a" == "$b" || "$a" == "$b"/* || "$b" == "$a"/* ]]
 }
 
 # build-app.sh resolves a relative SIGIL_APP against the repository root, so
@@ -84,12 +92,27 @@ else
 fi
 
 # build-app.sh deletes its own output before it builds. If that output is the
-# installed app, a failed build would take the installation with it.
-if same_bundle "$SRC" "$DEST"; then
-  echo "error: the build output and the install destination are the same bundle" >&2
-  echo "       $DEST" >&2
-  echo "point SIGIL_APP somewhere else; building there would delete the installed app" >&2
+# installed app, or anything inside it, a failed build would take the
+# installation, or its signature, with it.
+if overlaps "$SRC" "$DEST"; then
+  echo "error: the build output and the install destination overlap" >&2
+  echo "       build: $SRC" >&2
+  echo "     install: $DEST" >&2
+  echo "point SIGIL_APP somewhere outside the installed app" >&2
   exit 1
+fi
+
+# The build compiles the working tree but stamps the build number from HEAD, so
+# uncommitted work would install as if it were the merged build.
+if [[ -z "${SIGIL_ALLOW_DIRTY:-}" ]] && git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+  if [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no)" ]]; then
+    echo "error: the working tree has uncommitted changes" >&2
+    echo "this installs HEAD, and the build number comes from HEAD, so the app" >&2
+    echo "would not be what it claims to be" >&2
+    echo "commit or stash first, use Scripts/install.sh for a local build, or set" >&2
+    echo "SIGIL_ALLOW_DIRTY=1 to install the working tree anyway" >&2
+    exit 1
+  fi
 fi
 
 # One installer at a time. Two overlapping runs would otherwise interleave
