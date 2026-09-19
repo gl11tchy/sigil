@@ -130,6 +130,45 @@ test('phone transcript is the messages, not TUI chrome or wrap artifacts', () =>
   );
 });
 
+const iphoneSafariDump = [
+  '|     1. Delete the Sidereal icon.',
+  '|',
+  '|     2. Open Safari. It should still say Connected.',
+  '|',
+  '|     3. Share → Add to Home Screen.',
+  '|',
+  '|     4. If iPhone shows Open as Web App, turn that off.',
+  '|',
+  `╭${'─'.repeat(62)}╮`,
+  `│${' '.repeat(62)}│`,
+  `│${' '.repeat(62)}│`,
+  `╰${'─'.repeat(62)}╯`,
+  `╭${'─'.repeat(62)}╮`,
+  '│  | >                                                - grok   │',
+  `╰${'─'.repeat(62)}╯`,
+  ' — Grok 4.6 (xhigh) · always-approve —',
+  ' Shift+Tab:mode | Ctrl+x:shortcuts',
+].join('\n');
+
+test('strips the live iPhone idle composer that shows - grok instead of Build anything', () => {
+  assert.equal(
+    readableOutput(iphoneSafariDump),
+    [
+      '1. Delete the Sidereal icon.',
+      '',
+      '2. Open Safari. It should still say Connected.',
+      '',
+      '3. Share → Add to Home Screen.',
+      '',
+      '4. If iPhone shows Open as Web App, turn that off.',
+    ].join('\n'),
+  );
+  assert.equal(
+    readableOutput('Finished the layout.\n\n│  | > - grok\nGrok 4.6 (xhigh) · always-approve\nShift+Tab:mode | Ctrl+x:shortcuts'),
+    'Finished the layout.',
+  );
+});
+
 test('strips TUI tree gutters so phone code is not a column of pipes', () => {
   const tree = [
     '|     1 const CACHE = \'sidereal-shell-v7\';',

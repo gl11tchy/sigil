@@ -392,6 +392,39 @@ test('a boxed waiting composer does not cover the phone transcript', async ({ pa
   } finally { mac.close(); }
 });
 
+test('the live iPhone idle composer does not cover the phone transcript', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const raw = [
+    '|     1. Delete the Sidereal icon.',
+    '|',
+    '|     2. Open Safari. It should still say Connected.',
+    '|',
+    '|     3. Share → Add to Home Screen.',
+    '|',
+    '|     4. If iPhone shows Open as Web App, turn that off.',
+    '|',
+    `╭${'─'.repeat(62)}╮`,
+    `│${' '.repeat(62)}│`,
+    `│${' '.repeat(62)}│`,
+    `╰${'─'.repeat(62)}╯`,
+    `╭${'─'.repeat(62)}╮`,
+    '│  | >                                                - grok   │',
+    `╰${'─'.repeat(62)}╯`,
+    ' — Grok 4.6 (xhigh) · always-approve —',
+    ' Shift+Tab:mode | Ctrl+x:shortcuts',
+  ].join('\n');
+  const mac = await pair(page, baseURL, raw);
+  try {
+    await expect(page.locator('#terminal')).toContainText('Delete the Sidereal icon');
+    await expect(page.locator('#terminal')).toContainText('Add to Home Screen');
+    await expect(page.locator('#terminal')).not.toContainText('Shift+Tab');
+    await expect(page.locator('#terminal')).not.toContainText('always-approve');
+    await expect(page.locator('#terminal')).not.toContainText('- grok');
+    await expect(page.locator('#terminal')).not.toHaveText(/^\s*[│|╭╰]/m);
+    await page.screenshot({ path: testInfo.outputPath('iphone-idle.png') });
+  } finally { mac.close(); }
+});
+
 test('tree gutters do not wrap into a column of pipes on a phone', async ({ page, baseURL }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const raw = [
