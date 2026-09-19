@@ -72,27 +72,51 @@ npm --prefix Site ci --ignore-scripts && npm --prefix Site test
 
 Sidereal 52 passed, 0 failed. Site 7 passed, 0 failed.
 
-## Railway: not proven
+## Railway: revision still not proven
 
 Sidereal is deployed and is the pairing default, but nothing here shows which
-revision is running, so Task 7 stays open.
+revision is running, so Task 7 stays open. The routing half is now settled:
+checked against Railway on 2026-09-19, `remote.sigilapp.dev` is a verified custom
+domain on the Sidereal service with a valid certificate, and the apex
+`sigilapp.dev` has moved onto the site service on the same terms.
 
-`docs/remote-control.md` records the project, environment and service ids,
-`PUBLIC_ORIGIN` matching `https://remote.sigilapp.dev`, and sleeping disabled.
-That is routing and configuration. It also says the source is a local upload
-with no GitHub auto-deploy, and its recorded deployment id predates the phone
-readability and upload work. PRs #42 and #43 then changed relay behaviour in
-`Sidereal/server.mjs` after that. This container's egress cannot reach either
-host, so there is no fresh GET either.
+The reason the revision cannot be read is structural, not a gap in the checking.
+The service's source is a local upload, so each deployment carries a snapshot id
+and no commit SHA. The active deployment,
+`c5c7e7de-76a8-44d0-8d89-a1fdbe349ce2`, was created at 2026-09-18T17:40:14Z,
+which is 57 seconds after #43 merged, and #44 touched no Sidereal runtime file.
+That timing is suggestive, not evidence: nothing in Railway says what is inside
+the snapshot. Connecting the GitHub repo as the service's source is what would
+make every future deployment carry a SHA.
 
-What would close it: `railway up ./Sidereal` per the command in
-`docs/remote-control.md`, then record the deployment id and the SHA it carries.
+`docs/remote-control.md` records the project, environment and service ids, both
+custom domains, sleeping disabled, and now the active deployment. That is routing
+and configuration. This container's egress cannot reach either host, so there is
+no fresh GET to go with it.
 
-The apex cutover for `sigilapp.dev` is separate and tracked in
-`tasks/product-site-todo.md`. Task 10 is the owner-only Namecheap record change.
-Task 11 is agent work that follows it: move Sidereal's `PUBLIC_ORIGIN`, prove
-both hosts and `POST /rooms`, run `RemoteIntegrationTests` and `Scripts/verify.sh`,
-and browser-check production.
+`PUBLIC_ORIGIN` is a separate open point, and it stays agent work under Task 11
+rather than becoming an owner action: `tasks/product-site-spec.md` reserves only
+Namecheap for the owner, and moving this variable is Task 11's own acceptance
+criterion. What stopped it here is narrower. A connected Railway app is served
+variable names without values, so this session could not read back what it is set
+to, and this session's own permissions refused the write; a session with Railway
+write access can finish it without the owner touching Railway.
+
+Until the value is confirmed, treat pairing on `remote.sigilapp.dev` as unproven
+rather than working. `Sidereal/server.mjs:86` rejects a phone whose `Origin` does
+not equal `PUBLIC_ORIGIN`, so a value still pointing at the apex would refuse
+every phone on the new host.
+
+What would close Task 7: give the service a source whose revision is readable,
+which means connecting the GitHub repo rather than another `railway up` upload,
+then record the deployment id and the SHA it carries. The `railway up` command in
+`docs/remote-control.md` would deploy the current tree but would again record no
+SHA, so it cannot close this on its own.
+
+Task 10 in `tasks/product-site-todo.md`, the owner-only Namecheap change, is now
+done, and the apex has moved to the site service. Task 11 is what still follows:
+move Sidereal's `PUBLIC_ORIGIN`, prove both hosts and `POST /rooms`, run
+`RemoteIntegrationTests` and `Scripts/verify.sh`, and browser-check production.
 
 ## Still device-only
 
