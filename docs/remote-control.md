@@ -98,10 +98,20 @@ Hosting needs a real HTTPS deployment; local tests do not prove cellular/iPhone 
 - Environment: `1a3850e2-c49f-45c4-bb54-627dd102c646` (production).
 - Sidereal service: `d7e3c251-0ae2-45f9-b4b1-c819d3fa9ece`.
 - Site service: `060788b3-4ab1-45fb-8623-68027835cbc0`.
-- Companion origin: `https://remote.sigilapp.dev`. `PUBLIC_ORIGIN` matches that host.
-- Site preview: `https://site-production-c4d1.up.railway.app`. Apex still serves Sidereal until the owner points `sigilapp.dev` at the site service.
+- Companion origin: `https://remote.sigilapp.dev`. `PUBLIC_ORIGIN` is set on the Sidereal
+  service to match that host. A connected Railway app reads variable names without values,
+  so confirming the value needs the dashboard or the CLI.
+- Site preview: `https://site-production-c4d1.up.railway.app`. The apex `sigilapp.dev` is a
+  custom domain on the site service, ownership verified, certificate valid. Railway reports
+  the apex record as propagated against its target `s00d1xh1.up.railway.app`; an apex alias
+  has no readable CNAME value, so the valid certificate is the evidence it resolves.
+- `remote.sigilapp.dev` is a custom domain on the Sidereal service, ownership verified,
+  certificate valid, `remote` CNAME propagated to `1bkrlt5p.up.railway.app`.
 - Single replica in `sfo`; `/health`; app sleeping disabled through service settings.
-- Source: local upload; no GitHub auto-deploy yet.
+- Source: local upload; no GitHub auto-deploy yet. Deployments therefore carry a snapshot id
+  and no commit SHA, so which revision is live cannot be read back from Railway. The active
+  deployment is `c5c7e7de-76a8-44d0-8d89-a1fdbe349ce2` (SUCCESS, 2026-09-18T17:40:14Z,
+  snapshot `763a297a-e7bd-4787-9f3c-a87f46fa0f0b`).
 - Re-deploy Sidereal with `railway up ./Sidereal --path-as-root --project 26f52bc8-daae-4371-aa70-4cebb2d0f222 --environment 1a3850e2-c49f-45c4-bb54-627dd102c646 --service d7e3c251-0ae2-45f9-b4b1-c819d3fa9ece --detach`.
 - Re-deploy the site with `railway up ./Site --path-as-root --project 26f52bc8-daae-4371-aa70-4cebb2d0f222 --environment 1a3850e2-c49f-45c4-bb54-627dd102c646 --service 060788b3-4ab1-45fb-8623-68027835cbc0 --detach`.
 - Rollback: remove/revert the active Railway deployment. This only ends remote

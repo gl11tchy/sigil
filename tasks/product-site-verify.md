@@ -1,6 +1,8 @@
 # Product-site verification
 
-Not live. DNS is owner-only. Do not treat this as a production cutover.
+DNS is owner-only, and it is now applied: both hosts are verified custom domains in
+Railway. What is still unproven is which Sidereal revision is running. See the
+"Owner DNS" section below.
 
 Skills: using-agent-skills, planning-and-task-breakdown, test-driven-development, code-review-and-quality, git-workflow-and-versioning
 
@@ -44,13 +46,23 @@ Body `ok`. `/` is the product page with the zip href. `/docs` is 200. `/rooms` G
 
 Playwright: local and live `/` and `/docs` at 390px and 1280px. Docs click round-trips. No console errors. No horizontal overflow at 390px.
 
-## Owner DNS (not done)
+## Owner DNS
 
-Do not flip the apex until `remote.sigilapp.dev` is healthy Sidereal.
+Steps 1, 2 and 4 are done. Checked against Railway on 2026-09-19; the container has no
+egress to either host, so this records Railway's own view of each domain and not a `curl`.
 
-1. Namecheap CNAME `remote` → `1bkrlt5p.up.railway.app`.
-2. Namecheap TXT `_railway-verify.remote` → `railway-verify=fcc2e74a0b9e02bcb9504509004d7d783853f0086368e85cf4cbe618262558a8`.
-3. After `https://remote.sigilapp.dev/health` is `ok`, set Sidereal `PUBLIC_ORIGIN=https://remote.sigilapp.dev`.
-4. Then move the apex ALIAS for `sigilapp.dev` onto the Site service.
+1. Namecheap CNAME `remote` → `1bkrlt5p.up.railway.app`. Applied. Railway reports the
+   record propagated and matching, ownership verified, certificate valid.
+2. Namecheap TXT `_railway-verify.remote`. Applied; Railway no longer lists a pending
+   verification record for the domain.
+3. Sidereal `PUBLIC_ORIGIN=https://remote.sigilapp.dev`. **Open.** The variable exists on
+   the service, but a connected Railway app is served variable names without values, so its
+   current value cannot be read back from here.
+4. Apex `sigilapp.dev` moved onto the Site service. Applied. It is a custom domain on
+   service `060788b3-4ab1-45fb-8623-68027835cbc0`, ownership verified, certificate valid,
+   and it is no longer attached to Sidereal. An apex alias exposes no readable CNAME value,
+   so the issued certificate is the evidence that it resolves to Railway.
 
-Agent cannot change Namecheap. Apex still serves Sidereal. Do not merge the Mac default origin until step 3.
+Still open, and tracked as Task 7 in `tasks/plan.md`: the Sidereal service deploys from
+local uploads, so its deployments carry a snapshot id and no commit SHA. Nothing readable
+from Railway says which revision is live.

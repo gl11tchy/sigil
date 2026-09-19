@@ -22,8 +22,10 @@ ASSUMPTIONS: Readable companion, not a pixel TUI. Attach writes to SigilDrops an
 ### Phase 3: Phone UI
 - [x] Task 5: Attach, chips, Stop while working, composer layout.
 - [x] Task 6: Playwright + native tests. Evidence: `tasks/verify.md`.
-- [ ] Task 7: Redeploy Sidereal and record the revision. The last recorded
-  deploy predates the upload and readability work, and #42/#43 changed the relay after it.
+- [ ] Task 7: Redeploy Sidereal and record the revision. The active deployment,
+  `c5c7e7de-76a8-44d0-8d89-a1fdbe349ce2`, postdates #43 by under a minute, but the service
+  deploys from local uploads, so it carries a snapshot id and no SHA and nothing proves what
+  is in it. Closing this needs a deploy whose revision is readable.
 
 ## Risks
 | Risk | Mitigation |

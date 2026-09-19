@@ -233,12 +233,16 @@ Do not edit `tasks/plan.md` or `tasks/todo.md`.
 **Description:** Owner-only Namecheap. Agent adds Railway custom domains and prints records. Agent does not log into Namecheap.
 
 **Acceptance criteria:**
-- [ ] `remote.sigilapp.dev` is a custom domain on the Sidereal service.
-- [ ] `sigilapp.dev` is a custom domain on the site service (attach only after Task 11 is ready to set Sidereal `PUBLIC_ORIGIN`).
-- [ ] Owner applies the Railway-printed records at Namecheap.
+- [x] `remote.sigilapp.dev` is a custom domain on the Sidereal service.
+- [x] `sigilapp.dev` is a custom domain on the site service. It was attached ahead of the
+  `PUBLIC_ORIGIN` change rather than after it, so the ordering caveat above did not hold;
+  it cost nothing, because the Mac app addresses `remote.sigilapp.dev` and not the apex.
+- [x] Owner applies the Railway-printed records at Namecheap.
 
 **Verification:**
-- [ ] Owner confirms DNS. Agent checks `dig`/`curl` only after that.
+- [x] Railway reports both domains ownership-verified with valid certificates, which is a
+  stronger signal than `dig` and does not depend on session egress. A session cannot reach
+  either host, so no `curl` backs this.
 
 **Dependencies:** Task 9
 
