@@ -4,7 +4,8 @@ Spec: `tasks/spec.md`. Plan: `tasks/plan.md`. Closes Task 6. The deploy half of
 the old `tasks/todo.md` line stays open as Task 7.
 
 Swift and WebKit are macOS-only, so those two ran on the CI runner, not here.
-Everything else ran on Linux at `31e7f0f`.
+Everything else ran on Linux. Every claim below is about this branch's own
+content, not the `main` it forked from.
 
 ## Playwright
 
@@ -25,7 +26,8 @@ npx playwright test --project=chromium
 ```
 
 The container has Chromium only, so WebKit ran in CI, where `Scripts/verify.sh`
-installs both and runs both projects.
+installs both and runs both projects. CI run 126 on `b3d094d` is the run that
+carries the widened loop; runs from before it did not execute these assertions.
 
 ## Native tests
 
@@ -54,9 +56,12 @@ is unreachable: `maxChunks` (128) times `maxChunkBytes` (32 KB) is exactly
 was untested, so this change adds it. The 4 MB cap itself is enforced and tested
 one layer down, in `TerminalDrop.writeRemoteFile`.
 
-Swift does not run on Linux. CI run 122 on `31e7f0f` is green, and that job is
+Swift does not run on Linux, so the chunk-count assertion added here was first
+executed by CI. CI run 126 on `b3d094d` is green, and that job is
 `Scripts/verify.sh` on `macos-15`: native tests, both browser projects, format
-lint, signed debug bundle and smoke launch.
+lint, signed debug bundle and smoke launch. Cite that run and not an earlier
+one: run 122 on `31e7f0f` and run 124 on `d7a8990` both predate the Swift and
+Playwright assertions on this branch.
 
 ## Node suites
 
