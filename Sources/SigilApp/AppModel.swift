@@ -80,6 +80,9 @@ final class AppModel {
     @ObservationIgnored private var canonicalPathCache: [String: String] = [:]
     @ObservationIgnored private var canonicalCacheTabCount = -1
     @ObservationIgnored private var canonicalCacheSessionCount = -1
+    /// Refreshes what a crash report would say Sigil was doing. Observation
+    /// ignores it: nothing in the UI reads it.
+    @ObservationIgnored private var crashStateTask: Task<Void, Never>?
 
     init(
         settings: AppSettings = AppSettings(),
@@ -120,6 +123,7 @@ final class AppModel {
     func onAppear() async {
         guard !didAppear else { return }
         didAppear = true
+        if !Self.isRunningAutomatedTests { startCrashStateRefresh() }
         if Self.isSmokeTest { return }
         store.start()
         // Bind the local socket before restoring tabs so they inherit it.
@@ -1570,6 +1574,81 @@ final class AppModel {
         guard let app = NSApp else { return }
         app.dockTile.badgeLabel = tabs.contains(where: \.hasUnseenActivity) ? "•" : nil
         app.dockTile.display()
+    }
+
+    /// How often the snapshot a crash report carries is brought up to date.
+    /// Often enough to catch the turn that killed the app, seldom enough that
+    /// reading the terminal buffer costs nothing anyone can feel.
+    static let crashStateInterval: Duration = .seconds(5)
+    /// Tabs listed in that snapshot before it says how many more there were.
+    static let crashStateTabLimit = 12
+    /// Bytes a single name or path may take in that snapshot.
+    static let crashStateFieldLimit = 120
+
+    private func startCrashStateRefresh() {
+        guard crashStateTask == nil else { return }
+        crashStateTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                CrashReporter.updateState(self.crashState())
+                try? await Task.sleep(for: Self.crashStateInterval)
+            }
+        }
+    }
+
+    /// What Sigil was doing, in the form a crash report keeps in memory. A
+    /// backtrace says where the app died; this says what the user was doing
+    /// when it happened, which is the half that makes a report answerable.
+    func crashState() -> String {
+        var lines = ["tabs open: \(tabs.count)"]
+        let selected = selectedTab
+        for tab in tabs.prefix(Self.crashStateTabLimit) {
+            let marker = tab.id == selected?.id ? "*" : "-"
+            let activity = Self.describe(tab.activity)
+            // A conversation name is the user's own text and a path can be any
+            // length, so bound both: one long tab should not be able to push
+            // the others out of the report. The name is cut from the end and
+            // the path from the front, which is the useful half of each.
+            let name = CrashReporter.head(of: title(for: tab), bytes: Self.crashStateFieldLimit)
+            let path = CrashReporter.tail(
+                of: tab.workingDirectory.path, bytes: Self.crashStateFieldLimit)
+            lines.append("\(marker) \(name) [\(activity)] \(path)")
+        }
+        if tabs.count > Self.crashStateTabLimit {
+            lines.append("  and \(tabs.count - Self.crashStateTabLimit) more")
+        }
+        // Each section is bounded in bytes against its own budget, so the tab
+        // list keeps its head and the terminal keeps its tail. Trimming the
+        // finished snapshot as a whole would drop the tab list first.
+        var state = CrashReporter.head(
+            of: lines.joined(separator: "\n"), bytes: CrashReporter.tabListCapacity)
+        if let selected {
+            let name = CrashReporter.head(
+                of: title(for: selected), bytes: Self.crashStateFieldLimit)
+            let tail = CrashReporter.tail(
+                of: selected.controller.crashSnapshot(), bytes: CrashReporter.terminalTailCapacity)
+            state += "\n\nterminal tail — \(name):\n"
+            state += tail.isEmpty ? "(nothing on screen)" : tail
+        }
+        return state
+    }
+
+    /// The activity name, plus the exit code when the child reported one.
+    static func describe(_ activity: TerminalTab.Activity) -> String {
+        guard case .exited(let code?) = activity else { return activity.statusName }
+        return "\(activity.statusName) \(code)"
+    }
+
+    /// Help ▸ Reveal Crash Logs. Selects the newest report when there is one,
+    /// so the user lands on the file to attach rather than a folder to search.
+    func revealCrashLogs() {
+        let directory = CrashLog.directory
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        if let newest = CrashLog.mostRecentReport(in: directory) {
+            NSWorkspace.shared.activateFileViewerSelecting([newest])
+        } else {
+            NSWorkspace.shared.open(directory)
+        }
     }
 
     /// Clear the selected tab's badge once its contents are visible again.

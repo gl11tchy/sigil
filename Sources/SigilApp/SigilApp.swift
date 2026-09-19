@@ -32,6 +32,15 @@ struct SigilApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor var model: AppModel?
 
+    override init() {
+        super.init()
+        // The adaptor builds this delegate before the App's other stored
+        // properties, so a crash while the app model itself is being
+        // constructed still lands in a report. applicationDidFinishLaunching
+        // runs after all of that and would already be too late.
+        CrashReporter.install()
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -157,6 +166,7 @@ struct GrokCommands: Commands {
                 NSWorkspace.shared.open(
                     URL(string: "https://github.com/gl11tchy/sigil/releases/latest")!)
             }
+            Button("Reveal Crash Logs") { model.revealCrashLogs() }
         }
     }
 

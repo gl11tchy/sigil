@@ -3049,6 +3049,39 @@ struct AppModelTests {
         let closed = makeSession(id: "closed-id", cwd: cwd)
         #expect(model.sidebarDismiss(for: closed) == .delete)
     }
+
+    @Test @MainActor
+    func describesEveryTabActivity() {
+        #expect(AppModel.describe(.starting) == "starting")
+        #expect(AppModel.describe(.working) == "working")
+        #expect(AppModel.describe(.idle) == "idle")
+        #expect(AppModel.describe(.exited(code: 2)) == "exited 2")
+        #expect(AppModel.describe(.exited(code: nil)) == "exited")
+    }
+
+    @Test @MainActor
+    func crashStateSaysSoWhenNothingIsOpen() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+
+        #expect(fixture.model().crashState() == "tabs open: 0")
+    }
+
+    @Test @MainActor
+    func crashStateNamesTheOpenTabsAndMarksTheSelectedOne() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project-a")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        _ = try #require(model.newTab(in: cwd))
+
+        let state = model.crashState()
+        #expect(state.hasPrefix("tabs open: 1"))
+        #expect(state.contains("\n* "))
+        #expect(state.contains(cwd.lastPathComponent))
+        #expect(state.contains("terminal tail"))
+    }
 }
 
 private enum TestFailure: Error {

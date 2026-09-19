@@ -13,9 +13,12 @@ let package = Package(
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.18.0"),
     ],
     targets: [
+        // Lock-free atomics for the crash reporter, which needs ordering a
+        // signal handler is allowed to use and Swift cannot give it here.
+        .target(name: "SigilAtomics"),
         .target(
             name: "SigilKit",
-            dependencies: [.product(name: "SwiftTerm", package: "SwiftTerm")]
+            dependencies: [.product(name: "SwiftTerm", package: "SwiftTerm"), "SigilAtomics"]
         ),
         .executableTarget(
             name: "SigilApp",

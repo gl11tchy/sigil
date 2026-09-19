@@ -210,6 +210,10 @@ public final class TerminalController {
     /// Bounded readable output for an explicitly paired remote controller.
     public func remoteSnapshot() -> String { accessibilitySnapshot(maxCharacters: 12_000) }
 
+    /// The tail of the terminal for a crash report. Shorter than the remote
+    /// snapshot: the report has to stay readable, not be complete.
+    public func crashSnapshot() -> String { accessibilitySnapshot(maxCharacters: 4_000) }
+
     /// Uses the terminal's negotiated paste mode without changing the clipboard.
     /// Multiline input cannot be pasted safely when that mode is disabled.
     public func pasteRemoteText(_ text: String) -> Bool {

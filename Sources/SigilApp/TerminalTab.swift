@@ -27,6 +27,17 @@ final class TerminalTab: Identifiable {
             guard case .exited(let code?) = self else { return false }
             return code != 0
         }
+
+        /// The machine-readable name: the remote wire sends this, and a crash
+        /// report lists it. A label meant for a person belongs in the view.
+        var statusName: String {
+            switch self {
+            case .starting: return "starting"
+            case .working: return "working"
+            case .idle: return "idle"
+            case .exited: return "exited"
+            }
+        }
     }
 
     let id: UUID
