@@ -53,11 +53,8 @@ const liveFooter = [
 
 test('strips the live Grok 4.6 phone composer and space-padded TUI rows', () => {
   const padded = Array.from({ length: 18 }, () => ' '.repeat(120)).join('\n') + '\n' + liveFooter;
-  assert.equal(readableOutput(padded), '∴ Thinking... 2.7s\n3m28s ↓328k [stop]');
-  assert.equal(
-    readableOutput('Finished the layout.\n\n' + liveFooter),
-    'Finished the layout.\n\n         ∴ Thinking... 2.7s\n3m28s ↓328k [stop]',
-  );
+  assert.equal(readableOutput(padded), '');
+  assert.equal(readableOutput('Finished the layout.\n\n' + liveFooter), 'Finished the layout.');
 });
 
 test('keeps a typed Mac draft in the new composer', () => {
@@ -84,10 +81,7 @@ const boxed = [
 ].join('\n');
 
 test('strips a boxed Grok 4.6 composer while a turn is waiting', () => {
-  assert.equal(
-    readableOutput(boxed),
-    '> Testing 123\n6:56 PM\n\n♦ user_prompt_submit  [hooks: 1/2]\n\n: Waiting for response... 9.9s\n9.9s ↓318k [stop]',
-  );
+  assert.equal(readableOutput(boxed), '> Testing 123');
 });
 
 test('keeps a trailing table box and does not treat Grok in a sentence as chrome', () => {
@@ -100,6 +94,40 @@ test('keeps a trailing table box and does not treat Grok in a sentence as chrome
 test('still strips a boxed composer after a greater-than in the last result line', () => {
   const text = 'comparison: x > y\n\n' + boxed.slice(boxed.indexOf('┌'));
   assert.equal(readableOutput(text), 'comparison: x > y');
+});
+
+test('does not reflow code, a lone clock, or indented SQL', () => {
+  assert.equal(readableOutput('const first = 1\ncontinue'), 'const first = 1\ncontinue');
+  assert.equal(readableOutput('9:46 AM'), '9:46 AM');
+  assert.equal(
+    readableOutput('    SELECT first column FROM table'),
+    '    SELECT first column FROM table',
+  );
+});
+
+test('phone transcript is the messages, not TUI chrome or wrap artifacts', () => {
+  const raw = [
+    '          That stopped check was the hung',
+    'run I killed. The later full check',
+    'already     9:46 AM',
+    '          passed, and the connect fix is',
+    'live.',
+    '',
+    '        ◆ stop  [hooks: 1/2]',
+    '',
+    '      Worked for 23s',
+    '',
+    '        ◆ user_prompt_submit  [hooks: 1/2]',
+    '        ◆ Thought for 1.5s',
+    '',
+    '      Same as the last one: a hung check',
+    'I already stopped. Ignore it.',
+    '9:46 AM',
+  ].join('\n');
+  assert.equal(
+    readableOutput(raw),
+    'That stopped check was the hung run I killed. The later full check already passed, and the connect fix is live.\n\nSame as the last one: a hung check\nI already stopped. Ignore it.',
+  );
 });
 
 test('strips TUI tree gutters so phone code is not a column of pipes', () => {

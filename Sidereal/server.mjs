@@ -65,6 +65,7 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
     const room = rooms.get(id);
     if (!room) return;
     rooms.delete(id);
+    clearTimeout(room.dropPhone);
     if (room.ticket && tickets.get(room.ticket) === id) tickets.delete(room.ticket);
     room.phone?.terminate(); room.host?.terminate();
   };
@@ -75,13 +76,14 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
     const role = url.searchParams.get('role'), ticket = url.searchParams.get('ticket');
     if (ticket != null && !hex64(ticket)) { reject(); return; }
     let id = url.searchParams.get('room');
-    if (role === 'phone' && ticket) id = tickets.get(ticket);
+    if (role === 'phone' && ticket) id = tickets.get(ticket) || id;
     const room = rooms.get(id);
     if (url.pathname !== '/connect' || !room) { reject(); return; }
     if (role === 'host') {
-      if (req.headers.origin || room.host || !equal(req.headers.authorization, `Bearer ${room.hostToken}`)) { reject(); return; }
+      if ((req.headers.origin && req.headers.origin !== publicOrigin)
+        || !equal(req.headers.authorization, `Bearer ${room.hostToken}`)) { reject(); return; }
     } else if (role === 'phone') {
-      if (req.headers.origin !== publicOrigin || !room.host || room.phone) { reject(); return; }
+      if (req.headers.origin !== publicOrigin || !room.host) { reject(); return; }
     } else { reject(); return; }
     wss.handleUpgrade(req, socket, head, ws => {
       ws.on('error', () => {});
@@ -89,16 +91,24 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
       ws.on('pong', () => { ws.alive = true; });
       let windowStart = now(), count = 0;
       const peer = randomBytes(16).toString('hex');
+      const take = slot => {
+        const previous = room[slot];
+        room[slot] = ws;
+        if (previous && previous !== ws) previous.terminate();
+      };
       if (role === 'host') {
-        room.host = ws;
+        take('host');
+        clearTimeout(room.dropPhone);
+        room.dropPhone = undefined;
         if (ticket) {
           if (room.ticket && room.ticket !== ticket && tickets.get(room.ticket) === id) tickets.delete(room.ticket);
           tickets.set(ticket, id);
           room.ticket = ticket;
         }
         send(ws, { type: 'ready' });
+        if (room.phone) send(ws, { type: 'peer', peer: room.peer });
       }
-      else { room.phone = ws; room.peer = peer; send(room.host, { type: 'peer', peer }); }
+      else { take('phone'); room.peer = peer; send(room.host, { type: 'peer', peer }); }
       ws.on('message', (bytes, binary) => {
         if (now() - windowStart >= 1000) { count = 0; windowStart = now(); }
         if (binary || ++count > 30) { ws.close(1008); return; }
@@ -120,7 +130,14 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
       ws.on('close', () => {
         if (role === 'host' && room.host === ws) {
           room.host = null; room.disconnectedAt = now();
-          room.phone?.terminate(); room.phone = null;
+          clearTimeout(room.dropPhone);
+          const phone = room.phone;
+          room.dropPhone = setTimeout(() => {
+            if (room.host || room.phone !== phone) return;
+            phone?.terminate();
+            if (room.phone === phone) room.phone = null;
+          }, 3000);
+          room.dropPhone?.unref?.();
         } else if (room.phone === ws) {
           room.phone = null;
           send(room.host, { type: 'left', peer });

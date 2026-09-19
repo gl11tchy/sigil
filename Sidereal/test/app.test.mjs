@@ -239,6 +239,84 @@ test('an unanswered connection reports and closes after ten seconds', async () =
   assert.equal(page.element('status').textContent, 'Connected');
 });
 
+test('a command that times out keeps the socket so later commands can use it', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('new').onclick();
+  await settle();
+  assert.equal(socket.sent.at(-1).action, 'new');
+  await page.fireTimer(10000);
+  assert.equal(socket.readyState, 1);
+  assert.equal(page.element('error').hidden, false);
+  page.element('new').onclick();
+  await settle();
+  assert.equal(socket.sent.at(-1).action, 'new');
+  assert.equal(socket.readyState, 1);
+});
+
+test('a late reply after a command timeout does not close the socket', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('new').onclick();
+  await settle();
+  const timedOut = socket.sent.at(-1);
+  await page.fireTimer(10000);
+  socket.receive({ data: JSON.stringify({
+    challenge: timedOut.challenge, sequence: timedOut.sequence, ok: true,
+    state: { tabs: [{ id: 'tab-1', title: 'Late', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'LATE' },
+  }) });
+  await settle();
+  assert.equal(socket.readyState, 1);
+  assert.equal(page.element('status').textContent, 'Connected');
+  assert.equal(page.element('terminal').textContent, 'READY');
+});
+
+test('a command queued behind a poll does not run after a new handshake', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  await page.fireTimer(1000);
+  assert.equal(socket.sent.at(-1).action, 'state');
+  page.element('new').onclick();
+  await settle();
+  assert.equal(socket.sent.filter(request => request.action === 'new').length, 0);
+  socket.receive({ hello: 'd'.repeat(64) });
+  await settle();
+  assert.equal(socket.sent.filter(request => request.action === 'new').length, 0);
+  assert.equal(socket.sent.at(-1).action, 'state');
+  assert.equal(socket.sent.at(-1).challenge, 'd'.repeat(64));
+  socket.reply();
+  await settle();
+  assert.equal(socket.readyState, 1);
+  assert.equal(page.element('status').textContent, 'Connected');
+});
+
+test('reconnect waits longer after each failed attempt', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  socket.close();
+  await settle();
+  await page.fireTimer(500);
+  assert.equal(page.sockets.length, 2);
+  page.sockets.at(-1).close();
+  await settle();
+  await page.fireTimer(1000);
+  assert.equal(page.sockets.length, 3);
+});
+
+test('a new Mac handshake on the same socket is accepted without disconnecting', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  socket.receive({ hello: 'd'.repeat(64) });
+  await settle();
+  assert.equal(socket.readyState, 1);
+  assert.equal(socket.sent.at(-1).action, 'state');
+  assert.equal(socket.sent.at(-1).challenge, 'd'.repeat(64));
+  socket.reply();
+  await settle();
+  assert.equal(page.element('status').textContent, 'Connected');
+  assert.equal(page.element('status').dataset.connected, 'true');
+});
+
 test('an ended session disables remote actions but keeps local editing and picker', async () => {
   const page = await browser();
   const socket = await page.authorize();
@@ -342,7 +420,7 @@ test('a ticket in a Mac reply is stored and used on reconnect', async () => {
   await settle();
   const next = String(page.sockets.at(-1).url);
   assert.match(next, new RegExp(`ticket=${ticket}`));
-  assert.equal(next.includes('room='), false);
+  assert.match(next, new RegExp(`room=${'a'.repeat(32)}`));
 });
 
 test('a same-document QR fragment reloads the app but an empty fragment does not', async () => {

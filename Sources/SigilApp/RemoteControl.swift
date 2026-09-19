@@ -23,11 +23,13 @@ final class RemoteControl {
         self.store = store
     }
 
-    static let productionOrigin = "https://sigilapp.dev"
+    static let productionOrigin = "https://remote.sigilapp.dev"
     static let legacyRailwayOrigin = "https://sidereal-production-587c.up.railway.app"
+    static let legacyApexOrigin = "https://sigilapp.dev"
 
     static func preferredOrigin(_ text: String) -> String {
-        text == legacyRailwayOrigin ? productionOrigin : text
+        guard let normalized = origin(text)?.absoluteString else { return text }
+        return normalized == legacyRailwayOrigin || normalized == legacyApexOrigin ? productionOrigin : text
     }
 
     static func origin(_ text: String) -> URL? {
@@ -44,17 +46,24 @@ final class RemoteControl {
         guard allowed else { return nil }
         var normalized = components
         normalized.path = ""
+        normalized.host = host.lowercased()
+        if (normalized.scheme == "https" && normalized.port == 443)
+            || (normalized.scheme == "http" && normalized.port == 80)
+        {
+            normalized.port = nil
+        }
         return normalized.url
     }
 
     func resumeIfPaired(model: AppModel) {
         guard let pairing = store.load(), Self.origin(pairing.origin) != nil else { return }
+        guard Self.preferredOrigin(pairing.origin) == pairing.origin else { return }
         start(urlText: pairing.origin, model: model)
     }
 
     func start(urlText: String, model: AppModel) {
         stop()
-        guard let origin = Self.origin(urlText) else {
+        guard let origin = Self.origin(Self.preferredOrigin(urlText)) else {
             error = "Enter the HTTPS address of your Sidereal server."
             return
         }
@@ -119,6 +128,7 @@ final class RemoteControl {
                             failures = 0
                             self.status = session.isPaired ? "Phone disconnected" : "Scan to connect"
                             self.pairingURL = session.isPaired ? nil : pairingURL
+                            self.error = nil
                         } else if frame.type == "peer", let id = frame.peer, id.count <= 64 {
                             peer = id
                             session.resetConnection()
@@ -165,7 +175,10 @@ final class RemoteControl {
                     if RemoteReconnectPolicy.shouldReallocate(failures: failures) { room = nil }
                     retry = RemoteReconnectPolicy.retrySeconds(failures: failures)
                     self.status = "Reconnecting…"
-                    if !session.isPaired { self.pairingURL = nil }
+                    if !session.isPaired {
+                        self.pairingURL = nil
+                        self.error = "Could not reach the companion. Retrying."
+                    }
                     try? await Task.sleep(for: .seconds(retry))
                 }
             }
@@ -192,6 +205,7 @@ final class RemoteControl {
 
     private func restoredSession(for origin: URL) -> RemoteSession {
         guard let saved = store.load(),
+            Self.preferredOrigin(saved.origin) == saved.origin,
             RemoteControl.origin(saved.origin)?.absoluteString == origin.absoluteString,
             RemoteCrypto.isValidKey(saved.deviceKey), RemoteCrypto.isValidKey(saved.ticket)
         else { return RemoteSession() }
