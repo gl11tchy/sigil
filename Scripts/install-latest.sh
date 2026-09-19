@@ -37,9 +37,33 @@ sigil_running() {
   ps -axo command | awk -v exe="$DEST/Contents/MacOS/Sigil" '$0 == exe { found = 1 } END { exit !found }'
 }
 
+# Drop . and .. segments. Safe on the part of a path that does not exist, and
+# on a prefix pwd -P has already resolved, because neither holds a symlink.
+normalize_segments() {
+  local path="$1" seg out=() parts=()
+  IFS='/' read -r -a parts <<< "$path"
+  for seg in "${parts[@]}"; do
+    case "$seg" in
+      '' | .) ;;
+      ..)
+        if [[ ${#out[@]} -gt 0 ]]; then
+          unset 'out[-1]'
+        fi
+        ;;
+      *) out+=("$seg") ;;
+    esac
+  done
+  local joined=""
+  for seg in ${out[@]+"${out[@]}"}; do
+    joined="$joined/$seg"
+  done
+  printf '%s\n' "${joined:-/}"
+}
+
 # Canonicalize as much of the path as exists. Walking up to the nearest real
 # directory matters because a build output that does not exist yet can still
-# sit under a symlink into the installed app.
+# sit under a symlink into the installed app, and the part that does not exist
+# can still point back inside it through ..
 resolve_path() {
   local path="$1" dir rest=""
   if [[ -d "$path" ]]; then
@@ -54,7 +78,7 @@ resolve_path() {
   if [[ -d "$dir" ]]; then
     dir="$(cd "$dir" && pwd -P)"
   fi
-  printf '%s/%s\n' "${dir%/}" "$rest"
+  normalize_segments "${dir%/}/$rest"
 }
 
 # Device and inode, so two spellings of one bundle compare equal even on a
@@ -117,7 +141,8 @@ build_inputs_differ_from_head() {
     return 0
   fi
   [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=all -- \
-    Sources Tests Resources Package.swift Package.resolved 2>/dev/null)" ]]
+    Sources Tests Resources Package.swift Package.resolved \
+    'Package@swift-*.swift' 2>/dev/null)" ]]
 }
 
 # The build compiles the working tree but stamps the build number from HEAD, so
