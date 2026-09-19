@@ -52,10 +52,55 @@ async function pair(page, origin, initialOutput, options = {}) {
       }
     }).catch(error => errors.push(error));
   });
-  await page.goto(`${origin}/#room=${room}&key=${bootstrap}`);
-  await expect(page.locator('#status')).toHaveText('Connected');
-  return { actions, errors, close: () => ws.close() };
+  if (!options.skipNavigate) {
+    await page.goto(`${origin}/#room=${room}&key=${bootstrap}`);
+    await expect(page.locator('#status')).toHaveText('Connected');
+  }
+  return { actions, errors, room, bootstrap, close: () => ws.close() };
 }
+
+test('the welcome screen pairs from a pasted link without a URL fragment', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mac = await pair(page, baseURL, undefined, { skipNavigate: true });
+  try {
+    await page.goto(baseURL);
+    await expect(page.locator('#welcome')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Scan code' })).toBeVisible();
+    await expect(page.locator('#status')).toHaveText('Not connected');
+    await page.screenshot({ path: testInfo.outputPath('welcome.png') });
+    await page.getByRole('button', { name: 'Paste link' }).click();
+    await page.locator('#pairing-link').fill(`${baseURL}/#room=${mac.room}&key=${mac.bootstrap}`);
+    await page.locator('#paste-form').getByRole('button', { name: 'Connect' }).click();
+    await expect(page.locator('#status')).toHaveText('Connected');
+    await expect(page.locator('#welcome')).toBeHidden();
+    expect(new URL(page.url()).hash).toBe('');
+  } finally { mac.close(); }
+});
+
+test('a pairing link for another origin stays disconnected', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(baseURL);
+  await page.getByRole('button', { name: 'Paste link' }).click();
+  await page.locator('#pairing-link').fill(
+    `https://evil.example/#room=${'ab'.repeat(16)}&key=${'cd'.repeat(32)}`,
+  );
+  await page.locator('#paste-form').getByRole('button', { name: 'Connect' }).click();
+  await expect(page.locator('#error')).toHaveText('This code is for a different Sidereal address.');
+  await expect(page.locator('#status')).toHaveText('Not connected');
+  await expect(page.locator('#welcome')).toBeVisible();
+});
+
+test('scan falls back to paste when the camera is missing', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: undefined });
+  });
+  await page.goto(baseURL);
+  await page.getByRole('button', { name: 'Scan code' }).click();
+  await expect(page.locator('#error')).toContainText('Paste the pairing link');
+  await expect(page.locator('#paste-form')).toBeVisible();
+  await expect(page.locator('#scanner')).toBeHidden();
+});
 
 test('a stored ticket reconnects without a QR fragment', async ({ page, baseURL }) => {
   await page.setViewportSize({ width: 390, height: 844 });

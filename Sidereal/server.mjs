@@ -10,7 +10,8 @@ const hex64 = value => typeof value === 'string' && value.length === 64 && /^[a-
 const assets = new Map([
   ['/', ['index.html', 'text/html']], ['/app.mjs', ['app.mjs', 'text/javascript']],
   ['/output.mjs', ['output.mjs', 'text/javascript']],
-  ['/crypto.mjs', ['crypto.mjs', 'text/javascript']], ['/style.css', ['style.css', 'text/css']],
+  ['/crypto.mjs', ['crypto.mjs', 'text/javascript']], ['/pairing.mjs', ['pairing.mjs', 'text/javascript']],
+  ['/jsqr.js', ['jsqr.js', 'text/javascript']], ['/style.css', ['style.css', 'text/css']],
   ['/sw.js', ['sw.js', 'text/javascript']], ['/manifest.webmanifest', ['manifest.webmanifest', 'application/manifest+json']],
   ['/icon.svg', ['icon.svg', 'image/svg+xml']],
   ...[180, 192, 512].map(size => [`/icon-${size}.png`, [`icon-${size}.png`, 'image/png']]),
@@ -27,7 +28,7 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
   let creationWindow = now(), creations = 0;
   const wss = new WebSocketServer({ noServer: true, maxPayload: 110000, perMessageDeflate: false });
   const server = http.createServer(async (req, res) => {
-    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');

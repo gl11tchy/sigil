@@ -78,7 +78,14 @@ test('HTTP has fixed asset routes and security headers', async t => {
   assert.equal(res.status, 404);
   assert.equal(res.headers.get('referrer-policy'), 'no-referrer');
   assert.match(res.headers.get('content-security-policy'), /default-src 'self'/);
+  assert.match(res.headers.get('content-security-policy'), /media-src 'self' blob:/);
   assert.equal((await fetch(`${base}/rooms`)).status, 404);
+  const pairing = await fetch(`${base}/pairing.mjs`);
+  assert.equal(pairing.status, 200);
+  assert.match(pairing.headers.get('content-type'), /javascript/);
+  const scanner = await fetch(`${base}/jsqr.js`);
+  assert.equal(scanner.status, 200);
+  assert.match(scanner.headers.get('content-type'), /javascript/);
 });
 
 test('rejecting an unauthorized phone closes it and releases the slot', async t => {

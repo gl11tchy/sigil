@@ -1,5 +1,6 @@
 import { importKey, randomKey, seal, open } from './crypto.mjs';
 import { readableOutput } from './output.mjs';
+import { pairingFromText } from './pairing.mjs';
 const $ = id => document.getElementById(id);
 const drafts = new Map();
 const attachmentDrafts = new Map();
@@ -65,6 +66,8 @@ function updateControls() {
   $('raw-toggle').hidden = !selected;
   $('forget').hidden = !credential;
   $('reconnect').hidden = !credential || connected;
+  const actions = $('welcome-actions');
+  if (actions) actions.hidden = Boolean(credential);
 }
 function offline(message = 'Disconnected') {
   connected = false;
@@ -458,7 +461,131 @@ $('forget').onclick = async () => {
   try { await storage('delete'); showError(''); } catch { showError('Could not clear pairing. Clear this site’s data in browser settings.'); }
   updateControls();
 };
+let scanRun = 0;
+function loadJsQR() {
+  if (typeof globalThis.jsQR === 'function') return Promise.resolve(globalThis.jsQR);
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = '/jsqr.js';
+    script.onload = () => typeof globalThis.jsQR === 'function'
+      ? resolve(globalThis.jsQR)
+      : reject(new Error('Could not load the scanner.'));
+    script.onerror = () => reject(new Error('Could not load the scanner.'));
+    document.head.appendChild(script);
+  });
+}
+function stopScan() {
+  scanRun++;
+  const video = $('scanner-video');
+  const stream = video?.srcObject;
+  if (stream && typeof stream.getTracks === 'function') {
+    for (const track of stream.getTracks()) track.stop();
+  }
+  if (video) video.srcObject = null;
+  const scanner = $('scanner');
+  if (scanner) scanner.hidden = true;
+}
+async function beginPair(pairing) {
+  bootstrap = await importKey(pairing.key);
+  newDeviceKey = randomKey();
+  credential = { room: pairing.room, key: await importKey(newDeviceKey) };
+  await storage('put', credential);
+  stopped = false;
+  reconnectDelay = 500;
+  updateControls();
+  connect();
+}
+async function startScan() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    $('paste-form').hidden = false;
+    showError('This browser cannot open the camera. Paste the pairing link instead.');
+    $('pairing-link').focus();
+    return;
+  }
+  showError('');
+  const run = ++scanRun;
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+    });
+  } catch (error) {
+    $('paste-form').hidden = false;
+    showError(error?.name === 'NotAllowedError'
+      ? 'Camera access is off. Paste the pairing link instead.'
+      : 'No camera available. Paste the pairing link instead.');
+    $('pairing-link').focus();
+    return;
+  }
+  if (run !== scanRun) {
+    for (const track of stream.getTracks()) track.stop();
+    return;
+  }
+  const video = $('scanner-video');
+  video.setAttribute('playsinline', '');
+  video.playsInline = true;
+  video.muted = true;
+  video.srcObject = stream;
+  $('scanner').hidden = false;
+  try { await video.play(); } catch { /* frames still arrive if a second play() is rejected */ }
+  let jsQR;
+  try { jsQR = await loadJsQR(); }
+  catch (error) {
+    if (run === scanRun) { showError(error.message); stopScan(); }
+    return;
+  }
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const tick = () => {
+    if (run !== scanRun) return;
+    if (video.readyState >= 2 && video.videoWidth) {
+      const scale = Math.min(1, 640 / video.videoWidth);
+      canvas.width = Math.max(1, Math.floor(video.videoWidth * scale));
+      canvas.height = Math.max(1, Math.floor(video.videoHeight * scale));
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(image.data, image.width, image.height);
+      if (code?.data) {
+        const result = pairingFromText(code.data, location.origin);
+        if (result?.room) {
+          stopScan();
+          beginPair(result).catch(error => showError(error.message));
+          return;
+        }
+        if (result?.error) showError(result.error);
+      }
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+if ($('scan')) $('scan').onclick = () => void startScan();
+if ($('scanner-cancel')) $('scanner-cancel').onclick = () => stopScan();
+if ($('paste-link')) $('paste-link').onclick = async () => {
+  try {
+    const text = await navigator.clipboard.readText();
+    const result = pairingFromText(text, location.origin);
+    if (result?.room) { showError(''); await beginPair(result); return; }
+    if (result?.error) showError(result.error);
+  } catch { /* show the field so the user can paste */ }
+  $('paste-form').hidden = false;
+  $('pairing-link').focus();
+};
+if ($('paste-form')) $('paste-form').onsubmit = event => {
+  event.preventDefault();
+  const result = pairingFromText($('pairing-link').value, location.origin);
+  if (result?.room) {
+    showError('');
+    void beginPair(result).catch(error => showError(error.message));
+    return;
+  }
+  showError(result?.error || 'That is not a Sidereal pairing link.');
+};
 document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && $('scanner') && !$('scanner').hidden) {
+    event.preventDefault(); stopScan(); return;
+  }
   const details = $('connection');
   if (event.key === 'Escape' && details.open) { details.open = false; $('connection-toggle').focus(); }
 });
@@ -467,24 +594,26 @@ document.addEventListener('pointerdown', event => {
   if (details.open && !details.contains(event.target)) details.open = false;
 });
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { clearTimeout(pollTimer); }
+  if (document.hidden) {
+    clearTimeout(pollTimer);
+    if ($('scanner') && !$('scanner').hidden) stopScan();
+  }
   else if (connected) poll();
   else if (!stopped) connect();
 });
 async function start() {
   const fragment = new URLSearchParams(location.hash.slice(1));
+  const pairing = pairingFromText(location.hash, location.origin);
   history.replaceState(null, '', location.pathname);
   if (!crypto.subtle) throw new Error('Open Sidereal using HTTPS.');
-  if (fragment.has('room') || fragment.has('key')) {
-    const room = fragment.get('room');
-    if (!/^[a-f0-9]{32}$/.test(room)) throw new Error('Invalid code. Scan a new code in Sigil.');
-    bootstrap = await importKey(fragment.get('key'));
-    newDeviceKey = randomKey();
-    credential = { room, key: await importKey(newDeviceKey) };
-    await storage('put', credential);
-  } else credential = await storage('get');
-  updateControls();
-  if (credential) connect();
+  if (pairing?.room) await beginPair(pairing);
+  else if (pairing?.error || fragment.has('room') || fragment.has('key')) {
+    throw new Error(pairing?.error || 'Invalid code. Scan a new code in Sigil.');
+  } else {
+    credential = await storage('get');
+    updateControls();
+    if (credential) connect();
+  }
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 start().catch(error => showError(error.message));

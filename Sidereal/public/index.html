@@ -31,7 +31,28 @@
     </details>
   </header>
   <main>
-    <section id="welcome"><img src="/icon.svg" width="56" height="56" alt=""><h2>Your Mac, from here.</h2><p>Open Sigil → Settings → Remote.<br>Scan the code with your phone’s camera.</p></section>
+    <section id="welcome">
+      <img src="/icon.svg" width="56" height="56" alt="">
+      <h2>Your Mac, from here.</h2>
+      <p>Open Sigil → Settings → Remote, then scan the code here.</p>
+      <div id="welcome-actions">
+        <button id="scan" type="button">Scan code</button>
+        <button id="paste-link" type="button">Paste link</button>
+        <form id="paste-form" hidden>
+          <label class="sr-only" for="pairing-link">Pairing link</label>
+          <input id="pairing-link" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Pairing link from the QR">
+          <button type="submit">Connect</button>
+        </form>
+      </div>
+    </section>
+    <section id="scanner" hidden>
+      <video id="scanner-video" playsinline muted autoplay></video>
+      <div class="viewfinder" aria-hidden="true"></div>
+      <div class="scanner-bar">
+        <p>Point at the code on your Mac</p>
+        <button type="button" id="scanner-cancel">Cancel</button>
+      </div>
+    </section>
     <p id="error" role="alert" hidden></p>
     <section id="controls" hidden aria-label="Sigil remote control">
       <div class="output">
