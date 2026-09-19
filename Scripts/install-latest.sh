@@ -122,6 +122,23 @@ else
   SRC="$ROOT/dist/Sigil.app"
 fi
 
+# The destination is moved aside and the old copy is deleted on the way out, so
+# be certain it is a Sigil bundle and not a directory that merely holds one. A
+# stray SIGIL_INSTALL_APP of /Applications or a home directory would otherwise
+# be carried off wholesale.
+case "$(basename "$DEST")" in
+  *.app) ;;
+  *)
+    echo "error: the install destination is not an app bundle path" >&2
+    echo "       $DEST" >&2
+    exit 1
+    ;;
+esac
+if [[ -e "$DEST" && ! -x "$DEST/Contents/MacOS/Sigil" ]]; then
+  echo "error: $DEST exists and is not a Sigil app bundle; refusing to replace it" >&2
+  exit 1
+fi
+
 # One installer at a time, taken before anything reads the destination: the
 # other installer could otherwise finish between a check here and the swap
 # below, and the checks would have looked at a bundle that no longer exists.
@@ -159,8 +176,20 @@ build_inputs_differ_from_head() {
   # Ignored files count too when they sit under the sources, because SwiftPM
   # compiles them regardless. Scoped to those paths so .build and dist, which
   # are ignored on purpose, do not make every install refuse.
-  [[ -n "$(git -C "$ROOT" status --porcelain --ignored=matching -- \
-    Sources Tests Resources 2>/dev/null)" ]]
+  if [[ -n "$(git -C "$ROOT" status --porcelain --ignored=matching -- \
+    Sources Tests Resources 2>/dev/null)" ]]; then
+    return 0
+  fi
+  # Dependency sources are compiled from .build/checkouts, which is ignored, so
+  # a checkout edited while debugging a dependency would ship unnoticed.
+  local checkout
+  for checkout in "$ROOT"/.build/checkouts/*/; do
+    if [[ -d "$checkout/.git" ]] \
+      && [[ -n "$(git -C "$checkout" status --porcelain 2>/dev/null)" ]]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 # The build compiles the working tree but stamps the build number from HEAD, so

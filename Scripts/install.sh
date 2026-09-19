@@ -29,6 +29,21 @@ if [[ ! -x "$SRC/Contents/MacOS/Sigil" ]]; then
   exit 1
 fi
 
+# This script does rm -rf on the destination, so be certain it is a Sigil
+# bundle and not a directory that merely holds one.
+case "$(basename "$DEST")" in
+  *.app) ;;
+  *)
+    echo "error: the install destination is not an app bundle path" >&2
+    echo "       $DEST" >&2
+    exit 1
+    ;;
+esac
+if [[ -e "$DEST" && ! -x "$DEST/Contents/MacOS/Sigil" ]]; then
+  echo "error: $DEST exists and is not a Sigil app bundle; refusing to replace it" >&2
+  exit 1
+fi
+
 # The same lock Scripts/install-latest.sh takes, so the two cannot overwrite
 # each other's work on /Applications/Sigil.app.
 if ! mkdir "$LOCK" 2>/dev/null; then
