@@ -45,20 +45,51 @@ public enum CrashLog {
     /// ended. A process crashes at most once, and a launch-time name can be
     /// worked out while a date formatter is still safe to call — inside a
     /// signal handler it is not.
-    public static func fileName(for date: Date) -> String {
-        filePrefix + timestampFormatter.string(from: date) + fileSuffix
+    ///
+    /// The process id is in the name because the timestamp alone is not unique:
+    /// two copies launched in the same second, or a crash-on-launch relaunched
+    /// immediately, would otherwise append into one file and read as one run.
+    public static func fileName(for date: Date, pid: Int32) -> String {
+        "\(filePrefix)\(timestampFormatter.string(from: date))-\(pid)\(fileSuffix)"
     }
 
-    public static func reportURL(for date: Date, in directory: URL) -> URL {
-        directory.appendingPathComponent(fileName(for: date))
+    public static func reportURL(for date: Date, pid: Int32, in directory: URL) -> URL {
+        directory.appendingPathComponent(fileName(for: date, pid: pid))
     }
 
     /// Existing reports, newest first. The timestamp in the name sorts
-    /// chronologically, so the names alone give the order.
+    /// chronologically, so the names alone give the order; two runs from the
+    /// same second sort against each other by process id, which is arbitrary
+    /// but never mixes up two different seconds.
     public static func reportURLs(in directory: URL) -> [URL] {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
-        let reports = names.filter { $0.hasPrefix(filePrefix) && $0.hasSuffix(fileSuffix) }
-        return reports.sorted(by: >).map { directory.appendingPathComponent($0) }
+        let reports = names.filter(isReportName).sorted(by: >)
+        return reports.map { directory.appendingPathComponent($0) }.filter(isRegularFile)
+    }
+
+    /// Exactly the shape ``fileName(for:pid:)`` produces, and nothing else.
+    /// The affixes alone are not enough: something like `crash-backup.log`
+    /// carries both, and pruning would delete a file this never wrote.
+    static func isReportName(_ name: String) -> Bool {
+        guard name.hasPrefix(filePrefix), name.hasSuffix(fileSuffix) else { return false }
+        let middle = name.dropFirst(filePrefix.count).dropLast(fileSuffix.count)
+        let parts = middle.split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 5 else { return false }
+        for (part, width) in zip(parts, [4, 2, 2, 6]) where !isDigits(part, count: width) {
+            return false
+        }
+        return isDigits(parts[4])
+    }
+
+    private static func isDigits(_ text: Substring, count: Int? = nil) -> Bool {
+        if let count, text.count != count { return false }
+        return !text.isEmpty && text.allSatisfy { $0.isASCII && $0.isNumber }
+    }
+
+    /// A directory that happens to be named like a report is not one, and is
+    /// never what ``prune(in:keeping:)`` should be removing.
+    private static func isRegularFile(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
     }
 
     public static func mostRecentReport(in directory: URL) -> URL? {

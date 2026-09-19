@@ -1610,7 +1610,11 @@ final class AppModel {
             lines.append("  and \(tabs.count - Self.crashStateTabLimit) more")
         }
         if let selected {
-            let tail = selected.controller.crashSnapshot()
+            // Bounded in bytes, not characters: a terminal full of wide
+            // characters would otherwise fill the whole buffer and push the
+            // tab list above it out of the report.
+            let tail = CrashReporter.tail(
+                of: selected.controller.crashSnapshot(), bytes: CrashReporter.terminalTailCapacity)
             lines.append("")
             lines.append("terminal tail — \(title(for: selected)):")
             lines.append(tail.isEmpty ? "(nothing on screen)" : tail)

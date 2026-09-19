@@ -32,9 +32,12 @@ struct SigilApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor var model: AppModel?
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        // Before anything else can crash: the reporter reserves this run's log
-        // and its buffers here, while allocating is still allowed.
+    override init() {
+        super.init()
+        // The adaptor builds this delegate before the App's other stored
+        // properties, so a crash while the app model itself is being
+        // constructed still lands in a report. applicationDidFinishLaunching
+        // runs after all of that and would already be too late.
         CrashReporter.install()
     }
 
