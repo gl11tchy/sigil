@@ -37,18 +37,24 @@ sigil_running() {
   ps -axo command | awk -v exe="$DEST/Contents/MacOS/Sigil" '$0 == exe { found = 1 } END { exit !found }'
 }
 
+# Canonicalize as much of the path as exists. Walking up to the nearest real
+# directory matters because a build output that does not exist yet can still
+# sit under a symlink into the installed app.
 resolve_path() {
-  local path="$1" dir base
+  local path="$1" dir rest=""
   if [[ -d "$path" ]]; then
     (cd "$path" && pwd -P)
     return
   fi
-  dir="$(dirname "$path")"
-  base="$(basename "$path")"
+  dir="$path"
+  while [[ ! -d "$dir" && "$dir" != "/" && "$dir" != "." ]]; do
+    rest="$(basename "$dir")${rest:+/$rest}"
+    dir="$(dirname "$dir")"
+  done
   if [[ -d "$dir" ]]; then
     dir="$(cd "$dir" && pwd -P)"
   fi
-  printf '%s/%s\n' "$dir" "$base"
+  printf '%s/%s\n' "${dir%/}" "$rest"
 }
 
 # Device and inode, so two spellings of one bundle compare equal even on a
@@ -102,11 +108,23 @@ if overlaps "$SRC" "$DEST"; then
   exit 1
 fi
 
+# Anything the build would compile but HEAD does not carry: a change to a
+# tracked file anywhere, or an untracked file under the sources SwiftPM and
+# build-app.sh read. Untracked files elsewhere, dist/ and scratch notes among
+# them, are not build inputs and do not count.
+build_inputs_differ_from_head() {
+  if [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no)" ]]; then
+    return 0
+  fi
+  [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=all -- \
+    Sources Tests Resources Package.swift Package.resolved 2>/dev/null)" ]]
+}
+
 # The build compiles the working tree but stamps the build number from HEAD, so
 # uncommitted work would install as if it were the merged build.
 if [[ -z "${SIGIL_ALLOW_DIRTY:-}" ]] && git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
-  if [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no)" ]]; then
-    echo "error: the working tree has uncommitted changes" >&2
+  if build_inputs_differ_from_head; then
+    echo "error: the working tree does not match HEAD" >&2
     echo "this installs HEAD, and the build number comes from HEAD, so the app" >&2
     echo "would not be what it claims to be" >&2
     echo "commit or stash first, use Scripts/install.sh for a local build, or set" >&2
