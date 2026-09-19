@@ -68,6 +68,14 @@ function updateControls() {
   $('reconnect').hidden = !credential || connected;
   const actions = $('welcome-actions');
   if (actions) actions.hidden = Boolean(credential);
+  const hint = $('standalone-hint');
+  if (hint) hint.hidden = Boolean(credential) || !isStandaloneApp();
+}
+function isStandaloneApp() {
+  if (typeof navigator !== 'undefined' && navigator.standalone) return true;
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+  return window.matchMedia('(display-mode: standalone)').matches
+    || window.matchMedia('(display-mode: fullscreen)').matches;
 }
 function offline(message = 'Disconnected') {
   connected = false;

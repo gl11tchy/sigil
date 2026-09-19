@@ -86,6 +86,11 @@ test('HTTP has fixed asset routes and security headers', async t => {
   const scanner = await fetch(`${base}/jsqr.js`);
   assert.equal(scanner.status, 200);
   assert.match(scanner.headers.get('content-type'), /javascript/);
+  const page = await (await fetch(`${base}/`)).text();
+  assert.doesNotMatch(page, /apple-mobile-web-app-capable/);
+  assert.doesNotMatch(page, /mobile-web-app-capable/);
+  const manifest = await (await fetch(`${base}/manifest.webmanifest`)).json();
+  assert.equal(manifest.display, 'browser');
 });
 
 test('rejecting an unauthorized phone closes it and releases the slot', async t => {

@@ -66,6 +66,7 @@ test('the welcome screen pairs from a pasted link without a URL fragment', async
     await page.goto(baseURL);
     await expect(page.locator('#welcome')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Scan code' })).toBeVisible();
+    await expect(page.locator('#standalone-hint')).toBeHidden();
     await expect(page.locator('#status')).toHaveText('Not connected');
     await page.screenshot({ path: testInfo.outputPath('welcome.png') });
     await page.getByRole('button', { name: 'Paste link' }).click();
@@ -88,6 +89,16 @@ test('a pairing link for another origin stays disconnected', async ({ page, base
   await expect(page.locator('#error')).toHaveText('This code is for a different Sidereal address.');
   await expect(page.locator('#status')).toHaveText('Not connected');
   await expect(page.locator('#welcome')).toBeVisible();
+});
+
+test('a standalone Home Screen app warns that Safari is a different store', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'standalone', { configurable: true, value: true });
+  });
+  await page.goto(baseURL);
+  await expect(page.locator('#standalone-hint')).toBeVisible();
+  await expect(page.locator('#standalone-hint')).toContainText('Open as Web App');
 });
 
 test('scan falls back to paste when the camera is missing', async ({ page, baseURL }) => {
