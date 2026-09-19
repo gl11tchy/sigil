@@ -137,9 +137,15 @@ public enum CrashLog {
         try data.write(to: url)
     }
 
+    /// UTC, so the names sort chronologically through a daylight-saving fallback
+    /// or a time-zone change. In local time a run launched at 01:55 before the
+    /// fallback would sort after one launched at 01:05 after it, and pruning
+    /// would then remove the newer report. The date inside a report is local,
+    /// with its offset, since that is the one a person reads.
     private static let timestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd-HHmmss"
         return formatter
     }()

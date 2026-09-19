@@ -192,9 +192,15 @@ Double-click the finished app, or run `open dist/Sigil.app`.
 
 If Sigil dies, it writes what it knew to `~/Library/Logs/Sigil/`: the open tabs,
 the tail of the selected terminal, and the signal or exception that ended it.
-Help ▸ Reveal Crash Logs opens the newest one in Finder. Ten reports are kept.
-A run that never crashes leaves no file behind. Set `SIGIL_CRASH_LOG_DIR` to
-write them somewhere else.
+Help ▸ Reveal Crash Logs opens the newest one in Finder. One report per run,
+named in UTC so the folder always sorts by time, and ten are kept. A run that
+never crashes leaves no file behind. Set `SIGIL_CRASH_LOG_DIR` to write them
+somewhere else.
+
+For where the app died, read the report macOS writes for the same crash under
+`~/Library/Logs/DiagnosticReports`. Sigil's own report does not walk the stack:
+doing that inside a signal handler can hang a process that would otherwise have
+died and left that report behind.
 
 Debug build that stays attached to the terminal:
 

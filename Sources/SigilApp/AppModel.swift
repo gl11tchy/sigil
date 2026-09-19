@@ -1582,6 +1582,8 @@ final class AppModel {
     static let crashStateInterval: Duration = .seconds(5)
     /// Tabs listed in that snapshot before it says how many more there were.
     static let crashStateTabLimit = 12
+    /// Bytes a single name or path may take in that snapshot.
+    static let crashStateFieldLimit = 120
 
     private func startCrashStateRefresh() {
         guard crashStateTask == nil else { return }
@@ -1603,23 +1605,32 @@ final class AppModel {
         for tab in tabs.prefix(Self.crashStateTabLimit) {
             let marker = tab.id == selected?.id ? "*" : "-"
             let activity = Self.describe(tab.activity)
-            let name = title(for: tab)
-            lines.append("\(marker) \(name) [\(activity)] \(tab.workingDirectory.path)")
+            // A conversation name is the user's own text and a path can be any
+            // length, so bound both: one long tab should not be able to push
+            // the others out of the report. The name is cut from the end and
+            // the path from the front, which is the useful half of each.
+            let name = CrashReporter.head(of: title(for: tab), bytes: Self.crashStateFieldLimit)
+            let path = CrashReporter.tail(
+                of: tab.workingDirectory.path, bytes: Self.crashStateFieldLimit)
+            lines.append("\(marker) \(name) [\(activity)] \(path)")
         }
         if tabs.count > Self.crashStateTabLimit {
             lines.append("  and \(tabs.count - Self.crashStateTabLimit) more")
         }
+        // Each section is bounded in bytes against its own budget, so the tab
+        // list keeps its head and the terminal keeps its tail. Trimming the
+        // finished snapshot as a whole would drop the tab list first.
+        var state = CrashReporter.head(
+            of: lines.joined(separator: "\n"), bytes: CrashReporter.tabListCapacity)
         if let selected {
-            // Bounded in bytes, not characters: a terminal full of wide
-            // characters would otherwise fill the whole buffer and push the
-            // tab list above it out of the report.
+            let name = CrashReporter.head(
+                of: title(for: selected), bytes: Self.crashStateFieldLimit)
             let tail = CrashReporter.tail(
                 of: selected.controller.crashSnapshot(), bytes: CrashReporter.terminalTailCapacity)
-            lines.append("")
-            lines.append("terminal tail — \(title(for: selected)):")
-            lines.append(tail.isEmpty ? "(nothing on screen)" : tail)
+            state += "\n\nterminal tail — \(name):\n"
+            state += tail.isEmpty ? "(nothing on screen)" : tail
         }
-        return lines.joined(separator: "\n")
+        return state
     }
 
     /// The activity name, plus the exit code when the child reported one.

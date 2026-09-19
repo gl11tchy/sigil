@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import SigilAtomics
 
 /// Writes a readable report to ``CrashLog/directory`` when Sigil dies.
 ///
@@ -23,8 +24,10 @@ import Foundation
 /// The state snapshot the app keeps current through ``updateState(_:)`` is what
 /// makes a report worth reading. It lives in two buffers: the app fills the one
 /// the handler is not pointed at, then publishes which buffer and how many
-/// bytes in a single word, so a handler that fires mid-update reads the
-/// previous snapshot whole rather than a splice of two.
+/// bytes through `SigilAtomics`, whose release store means a handler that sees
+/// the new descriptor also sees the bytes behind it. A handler that fires
+/// mid-update therefore reads the previous snapshot whole rather than a splice
+/// of two.
 public enum CrashReporter {
 
     /// Bytes reserved for each state snapshot: room for a screen of terminal
@@ -34,6 +37,14 @@ public enum CrashReporter {
     /// list, which is trimmed away first if the tail is allowed to fill the
     /// buffer on its own.
     public static let terminalTailCapacity = 8 * 1024
+    /// Bytes held back for the headings that join the two sections.
+    public static let stateHeadingCapacity = 256
+    /// Bytes the tab list may take. Every section has its own budget and they
+    /// add up to ``stateCapacity``, so the whole-snapshot trim — which would
+    /// drop the tab list first — never has to engage.
+    public static var tabListCapacity: Int {
+        stateCapacity - terminalTailCapacity - stateHeadingCapacity
+    }
     /// Room for the largest decimal the signal path writes.
     static let numberCapacity = 24
 
@@ -51,13 +62,6 @@ public enum CrashReporter {
 
     private nonisolated(unsafe) static var stateSlotA: UnsafeMutablePointer<UInt8>?
     private nonisolated(unsafe) static var stateSlotB: UnsafeMutablePointer<UInt8>?
-    /// `slot * (stateCapacity + 1) + count`, written as one aligned word once
-    /// the bytes behind it are in place. A reader loads it once and is then
-    /// looking at a snapshot that was complete at the moment it was published.
-    private nonisolated(unsafe) static var statePublication = 0
-    /// Set the instant a crash path starts. An update that has not begun
-    /// copying yet gives up rather than touch a buffer the handler may read.
-    private nonisolated(unsafe) static var isCrashing = false
     private nonisolated(unsafe) static var pathBuffer: UnsafeMutablePointer<CChar>?
     private nonisolated(unsafe) static var numberBuffer: UnsafeMutablePointer<UInt8>?
     private nonisolated(unsafe) static var reportURL: URL?
@@ -72,30 +76,55 @@ public enum CrashReporter {
     public static func install(now: Date = Date()) {
         guard reportURL == nil else { return }
         guard prepare(directory: CrashLog.directory, now: now) != nil else { return }
+        // Touch the atomics once here so nothing in the handler is the first
+        // call into anything.
+        _ = sigil_load_state()
         installHandlers()
     }
 
     /// Replaces the snapshot a crash report will carry. Call from the main
     /// thread: the buffers have one writer by design.
     public static func updateState(_ text: String) {
-        guard !isCrashing else { return }
-        let published = statePublication
-        let nextSlot = published / (stateCapacity + 1) == 0 ? 1 : 0
+        guard !sigil_is_crashing() else { return }
+        let nextSlot = decode(sigil_load_state()).slot == 0 ? 1 : 0
         guard let target = slot(nextSlot) else { return }
         let bytes = tail(Array(text.utf8), limit: stateCapacity)
         bytes.withUnsafeBufferPointer { source in
             guard let base = source.baseAddress else { return }
             target.update(from: base, count: source.count)
         }
-        statePublication = nextSlot * (stateCapacity + 1) + bytes.count
+        sigil_publish_state(encode(slot: nextSlot, count: bytes.count))
     }
 
     /// The published snapshot as text, for the paths that can afford Foundation.
     public static var stateText: String {
-        let published = statePublication
-        let count = published % (stateCapacity + 1)
-        guard count > 0, let buffer = slot(published / (stateCapacity + 1)) else { return "" }
-        return String(decoding: UnsafeBufferPointer(start: buffer, count: count), as: UTF8.self)
+        let published = decode(sigil_load_state())
+        guard published.count > 0, let buffer = slot(published.slot) else { return "" }
+        return String(
+            decoding: UnsafeBufferPointer(start: buffer, count: published.count), as: UTF8.self)
+    }
+
+    /// One slot and one byte count in one word. Plain arithmetic, so decoding
+    /// is as safe inside a signal handler as loading the word was.
+    static func encode(slot: Int, count: Int) -> UInt64 {
+        UInt64(slot * (stateCapacity + 1) + count)
+    }
+
+    static func decode(_ value: UInt64) -> (slot: Int, count: Int) {
+        let value = Int(truncatingIfNeeded: value)
+        return (value / (stateCapacity + 1), value % (stateCapacity + 1))
+    }
+
+    /// Keeps the first `bytes` of `text` without splitting a character.
+    public static func head(of text: String, bytes limit: Int) -> String {
+        guard limit > 0 else { return "" }
+        let utf8 = Array(text.utf8)
+        guard utf8.count > limit else { return text }
+        var end = limit
+        while end > 0, utf8[end] & 0b1100_0000 == 0b1000_0000 {
+            end -= 1
+        }
+        return String(decoding: utf8[0..<end], as: UTF8.self)
     }
 
     /// Keeps the last `bytes` of `text` without opening mid-character.
@@ -147,7 +176,7 @@ public enum CrashReporter {
 
         stateSlotA = makeStateSlot()
         stateSlotB = makeStateSlot()
-        statePublication = 0
+        sigil_reset_state()
 
         let number = UnsafeMutablePointer<UInt8>.allocate(capacity: numberCapacity)
         number.initialize(repeating: 0, count: numberCapacity)
@@ -172,8 +201,7 @@ public enum CrashReporter {
         stateSlotA = nil
         stateSlotB?.deallocate()
         stateSlotB = nil
-        statePublication = 0
-        isCrashing = false
+        sigil_reset_state()
         pathBuffer?.deallocate()
         pathBuffer = nil
         numberBuffer?.deallocate()
@@ -209,7 +237,7 @@ public enum CrashReporter {
     }
 
     static func writeExceptionReport(_ exception: NSException) {
-        isCrashing = true
+        sigil_set_crashing()
         guard let url = reportURL else { return }
         let name = exception.name.rawValue
         let reason = exception.reason ?? "no reason given"
@@ -225,7 +253,7 @@ public enum CrashReporter {
     /// The signal-handler path. Every call below is async-signal-safe, and the
     /// bytes all come from buffers ``prepare(directory:now:)`` already filled.
     static func writeSignalReport(_ number: Int32) {
-        isCrashing = true
+        sigil_set_crashing()
         guard let path = pathBuffer else { return }
         let descriptor = open(path, O_WRONLY | O_CREAT | O_APPEND, 0o644)
         guard descriptor >= 0 else { return }
@@ -241,9 +269,9 @@ public enum CrashReporter {
     }
 
     private static func writeState(_ descriptor: Int32) {
-        let published = statePublication
-        let count = published % (stateCapacity + 1)
-        guard count > 0, let buffer = slot(published / (stateCapacity + 1)) else {
+        let published = decode(sigil_load_state())
+        let count = published.count
+        guard count > 0, let buffer = slot(published.slot) else {
             emit(descriptor, signalMissingState)
             emit(descriptor, signalNewline)
             return

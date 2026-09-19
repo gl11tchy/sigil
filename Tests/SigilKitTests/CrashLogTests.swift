@@ -34,14 +34,25 @@ struct CrashLogTests {
         #expect(directory.path == "/Users/someone/Library/Logs/Sigil")
     }
 
-    @Test func namesReportsWithASortableTimestampAndThePid() {
+    @Test func namesReportsWithASortableUTCTimestampAndThePid() {
+        // Pinned to UTC, so the name does not depend on the machine's zone.
         let name = CrashLog.fileName(for: Date(timeIntervalSince1970: 1_758_245_383), pid: 4321)
-        #expect(name.hasPrefix("crash-"))
-        #expect(name.hasSuffix("-4321.log"))
+        #expect(name == "crash-2025-09-19-012943-4321.log")
         #expect(CrashLog.isReportName(name))
         // Two reports from the same run sort in the order they were written.
         let later = CrashLog.fileName(for: Date(timeIntervalSince1970: 1_758_245_384), pid: 4321)
         #expect(name < later)
+    }
+
+    @Test func namesStillSortByTimeAcrossADaylightSavingFallback() {
+        // 05:30 and 06:30 UTC on 2 November 2025 are both 01:30 local in a zone
+        // that falls back that morning. In local time the names would tie, and
+        // the newer report could be pruned as if it were the older one.
+        let before = CrashLog.fileName(for: Date(timeIntervalSince1970: 1_762_061_400), pid: 7)
+        let after = CrashLog.fileName(for: Date(timeIntervalSince1970: 1_762_065_000), pid: 7)
+        #expect(before < after)
+        #expect(before == "crash-2025-11-02-053000-7.log")
+        #expect(after == "crash-2025-11-02-063000-7.log")
     }
 
     @Test func twoRunsInTheSameSecondGetSeparateReports() {

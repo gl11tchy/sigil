@@ -217,6 +217,40 @@ struct CrashReporterTests {
             NSException(name: .genericException, reason: "boom", userInfo: nil))
     }
 
+    @Test func everySectionOfTheSnapshotHasItsOwnBudget() {
+        // The budgets add up, so a finished snapshot never needs the
+        // whole-snapshot trim, which would drop the tab list first.
+        let total =
+            CrashReporter.tabListCapacity + CrashReporter.terminalTailCapacity
+            + CrashReporter.stateHeadingCapacity
+        #expect(total == CrashReporter.stateCapacity)
+        #expect(CrashReporter.tabListCapacity > 0)
+    }
+
+    @Test func aTextHeadIsBoundedInBytesWithoutSplittingACharacter() {
+        let wide = String(repeating: "あ", count: 100)
+        let kept = CrashReporter.head(of: wide, bytes: 31)
+        #expect(kept.utf8.count <= 31)
+        #expect(!kept.contains("\u{FFFD}"))
+        #expect(wide.hasPrefix(kept))
+        #expect(kept.count == 10)
+    }
+
+    @Test func aShortTextIsItsOwnHead() {
+        #expect(CrashReporter.head(of: "tabs open: 1", bytes: 4096) == "tabs open: 1")
+        #expect(CrashReporter.head(of: "anything", bytes: 0).isEmpty)
+    }
+
+    @Test func theSnapshotDescriptorRoundTrips() {
+        for slot in 0...1 {
+            for count in [0, 1, CrashReporter.stateCapacity] {
+                let decoded = CrashReporter.decode(CrashReporter.encode(slot: slot, count: count))
+                #expect(decoded.slot == slot)
+                #expect(decoded.count == count)
+            }
+        }
+    }
+
     @Test func bothCrashPathsUseTheSameHeadings() {
         #expect(CrashReporter.signalBanner.description.contains(CrashLog.banner))
         #expect(CrashReporter.signalStateHeading.description.contains(CrashLog.stateHeading))
