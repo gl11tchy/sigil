@@ -68,8 +68,11 @@ function updateControls() {
   $('reconnect').hidden = !credential || connected;
   const actions = $('welcome-actions');
   if (actions) actions.hidden = Boolean(credential);
-  const hint = $('standalone-hint');
-  if (hint) hint.hidden = Boolean(credential) || !isStandaloneApp();
+  const standalone = isStandaloneApp();
+  for (const id of ['standalone-hint', 'standalone-panel-hint']) {
+    const hint = $(id);
+    if (hint) hint.hidden = !standalone;
+  }
 }
 function isStandaloneApp() {
   if (typeof navigator !== 'undefined' && navigator.standalone) return true;

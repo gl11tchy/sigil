@@ -96,9 +96,19 @@ test('a standalone Home Screen app warns that Safari is a different store', asyn
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'standalone', { configurable: true, value: true });
   });
-  await page.goto(baseURL);
-  await expect(page.locator('#standalone-hint')).toBeVisible();
-  await expect(page.locator('#standalone-hint')).toContainText('Open as Web App');
+  const mac = await pair(page, baseURL, undefined, { skipNavigate: true });
+  try {
+    await page.goto(baseURL);
+    await expect(page.locator('#standalone-hint')).toBeVisible();
+    await expect(page.locator('#standalone-hint')).toContainText('Open as Web App');
+    await page.getByRole('button', { name: 'Paste link' }).click();
+    await page.locator('#pairing-link').fill(`${baseURL}/#room=${mac.room}&key=${mac.bootstrap}`);
+    await page.locator('#paste-form').getByRole('button', { name: 'Connect' }).click();
+    await expect(page.locator('#status')).toHaveText('Connected');
+    await expect(page.locator('#welcome')).toBeHidden();
+    await page.getByLabel('Connection settings').click();
+    await expect(page.locator('#standalone-panel-hint')).toBeVisible();
+  } finally { mac.close(); }
 });
 
 test('scan falls back to paste when the camera is missing', async ({ page, baseURL }) => {
