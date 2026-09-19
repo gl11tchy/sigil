@@ -21,7 +21,7 @@ ASSUMPTIONS: Readable companion, not a pixel TUI. Attach writes to SigilDrops an
 
 ### Phase 3: Phone UI
 - [x] Task 5: Attach, chips, Stop while working, composer layout.
-- [ ] Task 6: Playwright + native tests, then Railway.
+- [x] Task 6: Playwright + native tests, then Railway. Evidence: `tasks/verify.md`.
 
 ## Risks
 | Risk | Mitigation |
