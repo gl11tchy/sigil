@@ -114,8 +114,10 @@ then record the deployment id and the SHA it carries. The `railway up` command i
 SHA, so it cannot close this on its own.
 
 Task 10 in `tasks/product-site-todo.md`, the owner-only Namecheap change, is now
-done, and the apex has moved to the site service. Task 11 is what still follows:
-move Sidereal's `PUBLIC_ORIGIN`, prove both hosts and `POST /rooms`, run
+done, and the apex has moved to the site service. Task 11's configuration half is
+done too: `PUBLIC_ORIGIN` already holds the companion host, so nothing about it
+needs writing and no one should rewrite it. What is left of Task 11 is proof
+rather than change: prove both hosts and `POST /rooms`, run
 `RemoteIntegrationTests` and `Scripts/verify.sh`, and browser-check production.
 
 ## Still device-only

@@ -252,7 +252,7 @@ Do not edit `tasks/plan.md` or `tasks/todo.md`.
 
 ## Task 11: Cutover and live proof
 
-**Description:** Move Sidereal `PUBLIC_ORIGIN` to `https://remote.sigilapp.dev`, point hosts per the spec order, prove production, merge.
+**Description:** Prove production and merge. The two configuration steps this task opened with are already done and need no rewriting: Sidereal `PUBLIC_ORIGIN` is `https://remote.sigilapp.dev`, confirmed by the owner in the Railway dashboard on 2026-09-19, and both hosts are pointed per the spec order.
 
 **Acceptance criteria:**
 - [ ] Order: remote Sidereal healthy → site healthy on apex → Mac origin already on the branch.
