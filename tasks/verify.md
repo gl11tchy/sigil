@@ -94,18 +94,18 @@ custom domains, sleeping disabled, and now the active deployment. That is routin
 and configuration. This container's egress cannot reach either host, so there is
 no fresh GET to go with it.
 
-`PUBLIC_ORIGIN` is a separate open point, and it stays agent work under Task 11
-rather than becoming an owner action: `tasks/product-site-spec.md` reserves only
-Namecheap for the owner, and moving this variable is Task 11's own acceptance
-criterion. What stopped it here is narrower. A connected Railway app is served
-variable names without values, so this session could not read back what it is set
-to, and this session's own permissions refused the write; a session with Railway
-write access can finish it without the owner touching Railway.
+`PUBLIC_ORIGIN` is closed. The owner read it from the Railway dashboard on
+2026-09-19 and it is `https://remote.sigilapp.dev`, so no change was needed and
+the origin half of the cutover is done. That matters because
+`Sidereal/server.mjs:86` rejects a phone whose `Origin` does not equal
+`PUBLIC_ORIGIN`: a value still pointing at the apex would have refused every
+phone on the new host.
 
-Until the value is confirmed, treat pairing on `remote.sigilapp.dev` as unproven
-rather than working. `Sidereal/server.mjs:86` rejects a phone whose `Origin` does
-not equal `PUBLIC_ORIGIN`, so a value still pointing at the apex would refuse
-every phone on the new host.
+It took the owner because of tooling, not ownership. A connected Railway app is
+served variable names without values, so no agent session could read the value
+back, and this session's own permissions refused the write as a production
+deploy. The spec reserves only Namecheap for the owner, so with Railway write
+access this stays ordinary agent work.
 
 What would close Task 7: give the service a source whose revision is readable,
 which means connecting the GitHub repo rather than another `railway up` upload,
@@ -114,8 +114,10 @@ then record the deployment id and the SHA it carries. The `railway up` command i
 SHA, so it cannot close this on its own.
 
 Task 10 in `tasks/product-site-todo.md`, the owner-only Namecheap change, is now
-done, and the apex has moved to the site service. Task 11 is what still follows:
-move Sidereal's `PUBLIC_ORIGIN`, prove both hosts and `POST /rooms`, run
+done, and the apex has moved to the site service. Task 11's configuration half is
+done too: `PUBLIC_ORIGIN` already holds the companion host, so nothing about it
+needs writing and no one should rewrite it. What is left of Task 11 is proof
+rather than change: prove both hosts and `POST /rooms`, run
 `RemoteIntegrationTests` and `Scripts/verify.sh`, and browser-check production.
 
 ## Still device-only

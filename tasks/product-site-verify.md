@@ -48,16 +48,18 @@ Playwright: local and live `/` and `/docs` at 390px and 1280px. Docs click round
 
 ## Owner DNS
 
-Steps 1, 2 and 4 are done. Checked against Railway on 2026-09-19; the container has no
-egress to either host, so this records Railway's own view of each domain and not a `curl`.
+All four steps are done. Steps 1, 2 and 4 were checked against Railway on 2026-09-19; the
+container has no egress to either host, so those record Railway's own view of each domain
+and not a `curl`. Step 3 was read by the owner in the dashboard, which no agent can do.
 
 1. Namecheap CNAME `remote` → `1bkrlt5p.up.railway.app`. Applied. Railway reports the
    record propagated and matching, ownership verified, certificate valid.
 2. Namecheap TXT `_railway-verify.remote`. Applied; Railway no longer lists a pending
    verification record for the domain.
-3. Sidereal `PUBLIC_ORIGIN=https://remote.sigilapp.dev`. **Open.** The variable exists on
-   the service, but a connected Railway app is served variable names without values, so its
-   current value cannot be read back from here.
+3. Sidereal `PUBLIC_ORIGIN=https://remote.sigilapp.dev`. Confirmed. The owner read the
+   value in the Railway dashboard on 2026-09-19 and it already matched, so nothing had to
+   be written. A connected Railway app is served variable names without values, so an agent
+   cannot re-check it; treat the dashboard as the source of truth if it is ever in doubt.
 4. Apex `sigilapp.dev` moved onto the Site service. Applied. It is a custom domain on
    service `060788b3-4ab1-45fb-8623-68027835cbc0`, ownership verified, certificate valid,
    and it is no longer attached to Sidereal. An apex alias exposes no readable CNAME value,
