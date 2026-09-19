@@ -7,7 +7,7 @@ const PADDING = /^[\s┌┐└┘│╭╮╯╰▀▄█▌▐░▒▓]+$/;
 const GROK_META = /Grok [\w.-]+ \([^)]+\) · \S+/;
 const SHORTCUTS = /Ctrl\+x:shortcuts/;
 const HINT_TOKEN = /Ctrl\+x:shortcuts|Shift\+Tab:mode|Esc:cancel|Ctrl\+e:collapse thinking|→:expand|Build anything|↩/g;
-const EMPTY_PROMPT = /^[│| ]*[❯›>] ?(?:Build anything)?\s*$/;
+const EMPTY_PROMPT = /^[│| ]*[❯›>] ?(?:Build anything|- grok)?\s*$/i;
 const GROK_NAME = /^Grok [\w.-]+$/;
 const GROK_MODEL = /^\(?[\w-]+\)? · [\w-]+/;
 
@@ -41,8 +41,8 @@ function isComposerChrome(line) {
   if (GROK_META.test(text) || GROK_NAME.test(text) || GROK_MODEL.test(text)) return true;
   if (isHintRow(text) || isHintRow(line.trim())) return true;
   if (/^always-?approve$/i.test(text)) return true;
-  if (/Build anything/.test(text)) {
-    const rest = text.replace(/Build anything/g, '').replace(/Grok [\w.-]+/g, '').replace(/[❯›>]/g, '').trim();
+  if (/Build anything/.test(text) || (/[❯›>]/.test(text) && /- grok/i.test(text))) {
+    const rest = text.replace(/Build anything/gi, '').replace(/- grok/gi, '').replace(/Grok [\w.-]+/g, '').replace(/[❯›>]/g, '').trim();
     if (!rest) return true;
   }
   return false;
