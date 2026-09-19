@@ -258,7 +258,7 @@ Do not edit `tasks/plan.md` or `tasks/todo.md`.
 - [ ] Order: remote Sidereal healthy → site healthy on apex → Mac origin already on the branch.
 - [ ] `https://sigilapp.dev/` product page; `/docs` docs; `/rooms` 404.
 - [ ] `https://remote.sigilapp.dev/health` ok; `/` is Sidereal; native `POST /rooms` still 201 without an Origin header.
-- [ ] `docs/remote-control.md` hosted-deployment section lists both services and the live test origin `https://remote.sigilapp.dev`.
+- [x] `docs/remote-control.md` hosted-deployment section lists both services and the live test origin `https://remote.sigilapp.dev`, and records that the owner confirmed `PUBLIC_ORIGIN` already matches it.
 - [ ] `Scripts/verify.sh` green. PR is `feature/product-site`. No secrets. Handle `gl11tchy` only.
 
 **Verification:**
