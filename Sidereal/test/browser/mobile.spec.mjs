@@ -200,8 +200,8 @@ test('idle desktop chrome becomes one composer, with lossless raw output availab
   } finally { mac.close(); }
 });
 
-for (const width of [400, 414, 430]) {
-  test(`keys and header controls keep 44px touch targets at ${width}px`, async ({ page, baseURL }, testInfo) => {
+for (const width of [320, 390, 400, 414, 430]) {
+  test(`composer, keys, and header controls keep 44px touch targets at ${width}px`, async ({ page, baseURL }, testInfo) => {
     await page.setViewportSize({ width, height: 844 });
     const consoleErrors = [];
     page.on('pageerror', error => consoleErrors.push(error.message));
@@ -209,7 +209,7 @@ for (const width of [400, 414, 430]) {
     const mac = await pair(page, baseURL);
     try {
       await page.locator('#keys-toggle').click();
-      for (const control of await page.locator('#keys button:visible, #new, #keys-toggle, #attach-toggle, #connection-toggle, #stop').all()) {
+      for (const control of await page.locator('#keys button:visible, #new, #keys-toggle, #attach-toggle, #send, #connection-toggle, #stop').all()) {
         const box = await control.boundingBox();
         expect(box.width).toBeGreaterThanOrEqual(44);
         expect(box.height).toBeGreaterThanOrEqual(44);
