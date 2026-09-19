@@ -122,6 +122,16 @@ else
   SRC="$ROOT/dist/Sigil.app"
 fi
 
+# One installer at a time, taken before anything reads the destination: the
+# other installer could otherwise finish between a check here and the swap
+# below, and the checks would have looked at a bundle that no longer exists.
+if ! mkdir "$LOCK" 2>/dev/null; then
+  echo "error: another install is already running" >&2
+  echo "if that is not true, remove $LOCK and try again" >&2
+  exit 1
+fi
+HELD_LOCK=1
+
 # build-app.sh deletes its own output before it builds. If that output is the
 # installed app, or anything inside it, a failed build would take the
 # installation, or its signature, with it.
@@ -141,9 +151,16 @@ build_inputs_differ_from_head() {
   if [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no)" ]]; then
     return 0
   fi
-  [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=all -- \
+  if [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=all -- \
     Sources Tests Resources Package.swift Package.resolved \
-    'Package@swift-*.swift' 2>/dev/null)" ]]
+    'Package@swift-*.swift' 2>/dev/null)" ]]; then
+    return 0
+  fi
+  # Ignored files count too when they sit under the sources, because SwiftPM
+  # compiles them regardless. Scoped to those paths so .build and dist, which
+  # are ignored on purpose, do not make every install refuse.
+  [[ -n "$(git -C "$ROOT" status --porcelain --ignored=matching -- \
+    Sources Tests Resources 2>/dev/null)" ]]
 }
 
 # The build compiles the working tree but stamps the build number from HEAD, so
@@ -158,15 +175,6 @@ if [[ -z "${SIGIL_ALLOW_DIRTY:-}" ]] && git -C "$ROOT" rev-parse --git-dir >/dev
     exit 1
   fi
 fi
-
-# One installer at a time. Two overlapping runs would otherwise interleave
-# their swaps, and the loser would move its bundle inside the winner's.
-if ! mkdir "$LOCK" 2>/dev/null; then
-  echo "error: another install is already running" >&2
-  echo "if that is not true, remove $LOCK and try again" >&2
-  exit 1
-fi
-HELD_LOCK=1
 
 "$SCRIPT_DIR/build-app.sh"
 if [[ ! -x "$SRC/Contents/MacOS/Sigil" ]]; then
