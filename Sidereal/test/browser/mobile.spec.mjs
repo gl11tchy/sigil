@@ -425,6 +425,36 @@ test('the live iPhone idle composer does not cover the phone transcript', async 
   } finally { mac.close(); }
 });
 
+test('a live iPhone transcript is the messages, not hooks or pipes', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const raw = [
+    '▼ task completed in 1.8s. Poll Railway deployment until SUCCESS',
+    '',
+    '◆ Run Prove production Sidereal serves the new stripper  [hooks: 3]',
+    '',
+    '│  🙋 NEED YOU — Close the Safari tab on the phone, then open remote.sigilapp.dev again.     7:24 PM  │',
+    '│  The boxed Grok footer is stripped on the live host. Safari on iPhone keeps the old page until that tab  │',
+    '│    is gone.                                                                                         │',
+    '',
+    '> Done',
+    '',
+    '✅ DONE — That was the last step. You should see the four steps, not the boxed Grok footer.',
+  ].join('\n');
+  const mac = await pair(page, baseURL, raw, { statuses: { one: 'idle' } });
+  try {
+    const text = await page.locator('#terminal').innerText();
+    await expect(page.locator('#terminal')).toContainText('NEED YOU');
+    await expect(page.locator('#terminal')).toContainText('until that tab is gone.');
+    await expect(page.locator('#terminal')).toContainText('> Done');
+    await expect(page.locator('#terminal')).toContainText('four steps');
+    await expect(page.locator('#terminal')).not.toContainText('hooks');
+    await expect(page.locator('#terminal')).not.toContainText('task completed');
+    await expect(page.locator('#terminal')).not.toContainText('7:24 PM');
+    expect(text).not.toMatch(/^\s*[│|]/m);
+    await page.screenshot({ path: testInfo.outputPath('conversation.png') });
+  } finally { mac.close(); }
+});
+
 test('tree gutters do not wrap into a column of pipes on a phone', async ({ page, baseURL }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const raw = [

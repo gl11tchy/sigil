@@ -61,7 +61,9 @@ function isTreeOnly(line) {
 function isTurnChrome(line, previous) {
   const whole = line.trim();
   if (!whole) return false;
-  if (/\[hooks:\s*\d+\/\d+\]/.test(whole)) return true;
+  if (/\[hooks:\s*\d+(?:\/\d+)?\]/.test(whole)) return true;
+  if (/^[♦◆▼▽]/.test(whole)) return true;
+  if (/task completed in \d/i.test(whole)) return true;
   if (/^(?:[♦◆∴:]\s*)?(?:Thought for \d|Thinking\.{3}|Waiting for response|Worked for \d)/i.test(whole)) return true;
   if (/^\d+[hms]?[\d.]*s?\s*↓/.test(whole)) return true;
   if (/^\d{1,2}:\d{2} [AP]M$/.test(whole)) return Boolean(previous);
@@ -70,7 +72,7 @@ function isTurnChrome(line, previous) {
 }
 
 function stripClock(line) {
-  return line.replace(/\s{2,}\d{1,2}:\d{2} [AP]M\s*$/, '');
+  return line.replace(/\s{2,}\d{1,2}:\d{2} [AP]M\s*[│|]?\s*$/, '');
 }
 
 function unindentBubble(line) {
@@ -89,10 +91,18 @@ function isProseWrap(previous, line) {
   return /^[a-z0-9]/.test(next);
 }
 
-function stripTreeGutter(line) {
+function unwrapTuiFrame(line) {
   const trimmed = line.trimEnd();
-  if (/[│|]$/.test(trimmed) && /^[│|]/.test(trimmed.trimStart())) return line;
-  return line.replace(/^(?:[ \t]*[│|])+[ \t]{2,}/, '');
+  const framed = /^[ \t]*[│|]/.test(trimmed) && /[│|]$/.test(trimmed);
+  if (!framed) {
+    return { line: trimmed.replace(/^(?:[ \t]*[│|])+[ \t]{2,}/, ''), bubble: false };
+  }
+  const inner = trimmed.replace(/^[ \t]*[│|]/, '').replace(/[│|]\s*$/, '');
+  const words = inner.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  const continuation = /^[ \t]{2,}\S/.test(inner);
+  const timed = /\d{1,2}:\d{2} [AP]M/.test(inner);
+  if (!timed && !continuation && words.length < 4) return { line: trimmed, bubble: false };
+  return { line: inner.replace(/^[ \t]+/, ''), bubble: true };
 }
 
 function trailingComposerStart(lines) {
@@ -126,19 +136,20 @@ export function readableOutput(snapshot) {
   let blanks = 0;
   let inBubble = false;
   for (const line of lines) {
-    const cleaned = stripClock(stripTreeGutter(line));
+    const unwrapped = unwrapTuiFrame(line);
+    const cleaned = stripClock(unwrapped.line);
     const previous = compact.at(-1);
     if (isPadding(cleaned) || isTreeOnly(cleaned) || isTurnChrome(cleaned, previous && previous !== '' ? previous : '')) {
       if (++blanks === 1) compact.push('');
       inBubble = false;
     } else {
       blanks = 0;
-      const bubble = /^\s{6,}/.test(cleaned) || inBubble;
+      const bubble = unwrapped.bubble || /^\s{6,}/.test(line) || inBubble;
       if (inBubble && isProseWrap(previous, cleaned)) {
         compact[compact.length - 1] = `${previous.trim()} ${cleaned.trim()}`;
       } else {
         compact.push(unindentBubble(cleaned));
-        inBubble = bubble && /^[A-Z]/.test(cleaned.trim());
+        inBubble = unwrapped.bubble || (bubble && /^[A-Z]/.test(cleaned.trim()));
       }
     }
   }
