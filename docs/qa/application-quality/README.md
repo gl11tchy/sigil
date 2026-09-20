@@ -33,7 +33,7 @@ and real terminal. No synthetic conversation renderer or extra model-output filt
 - 72 browser tests across Chromium and WebKit, including 320–1280px viewports,
   44px touch targets, simulated keyboard resizing, file attachment, drafts, recovery,
   session search, keyboard focus during activity updates, output search, pairing failures, and raw output.
-- 469 Swift Testing tests plus 39 XCTest tests.
+- 470 Swift Testing tests plus 39 XCTest tests.
 - Production dependency audits: zero vulnerabilities.
 - Shell syntax, shellcheck, strict Swift formatting, signed debug bundle and smoke launch.
 
@@ -76,6 +76,7 @@ before release; a Mac-changing merge must use the repository's install-latest wo
 ## PR review fixes
 
 - Mixed name/CLI-summary queries expose every required source in search highlighting.
+  Queries spanning abbreviated and absolute paths retain both matching spellings.
 - Capped tab snapshots no longer discard drafts or attachments for hidden tabs.
   Restart migration uses the explicit replacement ID even when that ID is not visible.
 - Browser race tests wait for the remote selection acknowledgement before editing.

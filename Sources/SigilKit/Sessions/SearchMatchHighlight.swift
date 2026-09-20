@@ -352,19 +352,25 @@ public enum SearchMatchHighlight: Sendable {
         excerptAroundMatch(keepingMatchVisible(string, query: query), query: query)
     }
 
-    /// Prefer the spelling that explains the most query words; retain candidate order on ties.
+    /// Use enough spellings to explain all path-only terms; retain candidate order on ties.
     static func matchingPath(in candidates: [String], query: String) -> String? {
-        let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)
-        var best: String?
-        var bestCount = 0
-        for candidate in candidates where !candidate.isEmpty {
-            let count = terms.filter { contains(candidate, query: $0) }.count
-            if count > bestCount {
-                best = candidate
-                bestCount = count
+        var remaining = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        var spellings: [String] = []
+        while !remaining.isEmpty {
+            var best: String?
+            var bestCount = 0
+            for candidate in candidates where !candidate.isEmpty {
+                let count = remaining.filter { contains(candidate, query: $0) }.count
+                if count > bestCount {
+                    best = candidate
+                    bestCount = count
+                }
             }
+            guard let best else { break }
+            spellings.append(best)
+            remaining.removeAll { contains(best, query: $0) }
         }
-        return best
+        return spellings.isEmpty ? nil : spellings.joined(separator: " · ")
     }
 
     private static func subtitleText(prefix: String?, relativeTime: String) -> String {

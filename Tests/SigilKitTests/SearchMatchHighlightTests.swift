@@ -35,6 +35,20 @@ struct SearchMatchHighlightTests {
         }
     }
 
+    @Test func mixedPathSpellingsExposeEveryRequiredTerm() {
+        let paint = SearchMatchHighlight.row(
+            displayedTitle: "Auth rewrite", cliTitle: "CLI summary", projectName: "sigil",
+            cwd: "/Users/demo/repos/sigil", displayPath: "~/repos/sigil", relativeTime: "now",
+            showsProject: true, query: "~ Users")
+        let words = paint.subtitleRuns.filter(\.isMatch).map(\.text)
+        #expect(words.contains("~"))
+        #expect(words.contains("Users"))
+        let header = SearchMatchHighlight.projectHeader(
+            name: "sigil", paths: ["~/repos/sigil", "/Users/demo/repos/sigil"], count: 1, query: "~ Users")
+        #expect(header.runs.filter(\.isMatch).map(\.text).contains("~"))
+        #expect(header.runs.filter(\.isMatch).map(\.text).contains("Users"))
+    }
+
     @Test func emptyOrWhitespaceQueryYieldsNoRanges() {
         for query in ["", "   ", "\t", "\n", " \t\n "] {
             #expect(SearchMatchHighlight.ranges(in: "Auth rewrite", query: query).isEmpty)
