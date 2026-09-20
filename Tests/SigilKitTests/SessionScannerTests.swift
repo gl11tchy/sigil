@@ -81,6 +81,10 @@ struct SessionScannerTests {
         #expect(SessionScanner.matches(session, query: "Auth", displayedTitle: "Auth rewrite"))
         #expect(!SessionScanner.matches(session, query: "Auth"))
         #expect(SessionScanner.matches(session, query: "project"))
+        #expect(SessionScanner.matches(session, query: "project Auth", displayedTitle: "Auth rewrite"))
+        #expect(SessionScanner.matches(session, query: "rewrite auth", displayedTitle: "Auth rewrite"))
+        #expect(!SessionScanner.matches(session, query: "project missing", displayedTitle: "Auth rewrite"))
+
     }
 
     @Test func matchesTildeDisplayPathWithoutRequiringRawCwd() {

@@ -4,7 +4,7 @@ import Foundation
 ///
 /// `SessionScanner.matches` decides whether a conversation is listed by folding
 /// title, project name, and path with case- and diacritic-insensitive options,
-/// then asking whether the folded haystack contains the folded query.
+/// then requiring every query word to occur in at least one field.
 /// Highlighting has to paint the *original* characters that produced that hit,
 /// including clusters that expand under folding (`ß` → `ss`). `range(of:options:)`
 /// is not equivalent: it looks for a substring that *compares equal* to the
@@ -70,6 +70,28 @@ public enum SearchMatchHighlight: Sendable {
             }
         }
         return result
+    }
+
+    /// Paint each word of a multi-field search, merging overlapping original graphemes.
+    public static func termRanges(in haystack: String, query: String) -> [Range<String.Index>] {
+        let phrase = ranges(in: haystack, query: query)
+        if !phrase.isEmpty { return phrase }
+        let hits = query.split(whereSeparator: \.isWhitespace)
+            .flatMap { ranges(in: haystack, query: String($0)) }
+            .sorted { $0.lowerBound < $1.lowerBound }
+        var merged: [Range<String.Index>] = []
+        for hit in hits {
+            if let last = merged.last, last.upperBound >= hit.lowerBound {
+                merged[merged.count - 1] = last.lowerBound..<max(last.upperBound, hit.upperBound)
+            } else {
+                merged.append(hit)
+            }
+        }
+        return merged
+    }
+
+    private static func containsTerm(_ haystack: String, query: String) -> Bool {
+        query.split(whereSeparator: \.isWhitespace).contains { contains(haystack, query: String($0)) }
     }
 
     /// `ranges(in:query:)` relocated onto `container`, which must start with `haystack`.
@@ -177,12 +199,12 @@ public enum SearchMatchHighlight: Sendable {
         query: String
     ) -> RowPaint {
         let visibleTitle = excerptAroundMatch(displayedTitle, query: query)
-        let titleRuns = runs(in: visibleTitle, query: query)
+        let titleRuns = runs(in: visibleTitle, matching: termRanges(in: visibleTitle, query: query))
         let pathHit = matchingPath(in: [projectName, displayPath, cwd], query: query)
         let prefix: String?
         if showsProject, let pathHit {
             prefix = visiblePrefix(pathHit, query: query)
-        } else if !contains(displayedTitle, query: query), contains(cliTitle, query: query) {
+        } else if !containsTerm(displayedTitle, query: query), containsTerm(cliTitle, query: query) {
             prefix = excerptAroundMatch(cliTitle, query: query)
         } else if !showsProject, !headerCoversQuery, let pathHit {
             prefix = visiblePrefix(pathHit, query: query)
@@ -194,7 +216,12 @@ public enum SearchMatchHighlight: Sendable {
         let subtitle = subtitleText(prefix: prefix, relativeTime: relativeTime)
         let ranges: [Range<String.Index>] =
             if let prefix, !prefix.isEmpty {
-                self.ranges(in: prefix, query: query, asPrefixOf: subtitle)
+                termRanges(in: prefix, query: query).map { range in
+                    let start = prefix.distance(from: prefix.startIndex, to: range.lowerBound)
+                    let end = prefix.distance(from: prefix.startIndex, to: range.upperBound)
+                    return subtitle.index(
+                        subtitle.startIndex, offsetBy: start)..<subtitle.index(subtitle.startIndex, offsetBy: end)
+                }
             } else {
                 []
             }
@@ -217,7 +244,9 @@ public enum SearchMatchHighlight: Sendable {
         let raw = matchingPath(in: [name] + paths, query: query) ?? name
         let prefix = visiblePrefix(raw, query: query)
         let text = "\(prefix) (\(count))"
-        let ranges = ranges(in: prefix, query: query, asPrefixOf: text)
+        let ranges = termRanges(in: text, query: query).filter {
+            $0.upperBound <= text.index(text.startIndex, offsetBy: prefix.count)
+        }
         return HeaderPaint(text: text, runs: runs(in: text, matching: ranges))
     }
 
@@ -276,7 +305,7 @@ public enum SearchMatchHighlight: Sendable {
     /// project names and CLI summaries stay intact, even for a mid-string hit.
     public static func keepingMatchVisible(_ string: String, query: String) -> String {
         guard string.contains("/") else { return string }
-        guard let first = ranges(in: string, query: query).first else { return string }
+        guard let first = termRanges(in: string, query: query).first else { return string }
         let lead = string.distance(from: string.startIndex, to: first.lowerBound)
         if lead <= 2 { return string }
         let leading = string[string.startIndex..<first.lowerBound]
@@ -292,7 +321,7 @@ public enum SearchMatchHighlight: Sendable {
 
     public static func excerptAroundMatch(_ string: String, query: String) -> String {
         guard string.count > excerptMinimumCount else { return string }
-        guard let first = ranges(in: string, query: query).first else { return string }
+        guard let first = termRanges(in: string, query: query).first else { return string }
         let lead = string.distance(from: string.startIndex, to: first.lowerBound)
         if lead <= 2 { return string }
         let leading = string[string.startIndex..<first.lowerBound]
@@ -311,9 +340,9 @@ public enum SearchMatchHighlight: Sendable {
         excerptAroundMatch(keepingMatchVisible(string, query: query), query: query)
     }
 
-    /// First candidate that contains `query`. Empty strings are skipped.
+    /// First candidate that contains a query word. Empty strings are skipped.
     static func matchingPath(in candidates: [String], query: String) -> String? {
-        candidates.first { !$0.isEmpty && contains($0, query: query) }
+        candidates.first { !$0.isEmpty && containsTerm($0, query: query) }
     }
 
     private static func subtitleText(prefix: String?, relativeTime: String) -> String {

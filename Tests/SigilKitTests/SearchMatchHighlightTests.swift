@@ -6,6 +6,18 @@ import Testing
 @Suite("SearchMatchHighlight")
 struct SearchMatchHighlightTests {
 
+    @Test func multiFieldQueryPaintsTitleAndProjectTerms() {
+        let paint = SearchMatchHighlight.row(
+            displayedTitle: "Café auth rewrite", cliTitle: "CLI summary", projectName: "sigil",
+            cwd: "/tmp/sigil", displayPath: "/tmp/sigil", relativeTime: "now",
+            showsProject: true, query: "sigil CAFE auth")
+        #expect(paint.titleRuns.filter(\.isMatch).map(\.text) == ["Café", "auth"])
+        #expect(paint.subtitleRuns.filter(\.isMatch).map(\.text) == ["sigil"])
+        let text = "Straße"
+        let ranges = SearchMatchHighlight.termRanges(in: text, query: "strasse ss")
+        #expect(ranges.map { String(text[$0]) } == [text])
+    }
+
     @Test func emptyOrWhitespaceQueryYieldsNoRanges() {
         for query in ["", "   ", "\t", "\n", " \t\n "] {
             #expect(SearchMatchHighlight.ranges(in: "Auth rewrite", query: query).isEmpty)

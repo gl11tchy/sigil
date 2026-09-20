@@ -49,6 +49,8 @@ struct RemoteCommandsTests {
         #expect(!command("input", text: "hello", tabID: UUID().uuidString).ok)
         #expect(!command("key", text: "shell").ok)
         #expect(!command("delete").ok)
+        #expect(!command("restart").ok)
+        #expect(!command("restart", tabID: UUID().uuidString).ok)
         #expect(!command("input", text: "first\nsecond").ok)
         #expect(command("input", text: "phone-test").ok)
         #expect(command("key", text: "enter").ok)
@@ -70,6 +72,13 @@ struct RemoteCommandsTests {
         #expect(try String(contentsOf: received, encoding: .utf8) == "\u{1b}OA")
         tab.terminateAndWait()
         #expect(!command("input", text: "after exit").ok)
+        #expect(command("restart").ok)
+        let replacement = try #require(model.selectedTab)
+        #expect(replacement.id != tab.id)
+        #expect(replacement.sessionID == tab.sessionID)
+        #expect(replacement.workingDirectory == tab.workingDirectory)
+        #expect(model.tabs.count == 1)
+        #expect(!command("restart").ok)
     }
 
     @Test @MainActor func fileChunksWriteToTheDropCacheAndPasteThePath() async throws {

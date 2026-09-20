@@ -33,7 +33,7 @@ use your computer's `localhost`; real phone access requires the HTTPS deployment
 
 1. In Sigil, open Settings → Remote.
 2. Enter the Sidereal HTTPS address and select Connect Phone.
-3. Scan the code on the phone. It expires in five minutes.
+3. Scan the code on the phone, or copy the pairing link and paste it into the companion. It expires in five minutes.
 4. Add to Home Screen from that Safari tab as a shortcut. If iPhone offers Open as Web App, turn it off.
 
 Pair one phone at a time. The phone can select sessions, read recent terminal
@@ -48,9 +48,14 @@ and pastes their paths into the session. Keys opens terminal controls. Stop appe
 while a turn is running. Latest returns to the newest output.
 Drafts stay with each session until the page closes; a lost connection keeps them editable.
 Connection settings are under the status in the top-right corner.
+Sessions opens a searchable list. Find searches the recent output with previous/next
+matches. Connection settings also lets you copy the displayed output.
+Ended sessions offer Restart when the connected Mac supports it; drafts move to the
+restarted session. Older Macs still ask you to restart on the desktop.
 
 New starts a session in Sigil's current folder. Paste fills the prompt without
-submitting it. Send pastes, then presses Enter.
+submitting it. Send pastes, then presses Enter. Return in the phone message box
+adds a new line; Command/Ctrl+Return sends from a hardware keyboard.
 
 The terminal view is bounded plain text, not a pixel-perfect terminal emulator.
 It shows up to 100 open tabs and the latest 12 KB of readable output. Phone files

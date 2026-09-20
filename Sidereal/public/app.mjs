@@ -21,6 +21,8 @@ function remoteFileName(name) {
   return out || 'file';
 }
 let tabsSignature = '';
+let sessionTabs = [], canRestart = false;
+let findIndex = 0, findMatches = [], displayedOutput = null;
 let rawOutput = '', rawMode = false;
 let credential, bootstrap, newDeviceKey, socket, challenge, sequence = 0, selected;
 let selectedStatus = null, tabCount = 0;
@@ -53,7 +55,8 @@ function updateControls() {
   document.querySelectorAll('#controls button, #controls textarea, #session-toolbar button, #session-toolbar select').forEach(element => {
     // Never disable a focused editor while a command is pending: it closes the phone keyboard.
     if (element.id === 'message') { element.disabled = !selected; return; }
-    if (element.id === 'keys-toggle' || element.id === 'latest') { element.disabled = false; return; }
+    if (['keys-toggle', 'latest', 'find-toggle', 'find-close', 'find-next', 'find-previous', 'sessions-toggle'].includes(element.id)) { element.disabled = false; return; }
+    if (element.id === 'restart') { element.disabled = disabled || !ended; return; }
     if (element.id === 'new') { element.disabled = disabled; return; }
     if (element.id === 'tabs') { element.disabled = disabled || tabCount === 0; return; }
     if (element.id === 'stop' || element.id === 'interrupt') {
@@ -63,11 +66,22 @@ function updateControls() {
   });
   $('send').disabled = disabled || !selected || ended || !($('message').value.trim() || attachmentsFor().length);
   $('stop').hidden = selectedStatus !== 'working';
+  $('restart').hidden = !ended || !canRestart;
+  $('copy-output').hidden = !selected;
+  $('sessions-toggle').hidden = !selected && !tabCount;
+  $('session-status').textContent = !connected ? 'Reconnecting · draft kept' : ({ working: 'Working', starting: 'Starting…', idle: 'Ready', exited: 'Session ended' }[selectedStatus] || 'No session');
+  $('session-status').dataset.state = connected ? selectedStatus || '' : 'offline';
+  $('compose-status').textContent = busy ? 'Sending…' : !connected && selected ? 'Offline · draft kept' : ended ? 'Session ended' : '';
+  $('find-next').disabled = $('find-previous').disabled = !findMatches.length;
   $('raw-toggle').hidden = !selected;
   $('forget').hidden = !credential;
   $('reconnect').hidden = !credential || connected;
   const actions = $('welcome-actions');
   if (actions) actions.hidden = Boolean(credential);
+  $('welcome-reconnect').hidden = !credential;
+  $('welcome').querySelector('h2').textContent = credential ? 'Reconnecting to your Mac' : 'Pick up where you left off.';
+  $('welcome').querySelector('p').textContent = credential ? 'Keep Sigil open and your Mac awake.' : 'Your sessions. Your tools. Away from your desk.';
+  $('welcome').querySelector('.pairing-steps').hidden = Boolean(credential);
   const standalone = isStandaloneApp();
   for (const id of ['standalone-hint', 'standalone-panel-hint']) {
     const hint = $(id);
@@ -77,8 +91,9 @@ function updateControls() {
 function isStandaloneApp() {
   if (typeof navigator !== 'undefined' && navigator.standalone) return true;
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
-  return window.matchMedia('(display-mode: standalone)').matches
-    || window.matchMedia('(display-mode: fullscreen)').matches;
+  const isiOS = /iPhone|iPad|iPod/.test(navigator.userAgent || '')
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  return isiOS && window.matchMedia('(display-mode: standalone)').matches;
 }
 function offline(message = 'Disconnected') {
   connected = false;
@@ -104,6 +119,8 @@ function render(state) {
   if (nextSelected !== null && (typeof nextSelected !== 'string' || !ids.has(nextSelected))) {
     throw new Error('Invalid Mac response');
   }
+  sessionTabs = state.tabs;
+  canRestart = Array.isArray(state.capabilities) && state.capabilities.includes('restart');
   const changedSession = selected !== nextSelected;
   if (changedSession) {
     if (selected) drafts.set(selected, $('message').value);
@@ -122,9 +139,8 @@ function render(state) {
   const tabs = state.tabs.map(tab => {
     const option = document.createElement('option');
     option.value = tab.id;
-    const suffix = tab.status === 'working' ? ' · Working'
-      : tab.status === 'exited' ? ' · Ended' : tab.status === 'starting' ? ' · Starting' : '';
-    option.textContent = `${tab.title}${suffix}`;
+    const suffix = tab.status === 'exited' ? ' · Ended' : '';
+    option.textContent = tab.title + suffix;
     return option;
   });
   if (!tabs.length) { const empty = document.createElement('option'); empty.value = ''; empty.textContent = 'No open sessions'; tabs.push(empty); }
@@ -135,7 +151,8 @@ function render(state) {
   $('controls').hidden = false;
   rawOutput = state.terminal;
   $('session-toolbar').hidden = false;
-  $('brand').hidden = true;
+  $('brand').hidden = false;
+  if ($('sessions-dialog').open) renderSessionList();
   renderOutput(changedSession);
   if (changedSession) { resizeMessage(); renderAttachments(); }
   updateControls();
@@ -146,15 +163,115 @@ function renderOutput(changedSession = false) {
   const output = rawMode ? rawOutput : readableOutput(rawOutput);
   $('empty-output').hidden = Boolean(output);
   const ended = Boolean(selected) && selectedStatus === 'exited';
-  $('empty-output').querySelector('h2').textContent = ended ? 'Session ended' : selected ? 'Ready when you are.' : 'No open sessions.';
-  $('empty-output').querySelector('p').textContent = ended ? 'Restart this session in Sigil on your Mac.' : selected ? 'Send a message to this session.' : 'Choose New to start a session.';
+  $('empty-output').querySelector('h2').textContent = ended ? 'Session ended' : selectedStatus === 'working' ? 'Working…' : selectedStatus === 'starting' ? 'Starting session…' : selected ? 'Ready when you are.' : 'No open sessions.';
+  $('empty-output').querySelector('p').textContent = ended ? (canRestart ? 'Restart to pick up where you left off.' : 'Restart this session in Sigil on your Mac.') : selectedStatus === 'working' || selectedStatus === 'starting' ? 'Output will appear here.' : selected ? 'Send a message to this session.' : 'Choose New to start a session.';
   terminal.dataset.raw = String(rawMode);
-  if (terminal.textContent !== output || changedSession) {
-    terminal.textContent = output;
+  if (displayedOutput !== output || changedSession) {
+    displayedOutput = output;
+    if (changedSession) findIndex = 0;
+    paintOutput();
     if (atBottom || changedSession) terminal.scrollTop = terminal.scrollHeight;
   }
   updateLatest();
 }
+
+function renderSessionList() {
+  const query = $('session-search').value.trim().toLocaleLowerCase();
+  const matches = sessionTabs.filter(tab => tab.title.toLocaleLowerCase().includes(query));
+  $('session-no-results').hidden = matches.length > 0;
+  // Preserve focus during state polls: only rebuild if the displayed entries change.
+  const signature = JSON.stringify([matches, selected]);
+  if ($('session-list').dataset.signature === signature) return;
+  $('session-list').dataset.signature = signature;
+  const focusedID = document.activeElement?.dataset.tabId;
+  let nextFocus;
+  $('session-list').replaceChildren(...matches.map(tab => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.setAttribute('aria-current', String(tab.id === selected));
+    button.dataset.tabId = tab.id;
+    if (tab.id === focusedID) nextFocus = button;
+    const title = document.createElement('span');
+    title.textContent = tab.title;
+    const status = document.createElement('small');
+    status.textContent = { idle: 'Ready', working: 'Working', starting: 'Starting…', exited: 'Ended' }[tab.status];
+    button.append(title, status);
+    button.onclick = () => {
+      if (!connected || busy) return;
+      void perform(async () => {
+        await request('select', undefined, tab.id);
+        $('sessions-dialog').close();
+        $('sessions-toggle').focus();
+      });
+    };
+    return button;
+  }));
+  if (focusedID) (nextFocus || $('session-search')).focus();
+}
+function paintOutput() {
+  const output = displayedOutput || '';
+  const query = $('find-bar').hidden ? '' : $('find-query').value;
+  findMatches = [];
+  if (!query) { $('terminal').textContent = output; updateFind(false); return; }
+  const fragment = document.createDocumentFragment();
+  let cursor = 0;
+  if (query) {
+    // Escaped literal search preserves source offsets even for Unicode case folding.
+    const pattern = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu');
+    for (const match of output.matchAll(pattern)) {
+      fragment.append(document.createTextNode(output.slice(cursor, match.index)));
+      const mark = document.createElement('mark');
+      mark.textContent = match[0];
+      fragment.append(mark); findMatches.push(mark);
+      cursor = match.index + match[0].length;
+    }
+  }
+  fragment.append(document.createTextNode(output.slice(cursor)));
+  $('terminal').replaceChildren(fragment);
+  findIndex = Math.min(findIndex, Math.max(0, findMatches.length - 1));
+  updateFind(false);
+}
+function updateFind(scroll = true) {
+  findMatches.forEach((mark, index) => { mark.dataset.current = String(index === findIndex); });
+  $('find-count').textContent = !$('find-query').value ? '' : findMatches.length ? `${findIndex + 1} of ${findMatches.length}` : 'No matches';
+  $('find-next').disabled = $('find-previous').disabled = !findMatches.length;
+  if (scroll) findMatches[findIndex]?.scrollIntoView({ block: 'center' });
+}
+function moveFind(delta) {
+  if (!findMatches.length) return;
+  findIndex = (findIndex + delta + findMatches.length) % findMatches.length;
+  updateFind();
+}
+function closeFind() {
+  $('find-bar').hidden = true;
+  $('find-toggle').setAttribute('aria-expanded', 'false');
+  paintOutput();
+}
+$('sessions-toggle').onclick = () => {
+  $('session-search').value = '';
+  renderSessionList(); $('sessions-dialog').showModal(); $('session-search').focus();
+};
+$('sessions-close').onclick = () => $('sessions-dialog').close();
+$('sessions-dialog').addEventListener('close', () => { if (!$('sessions-toggle').hidden) $('sessions-toggle').focus(); });
+$('session-search').oninput = renderSessionList;
+$('find-toggle').onclick = () => {
+  $('find-bar').hidden = false; $('find-toggle').setAttribute('aria-expanded', 'true');
+  $('find-query').focus(); paintOutput();
+};
+$('find-query').oninput = () => { findIndex = 0; paintOutput(); updateFind(); };
+$('find-bar').onsubmit = event => { event.preventDefault(); moveFind(1); };
+$('find-next').onclick = () => moveFind(1);
+$('find-previous').onclick = () => moveFind(-1);
+$('find-close').onclick = () => { closeFind(); $('find-toggle').focus(); };
+$('find-query').onkeydown = event => {
+  if (event.key === 'Escape') { event.preventDefault(); closeFind(); $('find-toggle').focus(); }
+  if (event.key === 'Enter' && event.shiftKey) { event.preventDefault(); moveFind(-1); }
+};
+$('copy-output').onclick = async () => {
+  try { await navigator.clipboard.writeText(displayedOutput || ''); $('copy-output').textContent = 'Copied'; }
+  catch { showError('Could not copy. Select the output and copy it.'); }
+};
+$('connection').addEventListener('toggle', () => { if ($('connection').open) $('copy-output').textContent = 'Copy output'; });
 
 async function request(action, text, tabID = selected, pairing = false, extra = {}) {
   const current = generation;
@@ -181,7 +298,7 @@ async function transmit(action, text, tabID, pairing, extra = {}) {
       pending.delete(seq);
       reject(new Error('No response. Check the terminal before sending again.'));
     }, 10000);
-    pending.set(seq, { resolve, reject, timer });
+    pending.set(seq, { resolve, reject, timer, action, tabID });
     ws.send(JSON.stringify({ data }));
   });
 }
@@ -258,7 +375,18 @@ function connect() {
           credential.ticket = reply.ticket;
           try { await storage('put', credential); } catch { /* keep the in-memory ticket */ }
         }
-        if (reply.state) render(reply.state);
+        if (reply.state) {
+          // Restart replaces the Mac tab ID. Move drafts before pruning closed tabs.
+          const next = reply.state.selectedTabID;
+          if (item.action === 'restart' && item.tabID === selected && next && next !== selected) {
+            drafts.set(next, $('message').value);
+            if (attachmentDrafts.has(selected)) {
+              attachmentDrafts.set(next, attachmentDrafts.get(selected));
+              attachmentDrafts.delete(selected);
+            }
+          }
+          render(reply.state);
+        }
         pending.delete(reply.sequence); clearTimeout(item.timer);
         item.resolve(reply);
       } else throw new Error('Invalid response');
@@ -406,6 +534,7 @@ function updateViewport() {
   if (!viewport || viewport.scale !== 1) return;
   const terminal = $('terminal');
   const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
+  document.body.dataset.compact = String(viewport.height < 600);
   document.documentElement.style.setProperty('--viewport-height', `${viewport.height}px`);
   document.documentElement.style.setProperty('--viewport-top', `${viewport.offsetTop}px`);
   if (atBottom) terminal.scrollTop = terminal.scrollHeight;
@@ -436,8 +565,14 @@ $('compose').onsubmit = event => { event.preventDefault(); void perform(() => se
 $('paste').onclick = () => void perform(() => sendText(false));
 $('tabs').onchange = () => void perform(() => request('select', undefined, $('tabs').value));
 $('new').onclick = () => void perform(() => request('new'));
-$('interrupt').onclick = () => { if (connected && selected) void request('key', 'interrupt'); };
-$('stop').onclick = () => { if (connected && selected) void request('key', 'interrupt'); };
+async function interrupt() {
+  if (!connected || !selected) return;
+  try { await request('key', 'interrupt'); }
+  catch (error) { showError(error.message); }
+}
+$('interrupt').onclick = interrupt;
+$('stop').onclick = interrupt;
+$('restart').onclick = () => void perform(() => request('restart'));
 $('attach-toggle').onclick = () => $('attach').click();
 $('attach').onchange = () => {
   const list = attachmentsFor();
@@ -453,19 +588,20 @@ $('attach').onchange = () => {
 };
 $('message').addEventListener('keydown', event => {
   if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
-  if (!window.matchMedia('(pointer: coarse)').matches) return;
+  if (!event.metaKey && !event.ctrlKey) return;
   event.preventDefault();
   void perform(() => sendText(true));
 });
 document.querySelectorAll('[data-key]').forEach(button => { button.onclick = () => void perform(() => request('key', button.dataset.key)); });
-$('reconnect').onclick = () => { stopped = false; reconnectDelay = 500; connect(); };
+$('reconnect').onclick = $('welcome-reconnect').onclick = () => { stopped = false; reconnectDelay = 500; connect(); };
 $('forget').onclick = async () => {
   stopped = true; ++generation; clearTimeout(reconnectTimer); socket?.close(); offline();
   credential = null; bootstrap = null; newDeviceKey = null; selected = null; drafts.clear(); tabsSignature = '';
   selectedStatus = null; tabCount = 0;
   $('keys').hidden = true; $('keys-toggle').setAttribute('aria-expanded', 'false');
   clearAttachments();
-  rawOutput = ''; rawMode = false;
+  rawOutput = ''; rawMode = false; displayedOutput = null;
+  sessionTabs = []; $('sessions-dialog').close(); closeFind();
   $('raw-toggle').setAttribute('aria-pressed', 'false'); $('raw-toggle').textContent = 'Show raw terminal';
   $('session-toolbar').hidden = true; $('brand').hidden = false;
   $('terminal').textContent = ''; $('message').value = ''; $('controls').hidden = true; $('welcome').hidden = false;
@@ -574,8 +710,11 @@ async function startScan() {
 if ($('scan')) $('scan').onclick = () => void startScan();
 if ($('scanner-cancel')) $('scanner-cancel').onclick = () => stopScan();
 if ($('paste-link')) $('paste-link').onclick = async () => {
+  $('paste-form').hidden = false;
+  $('pairing-link').focus();
   try {
     const text = await navigator.clipboard.readText();
+    if (credential) return;
     const result = pairingFromText(text, location.origin);
     if (result?.room) { showError(''); await beginPair(result); return; }
     if (result?.error) showError(result.error);

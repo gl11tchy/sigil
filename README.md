@@ -27,6 +27,7 @@ By gl11tchy.
 - **Search highlight.** Matches from the sidebar Search field (`⌘⇧F`) light up in
   each visible title, in the project name or path on the subtitle, and in the
   Projects header. A hit on the CLI summary or a path still paints a visible run.
+  Combine words across conversation names and folders, such as `sigil auth`.
 - **Rename.** Name a conversation from the row's context menu, `F2` in the
   thread list, or `⌘⇧R` for the session on screen. The name is what the sidebar,
   tabs, and search use, and it survives the CLI rewriting its own summary.
@@ -64,7 +65,7 @@ Deploy its small encrypted relay over HTTPS, then enter that address in Sigil.
 The Mac makes outbound connections only; no router ports need opening.
 
 See [Sidereal setup](Sidereal/README.md) for hosting, pairing, controls, and limits.
-Remote access is off by default. Disconnecting or quitting Sigil revokes it.
+Remote access is off by default. Disconnecting revokes it. Quitting preserves pairing for the next launch.
 
 ## Tab messaging
 

@@ -28,6 +28,7 @@ struct TerminalFindBar: View {
                 .focused($isFieldFocused)
                 .frame(width: 132)
                 .onSubmit(advance)
+                .accessibilityLabel("Find in terminal")
 
             Text(counter)
                 .font(.system(size: 11, design: .monospaced))
@@ -35,11 +36,11 @@ struct TerminalFindBar: View {
                 .monospacedDigit()
                 .accessibilityLabel(counterLabel)
 
-            FindBarIconButton(systemName: "chevron.up", help: "Previous", action: findPrevious)
+            FindBarIconButton(systemName: "chevron.up", help: "Previous match (Shift+Return)", action: findPrevious)
                 .disabled(matchCount == 0)
-            FindBarIconButton(systemName: "chevron.down", help: "Next", action: findNext)
+            FindBarIconButton(systemName: "chevron.down", help: "Next match (Return)", action: findNext)
                 .disabled(matchCount == 0)
-            FindBarIconButton(systemName: "xmark", help: "Close", action: dismiss)
+            FindBarIconButton(systemName: "xmark", help: "Close find (Escape)", action: dismiss)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)

@@ -1,17 +1,22 @@
+import AppKit
 import CoreImage.CIFilterBuiltins
 import SigilKit
 import SwiftUI
 
 struct RemoteControlView: View {
     @Bindable var model: AppModel
+    @State private var copiedLink = false
     @AppStorage("remoteServerURL") private var serverURL = RemoteControl.productionOrigin
 
     var body: some View {
         Form {
             Section {
-                TextField("Sidereal address", text: $serverURL, prompt: Text("https://…"))
-                    .textFieldStyle(.roundedBorder)
-                    .disabled(model.remoteControl.isEnabled)
+                Label("Use your open sessions from your phone.", systemImage: "iphone")
+                DisclosureGroup("Server address") {
+                    TextField("Address", text: $serverURL, prompt: Text("https://…"))
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(model.remoteControl.isEnabled)
+                }
                 if model.remoteControl.isEnabled {
                     LabeledContent("Status", value: model.remoteControl.status)
                     Button("Disconnect", role: .destructive) { model.remoteControl.stop(revoke: true) }
@@ -20,7 +25,7 @@ struct RemoteControlView: View {
                         .disabled(serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             } footer: {
-                Text("Your phone can read and control open sessions. Scan once; Disconnect revokes access.")
+                Text("Scan once to pair. Disconnect revokes your phone’s access.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -39,6 +44,11 @@ struct RemoteControlView: View {
                                     .accessibilityLabel("QR code. Scan it on your phone to connect")
                             }
                             Text("Scan this code on your phone")
+                            Button(copiedLink ? "Copied" : "Copy Pairing Link") {
+                                NSPasteboard.general.clearContents()
+                                copiedLink = NSPasteboard.general.setString(url.absoluteString, forType: .string)
+                            }
+                            .help("Paste this link into Sigil Remote on your phone")
                             Text("Expires in \(max(0, Int(expiry.timeIntervalSince(context.date)))) seconds")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -57,6 +67,7 @@ struct RemoteControlView: View {
         }
         .formStyle(.grouped)
         .frame(minHeight: model.remoteControl.pairingURL == nil ? 280 : 550)
+        .onChange(of: model.remoteControl.pairingURL) { _, _ in copiedLink = false }
         .onAppear { serverURL = RemoteControl.preferredOrigin(serverURL) }
     }
 
