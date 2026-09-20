@@ -377,12 +377,14 @@ function connect() {
         }
         if (reply.state) {
           // Restart replaces the Mac tab ID. Move drafts before pruning closed tabs.
-          const next = reply.state.selectedTabID;
-          if (item.action === 'restart' && item.tabID === selected && next && next !== selected) {
-            drafts.set(next, $('message').value);
-            if (attachmentDrafts.has(selected)) {
-              attachmentDrafts.set(next, attachmentDrafts.get(selected));
-              attachmentDrafts.delete(selected);
+          const next = reply.restartedTabID;
+          if (item.action === 'restart' && typeof next === 'string' && next !== item.tabID
+              && Array.isArray(reply.state.tabs) && reply.state.tabs.some(tab => tab.id === next)) {
+            const draft = item.tabID === selected ? $('message').value : drafts.get(item.tabID);
+            if (draft !== undefined) drafts.set(next, draft);
+            if (attachmentDrafts.has(item.tabID)) {
+              attachmentDrafts.set(next, attachmentDrafts.get(item.tabID));
+              attachmentDrafts.delete(item.tabID);
             }
           }
           render(reply.state);

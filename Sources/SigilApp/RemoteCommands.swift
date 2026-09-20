@@ -20,6 +20,7 @@ struct RemoteReply: Codable, Sendable {
     var error: String?
     var state: RemoteState?
     var ticket: String?
+    var restartedTabID: String?
 }
 
 @MainActor
@@ -42,7 +43,9 @@ enum RemoteCommands {
                 return failure(request, "Could not start a session. Check Sigil on your Mac.")
             }
         case "restart":
-            guard let tab else { return failure(request, "This tab is closed.") }
+            guard let tab, let index = model.tabs.firstIndex(where: { $0.id == tab.id }) else {
+                return failure(request, "This tab is closed.")
+            }
             guard case .exited = tab.activity, !tab.controller.isRunning else {
                 return failure(request, "Only ended sessions can be restarted.")
             }
@@ -50,9 +53,10 @@ enum RemoteCommands {
                 (try? tab.workingDirectory.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
             else { return failure(request, "Restore the folder or Grok CLI on your Mac, then try again.") }
             model.restartTab(id: tab.id)
-            guard !model.tabs.contains(where: { $0.id == tab.id }) else {
+            guard index < model.tabs.count, model.tabs[index].id != tab.id else {
                 return failure(request, "Could not restart this session. Check Sigil on your Mac.")
             }
+            reply.restartedTabID = model.tabs[index].id.uuidString
         case "input":
             guard let tab, tab.controller.isRunning else { return failure(request, "This session is not running.") }
             guard let text = request.text, !text.isEmpty, text.utf8.count <= 8_192,

@@ -40,3 +40,10 @@ replace the running app as part of local verification. No unrelated infrastructu
 using-agent-skills, spec-driven-development, frontend-ui-engineering,
 incremental-implementation, test-driven-development, browser-testing-with-devtools,
 git-workflow-and-versioning, write-swift, impeccable, product-design:audit.
+
+## PR review follow-through
+Skills: code-review-and-quality, test-driven-development, debugging-and-error-recovery,
+api-and-interface-design, incremental-implementation.
+The restart reply names the replacement tab explicitly. Drafts must follow that ID,
+not whichever session the Mac has selected when it answers. Verify concurrent Mac
+selection changes in browser and native tests before the release push.

@@ -8,7 +8,8 @@
   navigation, and copying of displayed output. Raw terminal remains available.
 - Return inserts a newline. Command/Ctrl+Return or Send submits explicitly.
 - Ended sessions can restart remotely. Running and unknown tabs cannot be restarted.
-  The existing conversation and folder stay intact; the phone draft follows the new tab.
+  The existing conversation and folder stay intact; the phone draft follows the explicit
+  replacement tab ID, even if the Mac changes selection before answering.
   Older Mac versions retain the desktop-restart fallback.
 - Desktop search combines terms across conversation titles and folders, with matching
   highlights. Terminal Find buttons expose their keyboard shortcuts.
@@ -29,7 +30,7 @@ and real terminal. No synthetic conversation renderer or extra model-output filt
 `Scripts/verify.sh` passed:
 
 - 72 Sidereal Node tests and 7 Site tests.
-- 68 browser tests across Chromium and WebKit, including 320–1280px viewports,
+- 70 browser tests across Chromium and WebKit, including 320–1280px viewports,
   44px touch targets, simulated keyboard resizing, file attachment, drafts, recovery,
   session search, keyboard focus during activity updates, output search, pairing failures, and raw output.
 - 468 Swift Testing tests plus 39 XCTest tests.

@@ -47,15 +47,15 @@ async function pair(page, origin, initialOutput, options = {}) {
           return;
         }
         if (request.action === 'restart' && options.restart) {
-          selected = 'restarted'; outputs.restarted = 'Session restarted';
+          selected = options.switchDuringRestart ? 'two' : 'restarted'; outputs.restarted = 'Session restarted';
         }
         if (request.action === 'input') outputs[selected] += `\n\nYou: ${request.text}`;
         if (request.action === 'file') outputs[selected] += `\n\nAttached ${request.name || 'file'}`;
         const state = options.state ?? { tabs: [
-          { id: selected === 'restarted' ? 'restarted' : 'one', title: 'Mobile layout review', status: selected === 'restarted' ? 'idle' : options.statuses?.one ?? 'working' },
+          { id: outputs.restarted ? 'restarted' : 'one', title: 'Mobile layout review', status: outputs.restarted ? 'idle' : options.statuses?.one ?? 'working' },
           { id: 'two', title: 'Release checks', status: options.statuses?.two ?? 'idle' }],
           selectedTabID: selected, terminal: outputs[selected], capabilities: options.restart ? ['restart'] : [] };
-        ws.send(JSON.stringify({ peer, data: await seal({ challenge, sequence: request.sequence, ok: true, ticket, state }, key, 'mac') }));
+        ws.send(JSON.stringify({ peer, data: await seal({ challenge, sequence: request.sequence, ok: true, ticket, state, restartedTabID: request.action === 'restart' && options.restart ? 'restarted' : undefined }, key, 'mac') }));
       }
     }).catch(error => errors.push(error));
   });
@@ -610,5 +610,21 @@ test('session activity updates preserve keyboard focus inside the picker', async
     await expect(row).toBeFocused();
     await row.press('Escape');
     await expect(page.getByRole('button', { name: 'Browse sessions' })).toBeFocused();
+  } finally { mac.close(); }
+});
+
+
+test('restart keeps drafts with their own sessions when the Mac changes selection', async ({ page, baseURL }) => {
+  const mac = await pair(page, baseURL, '', { statuses: { one: 'exited' }, restart: true, switchDuringRestart: true });
+  try {
+    await page.locator('#tabs').selectOption('two');
+    await page.locator('#message').fill('Existing second-session draft');
+    await page.locator('#tabs').selectOption('one');
+    await page.locator('#message').fill('Draft for the restarted session');
+    await page.locator('#restart').click();
+    await expect(page.locator('#tabs')).toHaveValue('two');
+    await expect(page.locator('#message')).toHaveValue('Existing second-session draft');
+    await page.locator('#tabs').selectOption('restarted');
+    await expect(page.locator('#message')).toHaveValue('Draft for the restarted session');
   } finally { mac.close(); }
 });
