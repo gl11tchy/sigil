@@ -182,6 +182,57 @@ test('keeps a transcript line that is only - grok before the idle composer', () 
   assert.equal(readableOutput(raw), 'The process name is\n- grok');
 });
 
+const liveIphoneTranscript = [
+  '▼ task completed in 1.8s. Poll Railway deployment until SUCCESS',
+  '',
+  '◆ Run Prove production Sidereal serves the new stripper  [hooks: 3]',
+  '',
+  '│  🙋 NEED YOU — Close the Safari tab on the phone, then open remote.sigilapp.dev again.     7:24 PM  │',
+  '│  The boxed Grok footer is stripped on the live host. Safari on iPhone keeps the old page until that tab  │',
+  '│    is gone.                                                                                         │',
+  '',
+  '> Done',
+  '',
+  '✅ DONE — That was the last step. You should see the four steps, not the boxed Grok footer.',
+].join('\n');
+
+test('live iPhone transcript is the messages, not hooks, pipes, or wrap breaks', () => {
+  assert.equal(
+    readableOutput(liveIphoneTranscript),
+    [
+      '🙋 NEED YOU — Close the Safari tab on the phone, then open remote.sigilapp.dev again.',
+      'The boxed Grok footer is stripped on the live host. Safari on iPhone keeps the old page until that tab is gone.',
+      '',
+      '> Done',
+      '',
+      '✅ DONE — That was the last step. You should see the four steps, not the boxed Grok footer.',
+    ].join('\n'),
+  );
+});
+
+test('keeps real sentences, tables, commands, and trailing pipes that are not TUI chrome', () => {
+  assert.equal(
+    readableOutput('The task completed in 2 seconds.\n◆ my actual note'),
+    'The task completed in 2 seconds.\n◆ my actual note',
+  );
+  assert.equal(
+    readableOutput('Table:\n│ Name | Status | Owner │\n│ data │'),
+    'Table:\n│ Name | Status | Owner │\n│ data │',
+  );
+  assert.equal(
+    readableOutput('│  Hello from the phone.                                                       │'),
+    'Hello from the phone.',
+  );
+  assert.equal(
+    readableOutput('│  npm test --test-name-pattern live  │\n│  git status --short --branch  │'),
+    'npm test --test-name-pattern live\ngit status --short --branch',
+  );
+  assert.equal(
+    readableOutput('Build finished  7:24 PM |'),
+    'Build finished  7:24 PM |',
+  );
+});
+
 test('strips TUI tree gutters so phone code is not a column of pipes', () => {
   const tree = [
     '|     1 const CACHE = \'sidereal-shell-v7\';',
