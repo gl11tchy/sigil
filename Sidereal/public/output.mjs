@@ -62,8 +62,8 @@ function isTurnChrome(line, previous) {
   const whole = line.trim();
   if (!whole) return false;
   if (/\[hooks:\s*\d+(?:\/\d+)?\]/.test(whole)) return true;
-  if (/^[♦◆▼▽]/.test(whole)) return true;
-  if (/task completed in \d/i.test(whole)) return true;
+  if (/^[▼▽]\s*task completed in \d/i.test(whole)) return true;
+  if (/^[♦◆▼▽]\s+(?:Run |stop\b|user_prompt_submit|Thought for \d|Thinking\.{3}|Waiting for response|Worked for \d)/i.test(whole)) return true;
   if (/^(?:[♦◆∴:]\s*)?(?:Thought for \d|Thinking\.{3}|Waiting for response|Worked for \d)/i.test(whole)) return true;
   if (/^\d+[hms]?[\d.]*s?\s*↓/.test(whole)) return true;
   if (/^\d{1,2}:\d{2} [AP]M$/.test(whole)) return Boolean(previous);
@@ -72,7 +72,7 @@ function isTurnChrome(line, previous) {
 }
 
 function stripClock(line) {
-  return line.replace(/\s{2,}\d{1,2}:\d{2} [AP]M\s*[│|]?\s*$/, '');
+  return line.replace(/\s{2,}\d{1,2}:\d{2} [AP]M\s*$/, '');
 }
 
 function unindentBubble(line) {
@@ -86,6 +86,7 @@ function isProseWrap(previous, line) {
   const prev = previous.trim();
   const next = line.trim();
   if (!prev || !next) return false;
+  if (prev.split(/\s+/).length < 5) return false;
   if (/[.!?:;{}]$/.test(prev)) return false;
   if (/^\s{1,4}\S/.test(line) && !/^\s{6,}/.test(line)) return false;
   return /^[a-z0-9]/.test(next);
@@ -98,11 +99,12 @@ function unwrapTuiFrame(line) {
     return { line: trimmed.replace(/^(?:[ \t]*[│|])+[ \t]{2,}/, ''), bubble: false };
   }
   const inner = trimmed.replace(/^[ \t]*[│|]/, '').replace(/[│|]\s*$/, '');
+  if (/[│|]/.test(inner)) return { line: trimmed, bubble: false };
   const words = inner.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
   const continuation = /^[ \t]{2,}\S/.test(inner);
   const timed = /\d{1,2}:\d{2} [AP]M/.test(inner);
   if (!timed && !continuation && words.length < 4) return { line: trimmed, bubble: false };
-  return { line: inner.replace(/^[ \t]+/, ''), bubble: true };
+  return { line: inner.trim(), bubble: true };
 }
 
 function trailingComposerStart(lines) {

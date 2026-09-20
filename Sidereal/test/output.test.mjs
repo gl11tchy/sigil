@@ -210,6 +210,29 @@ test('live iPhone transcript is the messages, not hooks, pipes, or wrap breaks',
   );
 });
 
+test('keeps real sentences, tables, commands, and trailing pipes that are not TUI chrome', () => {
+  assert.equal(
+    readableOutput('The task completed in 2 seconds.\n◆ my actual note'),
+    'The task completed in 2 seconds.\n◆ my actual note',
+  );
+  assert.equal(
+    readableOutput('Table:\n│ Name | Status | Owner │\n│ data │'),
+    'Table:\n│ Name | Status | Owner │\n│ data │',
+  );
+  assert.equal(
+    readableOutput('│  Hello from the phone.                                                       │'),
+    'Hello from the phone.',
+  );
+  assert.equal(
+    readableOutput('│  npm test --test-name-pattern live  │\n│  git status --short --branch  │'),
+    'npm test --test-name-pattern live\ngit status --short --branch',
+  );
+  assert.equal(
+    readableOutput('Build finished  7:24 PM |'),
+    'Build finished  7:24 PM |',
+  );
+});
+
 test('strips TUI tree gutters so phone code is not a column of pipes', () => {
   const tree = [
     '|     1 const CACHE = \'sidereal-shell-v7\';',
