@@ -6,6 +6,49 @@ import Testing
 @Suite("SearchMatchHighlight")
 struct SearchMatchHighlightTests {
 
+    @Test func multiFieldQueryPaintsTitleAndProjectTerms() {
+        let paint = SearchMatchHighlight.row(
+            displayedTitle: "Café auth rewrite", cliTitle: "CLI summary", projectName: "sigil",
+            cwd: "/tmp/sigil", displayPath: "/tmp/sigil", relativeTime: "now",
+            showsProject: true, query: "sigil CAFE auth")
+        #expect(paint.titleRuns.filter(\.isMatch).map(\.text) == ["Café", "auth"])
+        #expect(paint.subtitleRuns.filter(\.isMatch).map(\.text) == ["sigil"])
+        let text = "Straße"
+        let ranges = SearchMatchHighlight.termRanges(in: text, query: "strasse ss")
+        #expect(ranges.map { String(text[$0]) } == [text])
+    }
+
+    @Test func multiFieldSearchExposesRequiredCLIOnlyTerms() {
+        for query in ["Auth CLI", "Auth CLI sigil", "Auth CLI sigil /tmp"] {
+            let paint = SearchMatchHighlight.row(
+                displayedTitle: "Auth rewrite", cliTitle: "CLI summary", projectName: "sigil",
+                cwd: "/tmp/sigil", displayPath: "/tmp/sigil", relativeTime: "now",
+                showsProject: true, query: query)
+            #expect(paint.titleRuns.filter(\.isMatch).map(\.text) == ["Auth"])
+            #expect(paint.subtitleRuns.filter(\.isMatch).map(\.text).contains("CLI"))
+            if query.contains("sigil") {
+                #expect(paint.subtitleRuns.filter(\.isMatch).map(\.text).contains("sigil"))
+            }
+            if query.contains("/tmp") {
+                #expect(paint.subtitleRuns.filter(\.isMatch).map(\.text).contains("/tmp"))
+            }
+        }
+    }
+
+    @Test func mixedPathSpellingsExposeEveryRequiredTerm() {
+        let paint = SearchMatchHighlight.row(
+            displayedTitle: "Auth rewrite", cliTitle: "CLI summary", projectName: "sigil",
+            cwd: "/Users/demo/repos/sigil", displayPath: "~/repos/sigil", relativeTime: "now",
+            showsProject: true, query: "~ Users")
+        let words = paint.subtitleRuns.filter(\.isMatch).map(\.text)
+        #expect(words.contains("~"))
+        #expect(words.contains("Users"))
+        let header = SearchMatchHighlight.projectHeader(
+            name: "sigil", paths: ["~/repos/sigil", "/Users/demo/repos/sigil"], count: 1, query: "~ Users")
+        #expect(header.runs.filter(\.isMatch).map(\.text).contains("~"))
+        #expect(header.runs.filter(\.isMatch).map(\.text).contains("Users"))
+    }
+
     @Test func emptyOrWhitespaceQueryYieldsNoRanges() {
         for query in ["", "   ", "\t", "\n", " \t\n "] {
             #expect(SearchMatchHighlight.ranges(in: "Auth rewrite", query: query).isEmpty)

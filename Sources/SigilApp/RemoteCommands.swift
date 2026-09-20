@@ -10,6 +10,8 @@ struct RemoteState: Codable, Sendable {
     let tabs: [Tab]
     let selectedTabID: String?
     let terminal: String
+    var capabilities: [String] = ["restart"]
+    var tabsTruncated = false
 }
 
 struct RemoteReply: Codable, Sendable {
@@ -19,6 +21,7 @@ struct RemoteReply: Codable, Sendable {
     var error: String?
     var state: RemoteState?
     var ticket: String?
+    var restartedTabID: String?
 }
 
 @MainActor
@@ -40,6 +43,21 @@ enum RemoteCommands {
             else {
                 return failure(request, "Could not start a session. Check Sigil on your Mac.")
             }
+        case "restart":
+            guard let tab, let index = model.tabs.firstIndex(where: { $0.id == tab.id }) else {
+                return failure(request, "This tab is closed.")
+            }
+            guard case .exited = tab.activity, !tab.controller.isRunning else {
+                return failure(request, "Only ended sessions can be restarted.")
+            }
+            guard model.settings.executableExists,
+                (try? tab.workingDirectory.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            else { return failure(request, "Restore the folder or Grok CLI on your Mac, then try again.") }
+            model.restartTab(id: tab.id)
+            guard index < model.tabs.count, model.tabs[index].id != tab.id else {
+                return failure(request, "Could not restart this session. Check Sigil on your Mac.")
+            }
+            reply.restartedTabID = model.tabs[index].id.uuidString
         case "input":
             guard let tab, tab.controller.isRunning else { return failure(request, "This session is not running.") }
             guard let text = request.text, !text.isEmpty, text.utf8.count <= 8_192,
@@ -90,7 +108,8 @@ enum RemoteCommands {
         return RemoteState(
             tabs: visibleTabs(tabs, selectedID: model.selectedTab?.id.uuidString),
             selectedTabID: model.selectedTab?.id.uuidString,
-            terminal: boundedSuffix(model.selectedTab?.controller.remoteSnapshot() ?? "", bytes: 12_000)
+            terminal: boundedSuffix(model.selectedTab?.controller.remoteSnapshot() ?? "", bytes: 12_000),
+            tabsTruncated: tabs.count > 100
         )
     }
 

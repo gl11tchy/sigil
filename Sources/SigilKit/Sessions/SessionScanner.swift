@@ -189,17 +189,14 @@ enum SessionScanner: Sendable {
         query: String,
         displayedTitle: String? = nil
     ) -> Bool {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return true }
-        if SearchMatchHighlight.contains(displayedTitle ?? session.title, query: trimmed) {
-            return true
+        let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        if terms.isEmpty { return true }
+        let fields = [
+            displayedTitle ?? session.title, session.title, session.projectName, session.displayPath, session.cwd,
+        ]
+        return terms.allSatisfy { term in
+            fields.contains { SearchMatchHighlight.contains($0, query: term) }
         }
-        if displayedTitle != nil, SearchMatchHighlight.contains(session.title, query: trimmed) {
-            return true
-        }
-        return SearchMatchHighlight.contains(session.projectName, query: trimmed)
-            || SearchMatchHighlight.contains(session.displayPath, query: trimmed)
-            || SearchMatchHighlight.contains(session.cwd, query: trimmed)
     }
 
     static func grouped(_ sessions: [GrokSession]) -> [(cwd: String, sessions: [GrokSession])] {

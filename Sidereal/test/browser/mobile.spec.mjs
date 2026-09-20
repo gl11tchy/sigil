@@ -39,16 +39,24 @@ async function pair(page, origin, initialOutput, options = {}) {
         const request = await open(frame.data, key, 'phone');
         expect(request.challenge).toBe(challenge);
         actions.push(request);
+        options.onRequest?.(request);
         if (request.action === 'pair') key = await importKey(request.text);
         if (request.action === 'select') selected = request.tabID;
         if (request.action === 'new') selected = 'two';
+        if (options.rejectAction === request.action) {
+          ws.send(JSON.stringify({ peer, data: await seal({ challenge, sequence: request.sequence, ok: false, error: 'Test action refused.' }, key, 'mac') }));
+          return;
+        }
+        if (request.action === 'restart' && options.restart) {
+          selected = options.switchDuringRestart ? 'two' : 'restarted'; outputs.restarted = 'Session restarted';
+        }
         if (request.action === 'input') outputs[selected] += `\n\nYou: ${request.text}`;
         if (request.action === 'file') outputs[selected] += `\n\nAttached ${request.name || 'file'}`;
         const state = options.state ?? { tabs: [
-          { id: 'one', title: 'Mobile layout review', status: options.statuses?.one ?? 'working' },
+          { id: outputs.restarted ? 'restarted' : 'one', title: 'Mobile layout review', status: outputs.restarted ? 'idle' : options.statuses?.one ?? 'working' },
           { id: 'two', title: 'Release checks', status: options.statuses?.two ?? 'idle' }],
-          selectedTabID: selected, terminal: outputs[selected] };
-        ws.send(JSON.stringify({ peer, data: await seal({ challenge, sequence: request.sequence, ok: true, ticket, state }, key, 'mac') }));
+          selectedTabID: selected, terminal: outputs[selected], capabilities: options.restart ? ['restart'] : [] };
+        ws.send(JSON.stringify({ peer, data: await seal({ challenge, sequence: request.sequence, ok: true, ticket, state, restartedTabID: request.action === 'restart' && options.restart ? 'restarted' : undefined }, key, 'mac') }));
       }
     }).catch(error => errors.push(error));
   });
@@ -492,5 +500,171 @@ test('the connection popover closes on Escape and outside pointer presses', asyn
     await expect(details).toHaveJSProperty('open', false);
     expect(consoleErrors).toEqual([]);
     await page.screenshot({ path: testInfo.outputPath('popover.png') });
+  } finally { mac.close(); }
+});
+
+test('session search switches conversations and keeps each draft', async ({ page, baseURL }) => {
+  const mac = await pair(page, baseURL);
+  try {
+    await page.locator('#message').fill('Keep this draft');
+    await page.getByRole('button', { name: 'Browse sessions' }).click();
+    await page.getByRole('searchbox', { name: 'Search sessions' }).fill('release');
+    await expect(page.locator('#session-list button')).toHaveCount(1);
+    await page.locator('#session-list button').click();
+    await expect(page.locator('#terminal')).toContainText('Release checks');
+    await expect(page.locator('#sessions-dialog')).not.toBeVisible();
+    await page.locator('#tabs').selectOption('one');
+    await expect(page.locator('#message')).toHaveValue('Keep this draft');
+  } finally { mac.close(); }
+});
+
+test('find output navigates literal matches without altering output', async ({ page, baseURL }) => {
+  const mac = await pair(page, baseURL, 'First <script>\nsecond needle\nthird needle');
+  try {
+    await page.getByRole('button', { name: 'Find in output' }).click();
+    await page.getByRole('searchbox', { name: 'Find in output' }).fill('needle');
+    await expect(page.locator('#find-count')).toHaveText('1 of 2');
+    await page.getByRole('button', { name: 'Next match' }).click();
+    await expect(page.locator('#find-count')).toHaveText('2 of 2');
+    await expect(page.locator('#terminal')).toHaveText('First <script>\nsecond needle\nthird needle');
+    await page.getByRole('searchbox', { name: 'Find in output' }).fill('absent');
+    await expect(page.locator('#find-count')).toHaveText('No matches');
+    await expect(page.getByRole('button', { name: 'Next match' })).toBeDisabled();
+    await page.getByRole('searchbox', { name: 'Find in output' }).press('Escape');
+    await expect(page.locator('#find-bar')).toBeHidden();
+  } finally { mac.close(); }
+});
+
+test('phone return creates a newline and explicit send submits once', async ({ page, baseURL }) => {
+  await page.emulateMedia({ media: 'screen' });
+  await page.addInitScript(() => {
+    const original = window.matchMedia.bind(window);
+    window.matchMedia = query => query === '(pointer: coarse)' ? { matches: true } : original(query);
+  });
+  const mac = await pair(page, baseURL);
+  try {
+    await page.locator('#message').fill('First line');
+    await page.locator('#message').press('End');
+    await page.locator('#message').press('Enter');
+    await page.locator('#message').pressSequentially('Second line');
+    await expect(page.locator('#message')).toHaveValue('First line\nSecond line');
+    expect(mac.actions.filter(a => a.action === 'input')).toHaveLength(0);
+    await page.locator('#send').click();
+    await expect.poll(() => mac.actions.filter(a => a.action === 'key' && a.text === 'enter').length).toBe(1);
+  } finally { mac.close(); }
+});
+
+
+test('restart recovers an ended session without losing its draft', async ({ page, baseURL }) => {
+  const mac = await pair(page, baseURL, '', { statuses: { one: 'exited' }, restart: true });
+  try {
+    await page.locator('#message').fill('Continue with this note');
+    await page.getByRole('button', { name: 'Restart session', exact: true }).click();
+    await expect(page.locator('#terminal')).toHaveText('Session restarted');
+    await expect(page.locator('#message')).toHaveValue('Continue with this note');
+    await expect(page.locator('#send')).toBeEnabled();
+    await expect(page.locator('#restart')).toBeHidden();
+    expect(mac.actions.filter(a => a.action === 'restart')).toHaveLength(1);
+  } finally { mac.close(); }
+});
+
+test('stop failures are visible and do not become unhandled errors', async ({ page, baseURL }) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const mac = await pair(page, baseURL, 'Still working', { rejectAction: 'key' });
+  try {
+    await page.locator('#stop').click();
+    await expect(page.locator('#error')).toHaveText('Test action refused.');
+    expect(errors).toEqual([]);
+    await expect(page.locator('#message')).toBeEditable();
+  } finally { mac.close(); }
+});
+
+test('fullscreen desktop does not show iPhone-only pairing advice', async ({ page, baseURL }) => {
+  await page.addInitScript(() => {
+    const match = window.matchMedia.bind(window);
+    window.matchMedia = query => query === '(display-mode: fullscreen)' ? { matches: true } : match(query);
+  });
+  await page.goto(baseURL);
+  await expect(page.locator('#standalone-hint')).toBeHidden();
+});
+
+test('manual pairing stays available while clipboard permission is pending', async ({ page, baseURL }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { readText: () => new Promise(() => {}) } });
+  });
+  await page.goto(baseURL);
+  await page.getByRole('button', { name: 'Paste link' }).click();
+  await expect(page.locator('#pairing-link')).toBeVisible();
+  await expect(page.locator('#pairing-link')).toBeFocused();
+});
+
+test('session activity updates preserve keyboard focus inside the picker', async ({ page, baseURL }) => {
+  const statuses = { one: 'working' };
+  const mac = await pair(page, baseURL, 'Output', { statuses });
+  try {
+    await page.getByRole('button', { name: 'Browse sessions' }).click();
+    const row = page.locator('#session-list button').filter({ hasText: 'Mobile layout review' });
+    await row.focus();
+    statuses.one = 'idle';
+    await expect(row).toContainText('Ready');
+    await expect(row).toBeFocused();
+    await row.press('Escape');
+    await expect(page.getByRole('button', { name: 'Browse sessions' })).toBeFocused();
+  } finally { mac.close(); }
+});
+
+
+test('restart keeps drafts with their own sessions when the Mac changes selection', async ({ page, baseURL }) => {
+  const mac = await pair(page, baseURL, '', { statuses: { one: 'exited' }, restart: true, switchDuringRestart: true });
+  try {
+    await page.locator('#tabs').selectOption('two');
+    await expect(page.locator('#terminal')).toContainText('Release checks');
+    await page.locator('#message').fill('Existing second-session draft');
+    await page.locator('#tabs').selectOption('one');
+    await expect(page.locator('#terminal')).toHaveText('');
+    await page.locator('#message').fill('Draft for the restarted session');
+    await page.locator('#restart').click();
+    await expect(page.locator('#tabs')).toHaveValue('two');
+    await expect(page.locator('#message')).toHaveValue('Existing second-session draft');
+    await page.locator('#tabs').selectOption('restarted');
+    await expect(page.locator('#message')).toHaveValue('Draft for the restarted session');
+  } finally { mac.close(); }
+});
+
+test('restart retains draft and attachments while its tab is outside the capped list', async ({ page, baseURL }) => {
+  const tabs = Array.from({ length: 99 }, (_, i) => ({ id: `tab-${i}`, title: `Session ${i}`, status: 'idle' }));
+  const original = { id: 'one', title: 'Hidden restart', status: 'idle' };
+  const state = { tabs: [...tabs, original], selectedTabID: 'one', terminal: '', capabilities: ['restart'], tabsTruncated: true };
+  const options = { state, restart: true, onRequest(request) {
+    if (request.action === 'restart') {
+      state.tabs = [...tabs, { id: 'tab-99', title: 'Session 99', status: 'idle' }];
+      state.selectedTabID = 'tab-0';
+    }
+  } };
+  const mac = await pair(page, baseURL, '', options);
+  try {
+    await page.locator('#message').fill('Keep my hidden-session draft');
+    await page.locator('#attach').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('Test attachment') });
+    original.status = 'exited';
+    await expect(page.locator('#restart')).toBeVisible();
+    await page.locator('#restart').click();
+    await expect(page.locator('#tabs')).toHaveValue('tab-0');
+    const polls = mac.actions.filter(a => a.action === 'state').length;
+    await expect.poll(() => mac.actions.filter(a => a.action === 'state').length).toBeGreaterThan(polls);
+    state.tabs = [...tabs, { id: 'restarted', title: 'Hidden restart', status: 'idle' }];
+    state.selectedTabID = 'restarted';
+    await expect(page.locator('#tabs')).toHaveValue('restarted');
+    await expect(page.locator('#message')).toHaveValue('Keep my hidden-session draft');
+    await expect(page.locator('#attachments')).toContainText('notes.txt');
+    state.tabs = [tabs[0]];
+    state.selectedTabID = 'tab-0';
+    state.tabsTruncated = false;
+    await expect(page.locator('#tabs')).toHaveValue('tab-0');
+    state.tabs = [tabs[0], { id: 'restarted', title: 'Hidden restart', status: 'idle' }];
+    state.selectedTabID = 'restarted';
+    await expect(page.locator('#tabs')).toHaveValue('restarted');
+    await expect(page.locator('#message')).toHaveValue('');
+    await expect(page.locator('#attachments')).toBeHidden();
   } finally { mac.close(); }
 });
