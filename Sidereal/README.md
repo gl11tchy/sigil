@@ -16,9 +16,30 @@ PUBLIC_ORIGIN=https://your-sidereal-host.example PORT=3000 npm start
 
 `PUBLIC_ORIGIN` is the exact public origin (no path or trailing slash). Your reverse
 proxy terminates TLS. Keep the Node port private to that proxy. The PWA and relay
-must use the same origin. Health check: `GET /health`.
+must use the same origin. Health check: `GET /health` returns JSON with `status`,
+`revision`, `gitSHA`, `dirty`, and `sourceSHA256`. An unstamped local checkout reports
+`revision: "development"`, never a guessed commit.
 The Dockerfile supports hosts such as Railway with the build root set to `Sidereal`.
 Use one replica and do not enable sleeping/serverless behavior for the relay.
+
+## Stamped uploads
+
+Run `Scripts/verify.sh` from the repo root before releasing. Then use
+`Scripts/deploy-sidereal.sh --project <id> --environment <id> --service <id>`.
+The script stages only Docker/runtime files, stamps the actual Git HEAD and a
+SHA-256 of the staged runtime and Dockerfile, and uploads that directory. No `.git`, local
+credentials, test output, or `node_modules` enter the upload. The generated stamp
+travels with the bundle even though local `Sidereal/revision.json` is gitignored.
+
+Uncommitted changes add `-dirty` to the revision; the source hash distinguishes
+uploads from the same commit. This does not pretend uncommitted code is in Git.
+Docker rejects a missing, malformed, or stale stamp at build time and startup.
+After deployment, compare `/health` with the revision and source hash printed by
+the upload script. A successful upload alone does not prove the running revision.
+
+For a manual Docker build, run `npm --prefix Sidereal run stamp` immediately before
+`docker build Sidereal`. Re-stamp after any runtime edit. GitHub auto-deploy is not
+required; a future GitHub pipeline must stamp its checkout before building too.
 
 Local development only:
 
@@ -74,9 +95,25 @@ that credential. Use Disconnect on the Mac to revoke authorization.
 
 The QR carries a one-use bootstrap secret in its fragment. The phone replaces it
 with a different key during pairing. The relay sees room identifiers, timing and
-ciphertext sizes, but not session contents or encryption keys. AES-256-GCM binds
+ciphertext sizes and routing tickets, but not session contents or device keys. AES-256-GCM binds
 message direction; Mac-generated connection challenges and sequences reject replay.
 The web host remains trusted to deliver the correct client JavaScript.
+
+Neither tickets nor room IDs enter WebSocket URLs. The relay sends a fresh per-connection routing
+key over WSS. The first client message is `{route: ciphertext}`: AES-256-GCM with
+`sigil-remote-v1:relay-phone` or `sigil-remote-v1:relay-host` AAD. Its plaintext carries
+only the room/ticket routing fields, never a device key. The relay opens this
+single-use envelope before assigning a slot. It expires after ten seconds. The
+existing phone/Mac end-to-end encryption starts after routing, unchanged.
+A phone can supply a ticket after a Mac restart or a room from a fresh QR code.
+A ticket is a routing credential, not permission to decrypt or run commands.
+
+Logging policy: never log query strings, Authorization headers, routing keys,
+tickets, or WebSocket frames. The relay emits no access logs and strips queries
+from request objects before downstream diagnostics. Reverse-proxy access logs must
+use path-only fields (for example, nginx `$uri`, not `$request` or `$request_uri`).
+Legacy `?ticket=` upgrades are rejected. Deploy the relay, PWA, and Mac app together;
+old clients cannot use this handshake. Existing stored pairings remain valid.
 
 Remote input can authorize anything Grok can do, including file changes. Treat the
 phone as access to your Mac's open sessions. Do not share pairing QR screenshots.

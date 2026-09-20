@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "node server.mjs",
+    "stamp": "node stamp-revision.mjs",
     "test": "node --test test/*.test.mjs",
     "test:browser": "playwright test"
   },

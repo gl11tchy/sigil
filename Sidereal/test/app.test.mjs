@@ -10,9 +10,11 @@ const source = (await readFile(new URL('../public/app.mjs', import.meta.url), 'u
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
 // Run the real handlers; only browser services and encryption are replaced.
-async function browser() {
+async function browser({ hash = '', saved } = {}) {
   const elements = new Map(), events = new Map(), timers = new Map(), sockets = [];
   let nextTimer = 0, reloads = 0;
+  let stored = saved ?? { room: 'a'.repeat(32), key: { device: true } };
+  const sealed = [];
   const element = id => {
     if (!elements.has(id)) elements.set(id, {
       id, value: '', textContent: '', hidden: false, disabled: false, dataset: {}, style: {},
@@ -26,7 +28,7 @@ async function browser() {
     return elements.get(id);
   };
   const location = {
-    origin: 'https://sidereal.example', protocol: 'https:', pathname: '/', hash: '',
+    origin: 'https://sidereal.example', protocol: 'https:', pathname: '/', hash,
     reload() { reloads++; },
   };
   const document = {
@@ -39,8 +41,12 @@ async function browser() {
     static OPEN = 1;
     readyState = 1;
     sent = [];
+    routes = [];
     constructor(url) { this.url = url; sockets.push(this); }
-    send(frame) { this.sent.push(JSON.parse(JSON.parse(frame).data)); }
+    send(frame) {
+      const value = JSON.parse(frame);
+      (value.route ? this.routes : this.sent).push(JSON.parse(value.route || value.data));
+    }
     receive(frame) { this.onmessage({ data: JSON.stringify(frame) }); }
     reply(request = this.sent.at(-1)) {
       this.receive({ data: JSON.stringify({
@@ -59,9 +65,9 @@ async function browser() {
           transaction() {
             const transaction = {
               objectStore: () => ({
-                get: () => ({ result: { room: 'a'.repeat(32), key: {} } }),
-                put: () => ({}),
-                delete: () => ({}),
+                get: () => ({ result: structuredClone(stored) }),
+                put: value => { stored = structuredClone(value); return {}; },
+                delete: () => { stored = undefined; return {}; },
               }),
             };
             queueMicrotask(() => { transaction.oncomplete?.(); });
@@ -77,7 +83,10 @@ async function browser() {
     readableOutput, pairingFromText, document, location, history: { replaceState() {} }, indexedDB,
     window: { addEventListener: (name, callback) => events.set(name, callback) },
     navigator: {}, crypto: { subtle: {} }, URL, URLSearchParams, TextEncoder,
-    WebSocket: FakeSocket, seal: async value => JSON.stringify(value), open: async frame => JSON.parse(frame),
+    WebSocket: FakeSocket,
+    importKey: async hex => ({ hex }), randomKey: () => 'e'.repeat(64),
+    seal: async (value, key, direction) => { sealed.push({ value, key, direction }); return JSON.stringify(value); },
+    open: async frame => JSON.parse(frame),
     setTimeout(callback, delay) { const id = ++nextTimer; timers.set(id, { callback, delay }); return id; },
     clearTimeout: id => timers.delete(id),
   });
@@ -104,7 +113,7 @@ async function browser() {
     element('compose').onsubmit({ preventDefault() { prevented = true; } });
     assert.equal(prevented, true);
   }
-  return { element, events, location, sockets, authorize, fireTimer, submit, reloads: () => reloads };
+  return { element, events, location, sockets, authorize, fireTimer, submit, sealed, timers, stored: () => structuredClone(stored), reloads: () => reloads };
 }
 
 test('Send clears the draft only after the Enter acknowledgement', async () => {
@@ -417,11 +426,17 @@ test('a ticket in a Mac reply is stored and used on reconnect', async () => {
     state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
   }) });
   await settle();
-  page.element('reconnect').onclick();
+  assert.equal(page.stored().ticket, ticket);
+  const reloaded = await browser({ saved: page.stored() });
+  const next = String(reloaded.sockets.at(-1).url);
+  assert.equal(new URL(next).searchParams.has('ticket'), false);
+  assert.equal(new URL(next).searchParams.has('room'), false);
+  const restored = reloaded.sockets.at(-1);
+  restored.receive({ route: 'f'.repeat(64) });
   await settle();
-  const next = String(page.sockets.at(-1).url);
-  assert.match(next, new RegExp(`ticket=${ticket}`));
-  assert.match(next, new RegExp(`room=${'a'.repeat(32)}`));
+  assert.equal(restored.routes[0].ticket, ticket);
+  assert.equal(restored.routes[0].room, 'a'.repeat(32));
+  assert.equal(restored.sent.length, 0);
 });
 
 test('a same-document QR fragment reloads the app but an empty fragment does not', async () => {
@@ -453,4 +468,95 @@ test('disconnect preserves an editable draft while remote actions are disabled',
   assert.equal(page.element('message').disabled, false);
   assert.equal(page.element('send').disabled, true);
   assert.equal(page.element('message').value, 'Keep this draft');
+});
+
+
+test('a replayed reply from a stale epoch is dropped without consuming the current request', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  const stale = socket.sent[0];
+  socket.receive({ hello: 'd'.repeat(64) });
+  await settle();
+  const current = socket.sent.at(-1);
+  assert.equal(current.sequence, stale.sequence);
+  assert.notEqual(current.challenge, stale.challenge);
+  socket.receive({ data: JSON.stringify({ challenge: stale.challenge, sequence: stale.sequence,
+    ok: true, ticket: 'f'.repeat(64), state: { tabs: [], terminal: 'REPLAY' } }) });
+  await settle();
+  assert.equal(socket.readyState, 1);
+  assert.equal(page.element('error').hidden, true);
+  assert.equal(page.element('terminal').textContent, 'READY');
+  assert.equal(page.stored().ticket, undefined);
+  socket.reply(current);
+  await settle();
+  assert.equal(page.element('status').textContent, 'Connected');
+  assert.equal([...page.timers.values()].some(timer => timer.delay === 10000), false);
+});
+
+test('duplicate hello does not reset sequence or replace a pending request', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  await page.fireTimer(1000);
+  const pending = socket.sent.at(-1);
+  const count = socket.sent.length;
+  socket.receive({ hello: pending.challenge });
+  await settle();
+  assert.equal(socket.sent.length, count);
+  assert.equal(socket.readyState, 1);
+  socket.reply(pending);
+  await settle();
+  page.element('new').onclick();
+  await settle();
+  assert.equal(socket.sent.at(-1).sequence, pending.sequence + 1);
+  assert.equal(socket.sent.at(-1).action, 'new');
+});
+
+test('unauthorized after a dropped pairing acknowledgement retries with the persisted device key', async () => {
+  const page = await browser({ hash: `#room=${'a'.repeat(32)}&key=${'b'.repeat(64)}` });
+  const socket = page.sockets.at(-1);
+  socket.receive({ hello: 'c'.repeat(64) });
+  await settle();
+  assert.equal(socket.sent.at(-1).action, 'pair');
+  assert.equal(page.sealed.at(-1).key.hex, 'b'.repeat(64));
+  socket.receive({ error: 'unauthorized' });
+  await settle();
+  assert.equal(socket.readyState, 3);
+  await page.fireTimer(500);
+  const next = await page.authorize();
+  assert.equal(next.sent[0].action, 'state');
+  assert.equal(page.sealed.at(-1).key.hex, page.stored().key.hex);
+  assert.equal(page.sealed.at(-1).key.hex, 'e'.repeat(64));
+});
+
+test('unauthorized without bootstrap stops automatic reconnect and asks for a new scan', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  socket.receive({ error: 'unauthorized' });
+  await settle();
+  assert.equal(socket.readyState, 3);
+  assert.match(page.element('error').textContent, /Scan a new code/);
+  assert.equal(page.timers.size, 0);
+  page.events.get('visibilitychange')();
+  await settle();
+  assert.equal(page.sockets.length, 1);
+  assert.equal(page.element('status').textContent, 'Disconnected');
+});
+
+
+test('routing uses a separate sealed first message, never the URL or the device key', async () => {
+  const ticket = 'd'.repeat(64);
+  const page = await browser({ saved: { room: 'a'.repeat(32), key: { device: true }, ticket } });
+  const socket = page.sockets.at(-1);
+  assert.equal(socket.url.search, '?role=phone');
+  socket.receive({ route: 'f'.repeat(64) });
+  await settle();
+  assert.equal(socket.routes.length, 1);
+  assert.equal(socket.routes[0].ticket, ticket);
+  assert.deepEqual(Object.keys(socket.routes[0]).sort(), ['room', 'ticket']);
+  assert.equal(page.sealed.at(-1).key.hex, 'f'.repeat(64));
+  assert.equal(page.sealed.at(-1).direction, 'relay-phone');
+  assert.equal(socket.sent.length, 0);
+  socket.receive({ route: 'e'.repeat(64) });
+  await settle();
+  assert.equal(socket.routes.length, 1);
 });

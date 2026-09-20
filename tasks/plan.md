@@ -25,7 +25,10 @@ ASSUMPTIONS: Readable companion, not a pixel TUI. Attach writes to SigilDrops an
 - [ ] Task 7: Redeploy Sidereal and record the revision. The active deployment,
   `c5c7e7de-76a8-44d0-8d89-a1fdbe349ce2`, postdates #43 by under a minute, but the service
   deploys from local uploads, so it carries a snapshot id and no SHA and nothing proves what
-  is in it. Closing this needs a deploy whose revision is readable.
+  is in it. Local-upload stamping is now implemented: `Scripts/deploy-sidereal.sh`
+  packages a Git SHA, dirty flag, and runtime hash; `/health` exposes and validates it.
+  Closing Task 7 still needs a coordinated live Mac/relay/PWA release and the matching
+  health response. The follow-up release request authorizes deployment after PR review and merge.
 
 ## Risks
 | Risk | Mitigation |
@@ -33,3 +36,14 @@ ASSUMPTIONS: Readable companion, not a pixel TUI. Attach writes to SigilDrops an
 | HEIC decode fails in Safari | Fall back to original bytes if ≤ 4 MB |
 | iOS PWA stale cache | Bump service-worker cache name |
 | Chunk DoS | 4 pending transfers, 4 MB, 128 chunks, 60 s expiry |
+
+## Remote-stack hardening (A → B → C)
+
+- [x] A: Node/Swift adversarial tests and stale-epoch reply drop. Full `Scripts/verify.sh` passed before B.
+- [x] B: First sealed routing envelope, no URL tickets/room IDs, no-query logging policy. Full `Scripts/verify.sh` passed before C.
+- [x] C: Stamped upload bundle and revision-bearing `/health`; full `Scripts/verify.sh` passed.
+
+Evidence: `tasks/remote-hardening-verify.md`.
+
+Release follow-up: open the PR, clear CI and automated review, squash merge, install
+the merged Mac build, then deploy the matching stamped relay/PWA and verify production.
