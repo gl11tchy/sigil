@@ -27,7 +27,7 @@ Use one replica and do not enable sleeping/serverless behavior for the relay.
 Run `Scripts/verify.sh` from the repo root before releasing. Then use
 `Scripts/deploy-sidereal.sh --project <id> --environment <id> --service <id>`.
 The script stages only Docker/runtime files, stamps the actual Git HEAD and a
-SHA-256 of the staged runtime, and uploads that directory. No `.git`, local
+SHA-256 of the staged runtime and Dockerfile, and uploads that directory. No `.git`, local
 credentials, test output, or `node_modules` enter the upload. The generated stamp
 travels with the bundle even though local `Sidereal/revision.json` is gitignored.
 

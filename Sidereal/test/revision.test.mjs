@@ -13,7 +13,7 @@ async function bundle(t) {
   const path = await mkdtemp(`${tmpdir()}/sidereal-revision-`);
   t.after(() => rm(path, { recursive: true, force: true }));
   const target = pathToFileURL(`${path}/`);
-  for (const file of ['package.json', 'package-lock.json', 'server.mjs', 'revision.mjs']) {
+  for (const file of ['Dockerfile', 'package.json', 'package-lock.json', 'server.mjs', 'revision.mjs']) {
     await copyFile(new URL(file, root), new URL(file, target));
   }
   await cp(new URL('public/', root), new URL('public/', target), { recursive: true });
@@ -97,4 +97,17 @@ const { pathToFileURL } = require('node:url');
   assert.deepEqual(result.args.slice(2), ['--path-as-root', '--project', 'test-project', '--environment', 'test-environment', '--service', 'test-service', '--detach']);
   assert.equal(result.stamp.sourceSHA256, await sourceHash(root));
   await assert.rejects(readFile(`${result.args[1]}/revision.json`), { code: 'ENOENT' });
+});
+
+
+test('Dockerfile-only changes invalidate the stamp and distinguish same-revision uploads', async t => {
+  const target = await bundle(t);
+  const first = await stampRevision(target, root);
+  const dockerfile = new URL('Dockerfile', target);
+  await writeFile(dockerfile, (await readFile(dockerfile, 'utf8')).replace('ENV PORT=3000', 'ENV PORT=4000'));
+  await assert.rejects(loadRevision(target, { required: true }), /stale/);
+  const second = await stampRevision(target, root);
+  assert.equal(first.revision, second.revision);
+  assert.notEqual(first.sourceSHA256, second.sourceSHA256);
+  assert.deepEqual(await loadRevision(target, { required: true }), second);
 });

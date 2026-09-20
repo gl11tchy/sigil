@@ -3,9 +3,9 @@ import { readFile, readdir } from 'node:fs/promises';
 
 const root = new URL('./', import.meta.url);
 
-// Exactly the runtime files copied by Dockerfile. Excludes the stamp itself.
+// Runtime files and the build recipe copied into the image. Excludes the stamp itself.
 export async function sourceHash(directory = root) {
-  const files = ['package.json', 'package-lock.json', 'server.mjs', 'revision.mjs'];
+  const files = ['Dockerfile', 'package.json', 'package-lock.json', 'server.mjs', 'revision.mjs'];
   async function visit(path) {
     for (const entry of await readdir(new URL(path, directory), { withFileTypes: true })) {
       const name = `${path}${entry.name}`;
