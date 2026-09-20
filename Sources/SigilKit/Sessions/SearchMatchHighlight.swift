@@ -206,7 +206,7 @@ public enum SearchMatchHighlight: Sendable {
             let term = String(word)
             return contains(cliTitle, query: term)
                 && !contains(displayedTitle, query: term)
-                && !paths.contains { contains($0, query: term) }
+                && !(pathHit.map { contains($0, query: term) } ?? false)
         }
         let prefix: String?
         if showsProject, let pathHit {
@@ -352,9 +352,19 @@ public enum SearchMatchHighlight: Sendable {
         excerptAroundMatch(keepingMatchVisible(string, query: query), query: query)
     }
 
-    /// First candidate that contains a query word. Empty strings are skipped.
+    /// Prefer the spelling that explains the most query words; retain candidate order on ties.
     static func matchingPath(in candidates: [String], query: String) -> String? {
-        candidates.first { !$0.isEmpty && containsTerm($0, query: query) }
+        let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        var best: String?
+        var bestCount = 0
+        for candidate in candidates where !candidate.isEmpty {
+            let count = terms.filter { contains(candidate, query: $0) }.count
+            if count > bestCount {
+                best = candidate
+                bestCount = count
+            }
+        }
+        return best
     }
 
     private static func subtitleText(prefix: String?, relativeTime: String) -> String {

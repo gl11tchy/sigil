@@ -19,7 +19,7 @@ struct SearchMatchHighlightTests {
     }
 
     @Test func multiFieldSearchExposesRequiredCLIOnlyTerms() {
-        for query in ["Auth CLI", "Auth CLI sigil"] {
+        for query in ["Auth CLI", "Auth CLI sigil", "Auth CLI sigil /tmp"] {
             let paint = SearchMatchHighlight.row(
                 displayedTitle: "Auth rewrite", cliTitle: "CLI summary", projectName: "sigil",
                 cwd: "/tmp/sigil", displayPath: "/tmp/sigil", relativeTime: "now",
@@ -28,6 +28,9 @@ struct SearchMatchHighlightTests {
             #expect(paint.subtitleRuns.filter(\.isMatch).map(\.text).contains("CLI"))
             if query.contains("sigil") {
                 #expect(paint.subtitleRuns.filter(\.isMatch).map(\.text).contains("sigil"))
+            }
+            if query.contains("/tmp") {
+                #expect(paint.subtitleRuns.filter(\.isMatch).map(\.text).contains("/tmp"))
             }
         }
     }
