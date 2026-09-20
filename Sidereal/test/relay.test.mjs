@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import WebSocket from 'ws';
 import { createRelay } from '../server.mjs';
+import { importKey, seal } from '../public/crypto.mjs';
 
 async function setup(t) {
   const relay = createRelay({ publicOrigin: 'http://localhost:3099' });
@@ -16,14 +17,29 @@ async function setup(t) {
 function connect(base, room, role, options = {}) {
   const { ticket, ...wsOptions } = options;
   const params = new URLSearchParams({ role });
-  if (room) params.set('room', room);
-  if (ticket) params.set('ticket', ticket);
   const ws = new WebSocket(`${base.replace('http', 'ws')}/connect?${params}`, wsOptions);
   ws.on('error', () => {});
+  ws.on('message', async bytes => {
+    const frame = JSON.parse(bytes);
+    if (!frame.route) return;
+    const route = await seal({ ...(room ? { room } : {}), ticket },
+      await importKey(frame.route), `relay-${role}`);
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ route }));
+  });
+  assert.equal(new URL(ws.url).search, `?role=${role}`);
   return ws;
 }
 function ticket() { return 'ab'.repeat(32); }
-function message(ws) { return once(ws, 'message').then(([data]) => JSON.parse(data)); }
+function message(ws) {
+  return new Promise(resolve => {
+    function onMessage(data) {
+      const frame = JSON.parse(data);
+      if (frame.route) return;
+      ws.off('message', onMessage); resolve(frame);
+    }
+    ws.on('message', onMessage);
+  });
+}
 
 test('host is authenticated and ciphertext routes only to its paired room', async t => {
   const { base, room, hostToken } = await setup(t);
@@ -52,9 +68,8 @@ test('host is authenticated and ciphertext routes only to its paired room', asyn
 
 test('foreign browser origins and unknown rooms cannot connect', async t => {
   const { base, room } = await setup(t);
-  for (const [id, origin] of [[room, 'https://evil.example'], ['0'.repeat(32), 'http://localhost:3099']]) {
-    await once(connect(base, id, 'phone', { origin }), 'error');
-  }
+  await once(connect(base, room, 'phone', { origin: 'https://evil.example' }), 'error');
+  assert.equal((await once(connect(base, '0'.repeat(32), 'phone', { origin: 'http://localhost:3099' }), 'close'))[0], 1008);
 });
 
 test('a host websocket may send the companion origin the way a bundled Mac app does', async t => {
@@ -170,7 +185,7 @@ test('a host reconnect keeps the current phone and re-announces it', async t => 
   if (phone.readyState !== WebSocket.OPEN) await once(phone, 'open');
   const second = connect(base, room, 'host', options);
   const frames = [];
-  second.on('message', data => frames.push(JSON.parse(data.toString())));
+  second.on('message', data => { const frame = JSON.parse(data); if (!frame.route) frames.push(frame); });
   while (frames.length < 2) await once(second, 'message');
   assert.equal(phone.readyState, WebSocket.OPEN);
   assert.equal(frames[0].type, 'ready');
@@ -293,7 +308,7 @@ test('rebinding a room ticket drops the previous mapping', async t => {
     headers: { Authorization: `Bearer ${hostToken}` }, ticket: second,
   });
   await message(restored);
-  await once(connect(base, null, 'phone', { origin: 'http://localhost:3099', ticket: first }), 'error');
+  assert.equal((await once(connect(base, null, 'phone', { origin: 'http://localhost:3099', ticket: first }), 'close'))[0], 1008);
   const notice = message(restored);
   const phone = connect(base, null, 'phone', { origin: 'http://localhost:3099', ticket: second });
   await once(phone, 'open');
@@ -302,10 +317,10 @@ test('rebinding a room ticket drops the previous mapping', async t => {
 
 test('ticket connects reject a short token and a missing host', async t => {
   const { base, room, hostToken } = await setup(t);
-  await once(connect(base, null, 'phone', { origin: 'http://localhost:3099', ticket: ticket() }), 'error');
+  assert.equal((await once(connect(base, null, 'phone', { origin: 'http://localhost:3099', ticket: ticket() }), 'close'))[0], 1008);
   await once(
     connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` }, ticket: 'short' }),
-    'error',
+    'close',
   );
 });
 
@@ -314,4 +329,94 @@ test('room allocation rejects browser requests and excessive creation', async t 
   assert.equal((await fetch(`${base}/rooms`, { method: 'POST', headers: { Origin: 'http://localhost:3099' } })).status, 403);
   for (let i = 0; i < 19; i++) assert.equal((await fetch(`${base}/rooms`, { method: 'POST' })).status, 201);
   assert.equal((await fetch(`${base}/rooms`, { method: 'POST' })).status, 429);
+});
+
+
+function unregisteredPhone(base) {
+  const ws = new WebSocket(`${base.replace('http', 'ws')}/connect?role=phone`, { origin: 'http://localhost:3099' });
+  ws.on('error', () => {});
+  return ws;
+}
+const routingHello = ws => once(ws, 'message').then(([bytes]) => JSON.parse(bytes).route);
+
+test('query tickets are rejected for both roles and removed from downstream request diagnostics', async t => {
+  const { base, room, hostToken, relay } = await setup(t);
+  const paths = [];
+  relay.server.on('upgrade', req => paths.push(req.url));
+  relay.server.on('request', req => paths.push(req.url));
+  for (const role of ['host', 'phone']) {
+    const ws = new WebSocket(`${base.replace('http', 'ws')}/connect?role=${role}&room=${room}&ticket=${ticket()}`,
+      { origin: 'http://localhost:3099', headers: { Authorization: `Bearer ${hostToken}` } });
+    await once(ws, 'error');
+  }
+  await fetch(`${base}/health?ticket=${ticket()}`);
+  assert.deepEqual(paths, ['/connect', '/connect', '/health']);
+});
+
+test('an unsealed routing ticket cannot displace the active phone', async t => {
+  const { base, room, hostToken } = await setup(t);
+  const host = connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` }, ticket: ticket() });
+  await message(host);
+  const notice = message(host);
+  const phone = connect(base, room, 'phone', { origin: 'http://localhost:3099' });
+  await notice;
+  const attacker = unregisteredPhone(base);
+  await routingHello(attacker);
+  const closed = once(attacker, 'close');
+  attacker.send(JSON.stringify({ ticket: ticket(), room }));
+  assert.equal((await closed)[0], 1008);
+  assert.equal(phone.readyState, WebSocket.OPEN);
+  const received = message(host);
+  phone.send(JSON.stringify({ data: 'still-connected' }));
+  assert.equal((await received).data, 'still-connected');
+});
+
+test('a routing envelope is single-use and cannot be replayed on another socket or direction', async t => {
+  const { base, room, hostToken } = await setup(t);
+  const host = connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` }, ticket: ticket() });
+  await message(host);
+  const original = unregisteredPhone(base);
+  const key = await importKey(await routingHello(original));
+  const route = await seal({ ticket: ticket() }, key, 'relay-phone');
+  const notice = message(host);
+  original.send(JSON.stringify({ route }));
+  await notice;
+  const attacker = unregisteredPhone(base);
+  await routingHello(attacker);
+  const closed = once(attacker, 'close');
+  attacker.send(JSON.stringify({ route }));
+  assert.equal((await closed)[0], 1008);
+  assert.equal(original.readyState, WebSocket.OPEN);
+  const reflected = unregisteredPhone(base);
+  const reflectionKey = await importKey(await routingHello(reflected));
+  const reflectedClosed = once(reflected, 'close');
+  reflected.send(JSON.stringify({ route: await seal({ ticket: ticket() }, reflectionKey, 'relay-host') }));
+  assert.equal((await reflectedClosed)[0], 1008);
+  assert.equal(original.readyState, WebSocket.OPEN);
+  const reused = once(original, 'close');
+  original.send(JSON.stringify({ route }));
+  assert.equal((await reused)[0], 1008);
+});
+
+test('routing handshakes time out without taking a phone slot', async t => {
+  const { base } = await setup(t);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const phone = unregisteredPhone(base);
+  await routingHello(phone);
+  const closed = once(phone, 'close');
+  t.mock.timers.tick(10000);
+  assert.equal((await closed)[0], 1008);
+});
+
+
+test('a well-formed wrong host token cannot register a ticket or replace the host', async t => {
+  const { base, room, hostToken } = await setup(t);
+  const host = connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` }, ticket: ticket() });
+  await message(host);
+  const attacker = connect(base, room, 'host', { headers: { Authorization: `Bearer ${'0'.repeat(64)}` }, ticket: ticket() });
+  assert.equal((await once(attacker, 'close'))[0], 1008);
+  assert.equal(host.readyState, WebSocket.OPEN);
+  const notice = message(host);
+  connect(base, null, 'phone', { origin: 'http://localhost:3099', ticket: ticket() });
+  assert.equal((await notice).type, 'peer');
 });

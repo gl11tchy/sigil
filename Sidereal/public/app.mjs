@@ -324,10 +324,9 @@ function connect() {
   const url = new URL('/connect', location.origin);
   url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const params = new URLSearchParams({ role: 'phone' });
-  if (credential.room) params.set('room', credential.room);
-  if (credential.ticket) params.set('ticket', credential.ticket);
   url.search = params;
   const ws = socket = new WebSocket(url);
+  let routed = false;
   connectTimer = setTimeout(() => {
     if (current !== generation || socket !== ws) return;
     showError('The Mac did not respond. Keep Sigil open and try again.');
@@ -339,7 +338,15 @@ function connect() {
       if (current !== generation) return;
       if (typeof event.data !== 'string' || event.data.length > 110000) throw new Error('Invalid response');
       const frame = JSON.parse(event.data);
-      if (typeof frame.hello === 'string' && /^[a-f0-9]{64}$/.test(frame.hello)) {
+      if (typeof frame.route === 'string' && /^[a-f0-9]{64}$/.test(frame.route)) {
+        if (routed) return;
+        routed = true;
+        // Routing is sealed to this relay connection, never with the device key.
+        const key = await importKey(frame.route);
+        const route = await seal({ room: credential.room, ticket: credential.ticket }, key, 'relay-phone');
+        if (current !== generation || ws.readyState !== WebSocket.OPEN) return;
+        ws.send(JSON.stringify({ route }));
+      } else if (typeof frame.hello === 'string' && /^[a-f0-9]{64}$/.test(frame.hello)) {
         if (challenge === frame.hello) return;
         commandEpoch++;
         for (const item of pending.values()) {
@@ -368,7 +375,7 @@ function connect() {
         if (current !== generation) return;
         const item = pending.get(reply.sequence);
         if (!item) return;
-        if (reply.challenge !== challenge) throw new Error('Invalid response');
+        if (reply.challenge !== challenge) return; // A delayed reply from an earlier Mac epoch.
         if (reply.ok !== true) {
           pending.delete(reply.sequence); clearTimeout(item.timer);
           item.reject(new Error(reply.error || 'The Mac could not complete this action.'));

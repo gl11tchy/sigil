@@ -23,16 +23,16 @@ async function pair(page, origin, initialOutput, options = {}) {
   const terminal = title => `${title}\n\n${Array.from({ length: 35 }, (_, i) => `Line ${i + 1}: Verified the mobile layout and terminal output.`).join('\n')}\n\nReady for your next message.`;
   const outputs = { one: initialOutput ?? terminal('Mobile layout review'), two: terminal('Release checks') };
   let ws;
-  for (let attempt = 0; ; attempt++) {
-    ws = new WebSocket(`${origin.replace(/^http/, 'ws')}/connect?room=${room}&role=host&ticket=${ticket}`, { headers: { Authorization: `Bearer ${hostToken}` } });
-    try { await once(ws, 'open'); break; }
-    catch (error) { if (attempt >= 9) throw error; await new Promise(resolve => setTimeout(resolve, 100)); }
-  }
-  previousHost = ws;
-  ws.on('message', bytes => {
+  let ready;
+  const registered = new Promise(resolve => { ready = resolve; });
+  const onMessage = bytes => {
     serial = serial.then(async () => {
       const frame = JSON.parse(bytes);
-      if (frame.type === 'peer') {
+      if (frame.route) {
+        ws.send(JSON.stringify({ route: await seal({ room, ticket }, await importKey(frame.route), 'relay-host') }));
+      } else if (frame.type === 'ready') {
+        ready();
+      } else if (frame.type === 'peer') {
         peer = frame.peer; challenge = randomKey();
         ws.send(JSON.stringify({ peer, hello: challenge }));
       } else if (frame.data) {
@@ -59,7 +59,16 @@ async function pair(page, origin, initialOutput, options = {}) {
         ws.send(JSON.stringify({ peer, data: await seal({ challenge, sequence: request.sequence, ok: true, ticket, state, restartedTabID: request.action === 'restart' && options.restart ? 'restarted' : undefined }, key, 'mac') }));
       }
     }).catch(error => errors.push(error));
-  });
+  };
+  for (let attempt = 0; ; attempt++) {
+    ws = new WebSocket(`${origin.replace(/^http/, 'ws')}/connect?role=host`, { headers: { Authorization: `Bearer ${hostToken}` } });
+    // The server can send routing immediately in the same read as the upgrade.
+    ws.on('message', onMessage);
+    try { await once(ws, 'open'); break; }
+    catch (error) { if (attempt >= 9) throw error; await new Promise(resolve => setTimeout(resolve, 100)); }
+  }
+  previousHost = ws;
+  await registered;
   if (!options.skipNavigate) {
     await page.goto(`${origin}/#room=${room}&key=${bootstrap}`);
     await expect(page.locator('#status')).toHaveText('Connected');
@@ -131,12 +140,16 @@ test('scan falls back to paste when the camera is missing', async ({ page, baseU
   await expect(page.locator('#scanner')).toBeHidden();
 });
 
-test('a stored ticket reconnects without a QR fragment', async ({ page, baseURL }) => {
+test('a stored ticket reconnects without a QR fragment or URL ticket', async ({ page, baseURL }) => {
+  const urls = [];
+  page.on('websocket', socket => urls.push(new URL(socket.url())));
   await page.setViewportSize({ width: 390, height: 844 });
   const mac = await pair(page, baseURL);
   try {
     await page.goto(baseURL);
     await expect(page.locator('#status')).toHaveText('Connected');
+    expect(urls.length).toBeGreaterThanOrEqual(2);
+    for (const url of urls) expect(url.search).toBe('?role=phone');
   } finally { mac.close(); }
 });
 

@@ -102,9 +102,7 @@ final class RemoteControl {
                     endpoint.scheme = origin.scheme == "https" ? "wss" : "ws"
                     endpoint.path = "/connect"
                     endpoint.queryItems = [
-                        URLQueryItem(name: "room", value: room.room),
-                        URLQueryItem(name: "role", value: "host"),
-                        URLQueryItem(name: "ticket", value: session.ticket),
+                        URLQueryItem(name: "role", value: "host")
                     ]
                     var socketRequest = URLRequest(url: endpoint.url!)
                     socketRequest.setValue("Bearer \(room.hostToken)", forHTTPHeaderField: "Authorization")
@@ -113,6 +111,7 @@ final class RemoteControl {
                     self.socket = socket
                     socket.resume()
                     var peer: String?
+                    var routed = false
                     while !Task.isCancelled, self.generation == current {
                         let message = try await socket.receive()
                         guard self.generation == current, !Task.isCancelled else { return }
@@ -123,7 +122,13 @@ final class RemoteControl {
                         @unknown default: throw RemoteError.invalidMessage
                         }
                         let frame = try JSONDecoder().decode(Frame.self, from: bytes)
-                        if frame.type == "ready" {
+                        if let key = frame.route {
+                            guard !routed, RemoteCrypto.isValidKey(key) else { throw RemoteError.invalidMessage }
+                            routed = true
+                            let route = try RemoteCrypto.seal(
+                                ["room": room.room, "ticket": session.ticket], key: key, direction: "relay-host")
+                            try await self.send(Frame(route: route), socket: socket)
+                        } else if frame.type == "ready" {
                             retry = 1
                             failures = 0
                             self.status = session.isPaired ? "Phone disconnected" : "Scan to connect"
@@ -237,6 +242,7 @@ final class RemoteControl {
     }
     private struct Frame: Codable {
         var type: String?
+        var route: String?
         var peer: String?
         var hello: String?
         var data: String?

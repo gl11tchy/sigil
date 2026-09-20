@@ -114,10 +114,12 @@ Hosting needs a real HTTPS deployment; local tests do not prove cellular/iPhone 
   certificate valid, `remote` CNAME propagated to `1bkrlt5p.up.railway.app`.
 - Single replica in `sfo`; `/health`; app sleeping disabled through service settings.
 - Source: local upload; no GitHub auto-deploy yet. Deployments therefore carry a snapshot id
-  and no commit SHA, so which revision is live cannot be read back from Railway. The active
+  and no Railway commit SHA. New uploads use the stamped bundle described below;
+  `/health` reports its Git SHA, dirty flag, and runtime source hash. The last recorded
   deployment is `c5c7e7de-76a8-44d0-8d89-a1fdbe349ce2` (SUCCESS, 2026-09-18T17:40:14Z,
   snapshot `763a297a-e7bd-4787-9f3c-a87f46fa0f0b`).
-- Re-deploy Sidereal with `railway up ./Sidereal --path-as-root --project 26f52bc8-daae-4371-aa70-4cebb2d0f222 --environment 1a3850e2-c49f-45c4-bb54-627dd102c646 --service d7e3c251-0ae2-45f9-b4b1-c819d3fa9ece --detach`.
+- Re-deploy Sidereal with `Scripts/deploy-sidereal.sh --project 26f52bc8-daae-4371-aa70-4cebb2d0f222 --environment 1a3850e2-c49f-45c4-bb54-627dd102c646 --service d7e3c251-0ae2-45f9-b4b1-c819d3fa9ece --detach`.
+- Verify the new Sidereal `/health` JSON against the revision and source hash printed by the upload script. Release the matching Mac build and relay/PWA together after merge.
 - Re-deploy the site with `railway up ./Site --path-as-root --project 26f52bc8-daae-4371-aa70-4cebb2d0f222 --environment 1a3850e2-c49f-45c4-bb54-627dd102c646 --service 060788b3-4ab1-45fb-8623-68027835cbc0 --detach`.
 - Rollback: remove/revert the active Railway deployment. This only ends remote
   sessions; it does not alter Mac sessions or files. Restarting the relay drops

@@ -5,4 +5,11 @@
 - [x] Phone attach, chips, Stop, 44px targets
 - [x] Tests and browser (`tasks/verify.md`)
 - [ ] Deploy: confirm the running Sidereal revision carries all of this. Blocked on the
-  service deploying from local uploads, which record no commit SHA.
+  previous uploads having no readable revision. Stamped uploads are implemented;
+  a live coordinated release and matching `/health` response remain Task 7.
+
+## Remote-stack hardening
+
+- [x] A: Adversarial protocol paths; full verification passed.
+- [x] B: Sealed ticket routing and no-query logging; full verification passed.
+- [x] C: Git revision stamp and health proof; full verification passed (`tasks/remote-hardening-verify.md`).

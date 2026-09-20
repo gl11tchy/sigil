@@ -81,7 +81,7 @@ struct RemoteIntegrationTests {
         var endpoint = try #require(URLComponents(string: origin))
         endpoint.scheme = endpoint.scheme == "https" ? "wss" : "ws"
         endpoint.path = "/connect"
-        endpoint.queryItems = [URLQueryItem(name: "room", value: room), URLQueryItem(name: "role", value: "phone")]
+        endpoint.queryItems = [URLQueryItem(name: "role", value: "phone")]
         var request = URLRequest(url: try #require(endpoint.url))
         request.setValue(phoneOrigin, forHTTPHeaderField: "Origin")
         let phone = network.webSocketTask(with: request)
@@ -93,6 +93,12 @@ struct RemoteIntegrationTests {
             if !Task.isCancelled { phone.cancel(with: .goingAway, reason: nil) }
         }
         defer { timeout.cancel() }
+        let routeHello = try await receive(phone)
+        try await send(
+            [
+                "route": RemoteCrypto.seal(
+                    ["room": room], key: try #require(routeHello["route"]), direction: "relay-phone")
+            ], phone)
         let hello = try await receive(phone)
         let challenge = try #require(hello["hello"])
         let device = RemoteCrypto.randomKey()
@@ -144,14 +150,19 @@ struct RemoteIntegrationTests {
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(model.remoteControl.status == "Phone disconnected")
-        endpoint.queryItems = [
-            URLQueryItem(name: "ticket", value: ticket), URLQueryItem(name: "role", value: "phone"),
-        ]
+        endpoint.queryItems = [URLQueryItem(name: "role", value: "phone")]
+        #expect(endpoint.query == "role=phone")
         var restoredRequest = URLRequest(url: try #require(endpoint.url))
         restoredRequest.setValue(phoneOrigin, forHTTPHeaderField: "Origin")
         let restored = network.webSocketTask(with: restoredRequest)
         restored.resume()
         defer { restored.cancel(with: .goingAway, reason: nil) }
+        let restoredRoute = try await receive(restored)
+        try await send(
+            [
+                "route": RemoteCrypto.seal(
+                    ["ticket": ticket], key: try #require(restoredRoute["route"]), direction: "relay-phone")
+            ], restored)
         let restoredHello = try await receive(restored)
         let restoredChallenge = try #require(restoredHello["hello"])
         try await send(
