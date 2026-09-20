@@ -39,6 +39,7 @@ async function pair(page, origin, initialOutput, options = {}) {
         const request = await open(frame.data, key, 'phone');
         expect(request.challenge).toBe(challenge);
         actions.push(request);
+        options.onRequest?.(request);
         if (request.action === 'pair') key = await importKey(request.text);
         if (request.action === 'select') selected = request.tabID;
         if (request.action === 'new') selected = 'two';
@@ -628,5 +629,42 @@ test('restart keeps drafts with their own sessions when the Mac changes selectio
     await expect(page.locator('#message')).toHaveValue('Existing second-session draft');
     await page.locator('#tabs').selectOption('restarted');
     await expect(page.locator('#message')).toHaveValue('Draft for the restarted session');
+  } finally { mac.close(); }
+});
+
+test('restart retains draft and attachments while its tab is outside the capped list', async ({ page, baseURL }) => {
+  const tabs = Array.from({ length: 99 }, (_, i) => ({ id: `tab-${i}`, title: `Session ${i}`, status: 'idle' }));
+  const original = { id: 'one', title: 'Hidden restart', status: 'idle' };
+  const state = { tabs: [...tabs, original], selectedTabID: 'one', terminal: '', capabilities: ['restart'], tabsTruncated: true };
+  const options = { state, restart: true, onRequest(request) {
+    if (request.action === 'restart') {
+      state.tabs = [...tabs, { id: 'tab-99', title: 'Session 99', status: 'idle' }];
+      state.selectedTabID = 'tab-0';
+    }
+  } };
+  const mac = await pair(page, baseURL, '', options);
+  try {
+    await page.locator('#message').fill('Keep my hidden-session draft');
+    await page.locator('#attach').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('Test attachment') });
+    original.status = 'exited';
+    await expect(page.locator('#restart')).toBeVisible();
+    await page.locator('#restart').click();
+    await expect(page.locator('#tabs')).toHaveValue('tab-0');
+    const polls = mac.actions.filter(a => a.action === 'state').length;
+    await expect.poll(() => mac.actions.filter(a => a.action === 'state').length).toBeGreaterThan(polls);
+    state.tabs = [...tabs, { id: 'restarted', title: 'Hidden restart', status: 'idle' }];
+    state.selectedTabID = 'restarted';
+    await expect(page.locator('#tabs')).toHaveValue('restarted');
+    await expect(page.locator('#message')).toHaveValue('Keep my hidden-session draft');
+    await expect(page.locator('#attachments')).toContainText('notes.txt');
+    state.tabs = [tabs[0]];
+    state.selectedTabID = 'tab-0';
+    state.tabsTruncated = false;
+    await expect(page.locator('#tabs')).toHaveValue('tab-0');
+    state.tabs = [tabs[0], { id: 'restarted', title: 'Hidden restart', status: 'idle' }];
+    state.selectedTabID = 'restarted';
+    await expect(page.locator('#tabs')).toHaveValue('restarted');
+    await expect(page.locator('#message')).toHaveValue('');
+    await expect(page.locator('#attachments')).toBeHidden();
   } finally { mac.close(); }
 });

@@ -107,6 +107,7 @@ function offline(message = 'Disconnected') {
 }
 function render(state) {
   if (!state || !Array.isArray(state.tabs) || state.tabs.length > 100 || typeof state.terminal !== 'string') throw new Error('Invalid Mac response');
+  if (state.tabsTruncated !== undefined && typeof state.tabsTruncated !== 'boolean') throw new Error('Invalid Mac response');
   const nextSelected = state.selectedTabID ?? null;
   const ids = new Set();
   for (const tab of state.tabs) {
@@ -129,9 +130,12 @@ function render(state) {
   selected = nextSelected;
   selectedStatus = selected ? state.tabs.find(tab => tab.id === selected).status : null;
   tabCount = state.tabs.length;
-  for (const id of drafts.keys()) { if (!state.tabs.some(tab => tab.id === id)) drafts.delete(id); }
+  // Absence from a capped snapshot is not evidence that a tab closed.
+  // Older Macs omit the flag, so treat a full 100-row response conservatively.
+  const completeTabList = state.tabsTruncated === undefined ? state.tabs.length < 100 : !state.tabsTruncated;
+  for (const id of drafts.keys()) { if (completeTabList && !ids.has(id)) drafts.delete(id); }
   for (const id of attachmentDrafts.keys()) {
-    if (!state.tabs.some(tab => tab.id === id)) {
+    if (completeTabList && !ids.has(id)) {
       for (const item of attachmentDrafts.get(id) || []) if (item.preview) URL.revokeObjectURL(item.preview);
       attachmentDrafts.delete(id);
     }
@@ -378,8 +382,9 @@ function connect() {
         if (reply.state) {
           // Restart replaces the Mac tab ID. Move drafts before pruning closed tabs.
           const next = reply.restartedTabID;
-          if (item.action === 'restart' && typeof next === 'string' && next !== item.tabID
-              && Array.isArray(reply.state.tabs) && reply.state.tabs.some(tab => tab.id === next)) {
+          const movedRestart = item.action === 'restart' && typeof next === 'string'
+            && next.length > 0 && next.length <= 64 && next !== item.tabID;
+          if (movedRestart) {
             const draft = item.tabID === selected ? $('message').value : drafts.get(item.tabID);
             if (draft !== undefined) drafts.set(next, draft);
             if (attachmentDrafts.has(item.tabID)) {
@@ -388,6 +393,7 @@ function connect() {
             }
           }
           render(reply.state);
+          if (movedRestart) drafts.delete(item.tabID);
         }
         pending.delete(reply.sequence); clearTimeout(item.timer);
         item.resolve(reply);

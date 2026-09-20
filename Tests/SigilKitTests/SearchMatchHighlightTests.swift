@@ -18,6 +18,20 @@ struct SearchMatchHighlightTests {
         #expect(ranges.map { String(text[$0]) } == [text])
     }
 
+    @Test func multiFieldSearchExposesRequiredCLIOnlyTerms() {
+        for query in ["Auth CLI", "Auth CLI sigil"] {
+            let paint = SearchMatchHighlight.row(
+                displayedTitle: "Auth rewrite", cliTitle: "CLI summary", projectName: "sigil",
+                cwd: "/tmp/sigil", displayPath: "/tmp/sigil", relativeTime: "now",
+                showsProject: true, query: query)
+            #expect(paint.titleRuns.filter(\.isMatch).map(\.text) == ["Auth"])
+            #expect(paint.subtitleRuns.filter(\.isMatch).map(\.text).contains("CLI"))
+            if query.contains("sigil") {
+                #expect(paint.subtitleRuns.filter(\.isMatch).map(\.text).contains("sigil"))
+            }
+        }
+    }
+
     @Test func emptyOrWhitespaceQueryYieldsNoRanges() {
         for query in ["", "   ", "\t", "\n", " \t\n "] {
             #expect(SearchMatchHighlight.ranges(in: "Auth rewrite", query: query).isEmpty)

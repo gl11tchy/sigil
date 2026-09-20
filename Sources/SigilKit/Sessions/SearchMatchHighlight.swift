@@ -200,11 +200,23 @@ public enum SearchMatchHighlight: Sendable {
     ) -> RowPaint {
         let visibleTitle = excerptAroundMatch(displayedTitle, query: query)
         let titleRuns = runs(in: visibleTitle, matching: termRanges(in: visibleTitle, query: query))
-        let pathHit = matchingPath(in: [projectName, displayPath, cwd], query: query)
+        let paths = [projectName, displayPath, cwd]
+        let pathHit = matchingPath(in: paths, query: query)
+        let hasUnrepresentedCLITerm = query.split(whereSeparator: \.isWhitespace).contains { word in
+            let term = String(word)
+            return contains(cliTitle, query: term)
+                && !contains(displayedTitle, query: term)
+                && !paths.contains { contains($0, query: term) }
+        }
         let prefix: String?
         if showsProject, let pathHit {
-            prefix = visiblePrefix(pathHit, query: query)
-        } else if !containsTerm(displayedTitle, query: query), containsTerm(cliTitle, query: query) {
+            let path = visiblePrefix(pathHit, query: query)
+            prefix =
+                hasUnrepresentedCLITerm
+                ? "\(excerptAroundMatch(cliTitle, query: query)) · \(path)" : path
+        } else if hasUnrepresentedCLITerm
+            || (!containsTerm(displayedTitle, query: query) && containsTerm(cliTitle, query: query))
+        {
             prefix = excerptAroundMatch(cliTitle, query: query)
         } else if !showsProject, !headerCoversQuery, let pathHit {
             prefix = visiblePrefix(pathHit, query: query)

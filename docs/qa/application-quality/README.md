@@ -30,10 +30,10 @@ and real terminal. No synthetic conversation renderer or extra model-output filt
 `Scripts/verify.sh` passed:
 
 - 72 Sidereal Node tests and 7 Site tests.
-- 70 browser tests across Chromium and WebKit, including 320–1280px viewports,
+- 72 browser tests across Chromium and WebKit, including 320–1280px viewports,
   44px touch targets, simulated keyboard resizing, file attachment, drafts, recovery,
   session search, keyboard focus during activity updates, output search, pairing failures, and raw output.
-- 468 Swift Testing tests plus 39 XCTest tests.
+- 469 Swift Testing tests plus 39 XCTest tests.
 - Production dependency audits: zero vulnerabilities.
 - Shell syntax, shellcheck, strict Swift formatting, signed debug bundle and smoke launch.
 
@@ -72,3 +72,10 @@ The native integration used a fake CLI, not a paid Grok model turn.
 This is a locally verified implementation, not a production deployment or installed-app
 update. The running user app was left intact. Existing review/CI/merge gates still apply
 before release; a Mac-changing merge must use the repository's install-latest workflow.
+
+## PR review fixes
+
+- Mixed name/CLI-summary queries expose every required source in search highlighting.
+- Capped tab snapshots no longer discard drafts or attachments for hidden tabs.
+  Restart migration uses the explicit replacement ID even when that ID is not visible.
+- Browser race tests wait for the remote selection acknowledgement before editing.

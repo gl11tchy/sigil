@@ -11,6 +11,7 @@ struct RemoteState: Codable, Sendable {
     let selectedTabID: String?
     let terminal: String
     var capabilities: [String] = ["restart"]
+    var tabsTruncated = false
 }
 
 struct RemoteReply: Codable, Sendable {
@@ -107,7 +108,8 @@ enum RemoteCommands {
         return RemoteState(
             tabs: visibleTabs(tabs, selectedID: model.selectedTab?.id.uuidString),
             selectedTabID: model.selectedTab?.id.uuidString,
-            terminal: boundedSuffix(model.selectedTab?.controller.remoteSnapshot() ?? "", bytes: 12_000)
+            terminal: boundedSuffix(model.selectedTab?.controller.remoteSnapshot() ?? "", bytes: 12_000),
+            tabsTruncated: tabs.count > 100
         )
     }
 
