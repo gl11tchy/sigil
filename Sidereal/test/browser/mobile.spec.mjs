@@ -618,8 +618,10 @@ test('restart keeps drafts with their own sessions when the Mac changes selectio
   const mac = await pair(page, baseURL, '', { statuses: { one: 'exited' }, restart: true, switchDuringRestart: true });
   try {
     await page.locator('#tabs').selectOption('two');
+    await expect(page.locator('#terminal')).toContainText('Release checks');
     await page.locator('#message').fill('Existing second-session draft');
     await page.locator('#tabs').selectOption('one');
+    await expect(page.locator('#terminal')).toHaveText('');
     await page.locator('#message').fill('Draft for the restarted session');
     await page.locator('#restart').click();
     await expect(page.locator('#tabs')).toHaveValue('two');
