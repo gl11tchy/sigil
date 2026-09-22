@@ -196,7 +196,7 @@ final class TabBridge: BridgeServerDelegate {
 
     private func snapshots() -> [BridgeTabRef] {
         guard let model else { return [] }
-        return model.tabs.map { tab in
+        return model.tabs.filter { $0.spec.provider == .grokBuild }.map { tab in
             BridgeTabRef(
                 tabID: tab.id.uuidString,
                 sessionID: tab.sessionID,

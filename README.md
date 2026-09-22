@@ -25,6 +25,8 @@ By gl11tchy.
   Other providers keep their own history inside their CLI; Sigil's sidebar,
   transcript export, tab messaging, and automatic chat restoration remain Grok-only.
   Restart opens a fresh CLI for other providers, not a resumed conversation.
+  Other providers have no turn-completion integration. Sigil keeps submitted work
+  active and warns before closing their running processes; silence does not mark completion.
 - **Thread sidebar.** Every conversation on this machine. Home is the project
   list; open a folder to see its chats and start a new one with the plus. Recents
   and Archived sit under the folders as destinations you open. Search by title, folder or

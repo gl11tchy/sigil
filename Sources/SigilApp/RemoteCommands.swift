@@ -118,9 +118,10 @@ enum RemoteCommands {
             guard case .exited = tab.activity, !tab.controller.isRunning else {
                 return failure(request, "Only ended sessions can be restarted.")
             }
-            guard model.settings.executableExists,
-                (try? tab.workingDirectory.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-            else { return failure(request, "Restore the folder or Grok CLI on your Mac, then try again.") }
+            guard (try? tab.workingDirectory.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            else { return failure(request, "Restore the folder on your Mac, then try again.") }
+            guard tab.spec.provider != .grokBuild || model.settings.executableExists
+            else { return failure(request, "Restore the Grok CLI on your Mac, then try again.") }
             model.restartTab(id: tab.id)
             guard index < model.tabs.count, model.tabs[index].id != tab.id else {
                 return failure(request, "Could not restart this session. Check Sigil on your Mac.")

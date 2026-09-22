@@ -111,9 +111,10 @@ final class TerminalTab: Identifiable {
         spec.provider == .grokBuild && activity == .idle && controller.isRunning
     }
 
-    /// Only a submitted turn needs a destructive-action warning. Idle prompt
-    /// processes remain running by design.
+    /// Other providers have no turn-completion integration. Conservatively
+    /// warn whenever their process is running, including startup prompts.
     var shouldWarnBeforeStopping: Bool {
+        if spec.provider != .grokBuild { return controller.isRunning }
         switch activity {
         case .starting, .working: return controller.isRunning
         case .idle, .exited: return false
@@ -247,6 +248,9 @@ final class TerminalTab: Identifiable {
     }
 
     private func armIdleFallback() {
+        // Output silence is not completion for providers without a journal.
+        // Keep their submitted work active until the process actually exits.
+        guard spec.provider == .grokBuild else { return }
         idleFallbackTask?.cancel()
         let silence =
             hasConfirmedJournalActivity

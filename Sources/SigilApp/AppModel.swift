@@ -389,7 +389,9 @@ final class AppModel {
     }
 
     func archive(_ project: SidebarProject) {
-        let projectTabs = tabs.filter { samePath($0.workingDirectory.path, project.cwd) }
+        let projectTabs = tabs.filter {
+            $0.spec.provider == .grokBuild && samePath($0.workingDirectory.path, project.cwd)
+        }
         if projectTabs.contains(where: \.shouldWarnBeforeStopping), !confirmStopWorking() {
             return
         }
@@ -397,8 +399,7 @@ final class AppModel {
         for session in store.sessions where samePath(session.cwd, project.cwd) {
             archive(session, confirmIfWorking: false)
         }
-        let leftover = tabs.filter { samePath($0.workingDirectory.path, project.cwd) }.map(\.id)
-        for id in leftover { closeTab(id) }
+        for tab in projectTabs { closeTab(tab.id) }
         dropDeferred(inProjectPath: project.cwd)
         persistOpenTabs()
         if focusedProject.map({ samePath($0.cwd, project.cwd) }) == true {
