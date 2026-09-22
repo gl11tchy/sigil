@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import SigilKit
 import SwiftUI
 
@@ -17,7 +18,10 @@ struct SigilApp: App {
                     ),
                     minHeight: 460
                 )
-                .onAppear { delegate.model = model }
+                .onAppear {
+                    delegate.model = model
+                    delegate.startRemoteIdleSleep(model)
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .commands { GrokCommands(model: model) }
@@ -31,6 +35,7 @@ struct SigilApp: App {
 /// Makes sure no `grok` child process outlives the app.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor var model: AppModel?
+    @MainActor private var remoteIdleSleep: RemoteIdleSleepWatch?
 
     override init() {
         super.init()
@@ -65,6 +70,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated { model?.closeAllTabsAndWait() }
+    }
+
+    @MainActor func startRemoteIdleSleep(_ model: AppModel) {
+        if remoteIdleSleep == nil {
+            remoteIdleSleep = RemoteIdleSleepWatch()
+        }
+        remoteIdleSleep?.start(model)
+    }
+}
+
+/// Forwards `RemoteControl.status` for as long as the app delegate lives.
+@MainActor
+private final class RemoteIdleSleepWatch {
+    private let sleep = RemoteIdleSleep()
+    private var started = false
+
+    func start(_ model: AppModel) {
+        guard !started else { return }
+        started = true
+        track(model)
+    }
+
+    private func track(_ model: AppModel) {
+        let status = withObservationTracking {
+            model.remoteControl.status
+        } onChange: { [weak self, weak model] in
+            Task { @MainActor [weak self, weak model] in
+                guard let model else { return }
+                self?.track(model)
+            }
+        }
+        sleep.apply(status: status)
     }
 }
 
