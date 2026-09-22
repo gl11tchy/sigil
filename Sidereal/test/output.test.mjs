@@ -272,11 +272,8 @@ test('strips the live iPhone working dump: braille tofu, gutters, and thinking f
     readableOutput(dump),
     [
       '...',
-      '',
       'icons.',
-      '',
       '• Folder and recent chats stay right where they are.',
-      '',
       '• When Grok Build is chosen, the model picker and effort slider drop in below it—nothing fancy, just two simple rows.',
     ].join('\n'),
   );
@@ -317,5 +314,78 @@ test('keeps documentation that mentions a stop control', () => {
     readableOutput('Use the ↓ control labeled [stop]'),
     'Use the ↓ control labeled [stop]',
   );
+});
+
+const liveNewChatDump = [
+  '⠹',
+  '|',
+  '⠹',
+  '|  The text on the left side should now',
+  '⠹',
+  '|  align properly without indentation.',
+  '⠹',
+  '',
+  '         ∴ Thinking… 18s          24s ↓22.8k',
+  '[stop]',
+  '',
+  '╭──────────────────────────────────────╮',
+  '│ ❯                                    │',
+  '│                                      │',
+  '│      Grok 4.7 (xhigh) · always-approve│',
+  '╰──────────────────────────────────────╯',
+  'Shift+Tab:mode | Esc:cancel | Ctrl+x:',
+].join('\n');
+
+test('strips a live new-chat iPhone dump: tofu, gutters, thinking, truncated composer', () => {
+  assert.equal(
+    readableOutput(liveNewChatDump),
+    'The text on the left side should now align properly without indentation.',
+  );
+  assert.equal(
+    readableOutput(liveNewChatDump.replaceAll('⠹', '■')),
+    'The text on the left side should now align properly without indentation.',
+  );
+});
+
+test('joins wraps when the spinner shares a row with an empty gutter', () => {
+  assert.equal(
+    readableOutput([
+      '⠹ │  The text on the left side should now',
+      '⠹ │',
+      '⠹ │  align properly without indentation.',
+    ].join('\n')),
+    'The text on the left side should now align properly without indentation.',
+  );
+});
+
+test('empty pipe gutters still separate bullets', () => {
+  assert.equal(
+    readableOutput([
+      '|  • First bullet with enough words here',
+      '|',
+      '|  • Second bullet with enough words too',
+    ].join('\n')),
+    '• First bullet with enough words here\n\n• Second bullet with enough words too',
+  );
+});
+
+test('peels a spinner glued onto a gutter line without dropping GPU status markers', () => {
+  assert.equal(
+    readableOutput('⠹ │  The text on the left side should now align properly without indentation.'),
+    'The text on the left side should now align properly without indentation.',
+  );
+  assert.equal(readableOutput('⣿ GPU utilization'), '⣿ GPU utilization');
+});
+
+test('strips a composer whose Ctrl+x hint was truncated by a narrow phone terminal', () => {
+  const dump = [
+    'Hello from the phone.',
+    '╭──────────────────────────────────────╮',
+    '│ ❯',
+    '│      Grok 4.7 (xhigh) · always-approve',
+    '╰──────────────────────────────────────╯',
+    'Shift+Tab:mode | Esc:cancel | Ctrl+x:',
+  ].join('\n');
+  assert.equal(readableOutput(dump), 'Hello from the phone.');
 });
 
