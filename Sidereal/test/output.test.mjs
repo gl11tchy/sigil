@@ -341,13 +341,31 @@ test('strips a live new-chat iPhone dump: tofu, gutters, thinking, truncated com
     readableOutput(liveNewChatDump),
     'The text on the left side should now align properly without indentation.',
   );
+  assert.equal(
+    readableOutput(liveNewChatDump.replaceAll('⠹', '■')),
+    'The text on the left side should now align properly without indentation.',
+  );
 });
 
-test('strips the same live dump when the spinner is a missing-glyph square', () => {
-  const dump = liveNewChatDump.replaceAll('⠹', '■');
+test('joins wraps when the spinner shares a row with an empty gutter', () => {
   assert.equal(
-    readableOutput(dump),
+    readableOutput([
+      '⠹ │  The text on the left side should now',
+      '⠹ │',
+      '⠹ │  align properly without indentation.',
+    ].join('\n')),
     'The text on the left side should now align properly without indentation.',
+  );
+});
+
+test('empty pipe gutters still separate bullets', () => {
+  assert.equal(
+    readableOutput([
+      '|  • First bullet with enough words here',
+      '|',
+      '|  • Second bullet with enough words too',
+    ].join('\n')),
+    '• First bullet with enough words here\n\n• Second bullet with enough words too',
   );
 });
 

@@ -7,11 +7,12 @@ const BOX_LINE = new RegExp(`^[\\s┌┐└┘│─━├┤┬┴┼╭╮╯�
 const PADDING = new RegExp(`^[\\s┌┐└┘│╭╮╯╰▀▄█▌▐░▒▓${SPINNER}]+$`);
 const TREE_ONLY = new RegExp(`^[│| \\t${SPINNER}]+$`);
 const SPINNER_ONLY = new RegExp(`^[${SPINNER}]+$`, 'u');
-const LEADING_SPINNER = new RegExp(`^[${SPINNER}]+(\\s*)(.*)$`, 'u');
+const HAS_SPINNER = new RegExp(`[${SPINNER}]`, 'u');
+const LEADING_SPINNER = new RegExp(`^[${SPINNER}]+(?=\\s*(?:[│|]|$))`, 'u');
 const GROK_META = /Grok [\w.-]+ \([^)]+\) · \S+/;
 const SHORTCUTS = /Ctrl\+x:(?:shortcuts)?/;
 const HINT_TOKEN = /Ctrl\+x:(?:shortcuts)?|Shift\+Tab:mode|Esc:cancel|Ctrl\+e:collapse thinking|→:expand|Build anything|↩/g;
-const EMPTY_PROMPT = /^[│| ]*[❯›>] ?(?:Build anything|- grok)?\s*[│|]?\s*$/i;
+const EMPTY_PROMPT = /^[│| ]*[❯›>] ?(?:Build anything|- grok)?\s*$/i;
 const GROK_NAME = /^Grok [\w.-]+$/;
 const GROK_MODEL = /^\(?[\w-]+\)? · [\w-]+/;
 const TURN_STATUS = /^(?:Run |stop\b|user_prompt_submit|Thought for \d|Thinking(?:\.{3}|…)|Waiting for response|Worked for \d)/i;
@@ -42,14 +43,15 @@ function isSpinnerOnly(line) {
   return Boolean(text) && SPINNER_ONLY.test(text);
 }
 
-// Braille/tofu spinners sit in their own column. Peel them only when the rest
-// is empty or a TUI gutter, so "⣿ GPU utilization" stays intact.
+// Peel a leading braille/tofu spinner only when the rest is empty or a TUI
+// gutter, so "⣿ GPU utilization" stays intact.
 function peelLeadingSpinner(line) {
-  const match = line.match(LEADING_SPINNER);
-  if (!match) return line;
-  const rest = match[2];
-  if (!rest || /^[│|]/.test(rest)) return `${match[1]}${rest}`;
-  return line;
+  return line.replace(LEADING_SPINNER, '');
+}
+
+function isSpinnerRow(original, cleaned) {
+  if (isSpinnerOnly(cleaned) || isSpinnerOnly(original)) return true;
+  return HAS_SPINNER.test(original) && isTreeOnly(cleaned);
 }
 
 function isHintRow(text) {
@@ -95,7 +97,7 @@ function isTurnChrome(line, previous) {
   if (/^\d+[hms]?[\d.]*s?\s*[↓⬇]/.test(whole) || /^\d+[hms]?[\d.]*s?\s*[↓⬇]/.test(peeled)) return true;
   if (/^\d{1,2}:\d{2} [AP]M$/.test(whole) || /^\d{1,2}:\d{2} [AP]M$/.test(peeled)) return Boolean(previous);
   if (/^∴\s/.test(whole) || /^∴\s/.test(peeled)) return true;
-  if (/^\[stop\]$/i.test(whole) || /^\[stop\]$/i.test(peeled)) return true;
+  if (/^\[stop\]$/i.test(peeled)) return true;
   return false;
 }
 
@@ -166,8 +168,7 @@ function trailingComposerStart(lines) {
   if (start >= lines.length) return -1;
   const slice = lines.slice(start);
   const block = slice.join(' ');
-  // Phone-width terminals truncate "Ctrl+x:shortcuts" to "Ctrl+x:". Shift+Tab
-  // is the other fingerprint of the Grok composer chrome.
+  // Phone-width terminals truncate "Ctrl+x:shortcuts" to "Ctrl+x:".
   if (!SHORTCUTS.test(block) && !/Shift\+Tab:mode/.test(block)) return -1;
   if (!GROK_META.test(block) && !/Grok [\w.-]+/.test(block) && !/Shift\+Tab:mode|→:expand/.test(block)) {
     return -1;
@@ -195,13 +196,12 @@ export function readableOutput(snapshot) {
     const unwrapped = unwrapTuiFrame(peelLeadingSpinner(line));
     const cleaned = stripClock(unwrapped.line);
     const previous = compact.at(-1);
-    const turn = isTurnChrome(cleaned, previous && previous !== '' ? previous : '');
-    if (turn) {
+    if (isTurnChrome(cleaned, previous && previous !== '' ? previous : '')) {
       if (++blanks === 1) compact.push('');
       inBubble = false;
-    } else if (isSpinnerOnly(cleaned) || isSpinnerOnly(line)) {
-      // Ink draws the braille spinner on its own row between wrapped bubble
-      // lines. That is not a paragraph break.
+    } else if (isSpinnerRow(line, cleaned)) {
+      // Ink draws the spinner on its own row, sometimes with an empty gutter.
+      // That is not a paragraph break.
     } else if (isPadding(cleaned) || isTreeOnly(cleaned)) {
       if (++blanks === 1) compact.push('');
       inBubble = false;
