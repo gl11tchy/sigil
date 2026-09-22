@@ -4,7 +4,7 @@ import Foundation
 import SwiftTerm
 import os
 
-/// Owns one `grok` child process and the view that renders it.
+/// Owns one CLI child process and the view that renders it.
 @MainActor
 public final class TerminalController {
 
@@ -68,9 +68,10 @@ public final class TerminalController {
         }
     }
 
-    /// Spawns `grok` with `spec`. Does nothing if already running.
+    /// Spawns the selected CLI with `spec`. Does nothing if already running.
     public func start(_ spec: GrokLaunchSpec) {
         if isRunning || terminalView.isProcessRunning { return }
+        terminalView.setAccessibilityLabel("\(spec.provider.name) terminal")
         reportsActivity = true
         didReportExit = false
         lastActivityFire = nil

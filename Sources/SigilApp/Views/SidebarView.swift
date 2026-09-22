@@ -148,9 +148,8 @@ struct SidebarView: View {
                 systemImage: "plus",
                 help: "New Session in \(model.newSessionDirectory.abbreviatedPath) (⌘T)"
             ) {
-                model.newTab(in: model.newSessionDirectory)
+                model.requestNewSession()
             }
-            .disabled(!model.settings.executableExists)
         }
         .padding(.horizontal, 10)
         .padding(.bottom, 6)
@@ -170,9 +169,9 @@ struct SidebarView: View {
                     isPinned: model.isPinned(project),
                     showsPin: true,
                     showsArchive: true,
-                    canStart: model.settings.executableExists,
+                    canStart: true,
                     leave: { model.leaveProject() },
-                    newChat: { _ = model.newTabInProject(project) },
+                    newChat: { model.requestNewSessionInProject(project) },
                     togglePin: { model.togglePin(project) },
                     toggleArchive: { model.archive(project) }
                 )
@@ -510,19 +509,18 @@ struct SidebarView: View {
             isWorking: model.isWorking(project),
             isActive: rows.contains { model.isActive($0) },
             isKeyboardSelected: project.id == keyboardSelectionID,
-            canStart: model.settings.executableExists,
+            canStart: true,
             open: {
                 keyboardSelectionID = project.id
                 model.openProject(project)
             },
-            newChat: { _ = model.newTabInProject(project) },
+            newChat: { model.requestNewSessionInProject(project) },
             togglePin: { model.togglePin(project) },
             archive: { model.archive(project) }
         )
         .id(project.id)
         .contextMenu {
-            Button("New Session") { _ = model.newTabInProject(project) }
-                .disabled(!model.settings.executableExists)
+            Button("New Session") { model.requestNewSessionInProject(project) }
             Button(model.isPinned(project) ? "Unpin Project" : "Pin Project") {
                 model.togglePin(project)
             }
@@ -591,7 +589,7 @@ struct SidebarView: View {
             }
             Divider()
             Button("New Session in This Folder") {
-                model.newTab(in: URL(fileURLWithPath: session.cwd))
+                model.requestNewSession(in: URL(fileURLWithPath: session.cwd))
             }
             if let project = containingProject {
                 Button(model.isPinned(project) ? "Unpin Project" : "Pin Project") {

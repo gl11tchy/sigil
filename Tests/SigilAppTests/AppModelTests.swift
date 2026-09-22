@@ -1,13 +1,91 @@
 import AppKit
 import Darwin
 import Foundation
-import SigilKit
 import Testing
 
 @testable import SigilApp
+@testable import SigilKit
 
 @Suite(.serialized)
 struct AppModelTests {
+
+    @Test @MainActor
+    func requestingAndCancellingAProviderDoesNotStartAProcess() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        fixture.settings.executablePath = "/missing/grok"
+        let model = fixture.model()
+        let folder = try fixture.directory("chosen folder")
+        model.requestNewSession(in: folder)
+        #expect(model.isShowingNewSessionSheet)
+        #expect(model.pendingSessionDirectory == folder)
+        #expect(model.tabs.isEmpty)
+        model.isShowingNewSessionSheet = false
+        #expect(model.tabs.isEmpty)
+        #expect(fixture.settings.openTabs.tabs.isEmpty)
+    }
+
+    @Test(arguments: CLIProvider.allCases) @MainActor
+    func providerSelectionStartsAnInteractivePTYInTheChosenFolder(provider: CLIProvider) async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let bin = try fixture.directory("bin with spaces")
+        let folder = try fixture.directory("project 'quoted' ; literal")
+        // A deterministic login shell prevents the developer's shell profile
+        // from replacing this test's PATH with real, authenticated CLIs.
+        let shell = bin.appendingPathComponent("zsh")
+        try "#!/bin/sh\nshift\nexec /bin/sh -c \"$@\"\n".write(to: shell, atomically: true, encoding: .utf8)
+        let cli = bin.appendingPathComponent(provider.command)
+        try """
+        #!/bin/sh
+        printf 'PROVIDER=\(provider.rawValue)\\nCWD=%s\\nARGC=%s\\n' "$(/bin/pwd -P)" "$#"
+        while IFS= read -r line; do printf 'REPLY=%s\\n' "$line"; done
+        """.write(to: cli, atomically: true, encoding: .utf8)
+        for file in [shell, cli] {
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
+        }
+        let previousShell = ProcessInfo.processInfo.environment["SHELL"]
+        let previousPath = ProcessInfo.processInfo.environment["PATH"]
+        setenv("SHELL", shell.path, 1)
+        setenv("PATH", "\(bin.path):/usr/bin:/bin", 1)
+        defer {
+            if let previousShell { setenv("SHELL", previousShell, 1) } else { unsetenv("SHELL") }
+            if let previousPath { setenv("PATH", previousPath, 1) } else { unsetenv("PATH") }
+        }
+        fixture.settings.executablePath = provider == .grokBuild ? cli.path : "/missing/grok"
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let tab = try #require(model.newTab(in: folder, provider: provider))
+        #expect(model.selectedTab?.id == tab.id)
+        #expect(tab.spec.provider == provider)
+        #expect(await waitUntil { tab.controller.bufferText().contains("PROVIDER=\(provider.rawValue)") })
+        #expect(tab.controller.bufferText().contains("CWD=\(GrokPaths.canonicalPath(folder.path))"))
+        #expect(tab.controller.bufferText().contains(provider == .grokBuild ? "ARGC=4" : "ARGC=0"))
+        #expect(tab.controller.view.accessibilityLabel() == "\(provider.name) terminal")
+        tab.controller.send(text: "provider-input\r")
+        #expect(await waitUntil { tab.controller.bufferText().contains("REPLY=provider-input") })
+
+        if provider != .grokBuild {
+            #expect(tab.sessionID == nil)
+            #expect(tab.spec.sessionDirectory == nil)
+            #expect(fixture.settings.openTabs.tabs.isEmpty)
+            #expect(!model.canExportSelectedTranscript)
+            #expect(!tab.canDeliverBridgePrompt)
+            fixture.settings.themeName = TerminalTheme.grokDay.name
+            let pid = tab.controller.processID
+            model.applyTheme()
+            #expect(model.selectedTab?.id == tab.id)
+            #expect(tab.controller.processID == pid)
+            model.restartTab(id: tab.id)
+            let restarted = try #require(model.selectedTab)
+            #expect(restarted.spec.provider == provider)
+            #expect(restarted.id != tab.id)
+            #expect(await waitUntil { restarted.controller.bufferText().contains("PROVIDER=\(provider.rawValue)") })
+            #expect(!tab.controller.isRunning)
+        } else {
+            #expect(fixture.settings.openTabs.tabs.count == 1)
+        }
+    }
 
     @Test @MainActor
     func restoreUsesIDAndFolderAndDoesNotDuplicateTabs() throws {
@@ -2803,7 +2881,11 @@ struct AppModelTests {
             model.newSessionDirectory.resolvingSymlinksInPath().path
                 == projectA.resolvingSymlinksInPath().path)
 
-        let tab = try #require(model.newTabInProject(api))
+        model.requestNewSessionInProject(api)
+        #expect(model.isShowingNewSessionSheet)
+        #expect(model.tabs.isEmpty)
+        let directory = try #require(model.pendingSessionDirectory)
+        let tab = try #require(model.newTab(in: directory))
         #expect(
             tab.workingDirectory.resolvingSymlinksInPath().path
                 == projectA.resolvingSymlinksInPath().path)

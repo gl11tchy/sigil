@@ -3,7 +3,7 @@ import Foundation
 import Observation
 import SigilKit
 
-/// One terminal tab: a `grok` process, its view, and the state the UI shows about it.
+/// One terminal tab: a provider CLI, its view, and the state the UI shows about it.
 @MainActor
 @Observable
 final class TerminalTab: Identifiable {
@@ -84,6 +84,8 @@ final class TerminalTab: Identifiable {
 
     /// The session this tab reads and writes, when it is known up front.
     var sessionID: String? {
+        // Only Grok sessions participate in the sidebar, export, and restoration.
+        guard spec.provider == .grokBuild else { return nil }
         switch spec.mode {
         case .new(let uuid): return uuid.uuidString.lowercased()
         case .resume(let id): return id
@@ -95,6 +97,7 @@ final class TerminalTab: Identifiable {
 
     var title: String {
         if let sessionTitle, !sessionTitle.isEmpty { return sessionTitle }
+        if spec.provider != .grokBuild { return spec.provider.name }
         let name = workingDirectory.lastPathComponent
         return name.isEmpty ? workingDirectory.path : name
     }
@@ -105,7 +108,7 @@ final class TerminalTab: Identifiable {
     }
 
     var canDeliverBridgePrompt: Bool {
-        activity == .idle && controller.isRunning
+        spec.provider == .grokBuild && activity == .idle && controller.isRunning
     }
 
     /// Only a submitted turn needs a destructive-action warning. Idle prompt

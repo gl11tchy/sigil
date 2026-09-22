@@ -1,6 +1,7 @@
 import Foundation
 
-/// How to start one `grok` process inside a terminal tab.
+/// How to start a provider CLI inside a terminal tab. The original Grok name
+/// remains for compatibility with its session, resume, and bridge callers.
 public struct GrokLaunchSpec: Sendable, Hashable {
 
     public struct HostCommand: Sendable, Equatable {
@@ -19,6 +20,8 @@ public struct GrokLaunchSpec: Sendable, Hashable {
     }
 
     public var executable: URL
+    public let provider: CLIProvider
+    private let searchesPATH: Bool
     public var workingDirectory: URL
     public var mode: Mode
     public var model: String?
@@ -36,7 +39,7 @@ public struct GrokLaunchSpec: Sendable, Hashable {
     public var bridgeSocketPath: String?
 
     public init(
-        executable: URL = GrokPaths.defaultExecutable,
+        executable: URL? = nil,
         workingDirectory: URL,
         mode: Mode,
         model: String? = nil,
@@ -45,9 +48,17 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         themeName: String? = nil,
         themeVariables: [String: String] = [:],
         bridgeTabID: String? = nil,
-        bridgeSocketPath: String? = nil
+        bridgeSocketPath: String? = nil,
+        provider: CLIProvider = .grokBuild
     ) {
-        self.executable = executable
+        self.provider = provider
+        self.searchesPATH = executable == nil && provider != .grokBuild
+        self.executable =
+            executable
+            ?? (provider == .grokBuild
+                ? GrokPaths.defaultExecutable
+                : FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent(".local/bin/\(provider.command)"))
         self.workingDirectory = workingDirectory
         self.mode = mode
         self.model = model
@@ -62,6 +73,7 @@ public struct GrokLaunchSpec: Sendable, Hashable {
     /// The session directory this launch reads and writes, when the app knows it up front.
     /// `nil` for `.continueLatest`, whose ID is only known once the CLI picks one.
     public var sessionDirectory: URL? {
+        guard provider == .grokBuild else { return nil }
         switch mode {
         case .new(let sessionID):
             return GrokPaths.sessionDirectory(
@@ -75,6 +87,7 @@ public struct GrokLaunchSpec: Sendable, Hashable {
 
     /// Command-line arguments for the CLI, in the order `grok` documents them.
     public func arguments() -> [String] {
+        guard provider == .grokBuild else { return extraArguments }
         var args = ["--cwd", workingDirectory.path]
         switch mode {
         case .new(let sessionID):
@@ -99,7 +112,31 @@ public struct GrokLaunchSpec: Sendable, Hashable {
     ) -> HostCommand {
         let fallback = URL(fileURLWithPath: "/bin/zsh")
         let requested = URL(fileURLWithPath: processEnvironment["SHELL"] ?? fallback.path)
-        let shell = FileManager.default.isExecutableFile(atPath: requested.path) ? requested : fallback
+        var shell = FileManager.default.isExecutableFile(atPath: requested.path) ? requested : fallback
+        if provider != .grokBuild {
+            if !["zsh", "bash", "sh", "fish"].contains(shell.lastPathComponent) {
+                shell = fallback
+            }
+            let command = searchesPATH ? provider.command : executable.path
+            // Arguments stay positional, including paths containing shell metacharacters.
+            if shell.lastPathComponent == "fish" {
+                return HostCommand(
+                    executable: shell,
+                    arguments: [
+                        "-lic",
+                        "set -gx PATH $PATH (string split : -- $argv[1]); cd -- $argv[2]; or exit; exec $argv[3..-1]",
+                        CLIProvider.fallbackPath, workingDirectory.path, command,
+                    ] + arguments()
+                )
+            }
+            return HostCommand(
+                executable: shell,
+                arguments: [
+                    "-lic", "export PATH=\"$PATH:$1\"; cd -- \"$2\" || exit; shift 2; exec \"$@\"",
+                    "sigil-\(provider.rawValue)", CLIProvider.fallbackPath, workingDirectory.path, command,
+                ] + arguments()
+            )
+        }
         switch shell.lastPathComponent {
         case "zsh", "bash", "sh":
             return HostCommand(
@@ -125,6 +162,14 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
         env["LANG"] = env["LANG"] ?? "en_US.UTF-8"
+        if provider != .grokBuild {
+            for key in env.keys where key.hasPrefix("GROK_THEME") || key == "GROK_WRAPPER" {
+                env.removeValue(forKey: key)
+            }
+            env.removeValue(forKey: BridgePaths.tabEnvironmentKey)
+            env.removeValue(forKey: BridgePaths.socketEnvironmentKey)
+            return env
+        }
         env["GROK_WRAPPER"] = "Sigil.app"
         let hostKeys = [
             "GROK_THEME_BG", "GROK_THEME_FG", "GROK_THEME_ACCENT", "GROK_THEME_USER",
