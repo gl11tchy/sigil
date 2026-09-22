@@ -71,15 +71,16 @@ struct RightPanelView: View {
             }
         case .notes:
             if let tab = model.selectedTab, let sessionID = tab.sessionID {
+                let cwd = tab.workingDirectory.path
                 NotesPane(
                     title: model.title(for: tab),
                     subtitle: tab.workingDirectory.abbreviatedPath,
                     text: Binding(
-                        get: { panel.notes(forSessionID: sessionID) },
-                        set: { panel.setNotes($0, forSessionID: sessionID) }
+                        get: { panel.notes(forSessionID: sessionID, cwd: cwd) },
+                        set: { panel.setNotes($0, forSessionID: sessionID, cwd: cwd) }
                     )
                 )
-                .id(sessionID)
+                .id("\(cwd)/\(sessionID)")
             } else {
                 PanelPlaceholder(text: "Open a conversation to keep notes on it.")
             }

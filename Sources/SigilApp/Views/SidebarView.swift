@@ -110,12 +110,6 @@ struct SidebarView: View {
         .task {
             await restorePromptOnAppear()
         }
-        .onChange(of: model.store.isLoading) { _, loading in
-            if !loading { model.pruneMissingPins() }
-        }
-        .onChange(of: model.store.sessions) { _, _ in
-            if !model.store.isLoading { model.pruneMissingPins() }
-        }
     }
 
     // MARK: - Search
@@ -1101,10 +1095,23 @@ struct SidebarView: View {
     }
 
     /// Rows that leave the filter (search, archive, delete) leave the selection.
+    /// A range anchor that left with them re-roots at the keyboard row, or the
+    /// first selected row, so the next ⇧-click still extends instead of
+    /// collapsing the selection to the target.
     private func pruneMultiSelection() {
-        guard !multiSelection.isEmpty else { return }
-        multiSelection.formIntersection(visibleRowIDs())
-        if multiSelection.isEmpty { selectionAnchor = nil }
+        let rows = visibleRowIDs()
+        let visible = Set(rows)
+        if !multiSelection.isEmpty {
+            multiSelection.formIntersection(visible)
+        }
+        if let anchor = selectionAnchor, !visible.contains(anchor) {
+            selectionAnchor =
+                keyboardSelectionID.flatMap { visible.contains($0) ? $0 : nil }
+                ?? rows.first(where: { multiSelection.contains($0) })
+        }
+        if multiSelection.isEmpty, keyboardSelectionID == nil {
+            selectionAnchor = nil
+        }
     }
 
     private var bulkDeleteTitle: String {
@@ -1665,11 +1672,12 @@ private struct SessionRow: View {
             )
     }
 
-    /// Multi-selection wears the accent hairline; the arrow-key highlight keeps
-    /// the plain one. The active row's `selected` fill needs neither.
+    /// Multi-selection wears the accent hairline — even on the active row, so
+    /// the open conversation never looks outside a bulk action it is in. The
+    /// arrow-key highlight keeps the plain one.
     private var stroke: Color {
-        if state == .active { return .clear }
         if isMultiSelected { return palette.accent }
+        if state == .active { return .clear }
         if isKeyboardSelected { return palette.hairline }
         return .clear
     }

@@ -126,6 +126,7 @@ final class AppModel {
         didAppear = true
         if !Self.isRunningAutomatedTests { startCrashStateRefresh() }
         if Self.isSmokeTest { return }
+        observeStoreForHousekeeping()
         store.start()
         // Bind the local socket before restoring tabs so they inherit it.
         // Registration is add-or-update and can take seconds; do not wait on it.
@@ -560,9 +561,28 @@ final class AppModel {
         migrateLegacyPanelNotes()
     }
 
+    /// Pruning and legacy-note migration follow the store's own loading, not a
+    /// view's `onChange`, so hiding the sidebar cannot skip them.
+    private func observeStoreForHousekeeping() {
+        withObservationTracking {
+            _ = store.isLoading
+            _ = store.sessions
+            // A watcher rescan can clear an error without changing sessions.
+            _ = store.loadError
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if !self.store.isLoading { self.pruneMissingPins() }
+                self.observeStoreForHousekeeping()
+            }
+        }
+    }
+
     /// One-time move of UserDefaults folder notes onto per-conversation files.
-    /// Each folder note lands on the newest conversation in that folder; folders
-    /// with no conversation yet keep their entry for a later launch.
+    /// Each folder note lands on the newest conversation in that folder; when
+    /// that conversation already has a note the legacy text is appended, not
+    /// dropped. Folders with no conversation yet keep their entry for a later
+    /// launch.
     func migrateLegacyPanelNotes() {
         let legacy = panel.legacyFolderNotes
         guard !legacy.isEmpty else { return }
@@ -573,12 +593,21 @@ final class AppModel {
                     .filter({ samePath($0.cwd, folder) })
                     .max(by: { $0.updatedAt < $1.updatedAt })
             else { continue }
-            if panel.notes(forSessionID: session.id).isEmpty {
-                panel.setNotes(text, forSessionID: session.id)
+            let existing = panel.notes(forSessionID: session.id, cwd: session.cwd)
+            let section = "\n\n---\n\n" + text
+            // Skip only a note that is the legacy text, or one already ending
+            // in a migrated copy of it. A mere substring match is not proof.
+            if existing.isEmpty {
+                panel.setNotes(text, forSessionID: session.id, cwd: session.cwd)
+            } else if existing != text && !existing.hasSuffix(section) {
+                panel.setNotes(existing + section, forSessionID: session.id, cwd: session.cwd)
             }
             remaining.removeValue(forKey: folder)
         }
         if remaining.count != legacy.count {
+            // Persist before the legacy source goes away: a crash between a
+            // debounced write and clearing UserDefaults would lose the note.
+            panel.flushNotes()
             panel.setLegacyFolderNotes(remaining)
         }
     }
@@ -1470,6 +1499,7 @@ final class AppModel {
         remoteControl.stop()
         stopTabMessaging()
         panel.closeShellAndWait()
+        panel.flushNotes()
         for tab in tabs { tab.terminateAndWait() }
         tabs.removeAll()
         selectedTabID = nil
@@ -1906,7 +1936,15 @@ final class AppModel {
             unpin(session)
             unarchive(session)
             resetName(session)
-            panel.deleteNotes(forSessionID: session.id)
+            panel.deleteNotes(forSessionID: session.id, cwd: session.cwd)
+            // A same-ID conversation in another folder may still be waiting to
+            // adopt the flat-layout note; when in doubt, keep the file.
+            let flatNoteShared = store.sessions.contains {
+                $0.id == session.id && !samePath($0.cwd, session.cwd)
+            }
+            if !flatNoteShared {
+                panel.deleteFlatNotes(forSessionID: session.id)
+            }
             let removedIDs = Set(matchingTabs.map(\.id))
             for tab in matchingTabs where !stoppedTabs.contains(where: { $0.id == tab.id }) {
                 tabBridge?.noteTabClosed(id: tab.id)

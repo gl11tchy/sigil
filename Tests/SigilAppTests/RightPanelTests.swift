@@ -53,16 +53,15 @@ struct RightPanelTests {
     func notesAreKeptPerConversation() throws {
         let (panel, notesRoot) = makePanel()
         defer { try? FileManager.default.removeItem(at: notesRoot) }
-        panel.setNotes("ports: 3000", forSessionID: "session-a")
-        #expect(panel.notes(forSessionID: "session-a") == "ports: 3000")
-        #expect(panel.notes(forSessionID: "session-b") == "")
+        panel.setNotes("ports: 3000", forSessionID: "session-a", cwd: "/tmp/project-a")
+        panel.notesStore.flushNow()
+        #expect(panel.notes(forSessionID: "session-a", cwd: "/tmp/project-a") == "ports: 3000")
+        #expect(panel.notes(forSessionID: "session-b", cwd: "/tmp/project-a") == "")
+        #expect(panel.notes(forSessionID: "session-a", cwd: "/tmp/project-b") == "")
 
-        let file = notesRoot.appendingPathComponent("session-a.md")
-        #expect(try String(contentsOf: file, encoding: .utf8) == "ports: 3000")
-
-        panel.setNotes("", forSessionID: "session-a")
-        #expect(panel.notes(forSessionID: "session-a") == "")
-        #expect(!FileManager.default.fileExists(atPath: file.path))
+        panel.setNotes("", forSessionID: "session-a", cwd: "/tmp/project-a")
+        panel.notesStore.flushNow()
+        #expect(panel.notes(forSessionID: "session-a", cwd: "/tmp/project-a") == "")
     }
 
     @Test @MainActor

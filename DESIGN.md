@@ -128,9 +128,10 @@ Every interactive element ships all of these, or it is not done:
 
 - **Row**: default, hover (`raised` fill), keyboard (hover fill + `hairline`
   stroke, so the arrow keys are visible even when the mouse is elsewhere), open,
-  active (`selected` fill + medium title), multi-selected (`raised` fill +
-  `accent` stroke — a bulk-selection state, never the open row's fill). Titles
-  stay at `text`; metadata carries the dim. No side stripe.
+  active (`selected` fill + medium title), multi-selected (`accent` stroke over
+  the `raised` fill — or over the open row's `selected` fill, so the active chat
+  still reads as part of a bulk selection). Titles stay at `text`; metadata
+  carries the dim. No side stripe.
 - **Pin**: hover control on the trailing edge of a chat row or a project header;
   a small ember pin stays on pinned rows and pinned folders.
 - **Field**: default, hover, focused (ember hairline).
