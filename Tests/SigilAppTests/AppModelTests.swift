@@ -3129,13 +3129,17 @@ struct AppModelTests {
         defer { model.closeAllTabsAndWait() }
         let a = makeSession(id: "s-a", cwd: cwdA)
         let b = makeSession(id: "s-b", cwd: cwdB)
-        model.panel.setNotes("remember the milk", forSessionID: "s-a")
+        model.panel.setNotes("remember the milk", forSessionID: "s-a", cwd: cwdA.path)
 
         #expect(model.deleteConversations([a, b]) == 2)
-        #expect(model.panel.notes(forSessionID: "s-a") == "")
+        model.panel.notesStore.flushNow()
+        #expect(model.panel.notes(forSessionID: "s-a", cwd: cwdA.path) == "")
+        let noteDir =
+            fixture.notesRoot
+            .appendingPathComponent(GrokPaths.encode(path: GrokPaths.canonicalPath(cwdA.path)))
         #expect(
             !FileManager.default.fileExists(
-                atPath: fixture.notesRoot.appendingPathComponent("s-a.md").path))
+                atPath: noteDir.appendingPathComponent("s-a.md").path))
     }
 
     @Test @MainActor
@@ -3156,10 +3160,32 @@ struct AppModelTests {
 
         model.migrateLegacyPanelNotes()
 
-        #expect(model.panel.notes(forSessionID: "new") == "folder note")
-        #expect(model.panel.notes(forSessionID: "old") == "")
+        #expect(model.panel.notes(forSessionID: "new", cwd: cwd.path) == "folder note")
+        #expect(model.panel.notes(forSessionID: "old", cwd: cwd.path) == "")
         // A folder with no conversation keeps its note for a later launch.
         #expect(model.panel.legacyFolderNotes == [orphanPath: "orphan note"])
+    }
+
+    @Test @MainActor
+    func legacyMigrationAppendsWhenTheTargetConversationAlreadyHasANote() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        try fixture.writeListedSession(id: "new", cwd: cwd.path, summary: "New")
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        // The user typed a note before the migration ran.
+        model.panel.setNotes("fresh note", forSessionID: "new", cwd: cwd.path)
+        fixture.defaults.set(
+            try JSONEncoder().encode([cwd.path: "folder note"]), forKey: "panel.notes")
+
+        model.migrateLegacyPanelNotes()
+
+        let migrated = model.panel.notes(forSessionID: "new", cwd: cwd.path)
+        #expect(migrated.contains("fresh note"))
+        #expect(migrated.contains("folder note"))
+        #expect(model.panel.legacyFolderNotes.isEmpty)
     }
 
     @Test @MainActor

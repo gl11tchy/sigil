@@ -120,17 +120,23 @@ final class RightPanel {
 
     // MARK: - Notes
 
-    /// The pad for one conversation; each tab knows its session ID from launch.
-    func notes(forSessionID sessionID: String) -> String {
-        notesStore.note(for: sessionID)
+    /// The pad for one conversation, keyed the way the app keys conversations:
+    /// session ID plus working directory.
+    func notes(forSessionID sessionID: String, cwd: String) -> String {
+        notesStore.note(for: sessionID, cwd: cwd)
     }
 
-    func setNotes(_ text: String, forSessionID sessionID: String) {
-        notesStore.setNote(text, for: sessionID)
+    func setNotes(_ text: String, forSessionID sessionID: String, cwd: String) {
+        notesStore.setNote(text, for: sessionID, cwd: cwd)
     }
 
-    func deleteNotes(forSessionID sessionID: String) {
-        notesStore.deleteNote(for: sessionID)
+    func deleteNotes(forSessionID sessionID: String, cwd: String) {
+        notesStore.deleteNote(for: sessionID, cwd: cwd)
+    }
+
+    /// Persist any note text still inside the debounce window. Quit only.
+    func flushNotes() {
+        notesStore.flushNow()
     }
 
     /// Folder-keyed notes from the UserDefaults era. `AppModel` moves them onto
