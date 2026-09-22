@@ -21,6 +21,7 @@ async function browser({ hash = '', saved } = {}) {
       open: false, focus() {}, contains() { return false; },
       getAttribute(name) { return this[name]; }, setAttribute(name, value) { this[name] = value; },
       addEventListener() {},
+      showModal() { this.open = true; }, close() { this.open = false; },
       scrollHeight: 0, scrollTop: 0, clientHeight: 0,
       querySelector(selector) { return element(`${id}-${selector}`); },
       replaceChildren(...children) { this.children = children; },
@@ -32,7 +33,15 @@ async function browser({ hash = '', saved } = {}) {
     reload() { reloads++; },
   };
   const document = {
-    hidden: false, getElementById: element, createElement: () => ({}),
+    hidden: false, getElementById: element,
+    createDocumentFragment: () => ({ append(node) { this.parts = [...(this.parts || []), node]; } }),
+    createTextNode: text => ({ textContent: text }),
+    createElement: () => ({
+      textContent: '', dataset: {}, hidden: false, children: [],
+      append(...nodes) { this.children.push(...nodes); },
+      setAttribute(name, value) { this[name] = value; },
+      focus() {}, scrollIntoView() {},
+    }),
     querySelectorAll: selector => selector === '[data-key]' ? [] :
       ['new', 'tabs', 'message', 'send', 'paste', 'interrupt'].map(element),
     addEventListener: (name, callback) => events.set(name, callback),
@@ -254,13 +263,13 @@ test('a command that times out keeps the socket so later commands can use it', a
   const socket = await page.authorize();
   page.element('new').onclick();
   await settle();
-  assert.equal(socket.sent.at(-1).action, 'new');
+  assert.equal(socket.sent.at(-1).action, 'projects');
   await page.fireTimer(10000);
   assert.equal(socket.readyState, 1);
   assert.equal(page.element('error').hidden, false);
   page.element('new').onclick();
   await settle();
-  assert.equal(socket.sent.at(-1).action, 'new');
+  assert.equal(socket.sent.at(-1).action, 'projects');
   assert.equal(socket.readyState, 1);
 });
 
@@ -288,10 +297,10 @@ test('a command queued behind a poll does not run after a new handshake', async 
   assert.equal(socket.sent.at(-1).action, 'state');
   page.element('new').onclick();
   await settle();
-  assert.equal(socket.sent.filter(request => request.action === 'new').length, 0);
+  assert.equal(socket.sent.filter(request => request.action === 'projects').length, 0);
   socket.receive({ hello: 'd'.repeat(64) });
   await settle();
-  assert.equal(socket.sent.filter(request => request.action === 'new').length, 0);
+  assert.equal(socket.sent.filter(request => request.action === 'projects').length, 0);
   assert.equal(socket.sent.at(-1).action, 'state');
   assert.equal(socket.sent.at(-1).challenge, 'd'.repeat(64));
   socket.reply();
@@ -508,7 +517,7 @@ test('duplicate hello does not reset sequence or replace a pending request', asy
   page.element('new').onclick();
   await settle();
   assert.equal(socket.sent.at(-1).sequence, pending.sequence + 1);
-  assert.equal(socket.sent.at(-1).action, 'new');
+  assert.equal(socket.sent.at(-1).action, 'projects');
 });
 
 test('unauthorized after a dropped pairing acknowledgement retries with the persisted device key', async () => {
@@ -559,4 +568,105 @@ test('routing uses a separate sealed first message, never the URL or the device 
   socket.receive({ route: 'e'.repeat(64) });
   await settle();
   assert.equal(socket.routes.length, 1);
+});
+
+test('a new chat asks which project and cancel does not start one', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('new').onclick();
+  await settle();
+  assert.equal(socket.sent.at(-1).action, 'projects');
+  const request = socket.sent.at(-1);
+  socket.receive({ data: JSON.stringify({
+    challenge: request.challenge, sequence: request.sequence, ok: true,
+    projects: [{ name: 'Widget', folder: '/work/widget' }, { name: 'Other', folder: '/work/other' }],
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
+  }) });
+  await settle();
+  assert.equal(page.element('project-dialog').open, true);
+  assert.equal(page.element('project-list').children.length, 2);
+  const labels = page.element('project-list').children.map(button => button.children.map(node => node.textContent).join(' '));
+  assert.deepEqual(labels, ['Widget /work/widget', 'Other /work/other']);
+  page.element('project-cancel').onclick();
+  await settle();
+  assert.equal(socket.sent.filter(item => item.action === 'new').length, 0);
+  page.element('new').onclick();
+  await settle();
+  const again = socket.sent.at(-1);
+  assert.equal(again.action, 'projects');
+  socket.receive({ data: JSON.stringify({
+    challenge: again.challenge, sequence: again.sequence, ok: true,
+    projects: [{ name: 'Widget', folder: '/work/widget' }],
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
+  }) });
+  await settle();
+  page.element('project-list').children[0].onclick();
+  await settle();
+  assert.equal(socket.sent.at(-1).action, 'new');
+  assert.equal(socket.sent.at(-1).text, '/work/widget');
+});
+
+test('saved chat search sends titles and folders and opens the chosen chat', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('sessions-toggle').onclick();
+  page.element('session-search').value = 'widget';
+  page.element('session-search').oninput();
+  await settle();
+  const request = socket.sent.at(-1);
+  assert.equal(request.action, 'chats');
+  assert.equal(request.text, 'widget');
+  socket.receive({ data: JSON.stringify({
+    challenge: request.challenge, sequence: request.sequence, ok: true,
+    chats: [{ id: 'chat-1', title: 'Fix the widget', folder: '/work/widget', transcript: 'SECRET_TRANSCRIPT' }],
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
+  }) });
+  await settle();
+  const row = page.element('saved-list').children[0];
+  assert.ok(row);
+  assert.deepEqual(row.children.map(node => node.textContent), ['Fix the widget', '/work/widget']);
+  assert.equal(row.children.map(node => node.textContent).join('\n').includes('SECRET_TRANSCRIPT'), false);
+  row.onclick();
+  await settle();
+  assert.equal(socket.sent.at(-1).action, 'open');
+  assert.equal(socket.sent.at(-1).name, 'chat-1');
+  assert.equal(socket.sent.at(-1).text, '/work/widget');
+  assert.equal(socket.sent.at(-1).transcript, undefined);
+});
+
+test('scrolling up prepends an earlier slice and a later tail keeps it', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  const terminal = page.element('terminal');
+  terminal.scrollHeight = 800;
+  terminal.clientHeight = 200;
+  terminal.scrollTop = 0;
+  terminal.onscroll();
+  await settle();
+  const request = socket.sent.at(-1);
+  assert.equal(request.action, 'earlier');
+  assert.equal(request.tabID, 'tab-1');
+  assert.ok(request.text);
+  assert.ok(request.name);
+  socket.receive({ data: JSON.stringify({
+    challenge: request.challenge, sequence: request.sequence, ok: true, earlier: 'EARLY_MARKER\n',
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'TAIL_MARKER' },
+  }) });
+  await settle();
+  assert.match(terminal.textContent, /EARLY_MARKER/);
+  assert.match(terminal.textContent, /TAIL_MARKER/);
+  await page.fireTimer(1000);
+  assert.equal(socket.sent.at(-1).action, 'state');
+  const poll = socket.sent.at(-1);
+  socket.receive({ data: JSON.stringify({
+    challenge: poll.challenge, sequence: poll.sequence, ok: true,
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'AIL_MARKER!' },
+  }) });
+  await settle();
+  assert.match(terminal.textContent, /EARLY_MARKER/);
+  assert.match(terminal.textContent, /AIL_MARKER!/);
+  page.element('find-toggle').onclick();
+  page.element('find-query').value = 'EARLY_MARKER';
+  page.element('find-query').oninput();
+  assert.match(page.element('find-count').textContent, /1 of 1/);
 });

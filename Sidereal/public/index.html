@@ -37,6 +37,14 @@
     <input id="session-search" type="search" placeholder="Search sessions" aria-label="Search sessions" autocomplete="off">
     <div id="session-list"></div>
     <p id="session-no-results" hidden>No matching sessions.</p>
+    <h3 id="saved-heading" hidden>Saved chats</h3>
+    <div id="saved-list"></div>
+    <p id="saved-empty" hidden>No matching chats.</p>
+  </dialog>
+  <dialog id="project-dialog" aria-labelledby="project-heading">
+    <div class="sheet-heading"><h2 id="project-heading">Choose a project</h2><button id="project-cancel" type="button">Cancel</button></div>
+    <div id="project-list"></div>
+    <p id="project-empty" hidden>No projects yet.</p>
   </dialog>
   <main>
     <section id="welcome">

@@ -225,4 +225,246 @@ struct RemoteCommandsTests {
         #expect(remote.pairingURL == nil)
         #expect(remote.error == nil)
     }
+
+    @Test @MainActor func phoneListsChatsAndProjectsWithoutTranscripts() async throws {
+        let fixture = try PhoneCommandFixture()
+        defer { fixture.cleanup() }
+        let widget = try fixture.directory("widget-folder")
+        let other = try fixture.directory("other-folder")
+        let archivedFolder = try fixture.directory("archived-folder")
+        let desktop = try fixture.directory("desktop-folder")
+        fixture.settings.defaultDirectory = desktop.path
+        fixture.settings.focusedProjectPath = ""
+        fixture.settings.showWorktreeSessions = true
+        let widgetID = "widget-session"
+        let otherID = "other-session"
+        let archivedID = "archived-session"
+        try fixture.writeSession(
+            id: widgetID, cwd: widget.path, summary: "Fix the widget",
+            updatedAt: "2026-08-03T00:00:00Z", secret: "SECRET_TRANSCRIPT_WIDGET")
+        try fixture.writeSession(
+            id: otherID, cwd: other.path, summary: "Unrelated notes",
+            updatedAt: "2026-08-02T00:00:00Z", secret: "SECRET_TRANSCRIPT_OTHER")
+        try fixture.writeSession(
+            id: archivedID, cwd: archivedFolder.path, summary: "Archived router notes",
+            updatedAt: "2026-08-01T00:00:00Z", secret: "SECRET_TRANSCRIPT_ARCHIVED")
+        fixture.settings.archivedConversations = [
+            OpenTabsSnapshot.Entry(sessionID: archivedID, cwd: archivedFolder.path)
+        ]
+        await fixture.store.reload()
+        #expect(fixture.model.store.sessions.count == 3)
+
+        let byTitle = fixture.command("chats", text: "widget")
+        #expect(byTitle.ok)
+        let titleHits = try #require(byTitle.chats)
+        #expect(titleHits.count == 1)
+        #expect(titleHits[0].id == widgetID)
+        #expect(titleHits[0].title == "Fix the widget")
+        #expect(titleHits[0].folder == widget.path)
+        let titleJSON = try encoded(byTitle)
+        #expect(!titleJSON.contains("SECRET_TRANSCRIPT"))
+        #expect(!titleJSON.contains("transcript"))
+
+        let byFolder = fixture.command("chats", text: "other-folder")
+        #expect(byFolder.chats?.map(\.id) == [otherID])
+
+        let archived = fixture.command("chats", text: "router")
+        #expect(archived.chats?.map(\.id) == [archivedID])
+
+        let projects = fixture.command("projects")
+        #expect(projects.ok)
+        let folders = try #require(projects.projects)
+        #expect(folders.contains { $0.name == "widget-folder" && $0.folder == widget.path })
+        #expect(folders.contains { $0.name == "other-folder" && $0.folder == other.path })
+        #expect(!folders.contains { $0.folder == archivedFolder.path })
+        let projectJSON = try encoded(projects)
+        #expect(!projectJSON.contains("SECRET_TRANSCRIPT"))
+        #expect(!projectJSON.contains("Fix the widget"))
+        #expect(!projectJSON.contains("session_summary"))
+
+        try fixture.writeSession(
+            id: "scratch-session", cwd: "/tmp/sigil-scratch-\(UUID().uuidString)",
+            summary: "Hidden scratch chat", updatedAt: "2026-08-04T00:00:00Z",
+            secret: "SECRET_TRANSCRIPT_SCRATCH")
+        await fixture.store.reload()
+        fixture.settings.showWorktreeSessions = false
+        #expect(fixture.command("chats", text: "Hidden scratch").chats?.isEmpty == true)
+        fixture.settings.showWorktreeSessions = true
+        #expect(fixture.command("chats", text: "Hidden scratch").chats?.map(\.id) == ["scratch-session"])
+        fixture.settings.showWorktreeSessions = false
+
+        let beforeOpen = fixture.model.tabs.count
+        let opened = fixture.command("open", text: widget.path, name: widgetID)
+        #expect(opened.ok)
+        #expect(fixture.model.tabs.count == beforeOpen + 1)
+        let tab = try #require(fixture.model.tabs.first { $0.sessionID == widgetID })
+        #expect(GrokPaths.canonicalPath(tab.workingDirectory.path) == GrokPaths.canonicalPath(widget.path))
+        let again = fixture.command("open", text: widget.path, name: widgetID)
+        #expect(again.ok)
+        #expect(fixture.model.tabs.count == beforeOpen + 1)
+        #expect(!fixture.command("open", text: widget.path, name: "missing-session").ok)
+        #expect(fixture.model.tabs.count == beforeOpen + 1)
+
+        let remembered = fixture.settings.defaultDirectory
+        let focused = fixture.settings.focusedProjectPath
+        let started = fixture.command("new", text: other.path)
+        #expect(started.ok)
+        let created = try #require(fixture.model.selectedTab)
+        #expect(GrokPaths.canonicalPath(created.workingDirectory.path) == GrokPaths.canonicalPath(other.path))
+        #expect(fixture.settings.defaultDirectory == remembered)
+        #expect(fixture.settings.focusedProjectPath == focused)
+        let count = fixture.model.tabs.count
+        #expect(!fixture.command("new", text: "/no/such/sigil-project").ok)
+        #expect(fixture.model.tabs.count == count)
+        #expect(fixture.settings.defaultDirectory == remembered)
+    }
+
+    @Test @MainActor func phoneChatPagesStayWithinOneSlice() async throws {
+        let fixture = try PhoneCommandFixture()
+        defer { fixture.cleanup() }
+        fixture.settings.showWorktreeSessions = true
+        let folder = try fixture.directory("paged")
+        for index in 0...40 {
+            try fixture.writeSession(
+                id: String(format: "paged-%02d", index),
+                cwd: folder.path,
+                summary: String(format: "Paged chat %02d", index),
+                updatedAt: String(format: "2026-09-01T00:%02d:00Z", index),
+                secret: "SECRET_PAGE_\(index)")
+        }
+        await fixture.store.reload()
+        let first = fixture.command("chats", index: 0)
+        let second = fixture.command("chats", index: 40)
+        let page = try #require(first.chats)
+        let rest = try #require(second.chats)
+        #expect(page.count == 40)
+        #expect(rest.count == 1)
+        #expect(rest[0].title == "Paged chat 00")
+        #expect(!page.contains { $0.title == "Paged chat 00" })
+        #expect(try encoded(first).contains("SECRET_PAGE") == false)
+        let projects = try #require(fixture.command("projects").projects)
+        #expect(projects.count == 1)
+        #expect(projects[0].name == "paged")
+        #expect(projects[0].folder == folder.path)
+    }
+
+    @Test @MainActor func earlierReplyKeepsTheLiveTail() async throws {
+        let fixture = try PhoneCommandFixture()
+        defer { fixture.cleanup() }
+        let early = "EARLY_MARKER"
+        let late = "LATE_MARKER"
+        let text =
+            early + "\n" + String(repeating: "a", count: 6_000) + "\n"
+            + String(repeating: "b", count: 14_000) + "\n" + late + "\n"
+        let payload = fixture.root.appendingPathComponent("payload.txt")
+        try Data(text.utf8).write(to: payload)
+        let script = """
+            #!/bin/sh
+            cat '\(payload.path)'
+            """
+        try Data(script.utf8).write(to: fixture.executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fixture.executable.path)
+        let tab = try #require(fixture.model.newTab(in: fixture.root))
+        var tail = ""
+        for _ in 0..<200 {
+            tail = tab.controller.remoteSnapshot()
+            if !tab.controller.isRunning, tail.contains(late) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(tail.contains(late))
+        #expect(!tail.contains(early))
+        let reply = fixture.command(
+            "earlier",
+            text: String(tail.prefix(80)),
+            tabID: tab.id.uuidString,
+            name: String(tail.suffix(40)),
+            index: tail.count)
+        #expect(reply.ok)
+        let slice = try #require(reply.earlier)
+        #expect(slice.contains(early))
+        #expect(!slice.contains(late))
+        #expect(slice.utf8.count <= 12_000)
+        #expect(reply.state?.terminal.contains(late) == true)
+        #expect(reply.state?.terminal.contains(early) == false)
+        #expect((reply.state?.terminal.utf8.count ?? 0) <= 12_000)
+    }
+}
+
+@MainActor
+private final class PhoneCommandFixture {
+    let root: URL
+    let executable: URL
+    let settings: AppSettings
+    let store: SessionStore
+    let model: AppModel
+    private let defaultsName: String
+
+    init() throws {
+        root = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Caches/sigil-phone-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        executable = root.appendingPathComponent("fake-grok")
+        let script = "#!/bin/sh\nsleep 60\n"
+        try Data(script.utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        defaultsName = "sigil-phone-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: defaultsName))
+        settings = AppSettings(defaults: defaults)
+        settings.executablePath = executable.path
+        settings.defaultDirectory = root.path
+        store = SessionStore(root: root.appendingPathComponent("sessions"))
+        model = AppModel(
+            settings: settings, store: store, presentError: { _ in },
+            pairingStore: InMemoryRemotePairingStore())
+    }
+
+    func cleanup() {
+        model.closeAllTabsAndWait()
+        store.stop()
+        UserDefaults(suiteName: defaultsName)?.removePersistentDomain(forName: defaultsName)
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    func directory(_ name: String) throws -> URL {
+        let url = root.appendingPathComponent(name)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return URL(fileURLWithPath: GrokPaths.canonicalPath(url.path))
+    }
+
+    func writeSession(
+        id: String, cwd: String, summary: String, updatedAt: String, secret: String
+    ) throws {
+        let canonical = GrokPaths.canonicalPath(cwd)
+        let dir =
+            storeRoot
+            .appendingPathComponent(GrokPaths.encode(path: canonical))
+            .appendingPathComponent(id)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let json: [String: Any] = [
+            "info": ["id": id, "cwd": canonical],
+            "session_summary": summary,
+            "created_at": "2026-08-01T00:00:00Z",
+            "updated_at": updatedAt,
+            "num_chat_messages": 4,
+        ]
+        let data = try JSONSerialization.data(withJSONObject: json)
+        try data.write(to: dir.appendingPathComponent("summary.json"))
+        try Data(secret.utf8).write(to: dir.appendingPathComponent("transcript.txt"))
+    }
+
+    func command(
+        _ action: String, text: String? = nil, tabID: String? = nil, name: String? = nil, index: Int? = nil
+    ) -> RemoteReply {
+        RemoteCommands.execute(
+            RemoteRequest(
+                challenge: "test", sequence: 1, action: action, tabID: tabID, text: text, name: name, index: index),
+            model: model)
+    }
+
+    private var storeRoot: URL { root.appendingPathComponent("sessions") }
+}
+
+private func encoded(_ reply: RemoteReply) throws -> String {
+    let data = try JSONEncoder().encode(reply)
+    return String(decoding: data, as: UTF8.self)
 }

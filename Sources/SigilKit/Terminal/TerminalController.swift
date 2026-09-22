@@ -214,6 +214,26 @@ public final class TerminalController {
     /// snapshot: the report has to stay readable, not be complete.
     public func crashSnapshot() -> String { accessibilitySnapshot(maxCharacters: 4_000) }
 
+    /// Readable text immediately before the phone's already loaded window.
+    /// One slice is at most 12_000 characters. This does not widen `remoteSnapshot`.
+    public func remoteEarlierSlice(
+        before startAnchor: String,
+        endAnchor: String = "",
+        loadedCharacters: Int,
+        maxCharacters: Int = 12_000
+    ) -> String {
+        let limit = min(max(maxCharacters, 0), 12_000)
+        let needle = String(startAnchor.prefix(256))
+        guard !needle.isEmpty, loadedCharacters > 0, limit > 0 else { return "" }
+        let budget = min(max(loadedCharacters, needle.count) + limit + 128, 500_000)
+        let rendered = untrimmedReadableSuffix(maxCharacters: budget)
+        guard
+            let start = earlierAnchorStart(
+                needle, endAnchor: endAnchor, loadedCharacters: loadedCharacters, in: rendered)
+        else { return "" }
+        return String(rendered[..<start].suffix(limit))
+    }
+
     /// Uses the terminal's negotiated paste mode without changing the clipboard.
     /// Multiline input cannot be pasted safely when that mode is disabled.
     public func pasteRemoteText(_ text: String) -> Bool {
@@ -415,6 +435,51 @@ public final class TerminalController {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return readable.count > maxCharacters
             ? String(readable.suffix(maxCharacters)) : readable
+    }
+
+    /// Same row walk as `accessibilitySnapshot`, without trimming either end,
+    /// so a slice can abut the live tail instead of losing the boundary.
+    private func untrimmedReadableSuffix(maxCharacters: Int) -> String {
+        guard maxCharacters > 0 else { return "" }
+        let count = terminalRowCount()
+        guard count > 0 else { return "" }
+        var rows: [ScrollbackSearch.Row] = []
+        var characterCount = 0
+        for index in stride(from: count - 1, through: 0, by: -1) {
+            guard let row = terminalRow(at: index, preserveWrappedWidth: false) else { continue }
+            rows.append(row)
+            characterCount += row.text.count + 1
+            if characterCount >= maxCharacters { break }
+        }
+        rows.reverse()
+        let rendered = Self.accessibilitySafeText(Self.renderedText(rows))
+        return rendered.count > maxCharacters ? String(rendered.suffix(maxCharacters)) : rendered
+    }
+
+    private func earlierAnchorStart(
+        _ needle: String,
+        endAnchor: String,
+        loadedCharacters: Int,
+        in rendered: String
+    ) -> String.Index? {
+        guard !rendered.isEmpty else { return nil }
+        let fromEnd = min(max(loadedCharacters, needle.count), rendered.count)
+        let approx = rendered.index(rendered.endIndex, offsetBy: -fromEnd)
+        let slack = 2_000
+        let before = min(slack, rendered.distance(from: rendered.startIndex, to: approx))
+        let after = min(slack + needle.count, rendered.distance(from: approx, to: rendered.endIndex))
+        let windowStart = rendered.index(approx, offsetBy: -before)
+        let windowEnd = rendered.index(approx, offsetBy: after)
+        if windowStart < windowEnd, let range = rendered.range(of: needle, range: windowStart..<windowEnd) {
+            if endAnchor.isEmpty || rendered[range.lowerBound...].range(of: endAnchor) != nil {
+                return range.lowerBound
+            }
+        }
+        guard !endAnchor.isEmpty, let end = rendered.range(of: endAnchor, options: .backwards) else {
+            return rendered.range(of: needle)?.lowerBound
+        }
+        let region = rendered[..<end.upperBound]
+        return region.range(of: needle, options: .backwards)?.lowerBound
     }
 
     /// Finds the first missing row in O(log n), rather than walking all 10,000

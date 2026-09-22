@@ -215,3 +215,7 @@ body[data-compact="true"] header { padding-top: env(safe-area-inset-top); }
 body[data-compact="true"] .toolbar { padding-bottom: 0; }
 body[data-compact="true"] #terminal { padding-top: 0; }
 body[data-compact="true"] textarea { max-height: 52px; }
+#saved-heading { margin: 16px 0 8px; font-size: 13px; font-weight: 600; color: var(--muted); }
+#saved-list, #project-list { display: flex; flex-direction: column; gap: 4px; }
+#saved-list button, #project-list button { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left; padding: 12px; border-color: transparent; background: transparent; overflow-wrap: anywhere; }
+#saved-list small, #project-list small, #saved-empty, #project-empty { color: var(--muted); font-size: 12px; }
