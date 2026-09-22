@@ -77,6 +77,15 @@ struct SidebarView: View {
             clampKeyboardSelection()
             await prepareRename(forceReconfigure: false)
         }
+        .onChange(of: model.searchText) { _, query in
+            let top = visibleRowIDs().first
+            switch SidebarOrganization.selectionAfterQueryChange(query: query, topRowID: top) {
+            case .keep:
+                break
+            case .row(let id):
+                keyboardSelectionID = id
+            }
+        }
         .task {
             await restorePromptOnAppear()
         }
@@ -193,7 +202,7 @@ struct SidebarView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                    if listKind != .projectList, !pinned.isEmpty {
+                    if listKind != .projectList, listKind != .search, !pinned.isEmpty {
                         section("Pinned", count: pinned.count, isFirst: true) {
                             ForEach(pinned, id: \.directory) { session in
                                 sessionRow(
@@ -291,6 +300,14 @@ struct SidebarView: View {
                     containingProject: projectIndex[session.directory]
                 )
             }
+        case .search:
+            ForEach(listedSessions, id: \.directory) { session in
+                sessionRow(
+                    session,
+                    showsProject: true,
+                    containingProject: projectIndex[session.directory]
+                )
+            }
         case .projectSearch:
             projectGroupedSections(from: unpinned, afterPinned: afterPinned)
         case .archived:
@@ -301,7 +318,7 @@ struct SidebarView: View {
     private var listKind: SidebarListKind {
         SidebarOrganization.listKind(
             surface: model.sidebarSurface,
-            isSearching: !model.searchText.isEmpty
+            isSearching: SidebarOrganization.isSearching(model.searchText)
         )
     }
 
@@ -688,6 +705,8 @@ struct SidebarView: View {
                 pinnedIDs: model.pinnedProjects().map(\.id),
                 restIDs: model.unpinnedProjects().map(\.id)
             )
+        case .search:
+            return listedSessions.map { model.sessionKey($0) }
         case .recents, .projectChats, .projectSearch, .archived:
             return visiblePinned.map { model.sessionKey($0) }
                 + groupedUnpinnedSessions().map { model.sessionKey($0) }
@@ -700,6 +719,8 @@ struct SidebarView: View {
         switch listKind {
         case .recents, .projectChats:
             return unpinned
+        case .search:
+            return []
         case .projectSearch, .archived:
             return (model.pinnedProjects() + model.unpinnedProjects()).flatMap { project in
                 SidebarOrganization.listedRows(in: project, from: unpinned)
@@ -719,21 +740,19 @@ struct SidebarView: View {
     }
 
     private func handleEscape() -> KeyPress.Result {
-        if model.renamingSessionKey != nil {
+        switch SidebarOrganization.escapeAction(
+            isRenaming: model.renamingSessionKey != nil,
+            surface: model.sidebarSurface
+        ) {
+        case .cancelRename:
             model.cancelRename()
             focus = .list
-            return .handled
-        }
-        if !model.searchText.isEmpty {
-            model.searchText = ""
-            return .handled
-        }
-        if model.sidebarSurface != .folders {
+        case .leaveFolder:
             model.leaveProject()
-            return .handled
+        case .leaveList:
+            focus = nil
+            model.focusSelectedTerminal()
         }
-        focus = nil
-        model.focusSelectedTerminal()
         return .handled
     }
 

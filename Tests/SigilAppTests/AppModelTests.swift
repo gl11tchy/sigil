@@ -3094,7 +3094,7 @@ private final class ErrorBox {
 }
 
 @MainActor
-private final class ModelFixture {
+final class ModelFixture {
     let root: URL
     let grokHome: URL
     let executable: URL
