@@ -24,7 +24,8 @@ enum RightPanelMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// State for the right-hand utility panel: a scratch shell and a per-folder notes pad.
+/// State for the right-hand utility panel: a scratch shell and a per-conversation
+/// notes pad.
 ///
 /// The panel is deliberately independent of the tabs on the left. It follows the
 /// current tab's working folder when it opens, and then stays where the user put it.
@@ -35,7 +36,8 @@ final class RightPanel {
         static let isVisible = "panel.visible"
         static let mode = "panel.mode"
         static let width = "panel.width"
-        static let notes = "panel.notes"
+        /// Folder-keyed notes from before notes moved to per-conversation files.
+        static let legacyNotes = "panel.notes"
     }
 
     /// Kept in step with the window so a resize cannot squeeze the terminal away.
@@ -43,6 +45,7 @@ final class RightPanel {
     static let maxWidth: Double = 900
 
     private let defaults: UserDefaults
+    let notesStore: ConversationNotesStore
 
     var isVisible: Bool {
         didSet { defaults.set(isVisible, forKey: Key.isVisible) }
@@ -58,11 +61,9 @@ final class RightPanel {
     private(set) var shell: TerminalController?
     private(set) var shellDirectory: URL?
 
-    /// Notes text, keyed by folder path.
-    private var notesByPath: [String: String]
-
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, notesStore: ConversationNotesStore? = nil) {
         self.defaults = defaults
+        self.notesStore = notesStore ?? ConversationNotesStore()
         isVisible = defaults.bool(forKey: Key.isVisible)
         if let raw = defaults.string(forKey: Key.mode), let stored = RightPanelMode(rawValue: raw) {
             mode = stored
@@ -71,13 +72,6 @@ final class RightPanel {
         }
         let storedWidth = defaults.double(forKey: Key.width)
         width = storedWidth > 0 ? min(max(storedWidth, Self.minWidth), Self.maxWidth) : 380
-        if let data = defaults.data(forKey: Key.notes),
-            let decoded = try? JSONDecoder().decode([String: String].self, from: data)
-        {
-            notesByPath = decoded
-        } else {
-            notesByPath = [:]
-        }
     }
 
     // MARK: - Visibility
@@ -126,18 +120,35 @@ final class RightPanel {
 
     // MARK: - Notes
 
-    func notes(for directory: URL) -> String {
-        notesByPath[directory.path] ?? ""
+    /// The pad for one conversation; each tab knows its session ID from launch.
+    func notes(forSessionID sessionID: String) -> String {
+        notesStore.note(for: sessionID)
     }
 
-    func setNotes(_ text: String, for directory: URL) {
-        if text.isEmpty {
-            notesByPath.removeValue(forKey: directory.path)
-        } else {
-            notesByPath[directory.path] = text
-        }
-        if let data = try? JSONEncoder().encode(notesByPath) {
-            defaults.set(data, forKey: Key.notes)
+    func setNotes(_ text: String, forSessionID sessionID: String) {
+        notesStore.setNote(text, for: sessionID)
+    }
+
+    func deleteNotes(forSessionID sessionID: String) {
+        notesStore.deleteNote(for: sessionID)
+    }
+
+    /// Folder-keyed notes from the UserDefaults era. `AppModel` moves them onto
+    /// the newest conversation in each folder once the store has loaded.
+    var legacyFolderNotes: [String: String] {
+        guard let data = defaults.data(forKey: Key.legacyNotes),
+            let decoded = try? JSONDecoder().decode([String: String].self, from: data)
+        else { return [:] }
+        return decoded
+    }
+
+    /// Writes back the folder notes that could not be migrated yet (their folder
+    /// has no conversation), or removes the key when none remain.
+    func setLegacyFolderNotes(_ remaining: [String: String]) {
+        if remaining.isEmpty {
+            defaults.removeObject(forKey: Key.legacyNotes)
+        } else if let data = try? JSONEncoder().encode(remaining) {
+            defaults.set(data, forKey: Key.legacyNotes)
         }
     }
 }

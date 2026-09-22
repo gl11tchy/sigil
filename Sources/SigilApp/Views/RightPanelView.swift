@@ -70,15 +70,19 @@ struct RightPanelView: View {
                 PanelPlaceholder(text: "Starting a shell…")
             }
         case .notes:
-            let directory = model.currentDirectory
-            NotesPane(
-                directory: directory,
-                text: Binding(
-                    get: { panel.notes(for: directory) },
-                    set: { panel.setNotes($0, for: directory) }
+            if let tab = model.selectedTab, let sessionID = tab.sessionID {
+                NotesPane(
+                    title: model.title(for: tab),
+                    subtitle: tab.workingDirectory.abbreviatedPath,
+                    text: Binding(
+                        get: { panel.notes(forSessionID: sessionID) },
+                        set: { panel.setNotes($0, forSessionID: sessionID) }
+                    )
                 )
-            )
-            .id(directory.path)
+                .id(sessionID)
+            } else {
+                PanelPlaceholder(text: "Open a conversation to keep notes on it.")
+            }
         }
     }
 }
@@ -120,29 +124,30 @@ private struct ToolButton: View {
     }
 }
 
-/// A plain scratch pad, saved per working folder as the user types.
+/// A plain scratch pad, saved per conversation as the user types.
 private struct NotesPane: View {
-    let directory: URL
+    let title: String
+    let subtitle: String
     @Binding var text: String
     @Environment(\.palette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(directory.breadcrumbPath)
+            Text(title)
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(palette.textFaint)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .padding(.horizontal, 10)
                 .frame(height: 22, alignment: .leading)
-                .help(directory.abbreviatedPath)
+                .help("\(title) — \(subtitle)")
             TextEditor(text: $text)
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(palette.text)
                 .scrollContentBackground(.hidden)
                 .padding(.horizontal, 6)
                 .padding(.bottom, 6)
-                .accessibilityLabel("Notes for \(directory.abbreviatedPath)")
+                .accessibilityLabel("Notes for \(title)")
         }
         .background(palette.ground)
     }

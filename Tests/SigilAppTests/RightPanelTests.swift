@@ -10,16 +10,19 @@ import Testing
 struct RightPanelTests {
 
     @MainActor
-    private func makePanel() -> RightPanel {
+    private func makePanel() -> (RightPanel, URL) {
         let name = "RightPanelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!
         defaults.removePersistentDomain(forName: name)
-        return RightPanel(defaults: defaults)
+        let notesRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(name)
+        return (RightPanel(defaults: defaults, notesStore: ConversationNotesStore(root: notesRoot)), notesRoot)
     }
 
     @Test @MainActor
     func pickingTheShowingToolClosesThePanel() {
-        let panel = makePanel()
+        let (panel, notesRoot) = makePanel()
+        defer { try? FileManager.default.removeItem(at: notesRoot) }
         let directory = FileManager.default.homeDirectoryForCurrentUser
         panel.toggle(.notes, in: directory)
         #expect(panel.isVisible)
@@ -47,15 +50,30 @@ struct RightPanelTests {
     }
 
     @Test @MainActor
-    func notesAreKeptPerFolder() {
-        let panel = makePanel()
-        let a = URL(fileURLWithPath: "/tmp/project-a")
-        let b = URL(fileURLWithPath: "/tmp/project-b")
-        panel.setNotes("ports: 3000", for: a)
-        #expect(panel.notes(for: a) == "ports: 3000")
-        #expect(panel.notes(for: b) == "")
-        panel.setNotes("", for: a)
-        #expect(panel.notes(for: a) == "")
+    func notesAreKeptPerConversation() throws {
+        let (panel, notesRoot) = makePanel()
+        defer { try? FileManager.default.removeItem(at: notesRoot) }
+        panel.setNotes("ports: 3000", forSessionID: "session-a")
+        #expect(panel.notes(forSessionID: "session-a") == "ports: 3000")
+        #expect(panel.notes(forSessionID: "session-b") == "")
+
+        let file = notesRoot.appendingPathComponent("session-a.md")
+        #expect(try String(contentsOf: file, encoding: .utf8) == "ports: 3000")
+
+        panel.setNotes("", forSessionID: "session-a")
+        #expect(panel.notes(forSessionID: "session-a") == "")
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+    }
+
+    @Test @MainActor
+    func legacyFolderNotesSurfaceForMigration() throws {
+        let (panel, notesRoot) = makePanel()
+        defer { try? FileManager.default.removeItem(at: notesRoot) }
+        let legacy = ["/tmp/project-a": "ports: 3000"]
+        panel.setLegacyFolderNotes(legacy)
+        #expect(panel.legacyFolderNotes == legacy)
+        panel.setLegacyFolderNotes([:])
+        #expect(panel.legacyFolderNotes.isEmpty)
     }
 
     @Test func windowColumnsDivideTheWidthWithoutOverflowing() {
