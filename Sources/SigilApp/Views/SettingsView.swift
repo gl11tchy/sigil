@@ -100,10 +100,11 @@ struct SettingsView: View {
                 }
             }
 
-            Picker("Default model", selection: Bindable(model.settings).model) {
+            Picker("Default model", selection: modelSelection) {
                 Text("CLI default").tag("")
                 ForEach(
-                    GrokModelCatalog.choices(listed: listedModels, saved: model.settings.model),
+                    GrokModelCatalog.choices(
+                        listed: listedModels, saved: model.settings.model),
                     id: \.self
                 ) { name in
                     Text(name).monospaced().tag(name)
@@ -154,7 +155,8 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .task {
+        .onAppear { normalizeStoredModel() }
+        .task(id: model.settings.executablePath) {
             let found = await GrokModelCatalog.load(executable: model.settings.executableURL)
             if !found.isEmpty { listedModels = found }
         }
@@ -187,6 +189,18 @@ struct SettingsView: View {
                 settingsError = error.localizedDescription
             }
         }
+    }
+
+    private var modelSelection: Binding<String> {
+        Binding(
+            get: { GrokModelCatalog.normalized(model.settings.model) },
+            set: { model.settings.model = $0 }
+        )
+    }
+
+    private func normalizeStoredModel() {
+        let clean = GrokModelCatalog.normalized(model.settings.model)
+        if model.settings.model != clean { model.settings.model = clean }
     }
 
     private var draftExecutableExists: Bool {

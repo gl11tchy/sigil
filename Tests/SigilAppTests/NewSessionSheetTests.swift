@@ -79,9 +79,44 @@ struct NewSessionSheetTests {
         #expect(arc.width > 9 && arc.width < 11)
         #expect(arc.height > 9 && arc.height < 11)
 
-        let mark = SVGPath.bounds(of: GrokMark.pathData)
+        let mark = SVGPath.bounds(of: ProviderMarks.data(for: .grokBuild))
         #expect(mark.width > 20)
         #expect(mark.height > 20)
+    }
+
+    @Test(arguments: CLIProvider.allCases)
+    func everyProviderHasAFallbackMark(provider: CLIProvider) {
+        let box = SVGPath.bounds(of: ProviderMarks.data(for: provider))
+        #expect(box.width > 8)
+        #expect(box.height > 8)
+    }
+
+    @Test func modelDiscoveryUsesTheLoginShell() {
+        let zsh = GrokModelCatalog.launch(executable: "/usr/local/bin/grok", shellPath: "/bin/zsh")
+        #expect(zsh.executable == "/bin/zsh")
+        #expect(
+            zsh.arguments == [
+                "-lic", "exec \"$@\"", "sigil-grok-models", "/usr/local/bin/grok", "models",
+            ]
+        )
+        let direct = GrokModelCatalog.launch(executable: "/usr/local/bin/grok", shellPath: "/bin/echo")
+        #expect(direct.executable == "/usr/local/bin/grok")
+        #expect(direct.arguments == ["models"])
+    }
+
+    @Test func aModelNameKeepsNoSurroundingSpace() {
+        #expect(GrokModelCatalog.normalized("  grok-4.7  ") == "grok-4.7")
+    }
+
+    @Test func stoppingAProcessThatIgnoresTermKillsIt() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "trap '' TERM; sleep 30"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        GrokModelCatalog.stop(process)
+        #expect(!process.isRunning)
     }
 
     @Test @MainActor
