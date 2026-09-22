@@ -22,6 +22,8 @@ function remoteFileName(name) {
 }
 let tabsSignature = '';
 let sessionTabs = [], canRestart = false;
+const histories = new Map();
+let pendingEarlier = null, earlierFlight = false, searchToken = 0;
 let findIndex = 0, findMatches = [], displayedOutput = null;
 let rawOutput = '', rawMode = false;
 let credential, bootstrap, newDeviceKey, socket, challenge, sequence = 0, selected;
@@ -68,7 +70,7 @@ function updateControls() {
   $('stop').hidden = selectedStatus !== 'working';
   $('restart').hidden = !ended || !canRestart;
   $('copy-output').hidden = !selected;
-  $('sessions-toggle').hidden = !selected && !tabCount;
+  $('sessions-toggle').hidden = !connected;
   $('session-status').textContent = !connected ? 'Reconnecting · draft kept' : ({ working: 'Working', starting: 'Starting…', idle: 'Ready', exited: 'Session ended' }[selectedStatus] || 'No session');
   $('session-status').dataset.state = connected ? selectedStatus || '' : 'offline';
   $('compose-status').textContent = busy ? 'Sending…' : !connected && selected ? 'Offline · draft kept' : ended ? 'Session ended' : '';
@@ -105,6 +107,69 @@ function offline(message = 'Disconnected') {
   pending.clear();
   updateControls();
 }
+function historyFor(id) {
+  if (!histories.has(id)) histories.set(id, { history: '', tail: '', exhausted: false });
+  return histories.get(id);
+}
+function overlapSuffixPrefix(left, right) {
+  if (!left || !right) return 0;
+  const max = Math.min(left.length, right.length);
+  const begin = left.length - max;
+  const first = right[0];
+  for (let i = begin; i < left.length; i++) {
+    if (left[i] !== first) continue;
+    if (right.startsWith(left.slice(i))) return left.length - i;
+  }
+  return 0;
+}
+function applyTail(bucket, next) {
+  const loaded = bucket.history + bucket.tail;
+  if (!loaded) { bucket.tail = next; return; }
+  if (next && loaded.endsWith(next)) {
+    bucket.history = loaded.slice(0, loaded.length - next.length);
+    bucket.tail = next;
+    return;
+  }
+  const overlap = overlapSuffixPrefix(loaded, next);
+  if (overlap > 0) {
+    bucket.history = loaded.slice(0, loaded.length - overlap);
+    bucket.tail = next;
+    return;
+  }
+  bucket.history = loaded;
+  bucket.tail = next;
+}
+function prependSlice(bucket, slice) {
+  if (typeof slice !== 'string' || new TextEncoder().encode(slice).length > 12_000) {
+    bucket.exhausted = true;
+    return;
+  }
+  if (!slice) { bucket.exhausted = true; return; }
+  const loaded = bucket.history + bucket.tail;
+  const overlap = overlapSuffixPrefix(slice, loaded);
+  const addition = slice.slice(0, slice.length - overlap);
+  if (!addition || bucket.history.length + addition.length > 400_000) {
+    bucket.exhausted = true;
+    return;
+  }
+  bucket.history = addition + bucket.history;
+}
+function takeChars(text, count) {
+  return [...text].slice(0, count).join('');
+}
+function takeEnd(text, count) {
+  const chars = [...text];
+  return chars.slice(Math.max(0, chars.length - count)).join('');
+}
+function utf8Limited(text, bytes) {
+  const encoder = new TextEncoder();
+  let out = '';
+  for (const ch of text) {
+    if (encoder.encode(out + ch).length > bytes) break;
+    out += ch;
+  }
+  return out;
+}
 function render(state) {
   if (!state || !Array.isArray(state.tabs) || state.tabs.length > 100 || typeof state.terminal !== 'string') throw new Error('Invalid Mac response');
   if (state.tabsTruncated !== undefined && typeof state.tabsTruncated !== 'boolean') throw new Error('Invalid Mac response');
@@ -122,6 +187,14 @@ function render(state) {
   }
   sessionTabs = state.tabs;
   canRestart = Array.isArray(state.capabilities) && state.capabilities.includes('restart');
+  const bucket = nextSelected ? historyFor(nextSelected) : null;
+  if (bucket) {
+    applyTail(bucket, state.terminal);
+    if (pendingEarlier) {
+      if (pendingEarlier.tabID === nextSelected) prependSlice(bucket, pendingEarlier.slice);
+      pendingEarlier = null;
+    }
+  }
   const changedSession = selected !== nextSelected;
   if (changedSession) {
     if (selected) drafts.set(selected, $('message').value);
@@ -133,6 +206,7 @@ function render(state) {
   // Absence from a capped snapshot is not evidence that a tab closed.
   // Older Macs omit the flag, so treat a full 100-row response conservatively.
   const completeTabList = state.tabsTruncated === undefined ? state.tabs.length < 100 : !state.tabsTruncated;
+  if (completeTabList) for (const id of histories.keys()) if (!ids.has(id)) histories.delete(id);
   for (const id of drafts.keys()) { if (completeTabList && !ids.has(id)) drafts.delete(id); }
   for (const id of attachmentDrafts.keys()) {
     if (completeTabList && !ids.has(id)) {
@@ -153,7 +227,7 @@ function render(state) {
   $('tabs').value = selected || '';
   $('welcome').hidden = true;
   $('controls').hidden = false;
-  rawOutput = state.terminal;
+  rawOutput = bucket ? bucket.history + bucket.tail : state.terminal;
   $('session-toolbar').hidden = false;
   $('brand').hidden = false;
   if ($('sessions-dialog').open) renderSessionList();
@@ -212,6 +286,77 @@ function renderSessionList() {
   }));
   if (focusedID) (nextFocus || $('session-search')).focus();
 }
+function searchSaved() {
+  renderSessionList();
+  const query = $('session-search').value.trim();
+  const token = ++searchToken;
+  if (!query || !$('sessions-dialog').open) { renderSaved([]); return; }
+  request('chats', query).then(reply => {
+    if (token !== searchToken || $('session-search').value.trim() !== query) return;
+    renderSaved(Array.isArray(reply.chats) ? reply.chats : []);
+  }).catch(error => { if (token === searchToken) showError(error.message); });
+}
+function renderSaved(chats) {
+  const query = $('session-search').value.trim();
+  const safe = [];
+  if (query) {
+    for (const chat of chats.slice(0, 40)) {
+      if (!chat || typeof chat.id !== 'string' || typeof chat.title !== 'string' || typeof chat.folder !== 'string') continue;
+      if (!chat.id || chat.id.length > 80 || chat.title.length > 300 || chat.folder.length > 4_096) continue;
+      if (/[\u0000-\u001F]/.test(chat.id) || /[\u0000-\u001F]/.test(chat.folder)) continue;
+      safe.push({ id: chat.id, title: chat.title, folder: chat.folder });
+    }
+  }
+  const heading = $('saved-heading');
+  if (heading) heading.hidden = !query;
+  const empty = $('saved-empty');
+  if (empty) empty.hidden = !query || safe.length > 0;
+  $('saved-list').replaceChildren(...safe.map(chat => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    const title = document.createElement('span');
+    title.textContent = chat.title;
+    const folder = document.createElement('small');
+    folder.textContent = chat.folder;
+    button.append(title, folder);
+    button.onclick = () => {
+      if (!connected || busy) return;
+      const id = chat.id, folderPath = chat.folder;
+      void perform(async () => {
+        await request('open', folderPath, undefined, false, { name: id });
+        $('sessions-dialog').close();
+      });
+    };
+    return button;
+  }));
+}
+function renderProjects(projects) {
+  const safe = [];
+  for (const project of (Array.isArray(projects) ? projects : []).slice(0, 40)) {
+    if (!project || typeof project.name !== 'string' || typeof project.folder !== 'string') continue;
+    if (!project.name || !project.folder || project.folder.length > 4_096) continue;
+    if (/[\u0000-\u001F]/.test(project.folder)) continue;
+    safe.push({ name: project.name, folder: project.folder });
+  }
+  const empty = $('project-empty');
+  if (empty) empty.hidden = safe.length > 0;
+  $('project-list').replaceChildren(...safe.map(project => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    const name = document.createElement('span');
+    name.textContent = project.name;
+    const folder = document.createElement('small');
+    folder.textContent = project.folder;
+    button.append(name, folder);
+    button.onclick = () => {
+      const folderPath = project.folder;
+      $('project-dialog').close();
+      void perform(() => request('new', folderPath));
+    };
+    return button;
+  }));
+  $('project-dialog').showModal();
+}
 function paintOutput() {
   const output = displayedOutput || '';
   const query = $('find-bar').hidden ? '' : $('find-query').value;
@@ -253,11 +398,13 @@ function closeFind() {
 }
 $('sessions-toggle').onclick = () => {
   $('session-search').value = '';
+  searchToken++;
+  renderSaved([]);
   renderSessionList(); $('sessions-dialog').showModal(); $('session-search').focus();
 };
 $('sessions-close').onclick = () => $('sessions-dialog').close();
 $('sessions-dialog').addEventListener('close', () => { if (!$('sessions-toggle').hidden) $('sessions-toggle').focus(); });
-$('session-search').oninput = renderSessionList;
+$('session-search').oninput = searchSaved;
 $('find-toggle').onclick = () => {
   $('find-bar').hidden = false; $('find-toggle').setAttribute('aria-expanded', 'true');
   $('find-query').focus(); paintOutput();
@@ -386,6 +533,9 @@ function connect() {
           credential.ticket = reply.ticket;
           try { await storage('put', credential); } catch { /* keep the in-memory ticket */ }
         }
+        if (item.action === 'earlier') pendingEarlier = {
+          tabID: item.tabID, slice: typeof reply.earlier === 'string' ? reply.earlier : '',
+        };
         if (reply.state) {
           // Restart replaces the Mac tab ID. Move drafts before pruning closed tabs.
           const next = reply.restartedTabID;
@@ -565,7 +715,22 @@ $('raw-toggle').onclick = () => {
   renderOutput(true);
 };
 $('message').oninput = () => { resizeMessage(); updateControls(); };
-$('terminal').onscroll = updateLatest;
+function maybeLoadEarlier() {
+  const terminal = $('terminal');
+  if (!connected || !selected || earlierFlight) return;
+  const bucket = historyFor(selected);
+  if (bucket.exhausted || terminal.scrollHeight <= terminal.clientHeight || terminal.scrollTop > 48) return;
+  const loaded = bucket.history + bucket.tail;
+  if (!loaded) return;
+  const end = utf8Limited(takeEnd(loaded, 40), 80);
+  if (!end) return;
+  earlierFlight = true;
+  const tabID = selected;
+  request('earlier', takeChars(loaded, 80), tabID, false, { name: end, index: loaded.length })
+    .catch(error => { showError(error.message); })
+    .finally(() => { earlierFlight = false; });
+}
+$('terminal').onscroll = () => { updateLatest(); maybeLoadEarlier(); };
 $('latest').onclick = () => { $('terminal').scrollTop = $('terminal').scrollHeight; updateLatest(); };
 $('keys-toggle').onclick = () => {
   const terminal = $('terminal');
@@ -579,7 +744,12 @@ $('keys-toggle').onclick = () => {
 $('compose').onsubmit = event => { event.preventDefault(); void perform(() => sendText(true)); };
 $('paste').onclick = () => void perform(() => sendText(false));
 $('tabs').onchange = () => void perform(() => request('select', undefined, $('tabs').value));
-$('new').onclick = () => void perform(() => request('new'));
+$('new').onclick = () => void perform(async () => {
+  const reply = await request('projects');
+  renderProjects(reply.projects);
+});
+$('project-cancel').onclick = () => $('project-dialog').close();
+$('project-dialog').addEventListener('close', () => { if (!$('new').disabled) $('new').focus(); });
 async function interrupt() {
   if (!connected || !selected) return;
   try { await request('key', 'interrupt'); }
@@ -616,7 +786,8 @@ $('forget').onclick = async () => {
   $('keys').hidden = true; $('keys-toggle').setAttribute('aria-expanded', 'false');
   clearAttachments();
   rawOutput = ''; rawMode = false; displayedOutput = null;
-  sessionTabs = []; $('sessions-dialog').close(); closeFind();
+  histories.clear(); pendingEarlier = null; earlierFlight = false; searchToken++;
+  sessionTabs = []; $('sessions-dialog').close(); $('project-dialog').close(); closeFind();
   $('raw-toggle').setAttribute('aria-pressed', 'false'); $('raw-toggle').textContent = 'Show raw terminal';
   $('session-toolbar').hidden = true; $('brand').hidden = false;
   $('terminal').textContent = ''; $('message').value = ''; $('controls').hidden = true; $('welcome').hidden = false;

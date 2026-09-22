@@ -199,6 +199,54 @@ enum SessionScanner: Sendable {
         }
     }
 
+    /// Closest title first. Exact beats a prefix, a prefix beats a title that
+    /// contains the query, and any title hit beats a folder or path hit.
+    /// Titles compare without case. Transcript text is not a field.
+    enum SearchRank: Int, Sendable {
+        case exactTitle = 0
+        case titlePrefix = 1
+        case titleContains = 2
+        case folderOrPath = 3
+    }
+
+    static func searchRank(
+        _ session: GrokSession,
+        query: String,
+        displayedTitle: String? = nil
+    ) -> SearchRank? {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return nil }
+        var best: SearchRank?
+        var seen = Set<String>()
+        for candidate in [displayedTitle, session.title] {
+            guard let candidate, seen.insert(candidate).inserted else { continue }
+            guard let rank = titleRank(candidate, query: trimmed) else { continue }
+            if let current = best, rank.rawValue >= current.rawValue { continue }
+            best = rank
+        }
+        if let best { return best }
+        if matches(session, query: trimmed, displayedTitle: displayedTitle) {
+            return .folderOrPath
+        }
+        return nil
+    }
+
+    private static func titleRank(_ title: String, query: String) -> SearchRank? {
+        let foldedTitle = SearchMatchHighlight.fold(
+            title.trimmingCharacters(in: .whitespacesAndNewlines))
+        let foldedQuery = SearchMatchHighlight.fold(
+            query.trimmingCharacters(in: .whitespacesAndNewlines))
+        if foldedTitle.isEmpty || foldedQuery.isEmpty { return nil }
+        if foldedTitle == foldedQuery { return .exactTitle }
+        if foldedTitle.hasPrefix(foldedQuery) { return .titlePrefix }
+        if foldedTitle.contains(foldedQuery) { return .titleContains }
+        let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        if !terms.isEmpty, terms.allSatisfy({ SearchMatchHighlight.contains(title, query: $0) }) {
+            return .titleContains
+        }
+        return nil
+    }
+
     static func grouped(_ sessions: [GrokSession]) -> [(cwd: String, sessions: [GrokSession])] {
         var groups: [String: [GrokSession]] = [:]
         var order: [String] = []
