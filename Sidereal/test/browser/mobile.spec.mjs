@@ -43,6 +43,13 @@ async function pair(page, origin, initialOutput, options = {}) {
         if (request.action === 'pair') key = await importKey(request.text);
         if (request.action === 'select') selected = request.tabID;
         if (request.action === 'new') selected = 'two';
+        const projects = request.action === 'projects'
+          ? (options.projects ?? [{ name: 'Release checks', folder: '/tmp/release' }]) : undefined;
+        const chats = request.action === 'chats'
+          ? (options.chats ?? []).filter(chat => `${chat.title} ${chat.folder}`.toLowerCase().includes(String(request.text || '').toLowerCase()))
+          : undefined;
+        const earlier = request.action === 'earlier'
+          ? (typeof options.earlier === 'string' ? options.earlier : '') : undefined;
         if (options.rejectAction === request.action) {
           ws.send(JSON.stringify({ peer, data: await seal({ challenge, sequence: request.sequence, ok: false, error: 'Test action refused.' }, key, 'mac') }));
           return;
@@ -56,7 +63,11 @@ async function pair(page, origin, initialOutput, options = {}) {
           { id: outputs.restarted ? 'restarted' : 'one', title: 'Mobile layout review', status: outputs.restarted ? 'idle' : options.statuses?.one ?? 'working' },
           { id: 'two', title: 'Release checks', status: options.statuses?.two ?? 'idle' }],
           selectedTabID: selected, terminal: outputs[selected], capabilities: options.restart ? ['restart'] : [] };
-        ws.send(JSON.stringify({ peer, data: await seal({ challenge, sequence: request.sequence, ok: true, ticket, state, restartedTabID: request.action === 'restart' && options.restart ? 'restarted' : undefined }, key, 'mac') }));
+        const payload = { challenge, sequence: request.sequence, ok: true, ticket, state, restartedTabID: request.action === 'restart' && options.restart ? 'restarted' : undefined };
+        if (projects) payload.projects = projects;
+        if (chats) payload.chats = chats;
+        if (earlier !== undefined) payload.earlier = earlier;
+        ws.send(JSON.stringify({ peer, data: await seal(payload, key, 'mac') }));
       }
     }).catch(error => errors.push(error));
   };
@@ -283,6 +294,7 @@ test('idle desktop chrome becomes one composer, with lossless raw output availab
     await expect.poll(() => mac.actions.filter(a => a.text === 'interrupt').length).toBe(1);
     await page.locator('#keys-toggle').click();
     await page.locator('#new').click();
+    await page.getByRole('button', { name: 'Release checks' }).click();
     await expect(page.locator('#terminal')).toContainText('Release checks');
   } finally { mac.close(); }
 });
