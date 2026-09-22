@@ -76,7 +76,6 @@ function isTurnChrome(line, previous) {
   const peeled = peelSpinner(whole);
   if (peeled && peeled !== whole && TURN_STATUS.test(peeled)) return true;
   if (/^\d+[hms]?[\d.]*s?\s*[↓⬇]/.test(whole) || /^\d+[hms]?[\d.]*s?\s*[↓⬇]/.test(peeled)) return true;
-  if (/\[stop\]\s*$/i.test(peeled) && /[↓⬇]/.test(peeled)) return true;
   if (/^\d{1,2}:\d{2} [AP]M$/.test(whole) || /^\d{1,2}:\d{2} [AP]M$/.test(peeled)) return Boolean(previous);
   if (/^∴\s/.test(whole) || /^∴\s/.test(peeled)) return true;
   return false;
@@ -104,7 +103,7 @@ function isProseWrap(previous, line) {
 }
 
 function unwrapTuiFrame(line) {
-  const trimmed = line.trimEnd().replace(new RegExp(`^[${SPINNER}]+[ \\t]*`), '');
+  const trimmed = line.trimEnd();
   const framed = /^[ \t]*[│|]/.test(trimmed) && /[│|]$/.test(trimmed);
   if (framed) {
     const inner = trimmed.replace(/^[ \t]*[│|]/, '').replace(/[│|]\s*$/, '');
@@ -112,8 +111,8 @@ function unwrapTuiFrame(line) {
     const words = inner.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
     const continuation = /^[ \t]{2,}\S/.test(inner);
     const timed = /\d{1,2}:\d{2} [AP]M/.test(inner);
-    const padded = /^[ \t]{2,}/.test(inner) || /[ \t]{2,}$/.test(inner);
-    if (!timed && !continuation && !padded && words.length < 4) return { line: trimmed, bubble: false };
+    const indented = /^[ \t]{2,}/.test(inner);
+    if (!timed && !continuation && !indented && words.length < 4) return { line: trimmed, bubble: false };
     return { line: inner.trim(), bubble: true };
   }
 

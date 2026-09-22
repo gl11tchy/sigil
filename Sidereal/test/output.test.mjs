@@ -301,3 +301,21 @@ test('unwraps a one-space unicode gutter and a short padded TUI row', () => {
   );
 });
 
+test('keeps padded single-column table cells', () => {
+  const table = 'Table:\n┌────────┐\n│ OK     │\n└────────┘';
+  assert.equal(readableOutput(table), table);
+});
+
+test('keeps list and status markers that are not spinner chrome', () => {
+  assert.equal(readableOutput('● passed'), '● passed');
+  assert.equal(readableOutput('○ pending\n■ blocked\n▪ queued'), '○ pending\n■ blocked\n▪ queued');
+  assert.equal(readableOutput('⣿ GPU utilization'), '⣿ GPU utilization');
+});
+
+test('keeps documentation that mentions a stop control', () => {
+  assert.equal(
+    readableOutput('Use the ↓ control labeled [stop]'),
+    'Use the ↓ control labeled [stop]',
+  );
+});
+
