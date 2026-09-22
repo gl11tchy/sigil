@@ -216,8 +216,8 @@ enum RemoteCommands {
         return Array(items.dropFirst(start).prefix(pageSize))
     }
 
-    /// Plaintext has to stay under the sealed-frame cap. Shorten a list before
-    /// dropping it, and never report a shortened list as an empty success.
+    /// Plaintext has to stay under the sealed-frame cap. Shrink the terminal
+    /// before shortening a list, so a large snapshot cannot wipe real matches.
     static func fitting(_ reply: RemoteReply) -> RemoteReply {
         var reply = reply
         func fits() -> Bool { encodedCount(reply) <= 48_000 }
@@ -225,6 +225,10 @@ enum RemoteCommands {
         reply.earlier = reply.earlier.map { boundedSuffix($0, bytes: 4_000) }
         if fits() { return reply }
         reply.earlier = nil
+        if fits() { return reply }
+        reply = shrinkTerminal(reply, bytes: 4_000)
+        if fits() { return reply }
+        reply = shrinkTerminal(reply, bytes: 0)
         if fits() { return reply }
         while !fits(), let chats = reply.chats, !chats.isEmpty {
             reply.chats = Array(chats.dropLast())
@@ -234,24 +238,6 @@ enum RemoteCommands {
             reply.projects = Array(projects.dropLast())
             reply.projectsTruncated = true
         }
-        if !fits(), let state = reply.state {
-            reply.state = RemoteState(
-                tabs: state.tabs,
-                selectedTabID: state.selectedTabID,
-                terminal: boundedSuffix(state.terminal, bytes: 4_000),
-                capabilities: state.capabilities,
-                tabsTruncated: state.tabsTruncated
-            )
-        }
-        if !fits(), let state = reply.state {
-            reply.state = RemoteState(
-                tabs: state.tabs,
-                selectedTabID: state.selectedTabID,
-                terminal: "",
-                capabilities: state.capabilities,
-                tabsTruncated: state.tabsTruncated
-            )
-        }
         if !fits() {
             if reply.chats == nil, reply.projects == nil, reply.earlier == nil {
                 reply.state = nil
@@ -260,6 +246,19 @@ enum RemoteCommands {
                 reply.error = "That list is too long."
             }
         }
+        return reply
+    }
+
+    private static func shrinkTerminal(_ reply: RemoteReply, bytes: Int) -> RemoteReply {
+        guard let state = reply.state else { return reply }
+        var reply = reply
+        reply.state = RemoteState(
+            tabs: state.tabs,
+            selectedTabID: state.selectedTabID,
+            terminal: bytes == 0 ? "" : boundedSuffix(state.terminal, bytes: bytes),
+            capabilities: state.capabilities,
+            tabsTruncated: state.tabsTruncated
+        )
         return reply
     }
 
