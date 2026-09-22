@@ -380,6 +380,27 @@ struct RemoteCommandsTests {
         #expect(!String(decoding: data, as: UTF8.self).contains("SECRET_WIDE"))
     }
 
+    @Test @MainActor func anOversizedStateIsShrunkInsteadOfCalledAListFailure() throws {
+        let tabs = (0..<100).map { index in
+            RemoteState.Tab(
+                id: String(format: "tab-%03d", index),
+                title: String(repeating: "\"", count: 96),
+                status: "working")
+        }
+        let state = RemoteState(
+            tabs: tabs,
+            selectedTabID: tabs[0].id,
+            terminal: String(repeating: "\n", count: 12_000))
+        let reply = RemoteCommands.fitting(
+            RemoteReply(challenge: "test", sequence: 1, state: state))
+        #expect(reply.ok)
+        #expect(reply.error == nil)
+        #expect(reply.chats == nil)
+        #expect(reply.projects == nil)
+        let data = try JSONEncoder().encode(reply)
+        #expect(data.count <= 48_000)
+    }
+
     @Test @MainActor func earlierReplyKeepsTheLiveTail() async throws {
         let fixture = try PhoneCommandFixture()
         defer { fixture.cleanup() }

@@ -136,7 +136,21 @@ function applyTail(bucket, next) {
     bucket.tail = next;
     return;
   }
+  const shared = commonPrefixLength(bucket.tail, next);
+  const shorter = Math.min(bucket.tail.length, next.length);
+  if (shorter > 0 && shared * 2 >= shorter) {
+    bucket.tail = next;
+    return;
+  }
+  const room = 400_000 - bucket.history.length;
+  if (room > 0) bucket.history += bucket.tail.slice(0, room);
   bucket.tail = next;
+}
+function commonPrefixLength(left, right) {
+  const count = Math.min(left.length, right.length);
+  let index = 0;
+  while (index < count && left[index] === right[index]) index += 1;
+  return index;
 }
 function prependSlice(bucket, slice) {
   if (typeof slice !== 'string' || new TextEncoder().encode(slice).length > 12_000) {
@@ -293,7 +307,7 @@ function searchSaved() {
   renderSaved([], { pending: true });
   request('chats', query).then(reply => {
     if (token !== searchToken || $('session-search').value.trim() !== query) return;
-    renderSaved(reply.chats);
+    renderSaved(reply.chats, { truncated: reply.chatsTruncated === true });
   }).catch(error => { if (token === searchToken) showError(error.message); });
 }
 function renderSaved(chats, options = {}) {
@@ -312,11 +326,16 @@ function renderSaved(chats, options = {}) {
   if (heading) heading.hidden = !query;
   const empty = $('saved-empty');
   if (empty) {
-    empty.hidden = !query || safe.length > 0 || options.pending === true;
-    if (query && safe.length === 0 && !options.pending && !Array.isArray(chats)) {
-      empty.textContent = 'The list was too long. Narrow the search.';
-    } else if (empty.textContent !== 'No matching chats.') {
-      empty.textContent = 'No matching chats.';
+    if (options.truncated === true && safe.length > 0) {
+      empty.hidden = false;
+      empty.textContent = 'Showing the first matches.';
+    } else {
+      empty.hidden = !query || safe.length > 0 || options.pending === true;
+      if (query && safe.length === 0 && !options.pending && !Array.isArray(chats)) {
+        empty.textContent = 'The list was too long. Narrow the search.';
+      } else if (empty.textContent !== 'No matching chats.') {
+        empty.textContent = 'No matching chats.';
+      }
     }
   }
   $('saved-list').replaceChildren(...safe.map(chat => {
@@ -349,7 +368,7 @@ function projectButton(nameText, folderText, onClick) {
   button.onclick = onClick;
   return button;
 }
-function renderProjects(projects, offset = 0) {
+function renderProjects(projects, offset = 0, truncated = false) {
   const safe = [];
   for (const project of (Array.isArray(projects) ? projects : []).slice(0, 40)) {
     if (!project || typeof project.name !== 'string' || typeof project.folder !== 'string') continue;
@@ -358,17 +377,20 @@ function renderProjects(projects, offset = 0) {
     safe.push({ name: project.name, folder: project.folder });
   }
   const list = $('project-list');
-  const kept = offset === 0 ? [] : (list.children || []).filter(button => button.dataset.more !== 'true');
+  const kept = offset === 0 ? [] : Array.from(list.children || []).filter(button => button.dataset.more !== 'true');
   const buttons = safe.map(project => projectButton(project.name, project.folder, () => {
+    if (!connected || busy) return;
     const folderPath = project.folder;
     $('project-dialog').close();
     void perform(() => request('new', folderPath));
   }));
-  if (safe.length === 40) {
+  if (safe.length > 0 && (safe.length === 40 || truncated)) {
+    const next = offset + safe.length;
     const more = projectButton('More projects', 'Show the next folders', () => {
+      if (!connected || busy) return;
       void perform(async () => {
-        const reply = await request('projects', undefined, undefined, false, { index: offset + 40 });
-        renderProjects(reply.projects, offset + 40);
+        const reply = await request('projects', undefined, undefined, false, { index: next });
+        renderProjects(reply.projects, next, reply.projectsTruncated === true);
       });
     });
     more.dataset.more = 'true';
@@ -376,6 +398,7 @@ function renderProjects(projects, offset = 0) {
   }
   if (offset === 0 && safe.length === 0) {
     buttons.push(projectButton('Current folder', 'The folder Sigil uses for a new session', () => {
+      if (!connected || busy) return;
       $('project-dialog').close();
       void perform(() => request('new'));
     }));
@@ -774,7 +797,7 @@ $('paste').onclick = () => void perform(() => sendText(false));
 $('tabs').onchange = () => void perform(() => request('select', undefined, $('tabs').value));
 $('new').onclick = () => void perform(async () => {
   const reply = await request('projects');
-  renderProjects(reply.projects, 0);
+  renderProjects(reply.projects, 0, reply.projectsTruncated === true);
 });
 $('project-cancel').onclick = () => $('project-dialog').close();
 $('project-dialog').addEventListener('close', () => { if (!$('new').disabled) $('new').focus(); });

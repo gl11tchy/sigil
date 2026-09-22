@@ -606,6 +606,28 @@ test('a new chat asks which project and cancel does not start one', async () => 
   assert.equal(socket.sent.at(-1).text, '/work/widget');
 });
 
+test('a snapshot with no overlap keeps the previous tail', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  await page.fireTimer(1000);
+  const first = socket.sent.at(-1);
+  socket.receive({ data: JSON.stringify({
+    challenge: first.challenge, sequence: first.sequence, ok: true,
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'OLD_TAIL_MARKER' },
+  }) });
+  await settle();
+  await page.fireTimer(1000);
+  const next = socket.sent.at(-1);
+  socket.receive({ data: JSON.stringify({
+    challenge: next.challenge, sequence: next.sequence, ok: true,
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'NEW_WINDOW_ONLY' },
+  }) });
+  await settle();
+  const text = page.element('terminal').textContent;
+  assert.match(text, /OLD_TAIL_MARKER/);
+  assert.match(text, /NEW_WINDOW_ONLY/);
+});
+
 test('a redraw replaces the live tail instead of appending it', async () => {
   const page = await browser();
   const socket = await page.authorize();
@@ -624,7 +646,9 @@ test('a redraw replaces the live tail instead of appending it', async () => {
     state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'task [|]' },
   }) });
   await settle();
-  assert.equal(page.element('terminal').textContent, 'task [|]');
+  const text = page.element('terminal').textContent;
+  assert.equal(text.includes('task [\\]'), false);
+  assert.equal(text.includes('task [|]'), true);
 });
 
 test('a new search clears the previous saved chats before the reply', async () => {
@@ -650,6 +674,25 @@ test('a new search clears the previous saved chats before the reply', async () =
   assert.equal(second.action, 'chats');
   assert.equal(second.text, 'two');
   assert.equal(socket.sent.filter(item => item.action === 'open').length, 0);
+});
+
+test('a shortened chat list says it is partial', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('sessions-toggle').onclick();
+  page.element('session-search').value = 'wide';
+  page.element('session-search').oninput();
+  await settle();
+  const request = socket.sent.at(-1);
+  socket.receive({ data: JSON.stringify({
+    challenge: request.challenge, sequence: request.sequence, ok: true, chatsTruncated: true,
+    chats: [{ id: 'chat-1', title: 'Wide one', folder: '/work/one' }],
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
+  }) });
+  await settle();
+  assert.equal(page.element('saved-list').children.length, 1);
+  assert.equal(page.element('saved-empty').hidden, false);
+  assert.match(page.element('saved-empty').textContent, /Showing the first matches/);
 });
 
 test('an empty project list can still start a session in the current folder', async () => {
@@ -692,6 +735,47 @@ test('a full project page can ask for the next page', async () => {
   await settle();
   assert.equal(socket.sent.at(-1).action, 'projects');
   assert.equal(socket.sent.at(-1).index, 40);
+});
+
+test('a shortened project page can still ask for the rest', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('new').onclick();
+  await settle();
+  const request = socket.sent.at(-1);
+  socket.receive({ data: JSON.stringify({
+    challenge: request.challenge, sequence: request.sequence, ok: true, projectsTruncated: true,
+    projects: [{ name: 'One', folder: '/work/one' }, { name: 'Two', folder: '/work/two' }],
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
+  }) });
+  await settle();
+  const more = [...page.element('project-list').children].find(button => button.dataset.more === 'true');
+  assert.ok(more);
+  more.onclick();
+  await settle();
+  assert.equal(socket.sent.at(-1).index, 2);
+});
+
+test('a project click does nothing while the next page is loading', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('new').onclick();
+  await settle();
+  const request = socket.sent.at(-1);
+  const projects = Array.from({ length: 40 }, (_, index) => ({ name: `P${index}`, folder: `/work/${index}` }));
+  socket.receive({ data: JSON.stringify({
+    challenge: request.challenge, sequence: request.sequence, ok: true, projects,
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
+  }) });
+  await settle();
+  const more = [...page.element('project-list').children].find(button => button.dataset.more === 'true');
+  more.onclick();
+  await settle();
+  const choice = page.element('project-list').children[0];
+  choice.onclick();
+  await settle();
+  assert.equal(page.element('project-dialog').open, true);
+  assert.equal(socket.sent.filter(item => item.action === 'new').length, 0);
 });
 
 test('saved chat search sends titles and folders and opens the chosen chat', async () => {

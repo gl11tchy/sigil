@@ -218,7 +218,7 @@ enum RemoteCommands {
 
     /// Plaintext has to stay under the sealed-frame cap. Shorten a list before
     /// dropping it, and never report a shortened list as an empty success.
-    private static func fitting(_ reply: RemoteReply) -> RemoteReply {
+    static func fitting(_ reply: RemoteReply) -> RemoteReply {
         var reply = reply
         func fits() -> Bool { encodedCount(reply) <= 48_000 }
         if fits() { return reply }
@@ -234,9 +234,31 @@ enum RemoteCommands {
             reply.projects = Array(projects.dropLast())
             reply.projectsTruncated = true
         }
+        if !fits(), let state = reply.state {
+            reply.state = RemoteState(
+                tabs: state.tabs,
+                selectedTabID: state.selectedTabID,
+                terminal: boundedSuffix(state.terminal, bytes: 4_000),
+                capabilities: state.capabilities,
+                tabsTruncated: state.tabsTruncated
+            )
+        }
+        if !fits(), let state = reply.state {
+            reply.state = RemoteState(
+                tabs: state.tabs,
+                selectedTabID: state.selectedTabID,
+                terminal: "",
+                capabilities: state.capabilities,
+                tabsTruncated: state.tabsTruncated
+            )
+        }
         if !fits() {
-            reply.ok = false
-            reply.error = "That list is too long."
+            if reply.chats == nil, reply.projects == nil, reply.earlier == nil {
+                reply.state = nil
+            } else {
+                reply.ok = false
+                reply.error = "That list is too long."
+            }
         }
         return reply
     }

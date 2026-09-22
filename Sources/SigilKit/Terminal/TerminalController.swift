@@ -472,12 +472,14 @@ public final class TerminalController {
         let windowStart = rendered.index(approx, offsetBy: -before)
         let windowEnd = rendered.index(approx, offsetBy: after)
         if windowStart < windowEnd {
+            let endOnce =
+                endAnchor.isEmpty ? nil : rendered.range(of: endAnchor, options: .backwards)
             var best: String.Index?
             var bestDistance = Int.max
             var search = windowStart
             while search < windowEnd, let range = rendered.range(of: needle, range: search..<windowEnd) {
                 let matchesEnd =
-                    endAnchor.isEmpty || rendered[range.lowerBound...].range(of: endAnchor) != nil
+                    endAnchor.isEmpty || (endOnce.map { range.lowerBound <= $0.lowerBound } ?? false)
                 if matchesEnd {
                     let distance = abs(rendered.distance(from: approx, to: range.lowerBound))
                     if distance < bestDistance {
