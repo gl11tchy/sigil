@@ -13,6 +13,15 @@ struct SidebarOrganizationTests {
         #expect(SidebarOrganization.activationKey(preferred: "a", in: []) == nil)
     }
 
+    @Test func selectionRangeCoversBothDirections() {
+        let rows = ["a", "b", "c", "d"]
+        #expect(SidebarOrganization.selectionRange(from: "b", to: "d", in: rows) == ["b", "c", "d"])
+        #expect(SidebarOrganization.selectionRange(from: "d", to: "b", in: rows) == ["b", "c", "d"])
+        #expect(SidebarOrganization.selectionRange(from: "b", to: "b", in: rows) == ["b"])
+        #expect(SidebarOrganization.selectionRange(from: "gone", to: "c", in: rows) == ["c"])
+        #expect(SidebarOrganization.selectionRange(from: "b", to: "gone", in: rows) == ["gone"])
+    }
+
     @Test func projectsWithTheSameBasenameUseDisplayPaths() {
         let first = session(id: "a", cwd: "/workspace/a/web", updated: 2)
         let second = session(id: "b", cwd: "/workspace/b/web", updated: 1)

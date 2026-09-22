@@ -3067,6 +3067,102 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func archivingASelectionArchivesEveryChat() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let a = makeSession(id: "s-a", cwd: cwd)
+        let b = makeSession(id: "s-b", cwd: cwd)
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        model.archive([a, b])
+
+        #expect(model.isArchived(a))
+        #expect(model.isArchived(b))
+    }
+
+    @Test @MainActor
+    func archivingASelectionWithAWorkingChatAsksOnce() throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        let tab = try #require(model.newTab(in: cwd))
+        tab.noteTurnStarted()
+        let working = makeSession(id: try #require(tab.sessionID), cwd: cwd)
+        let other = makeSession(id: "s-other", cwd: cwd)
+
+        var asked = 0
+        model.confirmStopWorking = {
+            asked += 1
+            return false
+        }
+        model.archive([working, other])
+        #expect(asked == 1)
+        #expect(!model.isArchived(working))
+        #expect(!model.isArchived(other))
+        #expect(model.isOpen(working))
+
+        model.confirmStopWorking = {
+            asked += 1
+            return true
+        }
+        model.archive([working, other])
+        #expect(asked == 2)
+        #expect(model.isArchived(working))
+        #expect(model.isArchived(other))
+        #expect(!model.isOpen(working))
+    }
+
+    @Test @MainActor
+    func deletingASelectionTrashesEachAndDropsItsNotes() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwdA = try fixture.directory("project-a")
+        let cwdB = try fixture.directory("project-b")
+        try fixture.createSession(id: "s-a", cwd: cwdA)
+        try fixture.createSession(id: "s-b", cwd: cwdB)
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let a = makeSession(id: "s-a", cwd: cwdA)
+        let b = makeSession(id: "s-b", cwd: cwdB)
+        model.panel.setNotes("remember the milk", forSessionID: "s-a")
+
+        #expect(model.deleteConversations([a, b]) == 2)
+        #expect(model.panel.notes(forSessionID: "s-a") == "")
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: fixture.notesRoot.appendingPathComponent("s-a.md").path))
+    }
+
+    @Test @MainActor
+    func legacyFolderNotesMigrateToTheNewestConversationInTheFolder() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        try fixture.writeListedSession(
+            id: "old", cwd: cwd.path, summary: "Old", updatedAt: "2026-07-01T00:00:00Z")
+        try fixture.writeListedSession(
+            id: "new", cwd: cwd.path, summary: "New", updatedAt: "2026-08-01T00:00:00Z")
+        await fixture.store.reload()
+        let orphanPath = fixture.root.appendingPathComponent("nowhere").path
+        let legacy = [cwd.path: "folder note", orphanPath: "orphan note"]
+        fixture.defaults.set(try JSONEncoder().encode(legacy), forKey: "panel.notes")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        model.migrateLegacyPanelNotes()
+
+        #expect(model.panel.notes(forSessionID: "new") == "folder note")
+        #expect(model.panel.notes(forSessionID: "old") == "")
+        // A folder with no conversation keeps its note for a later launch.
+        #expect(model.panel.legacyFolderNotes == [orphanPath: "orphan note"])
+    }
+
+    @Test @MainActor
     func archivingDropsADeferredTabSoItDoesNotRestore() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
@@ -3184,6 +3280,7 @@ final class ModelFixture {
     let defaults: UserDefaults
     let settings: AppSettings
     let store: SessionStore
+    let notesRoot: URL
 
     private let oldGrokHome: String?
     private let defaultsName: String
@@ -3201,6 +3298,7 @@ final class ModelFixture {
         settings = AppSettings(defaults: defaults)
         settings.executablePath = executable.path
         store = SessionStore(root: grokHome.appendingPathComponent("sessions"))
+        notesRoot = root.appendingPathComponent("notes")
     }
 
     func directory(_ name: String) throws -> URL {
@@ -3257,7 +3355,10 @@ final class ModelFixture {
                 mcpBinary: mcpBinary,
                 tabMessagingSocketURL: socketURL,
                 canonicalPath: canonicalPath ?? { GrokPaths.canonicalPath($0) },
-                panel: RightPanel(defaults: defaults),
+                panel: RightPanel(
+                    defaults: defaults,
+                    notesStore: ConversationNotesStore(root: notesRoot)
+                ),
                 pairingStore: InMemoryRemotePairingStore()
             )
         }
@@ -3268,7 +3369,10 @@ final class ModelFixture {
                 trashConversation: trashConversation,
                 presentError: presentError,
                 canonicalPath: canonicalPath,
-                panel: RightPanel(defaults: defaults),
+                panel: RightPanel(
+                    defaults: defaults,
+                    notesStore: ConversationNotesStore(root: notesRoot)
+                ),
                 pairingStore: InMemoryRemotePairingStore()
             )
         }
@@ -3277,7 +3381,10 @@ final class ModelFixture {
             store: store,
             trashConversation: trashConversation,
             presentError: presentError,
-            panel: RightPanel(defaults: defaults),
+            panel: RightPanel(
+                defaults: defaults,
+                notesStore: ConversationNotesStore(root: notesRoot)
+            ),
             pairingStore: InMemoryRemotePairingStore()
         )
     }

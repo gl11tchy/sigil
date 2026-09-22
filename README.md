@@ -30,7 +30,9 @@ By gl11tchy.
   and Archived sit under the folders as destinations you open. Search by title, folder or
   path. Click a chat to reopen it; if it is already open, the app moves to that
   tab. Hover archive on a chat or a project. Hover X closes an open tab, or
-  deletes a closed chat. Workflow and subagent children stay off the list unless
+  deletes a closed chat. `⌘`-click selects several chats — `⇧`-click or `⇧↑`/`⇧↓`
+  extends the range — and the context menu archives or deletes the selection at
+  once. Workflow and subagent children stay off the list unless
   you turn them on in Settings. They still run in the background.
 - **Search highlight.** Matches from the sidebar Search field (`⌘⇧F`) light up in
   each visible title, in the project name or path on the subtitle, and in the
@@ -50,8 +52,10 @@ By gl11tchy.
   attaches it the same way it does in a regular terminal.
 - **Tabs.** Several sessions at once, each in its own folder.
 - **Right panel.** ⌥⌘B opens a second column beside the session. It holds a plain
-  login shell in the same folder (⌥⌘1) and a notes pad kept per working folder
-  (⌥⌘2). The shell is a scratch terminal only: no conversation, no tab messaging.
+  login shell in the same folder (⌥⌘1) and a notes pad kept per conversation
+  (⌥⌘2), saved as one Markdown file per chat under `~/Library/Application
+  Support/Sigil/notes/`. The shell is a scratch terminal only: no conversation,
+  no tab messaging.
 - **Status light.** A green dot per tab while the agent is working, and a dot on the
   Dock icon when a background tab finishes a turn.
 - **Terminal colors and font size**, applied live; reopen a session to apply Grok’s interface theme.
@@ -112,7 +116,8 @@ terminal itself.
 | `⌘⇧R` | Rename the conversation on screen |
 | `⌘,` | Settings |
 
-In the thread list, `↑` and `↓` move the selection, `Return` opens it, and `F2` renames it.
+In the thread list, `↑` and `↓` move the selection, `⇧↑` and `⇧↓` extend a
+multi-selection, `Return` opens it, and `F2` renames it.
 
 ## Requirements
 

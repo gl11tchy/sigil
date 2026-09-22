@@ -17,7 +17,7 @@ final class AppModel {
 
     let settings: AppSettings
     let store: SessionStore
-    /// The right-hand utility column: scratch shell and per-folder notes.
+    /// The right-hand utility column: scratch shell and per-conversation notes.
     let panel: RightPanel
     let remoteControl: RemoteControl
 
@@ -372,6 +372,22 @@ final class AppModel {
         if isArchived(session) { unarchive(session) } else { archive(session) }
     }
 
+    /// Archives a multi-selection with at most one working-session prompt.
+    func archive(_ sessions: [GrokSession]) {
+        let anyWorking = sessions.contains { session in
+            tabs.contains {
+                tabMatches($0, sessionID: session.id, cwd: session.cwd)
+                    && $0.shouldWarnBeforeStopping
+            }
+        }
+        if anyWorking && !confirmStopWorking() { return }
+        for session in sessions { archive(session, confirmIfWorking: false) }
+    }
+
+    func unarchive(_ sessions: [GrokSession]) {
+        for session in sessions { unarchive(session) }
+    }
+
     func archive(_ project: SidebarProject) {
         let projectTabs = tabs.filter { samePath($0.workingDirectory.path, project.cwd) }
         if projectTabs.contains(where: \.shouldWarnBeforeStopping), !confirmStopWorking() {
@@ -539,6 +555,30 @@ final class AppModel {
             !store.sessions.contains(where: { samePath($0.cwd, focused) })
         {
             settings.focusedProjectPath = ""
+        }
+        migrateLegacyPanelNotes()
+    }
+
+    /// One-time move of UserDefaults folder notes onto per-conversation files.
+    /// Each folder note lands on the newest conversation in that folder; folders
+    /// with no conversation yet keep their entry for a later launch.
+    func migrateLegacyPanelNotes() {
+        let legacy = panel.legacyFolderNotes
+        guard !legacy.isEmpty else { return }
+        var remaining = legacy
+        for (folder, text) in legacy {
+            guard !text.isEmpty,
+                let session = store.sessions
+                    .filter({ samePath($0.cwd, folder) })
+                    .max(by: { $0.updatedAt < $1.updatedAt })
+            else { continue }
+            if panel.notes(forSessionID: session.id).isEmpty {
+                panel.setNotes(text, forSessionID: session.id)
+            }
+            remaining.removeValue(forKey: folder)
+        }
+        if remaining.count != legacy.count {
+            panel.setLegacyFolderNotes(remaining)
         }
     }
 
@@ -1865,6 +1905,7 @@ final class AppModel {
             unpin(session)
             unarchive(session)
             resetName(session)
+            panel.deleteNotes(forSessionID: session.id)
             let removedIDs = Set(matchingTabs.map(\.id))
             for tab in matchingTabs where !stoppedTabs.contains(where: { $0.id == tab.id }) {
                 tabBridge?.noteTabClosed(id: tab.id)
@@ -1910,6 +1951,15 @@ final class AppModel {
             presentError(error)
             return false
         }
+    }
+
+    /// Trashes a multi-selection one conversation at a time; each delete keeps
+    /// its own tab-restore-on-failure path. Returns how many went.
+    @discardableResult
+    func deleteConversations(_ sessions: [GrokSession]) -> Int {
+        var deleted = 0
+        for session in sessions where deleteConversation(session) { deleted += 1 }
+        return deleted
     }
 
     /// Writes `grok export <id>` to a file the user picks.
