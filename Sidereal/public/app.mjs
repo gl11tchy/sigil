@@ -136,8 +136,21 @@ function applyTail(bucket, next) {
     bucket.tail = next;
     return;
   }
-  bucket.history = loaded;
+  const shared = commonPrefixLength(bucket.tail, next);
+  const shorter = Math.min(bucket.tail.length, next.length);
+  if (shorter > 0 && shared * 2 >= shorter) {
+    bucket.tail = next;
+    return;
+  }
+  const room = 400_000 - bucket.history.length;
+  if (room > 0) bucket.history += bucket.tail.slice(0, room);
   bucket.tail = next;
+}
+function commonPrefixLength(left, right) {
+  const count = Math.min(left.length, right.length);
+  let index = 0;
+  while (index < count && left[index] === right[index]) index += 1;
+  return index;
 }
 function prependSlice(bucket, slice) {
   if (typeof slice !== 'string' || new TextEncoder().encode(slice).length > 12_000) {
@@ -291,16 +304,18 @@ function searchSaved() {
   const query = $('session-search').value.trim();
   const token = ++searchToken;
   if (!query || !$('sessions-dialog').open) { renderSaved([]); return; }
+  renderSaved([], { pending: true });
   request('chats', query).then(reply => {
     if (token !== searchToken || $('session-search').value.trim() !== query) return;
-    renderSaved(Array.isArray(reply.chats) ? reply.chats : []);
+    renderSaved(reply.chats, { truncated: reply.chatsTruncated === true });
   }).catch(error => { if (token === searchToken) showError(error.message); });
 }
-function renderSaved(chats) {
+function renderSaved(chats, options = {}) {
   const query = $('session-search').value.trim();
   const safe = [];
+  const rows = Array.isArray(chats) ? chats : [];
   if (query) {
-    for (const chat of chats.slice(0, 40)) {
+    for (const chat of rows.slice(0, 40)) {
       if (!chat || typeof chat.id !== 'string' || typeof chat.title !== 'string' || typeof chat.folder !== 'string') continue;
       if (!chat.id || chat.id.length > 80 || chat.title.length > 300 || chat.folder.length > 4_096) continue;
       if (/[\u0000-\u001F]/.test(chat.id) || /[\u0000-\u001F]/.test(chat.folder)) continue;
@@ -310,7 +325,19 @@ function renderSaved(chats) {
   const heading = $('saved-heading');
   if (heading) heading.hidden = !query;
   const empty = $('saved-empty');
-  if (empty) empty.hidden = !query || safe.length > 0;
+  if (empty) {
+    if (options.truncated === true && safe.length > 0) {
+      empty.hidden = false;
+      empty.textContent = 'Showing the first matches.';
+    } else {
+      empty.hidden = !query || safe.length > 0 || options.pending === true;
+      if (query && safe.length === 0 && !options.pending && !Array.isArray(chats)) {
+        empty.textContent = 'The list was too long. Narrow the search.';
+      } else if (empty.textContent !== 'No matching chats.') {
+        empty.textContent = 'No matching chats.';
+      }
+    }
+  }
   $('saved-list').replaceChildren(...safe.map(chat => {
     const button = document.createElement('button');
     button.type = 'button';
@@ -330,7 +357,18 @@ function renderSaved(chats) {
     return button;
   }));
 }
-function renderProjects(projects) {
+function projectButton(nameText, folderText, onClick) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  const name = document.createElement('span');
+  name.textContent = nameText;
+  const folder = document.createElement('small');
+  folder.textContent = folderText;
+  button.append(name, folder);
+  button.onclick = onClick;
+  return button;
+}
+function renderProjects(projects, offset = 0, truncated = false) {
   const safe = [];
   for (const project of (Array.isArray(projects) ? projects : []).slice(0, 40)) {
     if (!project || typeof project.name !== 'string' || typeof project.folder !== 'string') continue;
@@ -338,24 +376,37 @@ function renderProjects(projects) {
     if (/[\u0000-\u001F]/.test(project.folder)) continue;
     safe.push({ name: project.name, folder: project.folder });
   }
-  const empty = $('project-empty');
-  if (empty) empty.hidden = safe.length > 0;
-  $('project-list').replaceChildren(...safe.map(project => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    const name = document.createElement('span');
-    name.textContent = project.name;
-    const folder = document.createElement('small');
-    folder.textContent = project.folder;
-    button.append(name, folder);
-    button.onclick = () => {
-      const folderPath = project.folder;
-      $('project-dialog').close();
-      void perform(() => request('new', folderPath));
-    };
-    return button;
+  const list = $('project-list');
+  const kept = offset === 0 ? [] : Array.from(list.children || []).filter(button => button.dataset.more !== 'true');
+  const buttons = safe.map(project => projectButton(project.name, project.folder, () => {
+    if (!connected || busy) return;
+    const folderPath = project.folder;
+    $('project-dialog').close();
+    void perform(() => request('new', folderPath));
   }));
-  $('project-dialog').showModal();
+  if (safe.length > 0 && (safe.length === 40 || truncated)) {
+    const next = offset + safe.length;
+    const more = projectButton('More projects', 'Show the next folders', () => {
+      if (!connected || busy) return;
+      void perform(async () => {
+        const reply = await request('projects', undefined, undefined, false, { index: next });
+        renderProjects(reply.projects, next, reply.projectsTruncated === true);
+      });
+    });
+    more.dataset.more = 'true';
+    buttons.push(more);
+  }
+  if (offset === 0 && safe.length === 0) {
+    buttons.push(projectButton('Current folder', 'The folder Sigil uses for a new session', () => {
+      if (!connected || busy) return;
+      $('project-dialog').close();
+      void perform(() => request('new'));
+    }));
+  }
+  list.replaceChildren(...kept, ...buttons);
+  const empty = $('project-empty');
+  if (empty) empty.hidden = list.children.length > 0;
+  if (!$('project-dialog').open) $('project-dialog').showModal();
 }
 function paintOutput() {
   const output = displayedOutput || '';
@@ -746,7 +797,7 @@ $('paste').onclick = () => void perform(() => sendText(false));
 $('tabs').onchange = () => void perform(() => request('select', undefined, $('tabs').value));
 $('new').onclick = () => void perform(async () => {
   const reply = await request('projects');
-  renderProjects(reply.projects);
+  renderProjects(reply.projects, 0, reply.projectsTruncated === true);
 });
 $('project-cancel').onclick = () => $('project-dialog').close();
 $('project-dialog').addEventListener('close', () => { if (!$('new').disabled) $('new').focus(); });

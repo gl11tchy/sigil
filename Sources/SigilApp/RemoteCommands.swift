@@ -36,6 +36,8 @@ struct RemoteReply: Codable, Sendable {
     var chats: [RemoteChat]?
     var projects: [RemoteProject]?
     var earlier: String?
+    var chatsTruncated = false
+    var projectsTruncated = false
 }
 
 @MainActor
@@ -214,16 +216,50 @@ enum RemoteCommands {
         return Array(items.dropFirst(start).prefix(pageSize))
     }
 
-    /// Plaintext has to stay under the sealed-frame cap. Drop the extra list
-    /// before dropping the live tail.
-    private static func fitting(_ reply: RemoteReply) -> RemoteReply {
+    /// Plaintext has to stay under the sealed-frame cap. Shorten a list before
+    /// dropping it, and never report a shortened list as an empty success.
+    static func fitting(_ reply: RemoteReply) -> RemoteReply {
         var reply = reply
-        if encodedCount(reply) <= 48_000 { return reply }
+        func fits() -> Bool { encodedCount(reply) <= 48_000 }
+        if fits() { return reply }
         reply.earlier = reply.earlier.map { boundedSuffix($0, bytes: 4_000) }
-        if encodedCount(reply) <= 48_000 { return reply }
+        if fits() { return reply }
         reply.earlier = nil
-        reply.chats = nil
-        reply.projects = nil
+        if fits() { return reply }
+        while !fits(), let chats = reply.chats, !chats.isEmpty {
+            reply.chats = Array(chats.dropLast())
+            reply.chatsTruncated = true
+        }
+        while !fits(), let projects = reply.projects, !projects.isEmpty {
+            reply.projects = Array(projects.dropLast())
+            reply.projectsTruncated = true
+        }
+        if !fits(), let state = reply.state {
+            reply.state = RemoteState(
+                tabs: state.tabs,
+                selectedTabID: state.selectedTabID,
+                terminal: boundedSuffix(state.terminal, bytes: 4_000),
+                capabilities: state.capabilities,
+                tabsTruncated: state.tabsTruncated
+            )
+        }
+        if !fits(), let state = reply.state {
+            reply.state = RemoteState(
+                tabs: state.tabs,
+                selectedTabID: state.selectedTabID,
+                terminal: "",
+                capabilities: state.capabilities,
+                tabsTruncated: state.tabsTruncated
+            )
+        }
+        if !fits() {
+            if reply.chats == nil, reply.projects == nil, reply.earlier == nil {
+                reply.state = nil
+            } else {
+                reply.ok = false
+                reply.error = "That list is too long."
+            }
+        }
         return reply
     }
 

@@ -224,12 +224,13 @@ public final class TerminalController {
     ) -> String {
         let limit = min(max(maxCharacters, 0), 12_000)
         let needle = String(startAnchor.prefix(256))
-        guard !needle.isEmpty, loadedCharacters > 0, limit > 0 else { return "" }
-        let budget = min(max(loadedCharacters, needle.count) + limit + 128, 500_000)
+        let loaded = min(max(loadedCharacters, 0), 500_000)
+        guard !needle.isEmpty, loaded > 0, limit > 0 else { return "" }
+        let budget = min(loaded + limit + 128, 500_000)
         let rendered = untrimmedReadableSuffix(maxCharacters: budget)
         guard
-            let start = earlierAnchorStart(
-                needle, endAnchor: endAnchor, loadedCharacters: loadedCharacters, in: rendered)
+            let start = Self.earlierAnchorStart(
+                needle, endAnchor: endAnchor, loadedCharacters: loaded, in: rendered)
         else { return "" }
         return String(rendered[..<start].suffix(limit))
     }
@@ -456,13 +457,13 @@ public final class TerminalController {
         return rendered.count > maxCharacters ? String(rendered.suffix(maxCharacters)) : rendered
     }
 
-    private func earlierAnchorStart(
+    static func earlierAnchorStart(
         _ needle: String,
         endAnchor: String,
         loadedCharacters: Int,
         in rendered: String
     ) -> String.Index? {
-        guard !rendered.isEmpty else { return nil }
+        guard !rendered.isEmpty, !needle.isEmpty else { return nil }
         let fromEnd = min(max(loadedCharacters, needle.count), rendered.count)
         let approx = rendered.index(rendered.endIndex, offsetBy: -fromEnd)
         let slack = 2_000
@@ -470,10 +471,27 @@ public final class TerminalController {
         let after = min(slack + needle.count, rendered.distance(from: approx, to: rendered.endIndex))
         let windowStart = rendered.index(approx, offsetBy: -before)
         let windowEnd = rendered.index(approx, offsetBy: after)
-        if windowStart < windowEnd, let range = rendered.range(of: needle, range: windowStart..<windowEnd) {
-            if endAnchor.isEmpty || rendered[range.lowerBound...].range(of: endAnchor) != nil {
-                return range.lowerBound
+        if windowStart < windowEnd {
+            let endOnce =
+                endAnchor.isEmpty ? nil : rendered.range(of: endAnchor, options: .backwards)
+            var best: String.Index?
+            var bestDistance = Int.max
+            var search = windowStart
+            while search < windowEnd, let range = rendered.range(of: needle, range: search..<windowEnd) {
+                let matchesEnd =
+                    endAnchor.isEmpty || (endOnce.map { range.lowerBound <= $0.lowerBound } ?? false)
+                if matchesEnd {
+                    let distance = abs(rendered.distance(from: approx, to: range.lowerBound))
+                    if distance < bestDistance {
+                        best = range.lowerBound
+                        bestDistance = distance
+                    }
+                }
+                let next = rendered.index(after: range.lowerBound)
+                if next <= search { break }
+                search = next
             }
+            if let best { return best }
         }
         guard !endAnchor.isEmpty, let end = rendered.range(of: endAnchor, options: .backwards) else {
             return rendered.range(of: needle)?.lowerBound
