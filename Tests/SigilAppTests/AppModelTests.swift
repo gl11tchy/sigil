@@ -3014,14 +3014,20 @@ struct AppModelTests {
         let other = makeSession(id: "s-other", cwd: cwd)
 
         var asked = 0
-        model.confirmStopWorking = { asked += 1; return false }
+        model.confirmStopWorking = {
+            asked += 1
+            return false
+        }
         model.archive([working, other])
         #expect(asked == 1)
         #expect(!model.isArchived(working))
         #expect(!model.isArchived(other))
         #expect(model.isOpen(working))
 
-        model.confirmStopWorking = { asked += 1; return true }
+        model.confirmStopWorking = {
+            asked += 1
+            return true
+        }
         model.archive([working, other])
         #expect(asked == 2)
         #expect(model.isArchived(working))

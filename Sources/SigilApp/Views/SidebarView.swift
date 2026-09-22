@@ -1088,7 +1088,8 @@ struct SidebarView: View {
         let key = model.sessionKey(session)
         guard multiSelection.count > 1, multiSelection.contains(key) else { return [session] }
         let order = visibleRowIDs()
-        return listedSessions
+        return
+            listedSessions
             .filter { multiSelection.contains(model.sessionKey($0)) }
             .sorted {
                 (order.firstIndex(of: model.sessionKey($0)) ?? .max)
