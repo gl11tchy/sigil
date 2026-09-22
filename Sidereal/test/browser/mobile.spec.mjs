@@ -488,6 +488,41 @@ test('a live iPhone transcript is the messages, not hooks or pipes', async ({ pa
   } finally { mac.close(); }
 });
 
+test('a live working iPhone dump is the plan, not tofu squares or thinking chrome', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const raw = [
+    '⠹',
+    '|',
+    '⠹',
+    '|',
+    '⠹',
+    '|  ...',
+    '⠹',
+    '|  icons.',
+    '⠹',
+    '|  • Folder and recent chats stay right where they are.',
+    '⠹',
+    '|  • When Grok Build is chosen, the model picker and effort slider drop in below it—nothing fancy, just two simple rows.',
+    '⠹',
+    '',
+    '         ∴ Thinking… 16s',
+    '5m42s ↓130k [stop]',
+  ].join('\n');
+  const mac = await pair(page, baseURL, raw, { statuses: { one: 'working' } });
+  try {
+    const text = await page.locator('#terminal').innerText();
+    await expect(page.locator('#terminal')).toContainText('Folder and recent chats stay right where they are.');
+    await expect(page.locator('#terminal')).toContainText('When Grok Build is chosen');
+    await expect(page.locator('#terminal')).not.toContainText('Thinking');
+    await expect(page.locator('#terminal')).not.toContainText('[stop]');
+    await expect(page.locator('#terminal')).not.toContainText('5m42s');
+    expect(text).not.toMatch(/^\s*[│|]/m);
+    expect(text).not.toMatch(/[\u2800-\u28FF\uFFFD]/);
+    await expect(page.locator('#stop')).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath('working-iphone.png') });
+  } finally { mac.close(); }
+});
+
 test('tree gutters do not wrap into a column of pipes on a phone', async ({ page, baseURL }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const raw = [

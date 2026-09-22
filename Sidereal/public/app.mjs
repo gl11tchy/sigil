@@ -73,6 +73,7 @@ function updateControls() {
   $('sessions-toggle').hidden = !connected;
   $('session-status').textContent = !connected ? 'Reconnecting · draft kept' : ({ working: 'Working', starting: 'Starting…', idle: 'Ready', exited: 'Session ended' }[selectedStatus] || 'No session');
   $('session-status').dataset.state = connected ? selectedStatus || '' : 'offline';
+  if (document.body) document.body.dataset.connected = String(connected && !$('controls').hidden);
   $('compose-status').textContent = busy ? 'Sending…' : !connected && selected ? 'Offline · draft kept' : ended ? 'Session ended' : '';
   $('find-next').disabled = $('find-previous').disabled = !findMatches.length;
   $('raw-toggle').hidden = !selected;
