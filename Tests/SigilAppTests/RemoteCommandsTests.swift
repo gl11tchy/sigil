@@ -401,6 +401,36 @@ struct RemoteCommandsTests {
         #expect(data.count <= 48_000)
     }
 
+    @Test @MainActor func aHugeTerminalDoesNotWipeTheChatList() throws {
+        let tabs = (0..<100).map { index in
+            RemoteState.Tab(
+                id: String(format: "tab-%03d", index),
+                title: String(repeating: "\"", count: 96),
+                status: "working")
+        }
+        let state = RemoteState(
+            tabs: tabs,
+            selectedTabID: tabs[0].id,
+            terminal: String(repeating: "\n", count: 12_000))
+        let chats = [
+            RemoteChat(id: "chat-1", title: "Keep me", folder: "/work/keep")
+        ]
+        let projects = [
+            RemoteProject(name: "Keep", folder: "/work/keep")
+        ]
+        let reply = RemoteCommands.fitting(
+            RemoteReply(
+                challenge: "test", sequence: 1, state: state, chats: chats, projects: projects))
+        let keptChats = try #require(reply.chats)
+        let keptProjects = try #require(reply.projects)
+        #expect(reply.ok)
+        #expect(reply.error == nil)
+        #expect(keptChats.contains { $0.id == "chat-1" })
+        #expect(keptProjects.contains { $0.folder == "/work/keep" })
+        let data = try JSONEncoder().encode(reply)
+        #expect(data.count <= 48_000)
+    }
+
     @Test @MainActor func earlierReplyKeepsTheLiveTail() async throws {
         let fixture = try PhoneCommandFixture()
         defer { fixture.cleanup() }
