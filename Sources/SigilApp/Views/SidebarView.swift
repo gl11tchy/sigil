@@ -33,6 +33,11 @@ struct SidebarView: View {
     /// about the tab strip, not about where the keys are.
     @State private var keyboardSelectionID: String?
     @State private var pendingDelete: GrokSession?
+    /// ⌘/⇧-click multi-selection over the visible chat rows, for bulk archive
+    /// and delete. Keys are `sessionKey`s; the anchor starts a ⇧ range.
+    @State private var multiSelection: Set<String> = []
+    @State private var selectionAnchor: String?
+    @State private var pendingBulkDelete: [GrokSession]?
 
     /// F2. Unicode private-use scalar for `NSF2FunctionKey`.
     private static let f2 = KeyEquivalent(Character("\u{F705}"))
@@ -64,6 +69,21 @@ struct SidebarView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        .alert(
+            bulkDeleteTitle,
+            isPresented: Binding(
+                get: { pendingBulkDelete != nil },
+                set: { if !$0 { pendingBulkDelete = nil } }
+            )
+        ) {
+            Button("Move to Trash", role: .destructive) {
+                if let sessions = pendingBulkDelete {
+                    model.deleteConversations(sessions)
+                }
+                clearMultiSelection()
+            }
+            Button("Cancel", role: .cancel) {}
+        }
         .task(id: model.searchFocusToken) {
             guard model.searchFocusToken > 0 else { return }
             await Task.yield()
@@ -75,6 +95,7 @@ struct SidebarView: View {
         }
         .task(id: visibleRowIDs()) {
             clampKeyboardSelection()
+            pruneMultiSelection()
             await prepareRename(forceReconfigure: false)
         }
         .onChange(of: model.searchText) { _, query in
@@ -762,6 +783,10 @@ struct SidebarView: View {
     }
 
     private func handleEscape() -> KeyPress.Result {
+        if model.renamingSessionKey == nil, !multiSelection.isEmpty {
+            clearMultiSelection()
+            return .handled
+        }
         switch SidebarOrganization.escapeAction(
             isRenaming: model.renamingSessionKey != nil,
             surface: model.sidebarSurface
@@ -1504,11 +1529,16 @@ private struct SessionRow: View {
     let isPinned: Bool
     let isArchived: Bool
     let isKeyboardSelected: Bool
+    /// In the ⌘/⇧-click bulk selection; draws the accent stroke.
+    let isMultiSelected: Bool
     let isRenaming: Bool
     let hasCustomName: Bool
     let showsProject: Bool
     let headerCoversQuery: Bool
+    /// Plain activation (keyboard, VoiceOver): opens the conversation.
     let open: () -> Void
+    /// Mouse click: modifier-aware (⌘ toggles, ⇧ ranges), falls back to open.
+    let tap: () -> Void
     let togglePin: () -> Void
     let toggleArchive: () -> Void
     let beginRename: () -> Void
@@ -1586,7 +1616,7 @@ private struct SessionRow: View {
     @ViewBuilder
     private var interactiveRow: some View {
         rowChrome
-            .onTapGesture { if !isRenaming { open() } }
+            .onTapGesture { if !isRenaming { tap() } }
             .onHover { isHovering = $0 }
             .help(rowHelpText)
     }
@@ -1632,11 +1662,17 @@ private struct SessionRow: View {
             .fill(fill)
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(
-                        isKeyboardSelected && state != .active ? palette.hairline : Color.clear,
-                        lineWidth: 1
-                    )
+                    .strokeBorder(stroke, lineWidth: 1)
             )
+    }
+
+    /// Multi-selection wears the accent hairline; the arrow-key highlight keeps
+    /// the plain one. The active row's `selected` fill needs neither.
+    private var stroke: Color {
+        if state == .active { return .clear }
+        if isMultiSelected { return palette.accent }
+        if isKeyboardSelected { return palette.hairline }
+        return .clear
     }
 
     private var rowHelpText: String {
@@ -1651,6 +1687,7 @@ private struct SessionRow: View {
         case .open: value = "Open in another tab"
         case .closed: value = "Closed"
         }
+        if isMultiSelected { value += ", in selection" }
         if activity == .working {
             value += ", working"
         } else if hasUnseenActivity {
@@ -1778,7 +1815,8 @@ private struct SessionRow: View {
 
     private var fill: Color {
         if state == .active { return palette.selected }
-        return (isHovering || isKeyboardSelected || isRenaming) ? palette.raised : .clear
+        return (isHovering || isKeyboardSelected || isRenaming || isMultiSelected)
+            ? palette.raised : .clear
     }
 
     @MainActor

@@ -114,6 +114,14 @@ enum SidebarOrganization {
         pinnedIDs + restIDs
     }
 
+    /// The inclusive anchor…target slice of `rowIDs`, for a ⇧-click or ⇧-arrow
+    /// range. A missing end selects the target alone.
+    static func selectionRange(from anchor: String, to target: String, in rowIDs: [String]) -> Set<String> {
+        guard let a = rowIDs.firstIndex(of: anchor), let b = rowIDs.firstIndex(of: target)
+        else { return [target] }
+        return Set(rowIDs[min(a, b)...max(a, b)])
+    }
+
     /// Recents and Archived are destinations, not folders.
     static func destinationRowIDs(recentsCount: Int, archivedCount: Int) -> [String] {
         var ids: [String] = []
