@@ -144,7 +144,8 @@ private struct RankHarness {
 
     @discardableResult
     func write(id: String, cwd: String, title: String, updated: String) throws -> URL {
-        let directory = root
+        let directory =
+            root
             .appendingPathComponent(GrokPaths.encode(path: cwd), isDirectory: true)
             .appendingPathComponent(id, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
