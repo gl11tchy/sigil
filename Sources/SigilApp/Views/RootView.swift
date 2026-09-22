@@ -45,6 +45,8 @@ struct RootView: View {
         .background(WindowChrome(background: palette.groundNSColor))
         .sheet(isPresented: $model.isShowingNewSessionSheet) {
             NewSessionSheet(model: model)
+                .environment(\.palette, Palette(theme: model.settings.theme))
+                .tint(Palette(theme: model.settings.theme).accent)
         }
         .task { await model.onAppear() }
         .task(id: model.selectedTabID) {

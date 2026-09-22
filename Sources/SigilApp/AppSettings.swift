@@ -220,6 +220,15 @@ final class AppSettings {
     }
 
     static let effortOptions = ["", "low", "medium", "high", "xhigh"]
-    /// Suggestion names for the free-text model field. Empty is not offered.
-    static let modelOptions = ["", "grok-4.6", "grok-4.5"]
+
+    nonisolated static func effortLabel(_ value: String) -> String {
+        switch value {
+        case "": "CLI default"
+        case "low": "Low"
+        case "medium": "Medium"
+        case "high": "High"
+        case "xhigh": "Extra high"
+        default: value
+        }
+    }
 }

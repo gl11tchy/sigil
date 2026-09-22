@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Bindable var model: AppModel
     @State private var settingsError: String?
     @State private var pathDraft: ExecutablePathDraft
+    @State private var listedModels = GrokModelCatalog.fallback
     @FocusState private var isExecutablePathFocused: Bool
 
     init(model: AppModel) {
@@ -99,13 +100,19 @@ struct SettingsView: View {
                 }
             }
 
-            LabeledContent("Default model") {
-                ModelNameField(text: Bindable(model.settings).model)
+            Picker("Default model", selection: Bindable(model.settings).model) {
+                Text("CLI default").tag("")
+                ForEach(
+                    GrokModelCatalog.choices(listed: listedModels, saved: model.settings.model),
+                    id: \.self
+                ) { name in
+                    Text(name).monospaced().tag(name)
+                }
             }
 
             Picker("Default effort", selection: Bindable(model.settings).effort) {
                 ForEach(AppSettings.effortOptions, id: \.self) { option in
-                    Text(option.isEmpty ? "CLI default" : option.capitalized).tag(option)
+                    Text(AppSettings.effortLabel(option)).tag(option)
                 }
             }
 
@@ -147,6 +154,10 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .task {
+            let found = await GrokModelCatalog.load(executable: model.settings.executableURL)
+            if !found.isEmpty { listedModels = found }
+        }
         .alert(
             "Could not update Settings",
             isPresented: Binding(
@@ -311,31 +322,5 @@ struct ExecutablePathDraft: Equatable {
         }
         guard path != stored else { return .unchanged }
         return .applied(path)
-    }
-}
-
-/// Free-text model name with the known CLI names as fill-in suggestions.
-struct ModelNameField: View {
-    @Binding var text: String
-
-    var body: some View {
-        HStack(spacing: 6) {
-            TextField("CLI default", text: $text)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityLabel("Model")
-            Menu {
-                ForEach(AppSettings.modelOptions.filter { !$0.isEmpty }, id: \.self) { option in
-                    Button(option) { text = option }
-                }
-            } label: {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .bold))
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .frame(width: 20)
-            .help("Suggested models")
-            .accessibilityLabel("Suggested models")
-        }
     }
 }
