@@ -217,8 +217,10 @@ final class AppModel {
     /// the CLI summary moved. Same-key begin must not clear this.
     var renameCommitBaseline: String?
 
-    /// Conversations for the sidebar: newest first, one-shot noise filtered out.
-    /// Archived chats are hidden unless the Archived row is open.
+    /// Conversations for the sidebar, one-shot noise filtered out.
+    /// An empty query stays newest first. Archived chats stay hidden unless
+    /// Archived is open. A search ranks the closest title first and includes
+    /// every folder.
     var sidebarSessions: [GrokSession] {
         var result = store.search(searchText) { self.title(for: $0) }
         if !settings.showEmptySessions {
@@ -233,10 +235,12 @@ final class AppModel {
         if !settings.showSubagentSessions {
             result = result.filter { !$0.isSubagent || isOpen($0) }
         }
-        if sidebarSurface == .archived {
-            result = result.filter { isArchived($0) }
-        } else {
-            result = result.filter { !isArchived($0) }
+        if !SidebarOrganization.isSearching(searchText) {
+            if sidebarSurface == .archived {
+                result = result.filter { isArchived($0) }
+            } else {
+                result = result.filter { !isArchived($0) }
+            }
         }
         return result
     }

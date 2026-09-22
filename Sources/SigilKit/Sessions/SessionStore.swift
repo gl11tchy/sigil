@@ -142,11 +142,12 @@ public final class SessionStore {
         refreshWatcher()
     }
 
-    /// Sessions whose title, project name, `~` path, or cwd match `query`, newest first.
-    /// An empty or whitespace-only query returns every session without
-    /// evaluating `displayedTitle`.
-    /// Pass `displayedTitle` so a user-chosen name is searched; the CLI summary
-    /// still matches after a rename.
+    /// Sessions whose title, project name, `~` path, or cwd match `query`.
+    /// Closest title first, then newer activity. An empty or whitespace-only
+    /// query returns every session, newest first, without evaluating
+    /// `displayedTitle`. Pass `displayedTitle` so a user-chosen name is
+    /// searched; the CLI summary still matches after a rename.
+    /// Does not read a transcript.
     public func search(
         _ query: String,
         displayedTitle: ((GrokSession) -> String)? = nil
@@ -154,17 +155,24 @@ public final class SessionStore {
         if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return sessions
         }
-        return sessions.filter { session in
-            SessionScanner.matches(
-                session,
-                query: query,
-                displayedTitle: displayedTitle?(session)
-            )
+        return sessions.compactMap { session -> (GrokSession, SessionScanner.SearchRank)? in
+            guard
+                let rank = SessionScanner.searchRank(
+                    session,
+                    query: query,
+                    displayedTitle: displayedTitle?(session)
+                )
+            else { return nil }
+            return (session, rank)
         }
+        .sorted { lhs, rhs in
+            if lhs.1.rawValue != rhs.1.rawValue { return lhs.1.rawValue < rhs.1.rawValue }
+            return SessionScanner.isNewer(lhs.0, rhs.0)
+        }
+        .map(\.0)
     }
 
-    /// Sessions grouped by working directory, each group newest first,
-    /// groups ordered by their most recent session.
+    /// Groups `search` results by working directory, in that same order.
     public func groupedByProject(matching query: String = "") -> [(
         cwd: String, sessions: [GrokSession]
     )] {

@@ -112,17 +112,26 @@ struct SidebarOrganizationTests {
     @Test func aFocusedProjectShowsItsChats() {
         #expect(
             SidebarOrganization.listKind(surface: .project, isSearching: false) == .projectChats)
-        #expect(
-            SidebarOrganization.listKind(surface: .project, isSearching: true) == .projectChats)
     }
 
-    @Test func searchingFoldersGroupsMatchingChats() {
-        #expect(
-            SidebarOrganization.listKind(surface: .folders, isSearching: true) == .projectSearch)
+    @Test func aNonEmptyQueryIsNotLimitedToTheOpenFolder() {
+        let project = SidebarOrganization.listKind(surface: .project, isSearching: true)
+        let folders = SidebarOrganization.listKind(surface: .folders, isSearching: true)
+        let recents = SidebarOrganization.listKind(surface: .recents, isSearching: true)
+        let archived = SidebarOrganization.listKind(surface: .archived, isSearching: true)
+        #expect(project == .search)
+        #expect(project == folders)
+        #expect(project == recents)
+        #expect(project == archived)
+        #expect(project != .projectChats)
+        #expect(project != .projectSearch)
+        #expect(project != .projectList)
+        #expect(project != .recents)
+        #expect(project != .archived)
     }
 
     @Test func recentsAndArchivedAreTheirOwnLists() {
-        #expect(SidebarOrganization.listKind(surface: .recents, isSearching: true) == .recents)
+        #expect(SidebarOrganization.listKind(surface: .recents, isSearching: false) == .recents)
         #expect(SidebarOrganization.listKind(surface: .archived, isSearching: false) == .archived)
     }
 

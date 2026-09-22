@@ -599,9 +599,9 @@ struct SessionQueryCase: Sendable, CustomTestStringConvertible {
         ),
         SessionQueryCase(
             query: "alpha",
-            expectedIDs: ["a1", "a2"],
+            expectedIDs: ["a2", "a1"],
             expectedGroupOrder: ["/proj/Alpha"],
-            expectedGroupedIDs: [["a1", "a2"]]
+            expectedGroupedIDs: [["a2", "a1"]]
         ),
         SessionQueryCase(
             query: "cafe",
@@ -611,9 +611,9 @@ struct SessionQueryCase: Sendable, CustomTestStringConvertible {
         ),
         SessionQueryCase(
             query: "BETA",
-            expectedIDs: ["b1", "b2"],
+            expectedIDs: ["b2", "b1"],
             expectedGroupOrder: ["/proj/Beta"],
-            expectedGroupedIDs: [["b1", "b2"]]
+            expectedGroupedIDs: [["b2", "b1"]]
         ),
         SessionQueryCase(
             query: "Zebra",

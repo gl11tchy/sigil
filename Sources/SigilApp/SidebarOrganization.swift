@@ -34,6 +34,8 @@ enum SidebarListKind: Equatable, Sendable {
     case projectChats
     /// Search hits grouped by folder.
     case projectSearch
+    /// Ranked hits from every folder, including archived chats.
+    case search
     /// Archived chats, grouped by folder.
     case archived
 }
@@ -68,13 +70,44 @@ enum SidebarOrganization {
         return .project
     }
 
+    /// Whitespace is not a query. Empty lists stay on the open folder.
+    static func isSearching(_ query: String) -> Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     static func listKind(surface: SidebarSurface, isSearching: Bool) -> SidebarListKind {
+        if isSearching { return .search }
         switch surface {
         case .recents: return .recents
         case .archived: return .archived
         case .project: return .projectChats
-        case .folders: return isSearching ? .projectSearch : .projectList
+        case .folders: return .projectList
         }
+    }
+
+    /// Escape never clears the search query.
+    enum EscapeAction: Equatable, Sendable {
+        case cancelRename
+        case leaveFolder
+        case leaveList
+    }
+
+    static func escapeAction(isRenaming: Bool, surface: SidebarSurface) -> EscapeAction {
+        if isRenaming { return .cancelRename }
+        if surface != .folders { return .leaveFolder }
+        return .leaveList
+    }
+
+    /// A non-empty query selects the top ranked row. An empty query leaves
+    /// the current highlight alone.
+    enum SearchSelection: Equatable, Sendable {
+        case keep
+        case row(String?)
+    }
+
+    static func selectionAfterQueryChange(query: String, topRowID: String?) -> SearchSelection {
+        guard isSearching(query) else { return .keep }
+        return .row(topRowID)
     }
 
     static func folderListRowIDs(pinnedIDs: [String], restIDs: [String]) -> [String] {
