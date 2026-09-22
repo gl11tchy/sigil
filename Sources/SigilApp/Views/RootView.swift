@@ -73,13 +73,8 @@ struct RootView: View {
     @ViewBuilder
     private var content: some View {
         if model.tabs.isEmpty {
-            if !model.settings.executableExists {
-                MissingCLIView(path: model.settings.executablePath)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                EmptyDetailView { model.newTab(in: model.newSessionDirectory) }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+            EmptyDetailView { model.requestNewSession() }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             VStack(spacing: 0) {
                 ZStack(alignment: .topTrailing) {
@@ -194,11 +189,10 @@ private struct TopBar: View {
             }
 
             IconButton(systemImage: "plus", help: "New Session in \(model.newSessionDirectory.abbreviatedPath) (⌘T)") {
-                model.newTab(in: model.newSessionDirectory)
+                model.requestNewSession()
             }
-            .disabled(!model.settings.executableExists)
             Menu {
-                Button("New Session in Folder…") { model.isShowingNewSessionSheet = true }
+                Button("New Session in Folder…") { model.requestNewSession() }
                 Divider()
                 SettingsLink { Text("Settings…") }
             } label: {
@@ -403,47 +397,6 @@ private struct WindowChrome: NSViewRepresentable {
             window.isMovableByWindowBackground = true
             window.backgroundColor = color
             window.styleMask.insert(.fullSizeContentView)
-        }
-    }
-}
-
-/// Shown when the wrapped CLI is not where the app expects it.
-private struct MissingCLIView: View {
-    let path: String
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 20, weight: .light))
-                .foregroundStyle(palette.textFaint)
-            VStack(spacing: 6) {
-                Text("Grok Build CLI not found")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(palette.text)
-                Text("Set the path in Settings, or install the CLI.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(palette.textDim)
-            }
-            Text(path)
-                .font(.system(size: 10.5, design: .monospaced))
-                .foregroundStyle(palette.textDim)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(palette.raised)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 5)
-                                .strokeBorder(palette.hairline, lineWidth: 1)
-                        )
-                )
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: 420)
-            SettingsLink { Text("Open Settings…") }
-                .controlSize(.small)
-                .padding(.top, 2)
         }
     }
 }

@@ -31,6 +31,7 @@ final class AppModel {
     }
     var searchText: String = ""
     var isShowingNewSessionSheet = false
+    private(set) var pendingSessionDirectory: URL?
     /// Find-in-terminal bar for the selected tab.
     var isFindBarVisible = false
     /// True when a tab was selected while the main window could not take focus.
@@ -388,7 +389,9 @@ final class AppModel {
     }
 
     func archive(_ project: SidebarProject) {
-        let projectTabs = tabs.filter { samePath($0.workingDirectory.path, project.cwd) }
+        let projectTabs = tabs.filter {
+            $0.spec.provider == .grokBuild && samePath($0.workingDirectory.path, project.cwd)
+        }
         if projectTabs.contains(where: \.shouldWarnBeforeStopping), !confirmStopWorking() {
             return
         }
@@ -396,8 +399,7 @@ final class AppModel {
         for session in store.sessions where samePath(session.cwd, project.cwd) {
             archive(session, confirmIfWorking: false)
         }
-        let leftover = tabs.filter { samePath($0.workingDirectory.path, project.cwd) }.map(\.id)
-        for id in leftover { closeTab(id) }
+        for tab in projectTabs { closeTab(tab.id) }
         dropDeferred(inProjectPath: project.cwd)
         persistOpenTabs()
         if focusedProject.map({ samePath($0.cwd, project.cwd) }) == true {
@@ -506,10 +508,9 @@ final class AppModel {
         settings.focusedProjectPath = ""
     }
 
-    @discardableResult
-    func newTabInProject(_ project: SidebarProject) -> TerminalTab? {
+    func requestNewSessionInProject(_ project: SidebarProject) {
         openProject(project)
-        return newTab(in: URL(fileURLWithPath: project.cwd))
+        requestNewSession(in: URL(fileURLWithPath: project.cwd))
     }
 
     enum SidebarDismiss: Equatable {
@@ -1234,9 +1235,17 @@ final class AppModel {
 
     // MARK: - Tabs
 
+    func requestNewSession(in directory: URL? = nil) {
+        pendingSessionDirectory = directory ?? newSessionDirectory
+        isShowingNewSessionSheet = true
+    }
+
     @discardableResult
-    func newTab(in directory: URL, model: String? = nil, effort: String? = nil) -> TerminalTab? {
-        guard settings.executableExists else {
+    func newTab(
+        in directory: URL, model: String? = nil, effort: String? = nil,
+        provider: CLIProvider = .grokBuild
+    ) -> TerminalTab? {
+        guard provider != .grokBuild || settings.executableExists else {
             showError(title: "Grok CLI is unavailable", message: "Choose it in Settings, then try again.")
             return nil
         }
@@ -1245,13 +1254,14 @@ final class AppModel {
             return nil
         }
         let spec = GrokLaunchSpec(
-            executable: settings.executableURL,
+            executable: provider == .grokBuild ? settings.executableURL : nil,
             workingDirectory: directory,
             mode: .new(sessionID: UUID()),
             model: (model ?? settings.model).nilIfEmpty,
             reasoningEffort: (effort ?? settings.effort).nilIfEmpty,
             themeName: settings.theme.grokThemeName,
-            themeVariables: settings.theme.grokThemeEnvironment
+            themeVariables: settings.theme.grokThemeEnvironment,
+            provider: provider
         )
         return add(spec)
     }
@@ -1310,13 +1320,13 @@ final class AppModel {
     /// Reopens the same conversation in place so the tab does not jump or lose selection.
     func restartTab(id: TerminalTab.ID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
-        guard settings.executableExists else {
+        let old = tabs[index]
+        guard old.spec.provider != .grokBuild || settings.executableExists else {
             showError(title: "Grok CLI is unavailable", message: "Choose it in Settings, then try again.")
             return
         }
-        let old = tabs[index]
         // `.new` tabs already have a UUID the CLI wrote a session directory for.
-        guard let sessionID = old.sessionID else { return }
+        guard old.spec.provider != .grokBuild || old.sessionID != nil else { return }
         guard Self.isUsableDirectory(old.workingDirectory) else {
             showError(
                 title: "Folder is unavailable",
@@ -1327,7 +1337,7 @@ final class AppModel {
         let wasSelected = selectedTabID == old.id
         tabBridge?.noteTabClosed(id: old.id)
         old.terminateAndWait()
-        let tab = replacementTab(for: old, sessionID: sessionID)
+        let tab = replacementTab(for: old, sessionID: old.sessionID)
         tabs[index] = tab
         if wasSelected { selectedTabID = tab.id }
         persistOpenTabs()
@@ -1335,19 +1345,21 @@ final class AppModel {
 
     /// Builds a fresh process for a stopped tab without changing its position,
     /// title, per-tab launch options, or current selection.
-    private func replacementTab(for old: TerminalTab, sessionID: String) -> TerminalTab {
+    private func replacementTab(for old: TerminalTab, sessionID: String?) -> TerminalTab {
         var spec = old.spec
-        spec.executable = settings.executableURL
-        if case .new = old.spec.mode,
-            let directory = old.spec.sessionDirectory,
-            !Self.isUsableDirectory(directory)
-        {
-            spec.mode = old.spec.mode
-        } else {
-            spec.mode = .resume(sessionID: sessionID)
+        if spec.provider == .grokBuild, let sessionID {
+            spec.executable = settings.executableURL
+            if case .new = old.spec.mode,
+                let directory = old.spec.sessionDirectory,
+                !Self.isUsableDirectory(directory)
+            {
+                spec.mode = old.spec.mode
+            } else {
+                spec.mode = .resume(sessionID: sessionID)
+            }
+            spec.themeName = settings.theme.grokThemeName
+            spec.themeVariables = settings.theme.grokThemeEnvironment
         }
-        spec.themeName = settings.theme.grokThemeName
-        spec.themeVariables = settings.theme.grokThemeEnvironment
         spec.bridgeTabID = nil
         spec.bridgeSocketPath = nil
         let tabID = UUID()
@@ -1596,7 +1608,7 @@ final class AppModel {
     /// `sigil-mcp` server grok starts knows which tab it speaks for. Left off
     /// when messaging is unavailable, which also strips any inherited value.
     private func tagged(_ spec: GrokLaunchSpec, tabID: UUID) -> GrokLaunchSpec {
-        guard isTabMessagingAvailable, let bridge = tabBridge else { return spec }
+        guard spec.provider == .grokBuild, isTabMessagingAvailable, let bridge = tabBridge else { return spec }
         var tagged = spec
         tagged.bridgeTabID = tabID.uuidString
         tagged.bridgeSocketPath = bridge.socketURL.path
@@ -1785,7 +1797,7 @@ final class AppModel {
         applyAppearance()
         let name = settings.theme.grokThemeName
         let vars = settings.theme.grokThemeEnvironment
-        for tab in tabs {
+        for tab in tabs where tab.spec.provider == .grokBuild {
             if tab.spec.themeName == name, tab.spec.themeVariables == vars { continue }
             if tab.shouldWarnBeforeStopping { continue }
             restartTab(id: tab.id)

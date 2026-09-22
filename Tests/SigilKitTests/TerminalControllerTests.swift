@@ -279,7 +279,7 @@ struct TerminalControllerTests {
         #expect(sawFinalValue)
         #expect(controller.view.isAccessibilityElement())
         #expect(controller.view.accessibilityRole() == .textArea)
-        #expect(controller.view.accessibilityLabel() == "Grok terminal")
+        #expect(controller.view.accessibilityLabel() == "Grok Build terminal")
         #expect(value?.contains(marker) == true)
         #expect((value?.count ?? .max) <= 50_000)
         #expect(

@@ -1,7 +1,7 @@
 import SigilKit
 import SwiftUI
 
-/// Starts a session somewhere other than the current tab's folder.
+/// Chooses a provider and starts its CLI in the requested folder.
 struct NewSessionSheet: View {
     @Bindable var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -33,6 +33,34 @@ struct NewSessionSheet: View {
             Text("New Session")
                 .font(.headline)
 
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 5), spacing: 12) {
+                ForEach(CLIProvider.allCases) { provider in
+                    Button {
+                        if model.newTab(
+                            in: directory, model: modelName, effort: effort, provider: provider
+                        ) != nil {
+                            dismiss()
+                        }
+                    } label: {
+                        VStack(spacing: 10) {
+                            Image(systemName: provider.symbolName)
+                                .font(.system(size: 42, weight: .medium))
+                                .frame(width: 76, height: 76)
+                            Text(provider.name)
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!directoryIsAvailable)
+                    .accessibilityLabel("Start \(provider.name)")
+                    .accessibilityIdentifier("new-session-\(provider.rawValue)")
+                    .help("Start \(provider.name)")
+                }
+            }
+
             Form {
                 LabeledContent("Folder") {
                     VStack(alignment: .leading, spacing: 4) {
@@ -63,13 +91,14 @@ struct NewSessionSheet: View {
                     }
                 }
 
-                LabeledContent("Model") {
-                    ModelNameField(text: $modelName)
-                }
-
-                Picker("Effort", selection: $effort) {
-                    ForEach(AppSettings.effortOptions, id: \.self) { option in
-                        Text(option.isEmpty ? "CLI default" : option.capitalized).tag(option)
+                DisclosureGroup("Grok Build options") {
+                    LabeledContent("Model") {
+                        ModelNameField(text: $modelName)
+                    }
+                    Picker("Effort", selection: $effort) {
+                        ForEach(AppSettings.effortOptions, id: \.self) { option in
+                            Text(option.isEmpty ? "CLI default" : option.capitalized).tag(option)
+                        }
                     }
                 }
             }
@@ -79,20 +108,12 @@ struct NewSessionSheet: View {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button("Start") {
-                    if model.newTab(in: directory, model: modelName, effort: effort) != nil {
-                        dismiss()
-                    }
-                }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
-                .disabled(!directoryIsAvailable || !model.settings.executableExists)
             }
         }
         .padding(20)
-        .frame(width: 460)
+        .frame(width: 620)
         .onAppear {
-            directory = model.newSessionDirectory
+            directory = model.pendingSessionDirectory ?? model.newSessionDirectory
             modelName = model.settings.model
             effort = model.settings.effort
         }
@@ -102,5 +123,17 @@ struct NewSessionSheet: View {
         var isDirectory: ObjCBool = false
         return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
             && isDirectory.boolValue
+    }
+}
+
+extension CLIProvider {
+    fileprivate var symbolName: String {
+        switch self {
+        case .claudeCode: "sun.max.fill"
+        case .codex: "chevron.left.forwardslash.chevron.right"
+        case .devin: "cpu"
+        case .cursor: "cursorarrow"
+        case .grokBuild: "g.circle"
+        }
     }
 }

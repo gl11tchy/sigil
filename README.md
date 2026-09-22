@@ -5,9 +5,9 @@
 [![CI](https://github.com/gl11tchy/sigil/actions/workflows/ci.yml/badge.svg)](https://github.com/gl11tchy/sigil/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-MIT-6A6A6A)
 
-A native macOS app around the `grok` command line tool. It runs the real Grok Build
-terminal interface in a pseudo-terminal, so the tool behaves exactly as it does in a
-terminal — and adds a window, tabs, and a searchable list of every conversation.
+A native macOS app for Claude Code, Codex, Devin, Cursor, and Grok Build.
+It runs each provider's real CLI in a terminal tab. Grok Build also has a
+searchable conversation sidebar.
 
 By gl11tchy.
 
@@ -17,6 +17,16 @@ By gl11tchy.
 
 ## What it adds
 
+- **Provider picker.** Press ⌘T or click a new-session plus, then click a large
+  provider icon to launch its CLI in the chosen folder. Claude Code uses `claude`,
+  Codex uses `codex`, Devin uses `devin`, and Cursor uses `cursor-agent`.
+  Install and sign in to each CLI separately. Sigil uses your login shell's PATH
+  and the standard installation folders. Grok keeps its configured Settings path.
+  Other providers keep their own history inside their CLI; Sigil's sidebar,
+  transcript export, tab messaging, and automatic chat restoration remain Grok-only.
+  Restart opens a fresh CLI for other providers, not a resumed conversation.
+  Other providers have no turn-completion integration. Sigil keeps submitted work
+  active and warns before closing their running processes; silence does not mark completion.
 - **Thread sidebar.** Every conversation on this machine. Home is the project
   list; open a folder to see its chats and start a new one with the plus. Recents
   and Archived sit under the folders as destinations you open. Search by title, folder or
