@@ -139,6 +139,18 @@ struct RootView: View {
     }
 }
 
+/// The selected session's folder stays on screen for one tab and for many.
+enum SelectedSessionFolder {
+    static func text(tabCount: Int, folder: String?) -> String? {
+        guard tabCount > 0, let folder, !folder.isEmpty else { return nil }
+        return folder
+    }
+
+    static func breadcrumb(of directory: URL) -> String {
+        directory.breadcrumbPath
+    }
+}
+
 /// The one piece of window chrome: a 38pt band holding the sidebar toggle, what the
 /// current session is, and the new-session button. It replaces the title bar entirely.
 private struct TopBar: View {
@@ -165,6 +177,10 @@ private struct TopBar: View {
 
             if model.tabs.count > 1 {
                 TabStripView(model: model)
+                selectedFolder
+                if TabListRows.isShown(tabCount: model.tabs.count) {
+                    TabListView(model: model)
+                }
             } else {
                 label
                 Spacer(minLength: 8)
@@ -200,6 +216,21 @@ private struct TopBar: View {
     }
 
     @ViewBuilder
+    private var selectedFolder: some View {
+        if let tab = model.selectedTab,
+            let folder = SelectedSessionFolder.text(
+                tabCount: model.tabs.count,
+                folder: SelectedSessionFolder.breadcrumb(of: tab.workingDirectory)
+            )
+        {
+            folderText(folder, help: tab.workingDirectory.abbreviatedPath)
+                .layoutPriority(1)
+                .padding(.leading, 6)
+                .accessibilityLabel("Folder \(folder)")
+        }
+    }
+
+    @ViewBuilder
     private var label: some View {
         if let tab = model.selectedTab {
             HStack(spacing: 6) {
@@ -208,15 +239,24 @@ private struct TopBar: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(palette.text)
                     .lineLimit(1)
-                Text(tab.workingDirectory.breadcrumbPath)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(palette.textFaint)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .help(tab.workingDirectory.abbreviatedPath)
+                if let folder = SelectedSessionFolder.text(
+                    tabCount: model.tabs.count,
+                    folder: SelectedSessionFolder.breadcrumb(of: tab.workingDirectory)
+                ) {
+                    folderText(folder, help: tab.workingDirectory.abbreviatedPath)
+                }
             }
             .padding(.leading, 10)
         }
+    }
+
+    private func folderText(_ folder: String, help: String) -> some View {
+        Text(folder)
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundStyle(palette.textFaint)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .help(help)
     }
 }
 

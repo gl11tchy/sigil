@@ -1,15 +1,42 @@
 import SwiftUI
 
-/// The tab strip, which lives inside the top bar and replaces the session label
-/// once a second session is open.
+/// Chips share leftover width. Content wider than the strip scrolls.
+enum TabStripSizing {
+    /// `nil` means a chip is not pinned to one width.
+    static let fixedChipWidth: CGFloat? = nil
+    static let spacing: CGFloat = 2
+    static let showsScrollIndicators = true
+
+    static func widths(available: CGFloat, ideals: [CGFloat]) -> [CGFloat] {
+        guard !ideals.isEmpty else { return [] }
+        if let fixedChipWidth {
+            return Array(repeating: fixedChipWidth, count: ideals.count)
+        }
+        let gaps = spacing * CGFloat(ideals.count - 1)
+        let idealTotal = ideals.reduce(0, +) + gaps
+        let extra = max(0, available - idealTotal)
+        let share = extra / CGFloat(ideals.count)
+        return ideals.map { $0 + share }
+    }
+
+    static func contentWidth(available: CGFloat, ideals: [CGFloat]) -> CGFloat {
+        let widths = widths(available: available, ideals: ideals)
+        guard !widths.isEmpty else { return 0 }
+        let gaps = spacing * CGFloat(widths.count - 1)
+        return widths.reduce(0, +) + gaps
+    }
+}
+
+/// The tab strip in the top bar, beside the selected session's folder.
 struct TabStripView: View {
     @Bindable var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var stripWidth: CGFloat = 0
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal) {
-                HStack(spacing: 2) {
+                TabChipRow(availableWidth: max(0, stripWidth - 12)) {
                     ForEach(model.tabs) { tab in
                         TabChip(
                             tab: tab,
@@ -18,13 +45,20 @@ struct TabStripView: View {
                             select: { model.select(tab.id) },
                             close: { model.requestCloseTab(tab.id) }
                         )
-                        .frame(width: 150)
                         .id(tab.id)
                     }
                 }
                 .padding(.horizontal, 6)
             }
-            .scrollIndicators(.hidden)
+            .scrollIndicators(TabStripSizing.showsScrollIndicators ? .visible : .hidden)
+            .background {
+                GeometryReader { geo in
+                    Color.clear.preference(key: StripWidthKey.self, value: geo.size.width)
+                }
+            }
+            .onPreferenceChange(StripWidthKey.self) { width in
+                if width != stripWidth { stripWidth = width }
+            }
             .task(id: model.selectedTabID) {
                 await Task.yield()
                 guard !Task.isCancelled else { return }
@@ -36,6 +70,45 @@ struct TabStripView: View {
             }
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+private struct StripWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+/// Places chips with `TabStripSizing`.
+private struct TabChipRow: Layout {
+    var availableWidth: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let ideals = subviews.map { $0.sizeThatFits(.unspecified).width }
+        let height = subviews.map { $0.sizeThatFits(.unspecified).height }.max() ?? 0
+        return CGSize(
+            width: TabStripSizing.contentWidth(available: availableWidth, ideals: ideals),
+            height: height
+        )
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        let ideals = subviews.map { $0.sizeThatFits(.unspecified).width }
+        let widths = TabStripSizing.widths(available: availableWidth, ideals: ideals)
+        var x = bounds.minX
+        for index in subviews.indices {
+            let width = widths.indices.contains(index) ? widths[index] : 0
+            subviews[index].place(
+                at: CGPoint(x: x, y: bounds.midY),
+                anchor: .leading,
+                proposal: ProposedViewSize(width: width, height: bounds.height)
+            )
+            x += width
+            if index != subviews.count - 1 { x += TabStripSizing.spacing }
+        }
     }
 }
 
