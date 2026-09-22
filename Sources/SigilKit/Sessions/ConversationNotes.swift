@@ -64,6 +64,9 @@ public final class ConversationNotesStore {
         // `.some(nil)`: a plain nil assignment removes the entry instead of
         // recording the delete.
         dirty[url.path] = .some(nil)
+        // A note the first build wrote flat and nobody has opened since still
+        // sits at the root; it belongs to this conversation too.
+        dirty[root.appendingPathComponent(sessionID + ".md").path] = .some(nil)
         scheduleFlush()
     }
 

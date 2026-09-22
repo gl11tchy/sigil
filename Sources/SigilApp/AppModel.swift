@@ -567,6 +567,8 @@ final class AppModel {
         withObservationTracking {
             _ = store.isLoading
             _ = store.sessions
+            // A watcher rescan can clear an error without changing sessions.
+            _ = store.loadError
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -592,11 +594,13 @@ final class AppModel {
                     .max(by: { $0.updatedAt < $1.updatedAt })
             else { continue }
             let existing = panel.notes(forSessionID: session.id, cwd: session.cwd)
+            let section = "\n\n---\n\n" + text
+            // Skip only a note that is the legacy text, or one already ending
+            // in a migrated copy of it. A mere substring match is not proof.
             if existing.isEmpty {
                 panel.setNotes(text, forSessionID: session.id, cwd: session.cwd)
-            } else if !existing.contains(text) {
-                panel.setNotes(
-                    existing + "\n\n---\n\n" + text, forSessionID: session.id, cwd: session.cwd)
+            } else if existing != text && !existing.hasSuffix(section) {
+                panel.setNotes(existing + section, forSessionID: session.id, cwd: session.cwd)
             }
             remaining.removeValue(forKey: folder)
         }

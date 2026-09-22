@@ -123,6 +123,20 @@ struct ConversationNotesStoreTests {
     }
 
     @Test @MainActor
+    func deletingAnUnopenedConversationRemovesItsFlatNoteToo() throws {
+        let (store, root) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let legacy = root.appendingPathComponent("a-1.md")
+        try Data("old layout".utf8).write(to: legacy)
+
+        store.deleteNote(for: "a-1", cwd: "/tmp/one")
+        store.flushNow()
+        #expect(!FileManager.default.fileExists(atPath: legacy.path))
+    }
+
+    @Test @MainActor
     func idsThatCouldEscapeTheFolderAreRefused() throws {
         let (store, root) = try makeStore()
         defer { try? FileManager.default.removeItem(at: root) }

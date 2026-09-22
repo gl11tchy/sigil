@@ -3189,6 +3189,45 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func legacyMigrationAppendsEvenWhenTheLegacyTextIsAMereSubstring() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        try fixture.writeListedSession(id: "new", cwd: cwd.path, summary: "New")
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        model.panel.setNotes("TODO later", forSessionID: "new", cwd: cwd.path)
+        fixture.defaults.set(
+            try JSONEncoder().encode([cwd.path: "TODO"]), forKey: "panel.notes")
+
+        model.migrateLegacyPanelNotes()
+
+        let migrated = model.panel.notes(forSessionID: "new", cwd: cwd.path)
+        #expect(migrated == "TODO later\n\n---\n\nTODO")
+        #expect(model.panel.legacyFolderNotes.isEmpty)
+    }
+
+    @Test @MainActor
+    func legacyMigrationDoesNotDuplicateAnAlreadyMigratedSection() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        try fixture.writeListedSession(id: "new", cwd: cwd.path, summary: "New")
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        model.panel.setNotes("mine\n\n---\n\nfolder note", forSessionID: "new", cwd: cwd.path)
+        fixture.defaults.set(
+            try JSONEncoder().encode([cwd.path: "folder note"]), forKey: "panel.notes")
+
+        model.migrateLegacyPanelNotes()
+
+        #expect(model.panel.notes(forSessionID: "new", cwd: cwd.path) == "mine\n\n---\n\nfolder note")
+        #expect(model.panel.legacyFolderNotes.isEmpty)
+    }
+
+    @Test @MainActor
     func archivingDropsADeferredTabSoItDoesNotRestore() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
