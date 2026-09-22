@@ -152,8 +152,8 @@ header { border-bottom: 0; padding-bottom: 0; }
 #session-status[data-state="exited"] { color: #ffc46b; }
 #stop { width: auto; margin: 0; color: #ffc46b; }
 #restart { color: var(--accent); }
-#terminal { font: 14px/1.75 ui-monospace, "SF Mono", Menlo, monospace; padding: 8px 20px 56px; color: #d5dae1; }
-#terminal[data-raw="true"] { font-size: 13px; }
+#terminal { font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 12px 20px 40px; color: #d5dae1; }
+#terminal[data-raw="true"] { font: 13px/1.45 ui-monospace, "SF Mono", Menlo, monospace; }
 #compose { padding-top: 8px; border-top: 1px solid var(--line); background: #08090b; }
 .entry { padding: 6px; gap: 6px; border-radius: 12px; }
 .entry:focus-within { border-color: var(--accent); }
@@ -210,6 +210,11 @@ dialog::backdrop { background: #000a; }
   @keyframes sheet-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 }
 
+@media (max-width: 600px) {
+  .session-picker select { font-size: 16px; }
+  .toolbar { padding-bottom: 6px; }
+  #terminal:not([data-raw="true"]) { padding-top: 10px; }
+}
 body[data-compact="true"] #brand img { display: none; }
 body[data-compact="true"] header { padding-top: env(safe-area-inset-top); }
 body[data-compact="true"] .toolbar { padding-bottom: 0; }

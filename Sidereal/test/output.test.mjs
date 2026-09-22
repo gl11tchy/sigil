@@ -249,3 +249,73 @@ test('strips TUI tree gutters so phone code is not a column of pipes', () => {
   assert.equal(readableOutput('| "idle"\n| grep needle'), '| "idle"\n| grep needle');
 });
 
+test('strips the live iPhone working dump: braille tofu, gutters, and thinking footer', () => {
+  const dump = [
+    '⠹',
+    '|',
+    '⠹',
+    '|',
+    '⠹',
+    '|  ...',
+    '⠹',
+    '|  icons.',
+    '⠹',
+    '|  • Folder and recent chats stay right where they are.',
+    '⠹',
+    '|  • When Grok Build is chosen, the model picker and effort slider drop in below it—nothing fancy, just two simple rows.',
+    '⠹',
+    '',
+    '         ∴ Thinking… 16s',
+    '5m42s ↓130k [stop]',
+  ].join('\n');
+  assert.equal(
+    readableOutput(dump),
+    [
+      '...',
+      '',
+      'icons.',
+      '',
+      '• Folder and recent chats stay right where they are.',
+      '',
+      '• When Grok Build is chosen, the model picker and effort slider drop in below it—nothing fancy, just two simple rows.',
+    ].join('\n'),
+  );
+});
+
+test('strips braille spinners prefixed onto thinking and status rows', () => {
+  const dump = [
+    'Hello from the phone.',
+    '⠹ Thinking… 16s',
+    '⣾ 5m42s ↓130k [stop]',
+    '█',
+    '\uFFFD',
+  ].join('\n');
+  assert.equal(readableOutput(dump), 'Hello from the phone.');
+});
+
+test('unwraps a one-space unicode gutter and a short padded TUI row', () => {
+  assert.equal(readableOutput('│ • Folder and recent chats stay right where they are.'), '• Folder and recent chats stay right where they are.');
+  assert.equal(
+    readableOutput('│  icons.                                                                 │'),
+    'icons.',
+  );
+});
+
+test('keeps padded single-column table cells', () => {
+  const table = 'Table:\n┌────────┐\n│ OK     │\n└────────┘';
+  assert.equal(readableOutput(table), table);
+});
+
+test('keeps list and status markers that are not spinner chrome', () => {
+  assert.equal(readableOutput('● passed'), '● passed');
+  assert.equal(readableOutput('○ pending\n■ blocked\n▪ queued'), '○ pending\n■ blocked\n▪ queued');
+  assert.equal(readableOutput('⣿ GPU utilization'), '⣿ GPU utilization');
+});
+
+test('keeps documentation that mentions a stop control', () => {
+  assert.equal(
+    readableOutput('Use the ↓ control labeled [stop]'),
+    'Use the ↓ control labeled [stop]',
+  );
+});
+
