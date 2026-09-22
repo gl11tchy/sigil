@@ -552,14 +552,17 @@ struct SidebarView: View {
             isPinned: isPinned,
             isArchived: isArchived,
             isKeyboardSelected: model.sessionKey(session) == keyboardSelectionID,
+            isMultiSelected: multiSelection.contains(model.sessionKey(session)),
             isRenaming: model.renamingSessionKey == model.sessionKey(session),
             hasCustomName: hasCustomName,
             showsProject: showsProject,
             headerCoversQuery: headerCoversQuery,
             open: {
                 keyboardSelectionID = model.sessionKey(session)
+                clearMultiSelection()
                 model.open(session)
             },
+            tap: { handleSessionTap(session) },
             togglePin: { model.togglePin(session) },
             toggleArchive: { model.toggleArchive(session) },
             beginRename: { beginInlineRename(session) },
@@ -577,33 +580,52 @@ struct SidebarView: View {
         )
         .id(model.sessionKey(session))
         .contextMenu {
-            Button(isPinned ? "Unpin" : "Pin") { model.togglePin(session) }
-            Button(isArchived ? "Unarchive" : "Archive") { model.toggleArchive(session) }
-            Divider()
-            Button("Rename") { beginInlineRename(session) }
-            if hasCustomName {
-                Button("Reset Name") { model.resetName(session) }
-            }
-            Divider()
-            Button("Open in New Tab") { model.open(session) }
-            if model.isOpen(session) {
-                Button("Close Tab") { dismissSession(session) }
-            }
-            Divider()
-            Button("New Session in This Folder") {
-                model.newTab(in: URL(fileURLWithPath: session.cwd))
-            }
-            if let project = containingProject {
-                Button(model.isPinned(project) ? "Unpin Project" : "Pin Project") {
-                    model.togglePin(project)
+            let selection = bulkSelection(containing: session)
+            if selection.count > 1 {
+                if isArchived {
+                    Button("Unarchive \(selection.count) Conversations") {
+                        model.unarchive(selection)
+                        clearMultiSelection()
+                    }
+                } else {
+                    Button("Archive \(selection.count) Conversations") {
+                        model.archive(selection)
+                        clearMultiSelection()
+                    }
                 }
-            }
-            Button("Reveal Folder in Finder") { model.revealInFinder(session) }
-            Button("Copy Session ID") { model.copySessionID(session) }
-            Button("Export Transcript…") { model.exportTranscript(session) }
-            Divider()
-            Button("Delete Conversation…", role: .destructive) {
-                pendingDelete = session
+                Divider()
+                Button("Move \(selection.count) Conversations to Trash…", role: .destructive) {
+                    pendingBulkDelete = selection
+                }
+            } else {
+                Button(isPinned ? "Unpin" : "Pin") { model.togglePin(session) }
+                Button(isArchived ? "Unarchive" : "Archive") { model.toggleArchive(session) }
+                Divider()
+                Button("Rename") { beginInlineRename(session) }
+                if hasCustomName {
+                    Button("Reset Name") { model.resetName(session) }
+                }
+                Divider()
+                Button("Open in New Tab") { model.open(session) }
+                if model.isOpen(session) {
+                    Button("Close Tab") { dismissSession(session) }
+                }
+                Divider()
+                Button("New Session in This Folder") {
+                    model.newTab(in: URL(fileURLWithPath: session.cwd))
+                }
+                if let project = containingProject {
+                    Button(model.isPinned(project) ? "Unpin Project" : "Pin Project") {
+                        model.togglePin(project)
+                    }
+                }
+                Button("Reveal Folder in Finder") { model.revealInFinder(session) }
+                Button("Copy Session ID") { model.copySessionID(session) }
+                Button("Export Transcript…") { model.exportTranscript(session) }
+                Divider()
+                Button("Delete Conversation…", role: .destructive) {
+                    pendingDelete = session
+                }
             }
         }
     }
@@ -951,10 +973,19 @@ struct SidebarView: View {
     private func moveKeyboardSelection(by delta: Int) -> KeyPress.Result {
         let ids = visibleRowIDs()
         guard !ids.isEmpty else { return .ignored }
+        let extending =
+            NSEvent.modifierFlags.contains(.shift) && listKind != .projectList
+        let anchor = extending ? (selectionAnchor ?? keyboardSelectionID) : nil
         if let current = keyboardSelectionID, let index = ids.firstIndex(of: current) {
             keyboardSelectionID = ids[min(max(index + delta, 0), ids.count - 1)]
         } else {
             keyboardSelectionID = delta >= 0 ? ids.first : ids.last
+        }
+        if extending, let anchor, let current = keyboardSelectionID {
+            multiSelection = SidebarOrganization.selectionRange(from: anchor, to: current, in: ids)
+            selectionAnchor = anchor
+        } else {
+            clearMultiSelection()
         }
         return .handled
     }
@@ -996,6 +1027,72 @@ struct SidebarView: View {
         if !visibleRowIDs().contains(id) {
             keyboardSelectionID = nil
         }
+    }
+
+    // MARK: - Multi-selection
+
+    /// ⌘ toggles one row, ⇧ extends a range from the anchor, a plain click
+    /// opens the conversation and drops the selection.
+    private func handleSessionTap(_ session: GrokSession) {
+        let modifiers = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let key = model.sessionKey(session)
+        if modifiers.contains(.command) {
+            if multiSelection.contains(key) {
+                multiSelection.remove(key)
+                if selectionAnchor == key { selectionAnchor = multiSelection.first }
+            } else {
+                multiSelection.insert(key)
+                selectionAnchor = key
+            }
+            keyboardSelectionID = key
+        } else if modifiers.contains(.shift), let anchor = selectionAnchor ?? keyboardSelectionID {
+            multiSelection = SidebarOrganization.selectionRange(
+                from: anchor, to: key, in: visibleRowIDs())
+            selectionAnchor = anchor
+            keyboardSelectionID = key
+        } else {
+            clearMultiSelection()
+            keyboardSelectionID = key
+            model.open(session)
+        }
+    }
+
+    /// The rows a bulk action applies to: the multi-selection when this row is
+    /// part of it, in visible order; otherwise the row alone.
+    private func bulkSelection(containing session: GrokSession) -> [GrokSession] {
+        let key = model.sessionKey(session)
+        guard multiSelection.count > 1, multiSelection.contains(key) else { return [session] }
+        let order = visibleRowIDs()
+        return listedSessions
+            .filter { multiSelection.contains(model.sessionKey($0)) }
+            .sorted {
+                (order.firstIndex(of: model.sessionKey($0)) ?? .max)
+                    < (order.firstIndex(of: model.sessionKey($1)) ?? .max)
+            }
+    }
+
+    private func clearMultiSelection() {
+        multiSelection.removeAll()
+        selectionAnchor = nil
+    }
+
+    /// Rows that leave the filter (search, archive, delete) leave the selection.
+    private func pruneMultiSelection() {
+        guard !multiSelection.isEmpty else { return }
+        multiSelection.formIntersection(visibleRowIDs())
+        if multiSelection.isEmpty { selectionAnchor = nil }
+    }
+
+    private var bulkDeleteTitle: String {
+        let sessions = pendingBulkDelete ?? []
+        let count = sessions.count
+        if sessions.contains(where: { model.shouldWarnBeforeDeleting($0) }) {
+            return "Stop working sessions and move \(count) conversations to Trash?"
+        }
+        if sessions.contains(where: { model.isRunning($0) }) {
+            return "Close \(count) sessions and move them to Trash?"
+        }
+        return "Move \(count) conversations to Trash?"
     }
 }
 
