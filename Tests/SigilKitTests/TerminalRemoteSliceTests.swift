@@ -67,4 +67,28 @@ struct TerminalRemoteSliceTests {
         #expect(!next.contains(mid))
         #expect(next.count <= 12_000)
     }
+
+    @Test func repeatedAnchorUsesTheMatchNearestTheLoadedWindow() {
+        let head = "SAME\n" + String(repeating: "x", count: 80)
+        let tail = "SAME\nTAIL"
+        let rendered = head + "\n" + tail
+        let index = TerminalController.earlierAnchorStart(
+            "SAME",
+            endAnchor: "TAIL",
+            loadedCharacters: tail.count,
+            in: rendered
+        )
+        let text = index.map { String(rendered[$0...]) } ?? ""
+        #expect(text.hasPrefix("SAME\nTAIL"))
+    }
+
+    @Test func hugeLoadedCountDoesNotTrap() {
+        let controller = TerminalController()
+        let slice = controller.remoteEarlierSlice(
+            before: "abc",
+            endAnchor: "z",
+            loadedCharacters: Int.max
+        )
+        #expect(slice.isEmpty)
+    }
 }

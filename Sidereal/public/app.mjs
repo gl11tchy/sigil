@@ -136,7 +136,6 @@ function applyTail(bucket, next) {
     bucket.tail = next;
     return;
   }
-  bucket.history = loaded;
   bucket.tail = next;
 }
 function prependSlice(bucket, slice) {
@@ -291,16 +290,18 @@ function searchSaved() {
   const query = $('session-search').value.trim();
   const token = ++searchToken;
   if (!query || !$('sessions-dialog').open) { renderSaved([]); return; }
+  renderSaved([], { pending: true });
   request('chats', query).then(reply => {
     if (token !== searchToken || $('session-search').value.trim() !== query) return;
-    renderSaved(Array.isArray(reply.chats) ? reply.chats : []);
+    renderSaved(reply.chats);
   }).catch(error => { if (token === searchToken) showError(error.message); });
 }
-function renderSaved(chats) {
+function renderSaved(chats, options = {}) {
   const query = $('session-search').value.trim();
   const safe = [];
+  const rows = Array.isArray(chats) ? chats : [];
   if (query) {
-    for (const chat of chats.slice(0, 40)) {
+    for (const chat of rows.slice(0, 40)) {
       if (!chat || typeof chat.id !== 'string' || typeof chat.title !== 'string' || typeof chat.folder !== 'string') continue;
       if (!chat.id || chat.id.length > 80 || chat.title.length > 300 || chat.folder.length > 4_096) continue;
       if (/[\u0000-\u001F]/.test(chat.id) || /[\u0000-\u001F]/.test(chat.folder)) continue;
@@ -310,7 +311,14 @@ function renderSaved(chats) {
   const heading = $('saved-heading');
   if (heading) heading.hidden = !query;
   const empty = $('saved-empty');
-  if (empty) empty.hidden = !query || safe.length > 0;
+  if (empty) {
+    empty.hidden = !query || safe.length > 0 || options.pending === true;
+    if (query && safe.length === 0 && !options.pending && !Array.isArray(chats)) {
+      empty.textContent = 'The list was too long. Narrow the search.';
+    } else if (empty.textContent !== 'No matching chats.') {
+      empty.textContent = 'No matching chats.';
+    }
+  }
   $('saved-list').replaceChildren(...safe.map(chat => {
     const button = document.createElement('button');
     button.type = 'button';
@@ -330,7 +338,18 @@ function renderSaved(chats) {
     return button;
   }));
 }
-function renderProjects(projects) {
+function projectButton(nameText, folderText, onClick) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  const name = document.createElement('span');
+  name.textContent = nameText;
+  const folder = document.createElement('small');
+  folder.textContent = folderText;
+  button.append(name, folder);
+  button.onclick = onClick;
+  return button;
+}
+function renderProjects(projects, offset = 0) {
   const safe = [];
   for (const project of (Array.isArray(projects) ? projects : []).slice(0, 40)) {
     if (!project || typeof project.name !== 'string' || typeof project.folder !== 'string') continue;
@@ -338,24 +357,33 @@ function renderProjects(projects) {
     if (/[\u0000-\u001F]/.test(project.folder)) continue;
     safe.push({ name: project.name, folder: project.folder });
   }
-  const empty = $('project-empty');
-  if (empty) empty.hidden = safe.length > 0;
-  $('project-list').replaceChildren(...safe.map(project => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    const name = document.createElement('span');
-    name.textContent = project.name;
-    const folder = document.createElement('small');
-    folder.textContent = project.folder;
-    button.append(name, folder);
-    button.onclick = () => {
-      const folderPath = project.folder;
-      $('project-dialog').close();
-      void perform(() => request('new', folderPath));
-    };
-    return button;
+  const list = $('project-list');
+  const kept = offset === 0 ? [] : (list.children || []).filter(button => button.dataset.more !== 'true');
+  const buttons = safe.map(project => projectButton(project.name, project.folder, () => {
+    const folderPath = project.folder;
+    $('project-dialog').close();
+    void perform(() => request('new', folderPath));
   }));
-  $('project-dialog').showModal();
+  if (safe.length === 40) {
+    const more = projectButton('More projects', 'Show the next folders', () => {
+      void perform(async () => {
+        const reply = await request('projects', undefined, undefined, false, { index: offset + 40 });
+        renderProjects(reply.projects, offset + 40);
+      });
+    });
+    more.dataset.more = 'true';
+    buttons.push(more);
+  }
+  if (offset === 0 && safe.length === 0) {
+    buttons.push(projectButton('Current folder', 'The folder Sigil uses for a new session', () => {
+      $('project-dialog').close();
+      void perform(() => request('new'));
+    }));
+  }
+  list.replaceChildren(...kept, ...buttons);
+  const empty = $('project-empty');
+  if (empty) empty.hidden = list.children.length > 0;
+  if (!$('project-dialog').open) $('project-dialog').showModal();
 }
 function paintOutput() {
   const output = displayedOutput || '';
@@ -746,7 +774,7 @@ $('paste').onclick = () => void perform(() => sendText(false));
 $('tabs').onchange = () => void perform(() => request('select', undefined, $('tabs').value));
 $('new').onclick = () => void perform(async () => {
   const reply = await request('projects');
-  renderProjects(reply.projects);
+  renderProjects(reply.projects, 0);
 });
 $('project-cancel').onclick = () => $('project-dialog').close();
 $('project-dialog').addEventListener('close', () => { if (!$('new').disabled) $('new').focus(); });

@@ -348,6 +348,38 @@ struct RemoteCommandsTests {
         #expect(projects[0].folder == folder.path)
     }
 
+    @Test @MainActor func aLongChatPageIsTrimmedInsteadOfReportedEmpty() async throws {
+        let fixture = try PhoneCommandFixture()
+        defer { fixture.cleanup() }
+        fixture.settings.showWorktreeSessions = true
+        let bucket = fixture.root.appendingPathComponent("sessions").appendingPathComponent("wide")
+        for index in 0..<40 {
+            let id = String(format: "wide-%02d", index)
+            let folder = "/" + String(repeating: "p", count: 1_200) + "/wide-\(index)"
+            let dir = bucket.appendingPathComponent(id)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let json: [String: Any] = [
+                "info": ["id": id, "cwd": folder],
+                "session_summary": "Wide \(index)",
+                "created_at": "2026-08-01T00:00:00Z",
+                "updated_at": String(format: "2026-09-02T00:%02d:00Z", index),
+                "num_chat_messages": 4,
+            ]
+            let data = try JSONSerialization.data(withJSONObject: json)
+            try data.write(to: dir.appendingPathComponent("summary.json"))
+        }
+        await fixture.store.reload()
+        let reply = fixture.command("chats", text: "Wide")
+        let chats = try #require(reply.chats)
+        #expect(reply.ok)
+        #expect(!chats.isEmpty)
+        #expect(chats.count < 40)
+        #expect(reply.chatsTruncated)
+        let data = try JSONEncoder().encode(reply)
+        #expect(data.count <= 48_000)
+        #expect(!String(decoding: data, as: UTF8.self).contains("SECRET_WIDE"))
+    }
+
     @Test @MainActor func earlierReplyKeepsTheLiveTail() async throws {
         let fixture = try PhoneCommandFixture()
         defer { fixture.cleanup() }
