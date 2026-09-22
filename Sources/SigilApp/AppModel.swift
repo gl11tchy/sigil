@@ -601,6 +601,9 @@ final class AppModel {
             remaining.removeValue(forKey: folder)
         }
         if remaining.count != legacy.count {
+            // Persist before the legacy source goes away: a crash between a
+            // debounced write and clearing UserDefaults would lose the note.
+            panel.flushNotes()
             panel.setLegacyFolderNotes(remaining)
         }
     }

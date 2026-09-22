@@ -37,6 +37,7 @@ public final class ConversationNotesStore {
     public func note(for sessionID: String, cwd: String) -> String {
         guard let url = fileURL(for: sessionID, cwd: cwd) else { return "" }
         if let cached = cache[url.path] { return cached }
+        adoptFlatLayoutFile(named: sessionID + ".md", destination: url)
         guard let data = try? Data(contentsOf: url),
             let text = String(data: data, encoding: .utf8)
         else { return "" }
@@ -57,7 +58,9 @@ public final class ConversationNotesStore {
 
     public func deleteNote(for sessionID: String, cwd: String) {
         guard let url = fileURL(for: sessionID, cwd: cwd) else { return }
-        cache.removeValue(forKey: url.path)
+        // Tombstone: until the delete lands on disk, re-reads must not pull
+        // the file's old contents back into the cache.
+        cache[url.path] = ""
         // `.some(nil)`: a plain nil assignment removes the entry instead of
         // recording the delete.
         dirty[url.path] = .some(nil)
@@ -96,33 +99,61 @@ public final class ConversationNotesStore {
         return (writes, deletes)
     }
 
+    /// Serial queue carrying every disk write/delete in issue order: a debounce
+    /// write and a quit-time flush can never interleave out of order.
+    private nonisolated let writeQueue = DispatchQueue(
+        label: "com.gl11tchy.sigil.notes", qos: .utility)
+
     private func persist(_ pending: (writes: [(url: URL, data: Data)], deletes: [URL]), detached: Bool) {
         guard !pending.writes.isEmpty || !pending.deletes.isEmpty else { return }
-        let write: @Sendable () -> Void = {
-            let fm = FileManager.default
-            for (url, data) in pending.writes {
-                do {
-                    try fm.createDirectory(
-                        at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-                    try data.write(to: url, options: .atomic)
-                } catch {
-                    Self.log.error(
-                        "note write failed for \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)"
-                    )
-                }
-            }
-            for url in pending.deletes {
-                do { try fm.removeItem(at: url) } catch CocoaError.fileNoSuchFile {} catch {
-                    Self.log.error(
-                        "note delete failed for \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)"
-                    )
-                }
+        if detached {
+            writeQueue.async { Self.write(pending) }
+        } else {
+            // Quit path: blocks until earlier queued writes and this one land.
+            writeQueue.sync { Self.write(pending) }
+        }
+    }
+
+    private nonisolated static func write(
+        _ pending: (writes: [(url: URL, data: Data)], deletes: [URL])
+    ) {
+        let fm = FileManager.default
+        for (url, data) in pending.writes {
+            do {
+                try fm.createDirectory(
+                    at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try data.write(to: url, options: .atomic)
+            } catch {
+                log.error(
+                    "note write failed for \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
             }
         }
-        if detached {
-            Task.detached(priority: .utility, operation: write)
-        } else {
-            write()
+        for url in pending.deletes {
+            do { try fm.removeItem(at: url) } catch CocoaError.fileNoSuchFile {} catch {
+                log.error(
+                    "note delete failed for \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+    }
+
+    /// The first notes build wrote `notes/<id>.md` with no folder; adopt that
+    /// file the first time the conversation's real location is read.
+    private func adoptFlatLayoutFile(named fileName: String, destination: URL) {
+        let legacy = root.appendingPathComponent(fileName)
+        let fm = FileManager.default
+        guard !fm.fileExists(atPath: destination.path),
+            fm.fileExists(atPath: legacy.path)
+        else { return }
+        do {
+            try fm.createDirectory(
+                at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try fm.moveItem(at: legacy, to: destination)
+        } catch {
+            Self.log.error(
+                "flat note adoption failed for \(fileName, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
         }
     }
 

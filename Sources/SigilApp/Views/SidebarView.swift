@@ -1099,14 +1099,15 @@ struct SidebarView: View {
     /// first selected row, so the next ⇧-click still extends instead of
     /// collapsing the selection to the target.
     private func pruneMultiSelection() {
-        let visible = Set(visibleRowIDs())
+        let rows = visibleRowIDs()
+        let visible = Set(rows)
         if !multiSelection.isEmpty {
             multiSelection.formIntersection(visible)
         }
         if let anchor = selectionAnchor, !visible.contains(anchor) {
             selectionAnchor =
                 keyboardSelectionID.flatMap { visible.contains($0) ? $0 : nil }
-                ?? multiSelection.first
+                ?? rows.first(where: { multiSelection.contains($0) })
         }
         if multiSelection.isEmpty, keyboardSelectionID == nil {
             selectionAnchor = nil

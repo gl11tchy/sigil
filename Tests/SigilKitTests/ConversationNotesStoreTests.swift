@@ -93,6 +93,36 @@ struct ConversationNotesStoreTests {
     }
 
     @Test @MainActor
+    func aDeletedNoteStaysGoneBeforeTheFlushLands() throws {
+        let (store, root) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        store.setNote("scratch", for: "a-1", cwd: "/tmp/one")
+        store.flushNow()
+        store.deleteNote(for: "a-1", cwd: "/tmp/one")
+        // Still inside the debounce window: the file exists on disk, but the
+        // tombstone must answer the read instead of resurrecting it.
+        #expect(store.note(for: "a-1", cwd: "/tmp/one") == "")
+        store.flushNow()
+        #expect(store.note(for: "a-1", cwd: "/tmp/one") == "")
+    }
+
+    @Test @MainActor
+    func aFlatNoteFromTheFirstBuildIsAdoptedOnFirstRead() throws {
+        let (store, root) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // The first notes-as-files build wrote root/<id>.md with no folder.
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let legacy = root.appendingPathComponent("a-1.md")
+        try Data("old layout".utf8).write(to: legacy)
+
+        #expect(store.note(for: "a-1", cwd: "/tmp/one") == "old layout")
+        #expect(!FileManager.default.fileExists(atPath: legacy.path))
+        #expect(FileManager.default.fileExists(atPath: noteFile(root, "a-1", "/tmp/one").path))
+    }
+
+    @Test @MainActor
     func idsThatCouldEscapeTheFolderAreRefused() throws {
         let (store, root) = try makeStore()
         defer { try? FileManager.default.removeItem(at: root) }

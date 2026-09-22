@@ -80,7 +80,7 @@ struct RightPanelView: View {
                         set: { panel.setNotes($0, forSessionID: sessionID, cwd: cwd) }
                     )
                 )
-                .id(sessionID)
+                .id("\(cwd)/\(sessionID)")
             } else {
                 PanelPlaceholder(text: "Open a conversation to keep notes on it.")
             }
