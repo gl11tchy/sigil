@@ -134,6 +134,12 @@ final class RightPanel {
         notesStore.deleteNote(for: sessionID, cwd: cwd)
     }
 
+    /// Removes the flat-layout note file the first notes build wrote. Call only
+    /// when no other folder still has a conversation with this session ID.
+    func deleteFlatNotes(forSessionID sessionID: String) {
+        notesStore.deleteFlatNote(forSessionID: sessionID)
+    }
+
     /// Persist any note text still inside the debounce window. Quit only.
     func flushNotes() {
         notesStore.flushNow()

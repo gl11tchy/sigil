@@ -64,18 +64,27 @@ public final class ConversationNotesStore {
         // `.some(nil)`: a plain nil assignment removes the entry instead of
         // recording the delete.
         dirty[url.path] = .some(nil)
-        // A note the first build wrote flat and nobody has opened since still
-        // sits at the root; it belongs to this conversation too.
+        scheduleFlush()
+    }
+
+    /// Removes the flat-layout file the first notes build wrote. Only the
+    /// caller can know no other folder still has a conversation with this
+    /// session ID waiting to adopt it, so this stays a separate decision.
+    public func deleteFlatNote(forSessionID sessionID: String) {
+        guard Self.isValidSessionID(sessionID) else { return }
         dirty[root.appendingPathComponent(sessionID + ".md").path] = .some(nil)
         scheduleFlush()
     }
 
     /// Writes and deletes everything outstanding, synchronously. Called on the
-    /// quit path; the debounced writer keeps using detached I/O.
+    /// quit path; the debounced writer keeps using the queue's async side.
+    /// The sync block runs even with nothing new pending: the debounce may
+    /// already have queued its write, and quitting must not exit beneath it.
     public func flushNow() {
         flushTask?.cancel()
         flushTask = nil
-        persist(takePending(), detached: false)
+        let pending = takePending()
+        writeQueue.sync { Self.write(pending) }
     }
 
     private func scheduleFlush() {
@@ -83,7 +92,9 @@ public final class ConversationNotesStore {
         flushTask = Task { [weak self] in
             try? await Task.sleep(for: Self.flushDelay)
             guard !Task.isCancelled, let self else { return }
-            self.persist(self.takePending(), detached: true)
+            let pending = self.takePending()
+            guard !pending.writes.isEmpty || !pending.deletes.isEmpty else { return }
+            self.persist(pending)
         }
     }
 
@@ -107,14 +118,8 @@ public final class ConversationNotesStore {
     private nonisolated let writeQueue = DispatchQueue(
         label: "com.gl11tchy.sigil.notes", qos: .utility)
 
-    private func persist(_ pending: (writes: [(url: URL, data: Data)], deletes: [URL]), detached: Bool) {
-        guard !pending.writes.isEmpty || !pending.deletes.isEmpty else { return }
-        if detached {
-            writeQueue.async { Self.write(pending) }
-        } else {
-            // Quit path: blocks until earlier queued writes and this one land.
-            writeQueue.sync { Self.write(pending) }
-        }
+    private func persist(_ pending: (writes: [(url: URL, data: Data)], deletes: [URL])) {
+        writeQueue.async { Self.write(pending) }
     }
 
     private nonisolated static func write(
@@ -164,15 +169,17 @@ public final class ConversationNotesStore {
     /// Session IDs are UUIDs; refuse anything that could escape the folder or
     /// trip Unicode filename normalization.
     private func fileURL(for sessionID: String, cwd: String) -> URL? {
-        let allowed = CharacterSet(
-            charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-")
-        guard !sessionID.isEmpty,
-            sessionID.rangeOfCharacter(from: allowed.inverted) == nil,
-            !cwd.isEmpty
-        else { return nil }
+        guard Self.isValidSessionID(sessionID), !cwd.isEmpty else { return nil }
         return
             root
             .appendingPathComponent(GrokPaths.encode(path: GrokPaths.canonicalPath(cwd)))
             .appendingPathComponent(sessionID + ".md")
+    }
+
+    private static func isValidSessionID(_ sessionID: String) -> Bool {
+        let allowed = CharacterSet(
+            charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-")
+        return !sessionID.isEmpty
+            && sessionID.rangeOfCharacter(from: allowed.inverted) == nil
     }
 }

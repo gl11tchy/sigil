@@ -123,7 +123,7 @@ struct ConversationNotesStoreTests {
     }
 
     @Test @MainActor
-    func deletingAnUnopenedConversationRemovesItsFlatNoteToo() throws {
+    func deleteFlatNoteRemovesTheFirstBuildsLayout() throws {
         let (store, root) = try makeStore()
         defer { try? FileManager.default.removeItem(at: root) }
 
@@ -131,7 +131,7 @@ struct ConversationNotesStoreTests {
         let legacy = root.appendingPathComponent("a-1.md")
         try Data("old layout".utf8).write(to: legacy)
 
-        store.deleteNote(for: "a-1", cwd: "/tmp/one")
+        store.deleteFlatNote(forSessionID: "a-1")
         store.flushNow()
         #expect(!FileManager.default.fileExists(atPath: legacy.path))
     }

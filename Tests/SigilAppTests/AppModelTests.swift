@@ -3228,6 +3228,27 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func deletingOneOfTwoSameIDConversationsKeepsTheFlatNote() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwdA = try fixture.directory("project-a")
+        let cwdB = try fixture.directory("project-b")
+        try fixture.writeListedSession(id: "same-id", cwd: cwdA.path, summary: "A")
+        try fixture.writeListedSession(id: "same-id", cwd: cwdB.path, summary: "B")
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        try FileManager.default.createDirectory(at: fixture.notesRoot, withIntermediateDirectories: true)
+        let flat = fixture.notesRoot.appendingPathComponent("same-id.md")
+        try Data("shared note".utf8).write(to: flat)
+
+        #expect(model.deleteConversation(makeSession(id: "same-id", cwd: cwdA)))
+        model.panel.notesStore.flushNow()
+        // The twin in project-b has not adopted the flat note yet; it stays.
+        #expect(FileManager.default.fileExists(atPath: flat.path))
+    }
+
+    @Test @MainActor
     func archivingDropsADeferredTabSoItDoesNotRestore() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }

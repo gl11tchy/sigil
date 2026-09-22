@@ -1937,6 +1937,14 @@ final class AppModel {
             unarchive(session)
             resetName(session)
             panel.deleteNotes(forSessionID: session.id, cwd: session.cwd)
+            // A same-ID conversation in another folder may still be waiting to
+            // adopt the flat-layout note; when in doubt, keep the file.
+            let flatNoteShared = store.sessions.contains {
+                $0.id == session.id && !samePath($0.cwd, session.cwd)
+            }
+            if !flatNoteShared {
+                panel.deleteFlatNotes(forSessionID: session.id)
+            }
             let removedIDs = Set(matchingTabs.map(\.id))
             for tab in matchingTabs where !stoppedTabs.contains(where: { $0.id == tab.id }) {
                 tabBridge?.noteTabClosed(id: tab.id)
