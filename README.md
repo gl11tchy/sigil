@@ -108,7 +108,8 @@ terminal itself.
 | `⌘⇧R` | Rename the conversation on screen |
 | `⌘,` | Settings |
 
-In the thread list, `↑` and `↓` move the selection, `Return` opens it, and `F2` renames it.
+In the thread list, `↑` and `↓` move the selection, `⇧↑` and `⇧↓` extend a
+multi-selection, `Return` opens it, and `F2` renames it.
 
 ## Requirements
 
