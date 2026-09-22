@@ -48,9 +48,11 @@ public final class ConversationNotesStore {
         try? FileManager.default.removeItem(at: root.appendingPathComponent(fileName))
     }
 
-    /// Session IDs are UUIDs; refuse anything that could escape the folder.
+    /// Session IDs are UUIDs; refuse anything that could escape the folder or
+    /// trip Unicode filename normalization.
     static func fileName(for sessionID: String) -> String? {
-        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-"))
+        let allowed = CharacterSet(
+            charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-")
         guard !sessionID.isEmpty,
             sessionID.rangeOfCharacter(from: allowed.inverted) == nil
         else { return nil }
