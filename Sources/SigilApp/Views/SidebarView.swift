@@ -52,6 +52,8 @@ struct SidebarView: View {
     @State private var multiSelection: Set<String> = []
     @State private var selectionAnchor: String?
     @State private var pendingBulkDelete: [GrokSession]?
+    /// Minute tick for relative times and Today/Yesterday buckets.
+    @State private var now = Date()
 
     /// F2. Unicode private-use scalar for `NSF2FunctionKey`.
     private static let f2 = KeyEquivalent(Character("\u{F705}"))
@@ -123,6 +125,12 @@ struct SidebarView: View {
         }
         .task {
             await restorePromptOnAppear()
+        }
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                now = Date()
+            }
         }
     }
 
@@ -421,7 +429,7 @@ struct SidebarView: View {
         afterPinned: Bool,
         projectIndex: [URL: SidebarProject]
     ) -> some View {
-        let buckets = SessionBucket.bucket(sessions)
+        let buckets = SessionBucket.bucket(sessions, now: now)
         ForEach(Array(buckets.enumerated()), id: \.element.id) { index, bucket in
             section(bucket.title, count: bucket.sessions.count, isFirst: !afterPinned && index == 0) {
                 ForEach(bucket.sessions, id: \.directory) { session in
@@ -572,8 +580,8 @@ struct SidebarView: View {
                 sessions: rows
             ),
             count: rows.count,
-            relativeTime: rows.first?.updatedAt.shortRelative ?? "",
-            longRelative: rows.first?.updatedAt.longRelative ?? "",
+            relativeTime: rows.first?.updatedAt.shortRelative(to: now) ?? "",
+            longRelative: rows.first?.updatedAt.longRelative(to: now) ?? "",
             isPinned: model.isPinned(project),
             isWorking: model.isWorking(project),
             isActive: rows.contains { model.isActive($0) },
@@ -623,6 +631,7 @@ struct SidebarView: View {
             hasCustomName: hasCustomName,
             showsProject: showsProject,
             headerCoversQuery: headerCoversQuery,
+            now: now,
             open: {
                 keyboardSelectionID = model.sessionKey(session)
                 clearMultiSelection()
@@ -1709,6 +1718,8 @@ private struct SessionRow: View {
     let hasCustomName: Bool
     let showsProject: Bool
     let headerCoversQuery: Bool
+    /// The sidebar's minute tick, for relative times.
+    let now: Date
     /// Plain activation (keyboard, VoiceOver): opens the conversation.
     let open: () -> Void
     /// Mouse click: modifier-aware (⌘ toggles, ⇧ ranges), falls back to open.
@@ -1852,7 +1863,7 @@ private struct SessionRow: View {
 
     private var rowHelpText: String {
         "\(title)\n\(session.displayPath)\n"
-            + "\(session.messageCount) messages · \(session.updatedAt.longRelative)"
+            + "\(session.messageCount) messages · \(session.updatedAt.longRelative(to: now))"
     }
 
     private var rowAccessibilityValue: String {
@@ -1875,7 +1886,7 @@ private struct SessionRow: View {
         SearchMatchHighlight.rowAccessibilityLabel(
             title: title,
             projectName: session.projectName,
-            longRelative: session.updatedAt.longRelative,
+            longRelative: session.updatedAt.longRelative(to: now),
             paint: rowPaint,
             isPinned: isPinned,
             isArchived: isArchived,
@@ -1917,7 +1928,7 @@ private struct SessionRow: View {
             projectName: session.projectName,
             cwd: session.cwd,
             displayPath: session.displayPath,
-            relativeTime: session.updatedAt.shortRelative,
+            relativeTime: session.updatedAt.shortRelative(to: now),
             showsProject: showsProject,
             headerCoversQuery: headerCoversQuery,
             query: searchQuery

@@ -68,9 +68,10 @@ extension Date {
     ///
     /// Compact on purpose: the subtitle is metadata in mono, and a column of
     /// "14 minutes ago" is noise where "14m" scans. `longRelative` spells it out
-    /// where there is room (tooltips, accessibility).
-    var shortRelative: String {
-        let seconds = Date().timeIntervalSince(self)
+    /// where there is room (tooltips, accessibility). `now` is the sidebar's
+    /// minute tick, so the label moves with the clock.
+    func shortRelative(to now: Date) -> String {
+        let seconds = now.timeIntervalSince(self)
         if abs(seconds) < 60 { return "now" }
         let minutes = Int(abs(seconds) / 60)
         if minutes < 60 { return "\(minutes)m" }
@@ -83,9 +84,11 @@ extension Date {
     }
 
     /// Spelled-out relative time for tooltips and accessibility labels.
-    var longRelative: String {
-        let seconds = Date().timeIntervalSince(self)
+    func longRelative(to now: Date) -> String {
+        let seconds = now.timeIntervalSince(self)
         if abs(seconds) < 60 { return "now" }
-        return formatted(.relative(presentation: .numeric))
+        // The relative style always measures from the system clock; shift the
+        // date so it reads the same interval as from `now`.
+        return Date.now.addingTimeInterval(-seconds).formatted(.relative(presentation: .numeric))
     }
 }

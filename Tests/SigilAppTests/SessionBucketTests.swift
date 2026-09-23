@@ -6,8 +6,20 @@ import Testing
 
 struct SessionBucketTests {
     @Test func futureDatesOutsideClockSkewDoNotReadAsNow() {
-        #expect(Date.now.addingTimeInterval(5 * 60).shortRelative != "now")
-        #expect(Date.now.addingTimeInterval(30).shortRelative == "now")
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        #expect(now.addingTimeInterval(5 * 60).shortRelative(to: now) != "now")
+        #expect(now.addingTimeInterval(30).shortRelative(to: now) == "now")
+    }
+
+    /// The sidebar re-renders on a minute tick and passes that time in, so the
+    /// label must follow the given clock, not the moment the body first ran.
+    @Test func relativeTimeFollowsTheGivenClock() {
+        let updated = Date(timeIntervalSince1970: 1_790_000_000)
+        #expect(updated.shortRelative(to: updated.addingTimeInterval(30)) == "now")
+        #expect(updated.shortRelative(to: updated.addingTimeInterval(14 * 60)) == "14m")
+        #expect(updated.shortRelative(to: updated.addingTimeInterval(3 * 3600)) == "3h")
+        #expect(updated.longRelative(to: updated.addingTimeInterval(30)) == "now")
+        #expect(updated.longRelative(to: updated.addingTimeInterval(14 * 60)) != "now")
     }
 
     /// A local evening on the last day of a month is still that month, even when
