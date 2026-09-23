@@ -1469,9 +1469,8 @@ private struct ProjectListRow: View {
         .help(rowHelp)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
-        .accessibilityAddTraits(isActive ? .isSelected : [])
         .accessibilityLabel(title)
-        .accessibilityValue(countLabel)
+        .accessibilityValue(isActive ? "\(countLabel), one open" : countLabel)
         .accessibilityAction(.default, open)
         .modifier(NamedActionIf(name: "New Session", enabled: canStart, action: newChat))
         .modifier(
