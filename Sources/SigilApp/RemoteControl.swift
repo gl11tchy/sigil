@@ -16,6 +16,7 @@ final class RemoteControl {
 
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var socket: URLSessionWebSocketTask?
+    @ObservationIgnored private var peer: String?
     @ObservationIgnored private var generation = UUID()
     @ObservationIgnored private var network: URLSession?
     @ObservationIgnored private let store: any RemotePairingStore
@@ -113,7 +114,7 @@ final class RemoteControl {
                     socket.resume()
                     let keepAlive = Task { await Self.keepAlive(socket) }
                     defer { keepAlive.cancel() }
-                    var peer: String?
+                    self.peer = nil
                     var routed = false
                     while !Task.isCancelled, self.generation == current {
                         let message = try await socket.receive()
@@ -138,13 +139,13 @@ final class RemoteControl {
                             self.pairingURL = session.isPaired ? nil : pairingURL
                             self.error = nil
                         } else if frame.type == "peer", let id = frame.peer, id.count <= 64 {
-                            peer = id
+                            self.peer = id
                             session.resetConnection()
                             try await self.send(Frame(peer: id, hello: session.challenge), socket: socket)
-                        } else if frame.type == "left", frame.peer == peer {
-                            peer = nil
+                        } else if frame.type == "left", frame.peer == self.peer {
+                            self.peer = nil
                             self.status = session.isPaired ? "Phone disconnected" : "Scan to connect"
-                        } else if let id = frame.peer, id == peer, let ciphertext = frame.data {
+                        } else if let id = frame.peer, id == self.peer, let ciphertext = frame.data {
                             do {
                                 let firstPair = !session.isPaired
                                 let command = try session.accept(ciphertext)
@@ -198,9 +199,16 @@ final class RemoteControl {
         generation = UUID()
         task?.cancel()
         task = nil
-        socket?.cancel(with: .goingAway, reason: nil)
+        if revoke, let socket, let peer {
+            // The relay forwards this and closes the phone, which then stops
+            // reconnecting and asks for a new scan. A plain stop stays silent.
+            Self.send(Frame(peer: peer, error: "unauthorized"), thenClose: socket, network: network)
+        } else {
+            socket?.cancel(with: .goingAway, reason: nil)
+            network?.invalidateAndCancel()
+        }
         socket = nil
-        network?.invalidateAndCancel()
+        peer = nil
         network = nil
         RemoteCommands.uploads = RemoteUpload.Inbox()
         isEnabled = false
@@ -257,6 +265,14 @@ final class RemoteControl {
     private func send(_ frame: Frame, socket: URLSessionWebSocketTask) async throws {
         let bytes = try JSONEncoder().encode(frame)
         try await socket.send(.string(String(decoding: bytes, as: UTF8.self)))
+    }
+
+    private static func send(_ frame: Frame, thenClose socket: URLSessionWebSocketTask, network: URLSession?) {
+        let bytes = (try? JSONEncoder().encode(frame)) ?? Data()
+        socket.send(.string(String(decoding: bytes, as: UTF8.self))) { _ in
+            socket.cancel(with: .goingAway, reason: nil)
+            network?.invalidateAndCancel()
+        }
     }
 
     private struct Room: Decodable {
