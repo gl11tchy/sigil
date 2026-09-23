@@ -1243,11 +1243,11 @@ private struct DrillBar: View {
             if showsPin, let togglePin {
                 IconButton(
                     systemImage: isPinned ? "pin.fill" : "pin",
-                    help: isPinned ? "Unpin Project" : "Pin Project"
+                    help: isPinned ? "Unpin Project" : "Pin Project",
+                    tint: isPinned ? palette.accent : nil
                 ) {
                     togglePin()
                 }
-                .foregroundStyle(isPinned ? palette.accent : palette.textDim)
             }
             if let newChat {
                 IconButton(

@@ -318,6 +318,9 @@ private struct TopBar: View {
 struct IconButton: View {
     let systemImage: String
     var help: String = ""
+    /// Resting color. The button's own style wins over an outer foregroundStyle,
+    /// so a state color (the accent pin) has to come in here.
+    var tint: Color? = nil
     let action: () -> Void
 
     @Environment(\.palette) private var palette
@@ -335,7 +338,7 @@ struct IconButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(isHovering ? palette.text : palette.textDim)
+        .foregroundStyle(isHovering ? palette.text : (tint ?? palette.textDim))
         .onHover { isHovering = $0 }
         .help(help)
         .accessibilityLabel(help)
