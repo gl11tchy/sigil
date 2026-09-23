@@ -375,7 +375,7 @@ private struct SplitDivider: View {
                             .onEnded { _ in widthAtDragStart = nil }
                     )
             }
-            .focusable()
+            .focusable(interactions: .activate)
             .focused($isFocused)
             .onKeyPress(.leftArrow) {
                 width = max(200, width - 20)

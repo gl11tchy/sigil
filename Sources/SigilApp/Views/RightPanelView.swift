@@ -203,7 +203,7 @@ struct PanelDivider: View {
                             .onEnded { _ in widthAtDragStart = nil }
                     )
             }
-            .focusable()
+            .focusable(interactions: .activate)
             .focused($isFocused)
             .onKeyPress(.leftArrow) {
                 width = clamp(width + 20)
