@@ -837,8 +837,14 @@ struct SidebarView: View {
             surface: model.sidebarSurface
         ) {
         case .cancelRename:
+            let returnFocus = model.renameReturnFocus
             model.cancelRename()
-            focus = .list
+            if returnFocus == .terminal {
+                focus = nil
+                model.focusSelectedTerminal()
+            } else {
+                focus = .list
+            }
         case .leaveFolder:
             model.leaveProject()
         case .leaveList:
@@ -2084,24 +2090,37 @@ private struct SessionRow: View {
     }
 
     private func commitCurrentDraft(restoreListFocus: Bool) {
+        let returnFocus = model.renameReturnFocus
         suppressBlurCommit = true
         blurCommitTask?.cancel()
         blurCommitTask = nil
         commitRename(model.renameDraft)
-        if restoreListFocus { focus = .list }
+        if restoreListFocus { restoreFocus(after: returnFocus) }
         if AppModel.shouldClearBlurSuppressionAfterCommitOrAbandon() {
             suppressBlurCommit = false
         }
     }
 
     private func abandonRename() {
+        let returnFocus = model.renameReturnFocus
         suppressBlurCommit = true
         blurCommitTask?.cancel()
         blurCommitTask = nil
         cancelRename()
-        focus = .list
+        restoreFocus(after: returnFocus)
         if AppModel.shouldClearBlurSuppressionAfterCommitOrAbandon() {
             suppressBlurCommit = false
+        }
+    }
+
+    /// A ⌘⇧R rename hands the keyboard back to the terminal it came from.
+    private func restoreFocus(after returnFocus: AppModel.RenameReturnFocus) {
+        switch returnFocus {
+        case .list:
+            focus = .list
+        case .terminal:
+            focus = nil
+            model.focusSelectedTerminal()
         }
     }
 

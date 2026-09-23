@@ -220,6 +220,11 @@ final class AppModel {
     /// Displayed title at fresh begin. Unedited Return/blur is a no-op even if
     /// the CLI summary moved. Same-key begin must not clear this.
     var renameCommitBaseline: String?
+    /// Where keyboard focus goes when an inline rename ends.
+    enum RenameReturnFocus { case list, terminal }
+    /// Set by each beginRename: ⌘⇧R starts from the terminal and returns there;
+    /// F2 and the row menu start from the list.
+    private(set) var renameReturnFocus: RenameReturnFocus = .list
 
     /// Conversations for the sidebar, one-shot noise filtered out.
     /// An empty query stays newest first. Archived chats stay hidden unless
@@ -713,8 +718,9 @@ final class AppModel {
     /// Single draft owner for a fresh key. prepareRename only hands off the
     /// surface — it must not rewrite `renameDraft`, or typing that lands
     /// before that task runs is clobbered.
-    func beginRename(_ session: GrokSession) {
+    func beginRename(_ session: GrokSession, returnFocus: RenameReturnFocus = .list) {
         isSidebarVisible = true
+        renameReturnFocus = returnFocus
         let key = sessionKey(session)
         let isFreshKey = renamingSessionKey != key
         renameAlertDismissGeneration += 1

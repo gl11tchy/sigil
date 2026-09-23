@@ -1276,6 +1276,28 @@ struct AppModelTests {
         #expect(fixture.settings.conversationNames.isEmpty)
     }
 
+    /// ⌘⇧R starts from the terminal and must hand focus back there; F2 and the
+    /// row menu start from the list and return to it.
+    @Test @MainActor
+    func renameRemembersWhereItStarted() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(id: "s1", cwd: "/Users/someone/Documents/project")
+        try fixture.writeListedSession(id: "s2", cwd: "/Users/someone/Documents/project")
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let one = try #require(model.store.sessions.first { $0.id == "s1" })
+        let two = try #require(model.store.sessions.first { $0.id == "s2" })
+
+        model.beginRename(one, returnFocus: .terminal)
+        #expect(model.renameReturnFocus == .terminal)
+        model.cancelRename()
+
+        model.beginRename(two)
+        #expect(model.renameReturnFocus == .list)
+    }
+
     @Test @MainActor
     func commitRenameAfterCancelStillSavesTheCapturedSession() async throws {
         let fixture = try ModelFixture()
