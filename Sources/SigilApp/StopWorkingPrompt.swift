@@ -3,13 +3,14 @@ import SigilKit
 
 /// The question asked before a close, archive or quit stops sessions that are
 /// still running. Its words follow the action, the number of sessions, and
-/// whether they are mid-turn or only running. Quit also names a command still
-/// running in the panel terminal.
+/// whether they are mid-turn or only running. Quit and a shell restart also
+/// name a command still running in the panel terminal.
 struct StopWorkingPrompt: Equatable {
     enum Action: Equatable {
         case closeTab
         case archive
         case quit
+        case restartShell
     }
 
     let action: Action
@@ -17,7 +18,7 @@ struct StopWorkingPrompt: Equatable {
     let working: Int
     /// Providers of the other tabs it stops: their CLI runs but shows no turn.
     let running: [CLIProvider]
-    /// A command holds the panel terminal. Only quit stops it.
+    /// A command holds the panel terminal. Only quit and a shell restart stop it.
     let panelJob: Bool
 
     var count: Int { working + running.count }
@@ -57,6 +58,7 @@ struct StopWorkingPrompt: Equatable {
         case .closeTab: return statement
         case .archive: return "\(statement) Archive anyway?"
         case .quit: return "\(statement) Quit anyway?"
+        case .restartShell: return "\(statement) Restart anyway?"
         }
     }
 
@@ -80,6 +82,7 @@ struct StopWorkingPrompt: Equatable {
         case .closeTab: return "Close Tab"
         case .archive: return "Archive"
         case .quit: return "Quit"
+        case .restartShell: return "Restart Shell"
         }
     }
 

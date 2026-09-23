@@ -3299,6 +3299,58 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func restartingThePanelShellAsksFirstWhileACommandRuns() async throws {
+        // An empty HOME and /bin/sh keep the user's startup files out of the panel shell.
+        let home = try makeTemporaryTestDirectory()
+        let previousHome = ProcessInfo.processInfo.environment["HOME"]
+        let previousShell = ProcessInfo.processInfo.environment["SHELL"]
+        setenv("HOME", home.path, 1)
+        setenv("SHELL", "/bin/sh", 1)
+        defer {
+            if let previousHome { setenv("HOME", previousHome, 1) } else { unsetenv("HOME") }
+            if let previousShell { setenv("SHELL", previousShell, 1) } else { unsetenv("SHELL") }
+            try? FileManager.default.removeItem(at: home)
+        }
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        var prompts: [StopWorkingPrompt] = []
+        var answer = false
+        model.confirmStopWorking = {
+            prompts.append($0)
+            return answer
+        }
+        model.panel.isVisible = false
+        model.showPanel(.shell)
+        await flushMainAsync()
+        let idle = try #require(model.panel.shell)
+
+        model.restartPanelShell()
+        #expect(prompts.isEmpty)
+        let busy = try #require(model.panel.shell)
+        #expect(busy !== idle)
+        busy.send(text: "/bin/sleep 5\r")
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !model.panel.shellHasForegroundJob, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(model.panel.shellHasForegroundJob)
+
+        model.restartPanelShell()
+        #expect(
+            prompts.map(\.messageText) == [
+                "A command is still running in the panel terminal. Restart anyway?"
+            ])
+        #expect(model.panel.shell === busy)
+
+        answer = true
+        model.restartPanelShell()
+        #expect(prompts.count == 2)
+        #expect(model.panel.shell !== busy)
+    }
+
+    @Test @MainActor
     func archivingASelectionArchivesEveryChat() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }

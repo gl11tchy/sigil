@@ -78,7 +78,7 @@ final class AppModel {
     private var deferredLegacySelectedSessionID: String?
     private let trashConversation: TrashConversation
     private let presentError: ErrorPresenter
-    /// Shown before a close or archive kills a tab that is mid-turn.
+    /// Shown before a close, archive or shell restart stops work still running.
     @ObservationIgnored
     var confirmStopWorking: ConfirmStopWorking = { $0.runModal() }
     @ObservationIgnored private let registrationRunner: BridgeRegistration.Runner
@@ -1826,6 +1826,12 @@ final class AppModel {
 
     /// Kills the scratch shell and starts a new one in the current folder.
     func restartPanelShell() {
+        if let prompt = StopWorkingPrompt(
+            action: .restartShell, stopping: [], panelJob: panel.shellHasForegroundJob),
+            !confirmStopWorking(prompt)
+        {
+            return
+        }
         panel.restartShell(
             in: currentDirectory, theme: settings.theme, fontSize: settings.fontSize)
         panel.shell?.optionAsMetaKey = settings.optionAsMetaKey
