@@ -117,6 +117,29 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func aDeferredTabOpenedByHandStaysClosedAfterTheUserClosesIt() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("volume")
+        fixture.settings.openTabs = OpenTabsSnapshot(
+            tabs: [.init(sessionID: "late-id", cwd: cwd.path)],
+            selectedSessionID: "late-id",
+            selectedCWD: cwd.path
+        )
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        model.restoreOpenTabs()
+        #expect(model.tabs.isEmpty)
+
+        try fixture.createSession(id: "late-id", cwd: cwd)
+        model.open(makeSession(id: "late-id", cwd: cwd))
+        let tab = try #require(model.tabs.first)
+        model.closeTab(tab.id)
+
+        #expect(fixture.settings.openTabs.tabs.isEmpty)
+    }
+
+    @Test @MainActor
     func unavailableRestoredTabIsNotErased() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }

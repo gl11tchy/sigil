@@ -1373,6 +1373,12 @@ final class AppModel {
         selectedTabID = tab.id
         if !isRestoringTabs { clearDeferredSelection() }
         if !isRestoringTabs { rememberDefaultDirectory(spec.workingDirectory) }
+        // Opened by hand now, so closing it must not bring the saved entry back.
+        if !isRestoringTabs, let sessionID = tab.sessionID {
+            deferredOpenTabs.removeAll {
+                entryMatches($0, sessionID: sessionID, cwd: spec.workingDirectory.path)
+            }
+        }
         let id = tab.id
         tab.start(isSelected: { [weak self] in
             self?.selectedTabID == id && NSApp.isActive
