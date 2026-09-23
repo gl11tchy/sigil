@@ -47,13 +47,16 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
 
     /// Cmd-V. Takes the pasteboard so tests do not touch the user's clipboard.
     func paste(from pasteboard: NSPasteboard) {
-        if pasteDroppedContent(from: pasteboard) { return }
+        let text = pasteboard.string(forType: .string) ?? ""
+        // A Finder copy pastes paths; copied text wins over its picture rendition.
+        let hasFiles = !TerminalDrop.filesToPaste(from: TerminalDrop.fileURLs(from: pasteboard)).isEmpty
+        if hasFiles || text.isEmpty, pasteDroppedContent(from: pasteboard) { return }
         // Finder also puts a refused file's name on the pasteboard as text.
         if TerminalDrop.hasUnsafeFileName(TerminalDrop.fileURLs(from: pasteboard)) {
             NSSound.beep()
             return
         }
-        guard let text = pasteboard.string(forType: .string), !text.isEmpty else { return }
+        guard !text.isEmpty else { return }
         unmarkText()
         sendPaste(text)
     }

