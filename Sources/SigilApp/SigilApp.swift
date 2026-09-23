@@ -118,7 +118,7 @@ struct GrokCommands: Commands {
         }
 
         CommandGroup(after: .newItem) {
-            Button("Close Tab") { model.closeSelectedTab() }
+            Button("Close Tab") { Self.closeTabOrKeyWindow(model) }
                 .keyboardShortcut("w", modifiers: .command)
                 .disabled(model.tabs.isEmpty)
             Divider()
@@ -202,6 +202,19 @@ struct GrokCommands: Commands {
                     URL(string: "https://github.com/gl11tchy/sigil/releases/latest")!)
             }
             Button("Reveal Crash Logs") { model.revealCrashLogs() }
+        }
+    }
+
+    /// ⌘W belongs to the window in front. Settings and About get the system
+    /// Close action, a sheet blocks it, and only the tab window closes a tab.
+    private static func closeTabOrKeyWindow(_ model: AppModel) {
+        guard let key = NSApp.keyWindow else { return }
+        if model.tabs.contains(where: { $0.controller.view.window === key }) {
+            model.closeSelectedTab()
+        } else if key.sheetParent == nil {
+            key.performClose(nil)
+        } else {
+            NSSound.beep()
         }
     }
 
