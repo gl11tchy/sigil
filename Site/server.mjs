@@ -25,8 +25,11 @@ export function createSite({ publicOrigin } = {}) {
     res.setHeader('Cache-Control', 'no-store');
     if (origin.protocol === 'https:') res.setHeader('Strict-Transport-Security', 'max-age=31536000');
     if (!req.url || req.url.length > 2048) { res.writeHead(404).end(); return; }
-    if (req.url === '/health' && req.method === 'GET') { res.end('ok'); return; }
-    const asset = req.method === 'GET' && assets.get(req.url);
+    // Shared links gain tracking queries, and uptime checks send HEAD; Node omits HEAD bodies.
+    const path = req.url.split('?')[0];
+    const read = req.method === 'GET' || req.method === 'HEAD';
+    if (path === '/health' && read) { res.end('ok'); return; }
+    const asset = read && assets.get(path);
     if (!asset) { res.writeHead(404).end(); return; }
     try {
       const data = await readFile(new URL(`public/${asset[0]}`, import.meta.url));
