@@ -151,18 +151,34 @@ public enum BridgePrompt {
             }
             scalars.append(scalar)
         }
-        var flattened = String(String.UnicodeScalarView(scalars))
+        let flattened = String(String.UnicodeScalarView(scalars))
             .split(separator: "\n", omittingEmptySubsequences: true)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
             .joined(separator: " ")
-        // Repeat until none is left: removing the inner marker of "[[Sigil]]"
-        // leaves a new one. Each pass drops two characters, so this ends.
-        while flattened.range(of: marker, options: .caseInsensitive) != nil {
-            flattened = flattened.replacingOccurrences(
-                of: marker, with: "Sigil", options: .caseInsensitive)
+        return withoutMarkers(flattened)
+    }
+
+    /// Turns every marker into plain "Sigil" in one pass. A "]" that closes
+    /// "[sigil" rewrites it, and the rewritten word can complete an outer
+    /// marker on the next "]", so "[[Sigil]]" leaves none. Scalars, not
+    /// characters, so a combining mark on the "]" cannot hide one.
+    private static func withoutMarkers(_ text: String) -> String {
+        let opening = String(marker.dropLast())
+        var output: [Unicode.Scalar] = []
+        output.reserveCapacity(text.unicodeScalars.count)
+        for scalar in text.unicodeScalars {
+            if scalar == "]", output.count >= opening.unicodeScalars.count,
+                String(String.UnicodeScalarView(output.suffix(opening.unicodeScalars.count)))
+                    .caseInsensitiveCompare(opening) == .orderedSame
+            {
+                output.removeLast(opening.unicodeScalars.count)
+                output.append(contentsOf: "Sigil".unicodeScalars)
+            } else {
+                output.append(scalar)
+            }
         }
-        return flattened
+        return String(String.UnicodeScalarView(output))
     }
 
     /// A zero-width joiner is kept only between emoji, where it builds one
