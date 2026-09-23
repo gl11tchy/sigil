@@ -122,6 +122,7 @@ struct SidebarView: View {
         }
         .task(id: visibleRowIDs()) {
             clampKeyboardSelection()
+            showKeyboardRowIfListFocused()
             pruneMultiSelection()
             await prepareRename(forceReconfigure: false)
         }
@@ -270,6 +271,9 @@ struct SidebarView: View {
             .focusable()
             .focusEffectDisabled()
             .focused($focus, equals: .list)
+            .onChange(of: focus) { _, newFocus in
+                if newFocus == .list { showKeyboardRowIfListFocused() }
+            }
             .onKeyPress(.upArrow) {
                 if model.renamingSessionKey != nil { return .ignored }
                 return moveKeyboardSelection(by: -1)
@@ -1135,6 +1139,18 @@ struct SidebarView: View {
         if !visibleRowIDs().contains(id) {
             keyboardSelectionID = nil
         }
+    }
+
+    /// The list hides its focus ring, so while it has focus the arrow-key
+    /// highlight is the only mark of it and must always be on a row.
+    private func showKeyboardRowIfListFocused() {
+        guard focus == .list else { return }
+        let activeRowID =
+            listKind == .projectList
+            ? model.selectedTab.map { SidebarOrganization.openTabRowID($0.id) }
+            : model.sessionForSelectedTab().map { model.sessionKey($0) }
+        keyboardSelectionID = SidebarOrganization.keyboardRow(
+            onFocus: keyboardSelectionID, activeRowID: activeRowID, in: visibleRowIDs())
     }
 
     // MARK: - Multi-selection

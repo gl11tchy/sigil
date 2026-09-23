@@ -263,6 +263,20 @@ struct SidebarOrganizationTests {
         #expect(SidebarOrganization.homeRowID(leaving: .folders, projectID: nil) == nil)
         #expect(SidebarOrganization.homeRowID(leaving: .project, projectID: nil) == nil)
     }
+
+    /// A focused list always shows where the keys are.
+    @Test func focusedListAlwaysHasAHighlightedRow() {
+        let rows = ["a", "b", "c"]
+        #expect(
+            SidebarOrganization.keyboardRow(onFocus: "c", activeRowID: "b", in: rows) == "c")
+        #expect(
+            SidebarOrganization.keyboardRow(onFocus: nil, activeRowID: "b", in: rows) == "b")
+        #expect(
+            SidebarOrganization.keyboardRow(onFocus: "gone", activeRowID: nil, in: rows) == "a")
+        #expect(
+            SidebarOrganization.keyboardRow(onFocus: nil, activeRowID: "hidden", in: rows) == "a")
+        #expect(SidebarOrganization.keyboardRow(onFocus: nil, activeRowID: nil, in: []) == nil)
+    }
 }
 
 private func session(

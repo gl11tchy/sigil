@@ -147,6 +147,18 @@ enum SidebarOrganization {
             + destinationRowIDs(recentsCount: recentsCount, archivedCount: archivedCount)
     }
 
+    /// Where the arrow-key highlight sits once the list has focus. The list
+    /// draws no focus ring, so a focused list with no highlight shows nothing
+    /// and Return does nothing. Keep a visible highlight, else the active row,
+    /// else the first row.
+    static func keyboardRow(onFocus current: String?, activeRowID: String?, in rowIDs: [String])
+        -> String?
+    {
+        if let current, rowIDs.contains(current) { return current }
+        if let activeRowID, rowIDs.contains(activeRowID) { return activeRowID }
+        return rowIDs.first
+    }
+
     /// The home row that stands for the surface being left, so the arrow-key
     /// highlight lands back on the folder or destination the user opened.
     static func homeRowID(leaving surface: SidebarSurface, projectID: String?) -> String? {
