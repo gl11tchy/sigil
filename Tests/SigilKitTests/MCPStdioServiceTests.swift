@@ -402,6 +402,41 @@ struct MCPStdioServiceTests {
         #expect(await waitFor { session.inFlightCount == 0 })
     }
 
+    @Test func blockedToolCallsCannotStarveAPing() async throws {
+        // More blocked calls than the cooperative pool has threads.
+        let blockers = ProcessInfo.processInfo.activeProcessorCount + 2
+        let gate = DispatchSemaphore(value: 0)
+        let calls = BlockingCalls()
+        let service = MCPStdioService(peer: peer) { _ in
+            calls.start()
+            _ = gate.wait(timeout: .now() + 5)
+            calls.finish()
+            return BridgeResponse(ok: true, answer: "done")
+        }
+        let lines = LineRecorder()
+        let session = MCPStdioSession(service: service) { line in
+            lines.append(line)
+            if lines.hasResponse(id: 999) { calls.notePing() }
+        }
+        defer {
+            for _ in 0..<blockers { gate.signal() }
+            session.cancelAll()
+        }
+
+        for id in 1...blockers {
+            session.receive(
+                #"{"jsonrpc":"2.0","id":\#(id),"method":"tools/call","params":{"name":"ask_tab","arguments":{"tab":"other","question":"wait"}}}"#
+            )
+        }
+        #expect(await waitFor { calls.started == blockers })
+        session.receive(#"{"jsonrpc":"2.0","id":999,"method":"ping"}"#)
+        #expect(await waitFor { lines.hasResponse(id: 999) })
+        #expect(calls.finishedWhenPingAnswered == 0)
+
+        for _ in 0..<blockers { gate.signal() }
+        #expect(await waitFor(timeout: .seconds(5)) { session.inFlightCount == 0 })
+    }
+
     @Test func cancelledNotificationStopsAnInFlightCallWithoutResponse() async {
         let started = SignalProbe()
         let service = MCPStdioService(peer: peer) { _ in
@@ -548,6 +583,25 @@ private final class SignalProbe: @unchecked Sendable {
         lock.lock()
         storage = true
         lock.unlock()
+    }
+}
+
+private final class BlockingCalls: @unchecked Sendable {
+    private let lock = NSLock()
+    private var startedCount = 0
+    private var finishedCount = 0
+    private var finishedAtPing: Int?
+
+    var started: Int { lock.withLock { startedCount } }
+    var finishedWhenPingAnswered: Int? { lock.withLock { finishedAtPing } }
+
+    func start() { lock.withLock { startedCount += 1 } }
+    func finish() { lock.withLock { finishedCount += 1 } }
+
+    func notePing() {
+        lock.withLock {
+            if finishedAtPing == nil { finishedAtPing = finishedCount }
+        }
     }
 }
 

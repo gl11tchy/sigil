@@ -402,7 +402,7 @@ public final class MCPStdioSession: @unchecked Sendable {
 
         let task = Task.detached { [service, output, weak self, job] in
             defer { self?.finish(key, job: job) }
-            let response = service.handleLine(trimmed)
+            let response = await MCPRequestLane().handle(trimmed, with: service)
             guard !Task.isCancelled, let response else { return }
             output(response)
         }
@@ -434,6 +434,21 @@ public final class MCPStdioSession: @unchecked Sendable {
         lock.lock()
         if jobs[key] === job { jobs.removeValue(forKey: key) }
         lock.unlock()
+    }
+}
+
+/// Runs one request on its own dispatch thread. The transport blocks on a
+/// socket, and blocked cooperative threads starve every other task, pings
+/// included. The call stays in its task, so cancellation still reaches it.
+private actor MCPRequestLane {
+    private let queue = DispatchSerialQueue(label: "com.gl11tchy.sigil.mcp.request")
+
+    nonisolated var unownedExecutor: UnownedSerialExecutor {
+        queue.asUnownedSerialExecutor()
+    }
+
+    func handle(_ line: String, with service: MCPStdioService) -> String? {
+        service.handleLine(line)
     }
 }
 
