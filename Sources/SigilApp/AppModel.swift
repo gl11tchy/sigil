@@ -1834,13 +1834,13 @@ final class AppModel {
 
     /// Shows `mode` in the panel, or hides the panel when that tool is already up.
     func showPanel(_ mode: RightPanelMode) {
-        panel.toggle(mode, in: currentDirectory)
+        panel.toggle(mode)
         preparePanel()
     }
 
     /// Opens or closes the panel on whatever tool it last showed.
     func togglePanel() {
-        panel.toggle(nil, in: currentDirectory)
+        panel.toggle(nil)
         preparePanel()
     }
 
@@ -1853,14 +1853,10 @@ final class AppModel {
 
     /// Starts whatever the visible tool needs, with the app's own theme and size.
     private func preparePanel() {
-        guard panel.isVisible else { return }
-        if panel.mode == .shell {
-            panel.startShellIfNeeded(
-                in: currentDirectory, theme: settings.theme, fontSize: settings.fontSize)
-            panel.shell?.optionAsMetaKey = settings.optionAsMetaKey
-        } else {
-            panel.prepare(in: currentDirectory)
-        }
+        guard panel.isVisible, panel.mode == .shell else { return }
+        panel.startShellIfNeeded(
+            in: currentDirectory, theme: settings.theme, fontSize: settings.fontSize)
+        panel.shell?.optionAsMetaKey = settings.optionAsMetaKey
     }
 
     // MARK: - Appearance
