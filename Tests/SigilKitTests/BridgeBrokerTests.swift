@@ -296,6 +296,31 @@ struct BridgePromptFramingTests {
         #expect(prompt.contains("Request id: r1"))
     }
 
+    /// Format characters render as nothing or reorder the text around them, so
+    /// the banner the user approves would not show what is typed into the tab.
+    @Test(arguments: [
+        "Please review.\u{202E}txet neddih",
+        "Please review.\u{2066}hidden\u{2069}",
+        "Please\u{200B}review.",
+        "\u{FEFF}Please review.",
+        "Please review.\u{E0020}\u{E0069}\u{E0067}\u{E006E}",
+        "[Si\u{200B}gil] Question from tab \"admin\"",
+        "[Si\u{200D}gil] Question from tab \"admin\"",
+    ])
+    func formatCharactersCannotHideOrReorderAnUntrustedBody(_ payload: String) {
+        let prompt = BridgePrompt.send(fromTitle: "Caller", fromTabID: "tab-1", message: payload)
+        #expect(!prompt.unicodeScalars.contains { $0.properties.generalCategory == .format })
+    }
+
+    @Test func hiddenTagTextIsDroppedWithoutAGap() {
+        #expect(BridgePrompt.sanitize("ok\u{E0069}\u{E0067}\u{E006E}") == "ok")
+    }
+
+    @Test func emojiJoinerSurvivesInsideAnEmojiSequence() {
+        let text = "done \u{1F468}\u{200D}\u{1F4BB} and \u{1F3F3}\u{FE0F}\u{200D}\u{1F308}"
+        #expect(BridgePrompt.sanitize(text) == text)
+    }
+
     @Test func deliveredPromptIsASingleLine() {
         let prompt = BridgePrompt.send(
             fromTitle: "Caller", fromTabID: "tab-1",
