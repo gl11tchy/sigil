@@ -694,6 +694,41 @@ struct AppModelTests {
         #expect(!model.sidebarSessions.contains { $0.id == "closed-wt" })
     }
 
+    /// A remount of the sidebar (⌘B) must not refocus Search for an old ⌘⇧F.
+    @Test @MainActor
+    func searchFocusRequestIsConsumedOnce() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        #expect(!model.consumeSearchFocusRequest())
+
+        model.focusSidebarSearch()
+
+        #expect(model.consumeSearchFocusRequest())
+        #expect(!model.consumeSearchFocusRequest())
+    }
+
+    /// The Archived row counts only chats the Archived list will show.
+    @Test @MainActor
+    func archivedCountSkipsChatsTheArchivedListHides() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = "/Users/someone/Documents/peptide"
+        try fixture.writeListedSession(id: "kept", cwd: cwd)
+        try fixture.writeListedSession(id: "child", cwd: cwd, sessionKind: "subagent")
+        try fixture.writeListedSession(id: "empty", cwd: cwd, summary: "", messages: 1)
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        for session in fixture.store.sessions { model.archive(session) }
+
+        model.openArchived()
+
+        #expect(model.sidebarSessions.map(\.id) == ["kept"])
+        #expect(model.archivedCount == 1)
+    }
+
     @Test @MainActor
     func sidebarHidesSubagentSessionsUntilEnabled() async throws {
         let fixture = try ModelFixture()
@@ -1239,6 +1274,28 @@ struct AppModelTests {
         #expect(!model.hasCustomName(session))
         #expect(model.title(for: session) == "CLI summary")
         #expect(fixture.settings.conversationNames.isEmpty)
+    }
+
+    /// ⌘⇧R starts from the terminal and must hand focus back there; F2 and the
+    /// row menu start from the list and return to it.
+    @Test @MainActor
+    func renameRemembersWhereItStarted() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(id: "s1", cwd: "/Users/someone/Documents/project")
+        try fixture.writeListedSession(id: "s2", cwd: "/Users/someone/Documents/project")
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let one = try #require(model.store.sessions.first { $0.id == "s1" })
+        let two = try #require(model.store.sessions.first { $0.id == "s2" })
+
+        model.beginRename(one, returnFocus: .terminal)
+        #expect(model.renameReturnFocus == .terminal)
+        model.cancelRename()
+
+        model.beginRename(two)
+        #expect(model.renameReturnFocus == .list)
     }
 
     @Test @MainActor

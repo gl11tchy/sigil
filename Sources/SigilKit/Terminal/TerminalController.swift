@@ -480,7 +480,7 @@ public final class TerminalController {
             var search = windowStart
             while search < windowEnd, let range = rendered.range(of: needle, range: search..<windowEnd) {
                 let matchesEnd =
-                    endAnchor.isEmpty || (endOnce.map { range.lowerBound <= $0.lowerBound } ?? false)
+                    endAnchor.isEmpty || (endOnce.map { range.lowerBound <= $0.lowerBound } ?? true)
                 if matchesEnd {
                     let distance = abs(rendered.distance(from: approx, to: range.lowerBound))
                     if distance < bestDistance {
@@ -495,7 +495,14 @@ public final class TerminalController {
             if let best { return best }
         }
         guard !endAnchor.isEmpty, let end = rendered.range(of: endAnchor, options: .backwards) else {
-            return rendered.range(of: needle)?.lowerBound
+            // A stale end anchor proves nothing, so keep the match nearest the loaded window.
+            let earlier = rendered.range(of: needle, options: .backwards, range: rendered.startIndex..<approx)
+            let later = rendered.range(of: needle, range: approx..<rendered.endIndex)
+            guard let earlier else { return later?.lowerBound }
+            guard let later else { return earlier.lowerBound }
+            let earlierGap = rendered.distance(from: earlier.lowerBound, to: approx)
+            let laterGap = rendered.distance(from: approx, to: later.lowerBound)
+            return earlierGap <= laterGap ? earlier.lowerBound : later.lowerBound
         }
         let region = rendered[..<end.upperBound]
         return region.range(of: needle, options: .backwards)?.lowerBound

@@ -52,6 +52,8 @@ final class AppModel {
     /// Bumped by Find Conversations so the search field takes focus even when
     /// the sidebar just became visible, or already had it.
     private(set) var searchFocusToken = 0
+    /// The last token the sidebar acted on, so a remount does not replay it.
+    @ObservationIgnored private var consumedSearchFocusToken = 0
 
     /// True while this process owns the tab-messaging socket.
     private(set) var isTabMessagingAvailable = false
@@ -218,6 +220,11 @@ final class AppModel {
     /// Displayed title at fresh begin. Unedited Return/blur is a no-op even if
     /// the CLI summary moved. Same-key begin must not clear this.
     var renameCommitBaseline: String?
+    /// Where keyboard focus goes when an inline rename ends.
+    enum RenameReturnFocus { case list, terminal }
+    /// Set by each beginRename: ⌘⇧R starts from the terminal and returns there;
+    /// F2 and the row menu start from the list.
+    private(set) var renameReturnFocus: RenameReturnFocus = .list
 
     /// Conversations for the sidebar, one-shot noise filtered out.
     /// An empty query stays newest first. Archived chats stay hidden unless
@@ -225,18 +232,7 @@ final class AppModel {
     /// every folder.
     var sidebarSessions: [GrokSession] {
         var result = store.search(searchText) { self.title(for: $0) }
-        if !settings.showEmptySessions {
-            // A session you have open is always worth listing, even before the CLI
-            // has written a summary for it. Otherwise the row marking the
-            // conversation on screen is the one row the list refuses to show.
-            result = result.filter { isReal($0) || isOpen($0) }
-        }
-        if !settings.showWorktreeSessions {
-            result = result.filter { !isEphemeral(path: $0.cwd) || isOpen($0) }
-        }
-        if !settings.showSubagentSessions {
-            result = result.filter { !$0.isSubagent || isOpen($0) }
-        }
+            .filter { passesSidebarFilters($0) }
         if !SidebarOrganization.isSearching(searchText) {
             if sidebarSurface == .archived {
                 result = result.filter { isArchived($0) }
@@ -245,6 +241,24 @@ final class AppModel {
             }
         }
         return result
+    }
+
+    /// The empty, worktree and subagent filters. Shared by the list and the
+    /// Archived count so the count never includes rows the list hides.
+    private func passesSidebarFilters(_ session: GrokSession) -> Bool {
+        // A session you have open is always worth listing, even before the CLI
+        // has written a summary for it. Otherwise the row marking the
+        // conversation on screen is the one row the list refuses to show.
+        if !settings.showEmptySessions, !(isReal(session) || isOpen(session)) {
+            return false
+        }
+        if !settings.showWorktreeSessions, isEphemeral(path: session.cwd), !isOpen(session) {
+            return false
+        }
+        if !settings.showSubagentSessions, session.isSubagent, !isOpen(session) {
+            return false
+        }
+        return true
     }
 
     /// A session worth listing: it has a summary, a name the user chose, or more
@@ -414,9 +428,9 @@ final class AppModel {
         }
     }
 
-    /// Archived conversations still on disk, in archive order.
+    /// Archived conversations the Archived list will show.
     var archivedCount: Int {
-        store.sessions.filter { isArchived($0) }.count
+        store.sessions.filter { isArchived($0) && passesSidebarFilters($0) }.count
     }
 
     /// Pinned conversations still in the current sidebar filter, in pin order.
@@ -704,8 +718,9 @@ final class AppModel {
     /// Single draft owner for a fresh key. prepareRename only hands off the
     /// surface — it must not rewrite `renameDraft`, or typing that lands
     /// before that task runs is clobbered.
-    func beginRename(_ session: GrokSession) {
+    func beginRename(_ session: GrokSession, returnFocus: RenameReturnFocus = .list) {
         isSidebarVisible = true
+        renameReturnFocus = returnFocus
         let key = sessionKey(session)
         let isFreshKey = renamingSessionKey != key
         renameAlertDismissGeneration += 1
@@ -1856,6 +1871,14 @@ final class AppModel {
     func focusSidebarSearch() {
         if !isSidebarVisible { isSidebarVisible = true }
         searchFocusToken += 1
+    }
+
+    /// True once per Find Conversations request. The sidebar asks on mount and
+    /// on each new token; only a request it has not acted on moves focus.
+    func consumeSearchFocusRequest() -> Bool {
+        guard searchFocusToken > consumedSearchFocusToken else { return false }
+        consumedSearchFocusToken = searchFocusToken
+        return true
     }
 
     // MARK: - Find

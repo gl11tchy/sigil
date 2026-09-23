@@ -21,6 +21,20 @@ enum SidebarActivityDot {
     }
 }
 
+/// VoiceOver value for a folder row. The row combines its children, so the
+/// working dot and the pin glyph are spoken here or not at all.
+enum ProjectRowAccessibility {
+    static func value(countLabel: String, isActive: Bool, isWorking: Bool, isPinned: Bool)
+        -> String
+    {
+        var value = countLabel
+        if isActive { value += ", one open" }
+        if isWorking { value += ", working" }
+        if isPinned { value += ", pinned" }
+        return value
+    }
+}
+
 /// The thread viewer: every Grok Build conversation on this machine.
 ///
 /// Home is the project list. Recents and Archived sit under it as destinations
@@ -85,8 +99,8 @@ struct SidebarView: View {
             Button("Cancel", role: .cancel) {}
         }
         .task(id: model.searchFocusToken) {
-            guard model.searchFocusToken > 0 else { return }
             await Task.yield()
+            guard !Task.isCancelled, model.consumeSearchFocusRequest() else { return }
             focus = .search
         }
         .task(id: model.renamePrepareTaskID) {
@@ -258,7 +272,9 @@ struct SidebarView: View {
             .onKeyPress(Self.f2) { renameKeyboardSelection() }
             .onKeyPress(.escape) { handleEscape() }
             .onChange(of: keyboardSelectionID) { _, id in
-                if let id { proxy.scrollTo(id, anchor: .center) }
+                // No anchor: scroll only as far as needed to reveal the row, so a
+                // click on a visible row leaves the list where it is.
+                if let id { proxy.scrollTo(id) }
             }
             .onChange(of: model.renamingSessionKey) { _, id in
                 if let id { proxy.scrollTo(id, anchor: .center) }
@@ -821,8 +837,14 @@ struct SidebarView: View {
             surface: model.sidebarSurface
         ) {
         case .cancelRename:
+            let returnFocus = model.renameReturnFocus
             model.cancelRename()
-            focus = .list
+            if returnFocus == .terminal {
+                focus = nil
+                model.focusSelectedTerminal()
+            } else {
+                focus = .list
+            }
         case .leaveFolder:
             model.leaveProject()
         case .leaveList:
@@ -1452,9 +1474,10 @@ private struct ProjectListRow: View {
             }
             Spacer(minLength: 8)
             if isWorking {
-                // Clear of the plus that sits in the trailing overlay.
+                // Clear of the plus, and of a pinned folder's pin glyph, in the
+                // trailing overlay.
                 StatusDot(activity: .working)
-                    .padding(.trailing, canStart ? 22 : 0)
+                    .padding(.trailing, (canStart ? 22 : 0) + (isPinned && showsPin ? 22 : 0))
             }
         }
         .padding(.leading, 8)
@@ -1470,7 +1493,14 @@ private struct ProjectListRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel(title)
-        .accessibilityValue(isActive ? "\(countLabel), one open" : countLabel)
+        .accessibilityValue(
+            ProjectRowAccessibility.value(
+                countLabel: countLabel,
+                isActive: isActive,
+                isWorking: isWorking,
+                isPinned: isPinned && showsPin
+            )
+        )
         .accessibilityAction(.default, open)
         .modifier(NamedActionIf(name: "New Session", enabled: canStart, action: newChat))
         .modifier(
@@ -1530,21 +1560,9 @@ private struct ProjectListRow: View {
                     endPoint: .trailing
                 )
                 .frame(width: 14)
+                // The plus stays trailing-most so hover adds controls to its left
+                // and nothing moves under the pointer.
                 HStack(spacing: 0) {
-                    if canStart {
-                        Button(action: newChat) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 9, weight: .semibold))
-                                .frame(width: 22, height: 22)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(
-                            (isHovering || isKeyboardSelected) ? palette.textDim : palette.textFaint
-                        )
-                        .help("New Session")
-                        .accessibilityLabel("New Session")
-                    }
                     if isHovering || isKeyboardSelected {
                         if let archive {
                             Button(action: archive) {
@@ -1576,6 +1594,20 @@ private struct ProjectListRow: View {
                             .foregroundStyle(palette.accent.opacity(0.9))
                             .frame(width: 22, height: 22)
                             .accessibilityHidden(true)
+                    }
+                    if canStart {
+                        Button(action: newChat) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 9, weight: .semibold))
+                                .frame(width: 22, height: 22)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(
+                            (isHovering || isKeyboardSelected) ? palette.textDim : palette.textFaint
+                        )
+                        .help("New Session")
+                        .accessibilityLabel("New Session")
                     }
                 }
                 .padding(.trailing, 8)
@@ -2058,24 +2090,37 @@ private struct SessionRow: View {
     }
 
     private func commitCurrentDraft(restoreListFocus: Bool) {
+        let returnFocus = model.renameReturnFocus
         suppressBlurCommit = true
         blurCommitTask?.cancel()
         blurCommitTask = nil
         commitRename(model.renameDraft)
-        if restoreListFocus { focus = .list }
+        if restoreListFocus { restoreFocus(after: returnFocus) }
         if AppModel.shouldClearBlurSuppressionAfterCommitOrAbandon() {
             suppressBlurCommit = false
         }
     }
 
     private func abandonRename() {
+        let returnFocus = model.renameReturnFocus
         suppressBlurCommit = true
         blurCommitTask?.cancel()
         blurCommitTask = nil
         cancelRename()
-        focus = .list
+        restoreFocus(after: returnFocus)
         if AppModel.shouldClearBlurSuppressionAfterCommitOrAbandon() {
             suppressBlurCommit = false
+        }
+    }
+
+    /// A ⌘⇧R rename hands the keyboard back to the terminal it came from.
+    private func restoreFocus(after returnFocus: AppModel.RenameReturnFocus) {
+        switch returnFocus {
+        case .list:
+            focus = .list
+        case .terminal:
+            focus = nil
+            model.focusSelectedTerminal()
         }
     }
 
