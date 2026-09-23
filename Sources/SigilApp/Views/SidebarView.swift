@@ -258,7 +258,9 @@ struct SidebarView: View {
             .onKeyPress(Self.f2) { renameKeyboardSelection() }
             .onKeyPress(.escape) { handleEscape() }
             .onChange(of: keyboardSelectionID) { _, id in
-                if let id { proxy.scrollTo(id, anchor: .center) }
+                // No anchor: scroll only as far as needed to reveal the row, so a
+                // click on a visible row leaves the list where it is.
+                if let id { proxy.scrollTo(id) }
             }
             .onChange(of: model.renamingSessionKey) { _, id in
                 if let id { proxy.scrollTo(id, anchor: .center) }
