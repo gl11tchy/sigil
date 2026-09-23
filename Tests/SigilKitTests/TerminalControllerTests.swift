@@ -326,6 +326,16 @@ struct TerminalControllerTests {
         )
     }
 
+    @Test func accessibilityValueIsBuiltWhenAskedNotOnEveryOutputTick() throws {
+        let controller = TerminalController()
+        let view = try #require(controller.view as? TerminalView)
+
+        view.feed(text: "AX_ON_DEMAND")
+
+        let value = controller.view.accessibilityValue() as? String
+        #expect(value?.contains("AX_ON_DEMAND") == true)
+    }
+
     @Test func anAlreadyReapedChildIsGoneEvenIfItsPIDCouldBeReused() throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/true")

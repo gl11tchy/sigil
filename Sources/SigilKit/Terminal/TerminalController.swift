@@ -59,7 +59,7 @@ public final class TerminalController {
         terminal.setAccessibilityElement(true)
         terminal.setAccessibilityRole(.textArea)
         terminal.setAccessibilityLabel("Grok terminal")
-        terminal.setAccessibilityValue("")
+        terminal.accessibilityText = { [weak self] in self?.accessibilitySnapshot() ?? "" }
         apply(theme: theme)
     }
 
@@ -700,7 +700,7 @@ extension TerminalController {
     }
 
     private func updateAccessibilitySnapshot() {
-        terminalView.setAccessibilityValue(accessibilitySnapshot())
+        NSAccessibility.post(element: terminalView, notification: .valueChanged)
     }
 
     private func handleProcessExit(_ rawStatus: Int32?) {
