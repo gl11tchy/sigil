@@ -19,6 +19,22 @@ struct TabStripTests {
         #expect(TabStripSizing.widths(available: 200, ideals: []) == [])
     }
 
+    @Test func longTitlesShrinkToFitBeforeTheStripScrolls() {
+        // Two long titles split the strip instead of pushing the first one off screen.
+        #expect(TabStripSizing.widths(available: 400, ideals: [300, 300]) == [199, 199])
+        #expect(TabStripSizing.contentWidth(available: 400, ideals: [300, 300]) == 400)
+
+        // A short title keeps its width; only the long one gives way.
+        let mixed = TabStripSizing.widths(available: 300, ideals: [60, 400])
+        #expect(mixed[0] == 60)
+        #expect(abs(mixed[1] - 238) < 0.01)
+
+        // Below the floor the strip scrolls rather than crushing titles.
+        let crowded = TabStripSizing.widths(available: 200, ideals: [300, 300, 300])
+        #expect(crowded == Array(repeating: TabStripSizing.minimumChipWidth, count: 3))
+        #expect(TabStripSizing.contentWidth(available: 200, ideals: [300, 300, 300]) > 200)
+    }
+
     @Test func tabStripShowsTheScrollPosition() {
         #expect(TabStripSizing.showsScrollIndicators)
     }

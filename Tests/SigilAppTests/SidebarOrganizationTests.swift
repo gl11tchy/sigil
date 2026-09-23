@@ -199,6 +199,19 @@ struct SidebarOrganizationTests {
             ) == ["a"])
     }
 
+    @Test func homeListPutsOpenTabsFirst() {
+        let tab = UUID()
+        let rowID = SidebarOrganization.openTabRowID(tab)
+        #expect(
+            SidebarOrganization.homeRowIDs(
+                recentsCount: 1, archivedCount: 0, pinnedIDs: ["pin"], restIDs: ["rest"],
+                openTabIDs: [rowID]
+            ) == [rowID, "pin", "rest", SidebarOrganization.recentsID])
+        #expect(SidebarOrganization.openTabID(fromRowID: rowID) == tab)
+        #expect(SidebarOrganization.openTabID(fromRowID: "pin") == nil)
+        #expect(SidebarOrganization.openTabID(fromRowID: SidebarOrganization.openTabPrefix + "x") == nil)
+    }
+
     @Test func pathHaystacksIncludeEveryMemberSpelling() {
         let sample = session(id: "a", cwd: "/var/folders/x", name: "n", updated: 2)
         let sibling = session(id: "b", cwd: "/private/var/folders/x", name: "n", updated: 1)

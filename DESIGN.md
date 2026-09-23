@@ -108,7 +108,11 @@ because that is how the chosen mockup marks structure. They take 16pt above and
 5pt below. Project names stay in their own case, `sigil`, so a folder slug
 does not become a shout.
 
-The sidebar is one list of projects. Recents and Archived sit under that list
+The sidebar home opens with `OPEN (n)`: every session that has a tab, as a
+two-line row — title, then folder and state in mono — with the `selected` fill
+on the one on screen and the working light on the ones still busy. It is the
+answer to "what is running, and where" without reading the tab strip. Below it
+is one list of projects. Recents and Archived sit under that list
 as destinations — a hairline, then one-line rows with an icon — not as folders
 in the same stack. Chat pins sit at the top of Recents and of an open project.
 Project pins sit at the top of the folder list, newest-pinned first. A plus on
@@ -137,7 +141,9 @@ Every interactive element ships all of these, or it is not done:
 - **Field**: default, hover, focused (ember hairline).
 - **Icon button**: default, hover, on.
 - **Tab**: default, hover, selected (`selected` fill — the same fill as the open
-  row, because it is the same state), close button with its own hover.
+  row, because it is the same state), close button with its own hover. Chips
+  share the strip: long titles give way first, down to 96pt, and only past
+  that does the strip scroll.
 - **Session**: starting, working (pulsing ember on the row), idle, exited.
 - **Folder**: in Projects, a working folder is a row you open. Pin it from the
   row or from the open-project bar; pinned folders stay at the top of the list.

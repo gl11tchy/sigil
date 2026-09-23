@@ -15,7 +15,11 @@
 <body>
   <header>
     <h1 id="brand"><img src="/icon.svg" width="24" height="24" alt="">Sigil</h1>
-    <button id="sessions-toggle" type="button" aria-label="Browse sessions" aria-haspopup="dialog">Sessions</button>
+    <div id="session-toolbar" class="toolbar" hidden>
+      <img class="mark" src="/icon.svg" width="22" height="22" alt="">
+      <div class="session-picker"><select id="tabs" aria-label="Session"></select><span class="session-chevron" aria-hidden="true">⌄</span></div>
+      <button id="new" type="button" aria-label="New session">+ New</button>
+    </div>
     <details class="connection" id="connection">
       <summary id="connection-toggle" aria-label="Connection settings"><span id="status" role="status">Not connected</span><span aria-hidden="true">⌄</span></summary>
       <div class="connection-panel">
@@ -28,13 +32,10 @@
       </div>
     </details>
   </header>
-  <div id="session-toolbar" class="toolbar" hidden>
-    <div class="session-picker"><select id="tabs" aria-label="Session"></select><span class="session-chevron" aria-hidden="true">⌄</span></div>
-    <button id="new" type="button" aria-label="New session">+ New</button>
-  </div>
   <dialog id="sessions-dialog" aria-labelledby="sessions-heading">
-    <div class="sheet-heading"><h2 id="sessions-heading">Sessions</h2><button id="sessions-close" type="button">Done</button></div>
-    <input id="session-search" type="search" placeholder="Search sessions" aria-label="Search sessions" autocomplete="off">
+    <div class="sheet-heading"><h2 id="sessions-heading">Chats</h2><button id="sessions-close" type="button">Done</button></div>
+    <input id="session-search" type="search" placeholder="Search open and saved chats" aria-label="Search chats" autocomplete="off">
+    <h3 id="open-heading">Open</h3>
     <div id="session-list"></div>
     <p id="session-no-results" hidden>No matching sessions.</p>
     <h3 id="saved-heading" hidden>Saved chats</h3>
@@ -76,7 +77,7 @@
     <section id="controls" hidden aria-label="Sigil remote control">
       <div class="workspace-bar">
         <span id="session-status" role="status"></span>
-        <div><button id="restart" type="button" hidden>Restart session</button><button id="stop" type="button" hidden>Stop</button><button id="find-toggle" type="button" aria-label="Find in output" aria-expanded="false" aria-controls="find-bar">Find</button></div>
+        <div><button id="restart" type="button" aria-label="Restart session" hidden>Restart</button><button id="stop" type="button" hidden>Stop</button><button id="sessions-toggle" type="button" aria-label="Browse open and saved chats" aria-haspopup="dialog">Chats</button><button id="find-toggle" type="button" aria-label="Find in output" aria-expanded="false" aria-controls="find-bar">Find</button></div>
       </div>
       <form id="find-bar" hidden role="search">
         <input id="find-query" type="search" placeholder="Find in output" aria-label="Find in output" autocomplete="off">
@@ -103,12 +104,15 @@
             <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.2 10.2 11 20.4a5.2 5.2 0 0 1-7.4-7.4l10.2-10.2a3.5 3.5 0 0 1 4.9 4.9L8.6 18.8a1.7 1.7 0 1 1-2.5-2.5l9.2-9.2"/></svg>
           </button>
           <input id="attach" type="file" accept="image/*,application/pdf,text/plain,text/markdown,.md,.txt,.pdf,.png,.jpg,.jpeg,.gif,.webp,.heic,.csv,.json" multiple hidden>
+          <button id="keys-toggle" type="button" aria-label="Terminal keys" aria-expanded="false" aria-controls="keys">
+            <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6.5 10h.01M10.5 10h.01M14.5 10h.01M18.5 10h.01M6.5 14h.01M9.5 14h5M18.5 14h.01"/></svg>
+          </button>
 
           <label class="sr-only" for="message">Message</label>
           <textarea id="message" rows="1" placeholder="Message…" maxlength="8192" autocapitalize="sentences" enterkeyhint="enter"></textarea>
           <button id="send" type="submit" aria-label="Send message">↑</button>
         </div>
-        <div class="compose-tools"><button id="keys-toggle" type="button" aria-expanded="false" aria-controls="keys">Keys</button><span id="compose-status" role="status"></span><span class="send-hint">⌘ / Ctrl + Enter to send</span></div>
+        <div class="compose-tools" id="compose-tools" hidden><span id="compose-status" role="status"></span><span class="send-hint">⌘ / Ctrl + Enter to send</span></div>
       </form>
     </section>
   </main>

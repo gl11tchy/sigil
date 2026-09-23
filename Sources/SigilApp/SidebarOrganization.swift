@@ -134,10 +134,25 @@ enum SidebarOrganization {
         recentsCount: Int,
         archivedCount: Int,
         pinnedIDs: [String],
-        restIDs: [String]
+        restIDs: [String],
+        openTabIDs: [String] = []
     ) -> [String] {
-        folderListRowIDs(pinnedIDs: pinnedIDs, restIDs: restIDs)
+        openTabIDs
+            + folderListRowIDs(pinnedIDs: pinnedIDs, restIDs: restIDs)
             + destinationRowIDs(recentsCount: recentsCount, archivedCount: archivedCount)
+    }
+
+    /// Home lists every open tab above the folders, so the sessions in flight
+    /// are one click away without opening a folder or reading the tab strip.
+    static let openTabPrefix = "sigil:tab:"
+
+    static func openTabRowID(_ id: UUID) -> String {
+        openTabPrefix + id.uuidString
+    }
+
+    static func openTabID(fromRowID rowID: String) -> UUID? {
+        guard rowID.hasPrefix(openTabPrefix) else { return nil }
+        return UUID(uuidString: String(rowID.dropFirst(openTabPrefix.count)))
     }
 
     static func activationKey(preferred: String?, in keys: [String]) -> String? {

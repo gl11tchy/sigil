@@ -216,6 +216,13 @@ struct SidebarView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    if listKind == .projectList, !model.tabs.isEmpty {
+                        section("Open", count: model.tabs.count, isFirst: true) {
+                            ForEach(model.tabs) { tab in
+                                openTabRow(tab)
+                            }
+                        }
+                    }
                     if listKind != .projectList, listKind != .search, !pinned.isEmpty {
                         section("Pinned", count: pinned.count, isFirst: true) {
                             ForEach(pinned, id: \.directory) { session in
@@ -508,6 +515,35 @@ struct SidebarView: View {
         .id(id)
     }
 
+    private func openTabRow(_ tab: TerminalTab) -> some View {
+        let rowID = SidebarOrganization.openTabRowID(tab.id)
+        return OpenTabRow(
+            title: model.title(for: tab),
+            folder: tab.workingDirectory.breadcrumbPath,
+            path: tab.workingDirectory.abbreviatedPath,
+            activity: tab.activity,
+            hasUnseenActivity: tab.hasUnseenActivity,
+            isSelected: tab.id == model.selectedTab?.id,
+            isKeyboardSelected: rowID == keyboardSelectionID,
+            select: {
+                keyboardSelectionID = rowID
+                model.select(tab.id)
+            },
+            close: { model.requestCloseTab(tab.id) }
+        )
+        .id(rowID)
+        .contextMenu {
+            Button("Close Tab") { model.requestCloseTab(tab.id) }
+            if case .exited = tab.activity {
+                Button("Restart Session") { model.restartTab(id: tab.id) }
+            }
+            Divider()
+            Button("New Session in This Folder") {
+                model.requestNewSession(in: tab.workingDirectory)
+            }
+        }
+    }
+
     private func projectRow(_ project: SidebarProject, rows: [GrokSession]) -> some View {
         ProjectListRow(
             title: project.name,
@@ -738,7 +774,8 @@ struct SidebarView: View {
                 recentsCount: listedSessions.count,
                 archivedCount: model.archivedCount,
                 pinnedIDs: model.pinnedProjects().map(\.id),
-                restIDs: model.unpinnedProjects().map(\.id)
+                restIDs: model.unpinnedProjects().map(\.id),
+                openTabIDs: model.tabs.map { SidebarOrganization.openTabRowID($0.id) }
             )
         case .search:
             return listedSessions.map { model.sessionKey($0) }
@@ -1022,6 +1059,11 @@ struct SidebarView: View {
             model.openArchived()
             return true
         }
+        if let tabID = SidebarOrganization.openTabID(fromRowID: id) {
+            guard model.tabs.contains(where: { $0.id == tabID }) else { return false }
+            model.select(tabID)
+            return true
+        }
         if listKind == .projectList, let project = project(for: id) {
             model.openProject(project)
             return true
@@ -1265,6 +1307,117 @@ private struct DestinationRow: View {
     }
 }
 
+/// One open session at the top of home: its title, its folder and state in
+/// mono, and the same light the tab strip shows. Click selects the tab.
+private struct OpenTabRow: View {
+    let title: String
+    let folder: String
+    let path: String
+    let activity: TerminalTab.Activity
+    let hasUnseenActivity: Bool
+    let isSelected: Bool
+    let isKeyboardSelected: Bool
+    let select: () -> Void
+    let close: () -> Void
+
+    @Environment(\.palette) private var palette
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 12, weight: isSelected ? .medium : .regular))
+                    .foregroundStyle(palette.text)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text("\(folder) · \(stateLabel)")
+                    .font(.system(size: 9.5, design: .monospaced))
+                    .foregroundStyle(activity.endedInFailure ? palette.error : palette.textFaint)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 8)
+            if SidebarActivityDot.isVisible(
+                activity: activity, hasUnseenActivity: hasUnseenActivity, isActive: isSelected)
+                || activity.endedInFailure
+            {
+                StatusDot(activity: activity)
+            }
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(fill)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(
+                            isKeyboardSelected && !isSelected ? palette.hairline : Color.clear,
+                            lineWidth: 1
+                        )
+                )
+        )
+        .overlay(alignment: .topTrailing) { trailing }
+        .padding(.horizontal, 6)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: select)
+        .onHover { isHovering = $0 }
+        .help("\(title)\n\(path)\n\(stateLabel)")
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityLabel("\(title), \(folder)")
+        .accessibilityValue(isSelected ? "Selected, \(stateLabel)" : stateLabel)
+        .accessibilityAction(.default, select)
+        .accessibilityAction(named: "Close Tab", close)
+    }
+
+    private var stateLabel: String {
+        switch activity {
+        case .starting: return "Starting"
+        case .working: return "Working"
+        case .idle: return hasUnseenActivity ? "Finished" : "Idle"
+        case .exited(let code):
+            if let code, code != 0 { return "Ended · code \(code)" }
+            return "Ended"
+        }
+    }
+
+    private var fill: Color {
+        if isSelected { return palette.selected }
+        return (isHovering || isKeyboardSelected) ? palette.raised : .clear
+    }
+
+    @ViewBuilder
+    private var trailing: some View {
+        if isHovering || isKeyboardSelected {
+            HStack(spacing: 0) {
+                LinearGradient(
+                    colors: [fill.opacity(0), fill],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: 14)
+                Button(action: close) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(palette.textDim)
+                .help("Close Tab")
+                .accessibilityLabel("Close Tab")
+                .padding(.trailing, 8)
+                .padding(.top, 4)
+                .background(fill)
+            }
+        }
+    }
+}
+
 private struct ProjectListRow: View {
     let title: String
     let paths: [String]
@@ -1299,7 +1452,9 @@ private struct ProjectListRow: View {
             }
             Spacer(minLength: 8)
             if isWorking {
+                // Clear of the plus that sits in the trailing overlay.
                 StatusDot(activity: .working)
+                    .padding(.trailing, canStart ? 22 : 0)
             }
         }
         .padding(.leading, 8)
@@ -1314,9 +1469,8 @@ private struct ProjectListRow: View {
         .help(rowHelp)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
-        .accessibilityAddTraits(isActive ? .isSelected : [])
         .accessibilityLabel(title)
-        .accessibilityValue(countLabel)
+        .accessibilityValue(isActive ? "\(countLabel), one open" : countLabel)
         .accessibilityAction(.default, open)
         .modifier(NamedActionIf(name: "New Session", enabled: canStart, action: newChat))
         .modifier(
@@ -1347,9 +1501,10 @@ private struct ProjectListRow: View {
         relativeTime.isEmpty ? countLabel : "\(countLabel) · \(relativeTime)"
     }
 
+    /// A folder is never the conversation on screen; the Open section above
+    /// carries the `selected` fill. The folder keeps its medium title.
     private var fill: Color {
-        if isActive { return palette.selected }
-        return (isHovering || isKeyboardSelected) ? palette.raised : .clear
+        (isHovering || isKeyboardSelected) ? palette.raised : .clear
     }
 
     @ViewBuilder
@@ -1359,7 +1514,7 @@ private struct ProjectListRow: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
                     .strokeBorder(
-                        isKeyboardSelected && !isActive ? palette.hairline : Color.clear,
+                        isKeyboardSelected ? palette.hairline : Color.clear,
                         lineWidth: 1
                     )
             )

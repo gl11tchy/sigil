@@ -1,11 +1,16 @@
 import SwiftUI
 
-/// Chips share leftover width. Content wider than the strip scrolls.
+/// Chips share leftover width. When their titles want more than the strip has,
+/// the widest chips give way first so every open session stays on screen with
+/// its title, dot, and close button. Only past `minimumChipWidth` does the
+/// strip scroll.
 enum TabStripSizing {
     /// `nil` means a chip is not pinned to one width.
     static let fixedChipWidth: CGFloat? = nil
     static let spacing: CGFloat = 2
     static let showsScrollIndicators = true
+    /// Narrower than this and a chip cannot hold a dot, a few words, and its close button.
+    static let minimumChipWidth: CGFloat = 96
 
     static func widths(available: CGFloat, ideals: [CGFloat]) -> [CGFloat] {
         guard !ideals.isEmpty else { return [] }
@@ -14,9 +19,27 @@ enum TabStripSizing {
         }
         let gaps = spacing * CGFloat(ideals.count - 1)
         let idealTotal = ideals.reduce(0, +) + gaps
-        let extra = max(0, available - idealTotal)
-        let share = extra / CGFloat(ideals.count)
-        return ideals.map { $0 + share }
+        if idealTotal <= available {
+            let share = (available - idealTotal) / CGFloat(ideals.count)
+            return ideals.map { $0 + share }
+        }
+        return ideals.map { min($0, max(minimumChipWidth, cap(room: max(0, available - gaps), ideals: ideals))) }
+    }
+
+    /// The width that, applied as a ceiling to every chip, makes the row fit
+    /// `room`: chips already narrower than the ceiling keep their size and hand
+    /// the difference to the wider ones.
+    private static func cap(room: CGFloat, ideals: [CGFloat]) -> CGFloat {
+        var cap = room / CGFloat(ideals.count)
+        for _ in ideals.indices {
+            let fixed = ideals.filter { $0 <= cap }
+            let flexible = ideals.count - fixed.count
+            guard flexible > 0 else { return cap }
+            let next = (room - fixed.reduce(0, +)) / CGFloat(flexible)
+            if abs(next - cap) < 0.5 { return next }
+            cap = next
+        }
+        return cap
     }
 
     static func contentWidth(available: CGFloat, ideals: [CGFloat]) -> CGFloat {
@@ -28,55 +51,46 @@ enum TabStripSizing {
 }
 
 /// The tab strip in the top bar, beside the selected session's folder.
+///
+/// The strip claims whatever width the bar has left (a `GeometryReader` is
+/// greedy), so its width never follows the chips' own size. The chips then
+/// share that width; see `TabStripSizing`.
 struct TabStripView: View {
     @Bindable var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var stripWidth: CGFloat = 0
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal) {
-                TabChipRow(availableWidth: max(0, stripWidth - 12)) {
-                    ForEach(model.tabs) { tab in
-                        TabChip(
-                            tab: tab,
-                            label: model.title(for: tab),
-                            isSelected: tab.id == model.selectedTab?.id,
-                            select: { model.select(tab.id) },
-                            close: { model.requestCloseTab(tab.id) }
-                        )
-                        .id(tab.id)
+        GeometryReader { geo in
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    TabChipRow(availableWidth: max(0, geo.size.width - 12)) {
+                        ForEach(model.tabs) { tab in
+                            TabChip(
+                                tab: tab,
+                                label: model.title(for: tab),
+                                isSelected: tab.id == model.selectedTab?.id,
+                                select: { model.select(tab.id) },
+                                close: { model.requestCloseTab(tab.id) }
+                            )
+                            .id(tab.id)
+                        }
                     }
+                    .padding(.horizontal, 6)
+                    .frame(minHeight: geo.size.height)
                 }
-                .padding(.horizontal, 6)
-            }
-            .scrollIndicators(TabStripSizing.showsScrollIndicators ? .visible : .hidden)
-            .background {
-                GeometryReader { geo in
-                    Color.clear.preference(key: StripWidthKey.self, value: geo.size.width)
-                }
-            }
-            .onPreferenceChange(StripWidthKey.self) { width in
-                if width != stripWidth { stripWidth = width }
-            }
-            .task(id: model.selectedTabID) {
-                await Task.yield()
-                guard !Task.isCancelled else { return }
-                if let id = model.selectedTabID {
-                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.12)) {
-                        proxy.scrollTo(id, anchor: .center)
+                .scrollIndicators(TabStripSizing.showsScrollIndicators ? .visible : .hidden)
+                .task(id: model.selectedTabID) {
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
+                    if let id = model.selectedTabID {
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.12)) {
+                            proxy.scrollTo(id, anchor: .center)
+                        }
                     }
                 }
             }
         }
         .frame(maxWidth: .infinity)
-    }
-}
-
-private struct StripWidthKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }
 
