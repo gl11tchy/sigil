@@ -83,7 +83,7 @@ struct TabStripView: View {
                     await Task.yield()
                     guard !Task.isCancelled else { return }
                     if let id = model.selectedTabID {
-                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.12)) {
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
                             proxy.scrollTo(id, anchor: .center)
                         }
                     }

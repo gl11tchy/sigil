@@ -151,7 +151,7 @@ struct TabListView: View {
             }
             .onChange(of: highlighted) { _, id in
                 guard let id else { return }
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.12)) {
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
                     proxy.scrollTo(id, anchor: .center)
                 }
             }
