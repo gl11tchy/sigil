@@ -49,7 +49,8 @@ async function pair(page, origin, initialOutput, options = {}) {
           ? (options.chats ?? []).filter(chat => `${chat.title} ${chat.folder}`.toLowerCase().includes(String(request.text || '').toLowerCase()))
           : undefined;
         const earlier = request.action === 'earlier'
-          ? (typeof options.earlier === 'string' ? options.earlier : '') : undefined;
+          ? (typeof options.earlier === 'function' ? options.earlier(request)
+            : typeof options.earlier === 'string' ? options.earlier : '') : undefined;
         if (options.rejectAction === request.action) {
           ws.send(JSON.stringify({ peer, data: await seal({ challenge, sequence: request.sequence, ok: false, error: 'Test action refused.' }, key, 'mac') }));
           return;
@@ -232,6 +233,36 @@ test('drafts, history position, and a keyboard-sized viewport stay usable', asyn
     await expect(page.locator('#send')).toBeDisabled();
     await expect(page.locator('#message')).toBeEditable();
     await expect(page.locator('#message')).toHaveValue('Draft for the first session');
+  } finally { mac.close(); }
+});
+
+test('loading earlier output keeps the text the reader was on in place', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  let batch = 0;
+  const earlier = () => {
+    batch += 1;
+    return Array.from({ length: 60 }, (_, i) => `Batch ${batch} line ${i + 1}: older output.`).join('\n') + '\n';
+  };
+  const mac = await pair(page, baseURL, undefined, { earlier });
+  try {
+    await expect.poll(() => mac.actions.filter(a => a.action === 'state').length).toBeGreaterThan(1);
+    const measure = (marker, top) => page.locator('#terminal').evaluate((el, [wanted, scrollToTop]) => {
+      if (scrollToTop) el.scrollTop = 0;
+      const node = el.firstChild;
+      const text = wanted || node.textContent.split('\n')[0];
+      const at = node.textContent.indexOf(text);
+      const range = document.createRange();
+      range.setStart(node, at); range.setEnd(node, at + 6);
+      const offset = range.getBoundingClientRect().top - el.getBoundingClientRect().top;
+      if (scrollToTop) el.dispatchEvent(new Event('scroll'));
+      return { text, offset };
+    }, [marker, top]);
+    const loads = mac.actions.filter(a => a.action === 'earlier').length;
+    const before = await measure(null, true);
+    await expect.poll(() => mac.actions.filter(a => a.action === 'earlier').length).toBe(loads + 1);
+    await expect(page.locator('#terminal')).toContainText(`Batch ${loads + 1} line 1:`);
+    const after = await measure(before.text, false);
+    expect(Math.abs(after.offset - before.offset)).toBeLessThan(40);
   } finally { mac.close(); }
 });
 

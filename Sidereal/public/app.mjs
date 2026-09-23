@@ -229,10 +229,15 @@ function render(state) {
   sessionTabs = state.tabs;
   canRestart = Array.isArray(state.capabilities) && state.capabilities.includes('restart');
   const bucket = nextSelected ? historyFor(nextSelected) : null;
+  let prepended = false;
   if (bucket) {
     applyTail(bucket, state.terminal);
     if (pendingEarlier) {
-      if (pendingEarlier.tabID === nextSelected) prependSlice(bucket, pendingEarlier.slice);
+      if (pendingEarlier.tabID === nextSelected) {
+        const before = bucket.history.length;
+        prependSlice(bucket, pendingEarlier.slice);
+        prepended = bucket.history.length !== before;
+      }
       pendingEarlier = null;
     }
   }
@@ -282,13 +287,14 @@ function render(state) {
   $('session-toolbar').hidden = false;
   $('brand').hidden = true;
   if ($('sessions-dialog').open) renderSessionList();
-  renderOutput(changedSession);
+  renderOutput(changedSession, prepended);
   if (changedSession) { resizeMessage(); renderAttachments(); }
   updateControls();
 }
-function renderOutput(changedSession = false) {
+function renderOutput(changedSession = false, prepended = false) {
   const terminal = $('terminal');
   const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
+  const fromEnd = terminal.scrollHeight - terminal.scrollTop;
   const output = rawMode ? rawOutput : readableOutput(rawOutput);
   $('empty-output').hidden = Boolean(output);
   const ended = Boolean(selected) && selectedStatus === 'exited';
@@ -300,6 +306,8 @@ function renderOutput(changedSession = false) {
     if (changedSession) findIndex = 0;
     paintOutput();
     if (atBottom || changedSession) terminal.scrollTop = terminal.scrollHeight;
+    // Older text went in above the reader. Keep the lines they were reading in place.
+    else if (prepended) terminal.scrollTop = terminal.scrollHeight - fromEnd;
   }
   updateLatest();
 }
