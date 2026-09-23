@@ -116,8 +116,10 @@ Hosting needs a real HTTPS deployment; local tests do not prove cellular/iPhone 
 - Source: local upload; no GitHub auto-deploy yet. Deployments therefore carry a snapshot id
   and no Railway commit SHA. New uploads use the stamped bundle described below;
   `/health` reports its Git SHA, dirty flag, and runtime source hash. The last recorded
-  deployment is `c5c7e7de-76a8-44d0-8d89-a1fdbe349ce2` (SUCCESS, 2026-09-18T17:40:14Z,
-  snapshot `763a297a-e7bd-4787-9f3c-a87f46fa0f0b`).
+  deployment is `c8b32797-2b3d-4e8f-aa4d-a27448a1012a` (2026-09-23, revision
+  `199cc86f60d88aa6962251eaf647c455400c5fcd`, source hash
+  `b6e2254d668e02992cd992fa30d5f65df0fbfbcff8e8514199da2297a254df72`, confirmed by `/health`
+  and a paired phone session against the live host).
 - Re-deploy Sidereal with `Scripts/deploy-sidereal.sh --project 26f52bc8-daae-4371-aa70-4cebb2d0f222 --environment 1a3850e2-c49f-45c4-bb54-627dd102c646 --service d7e3c251-0ae2-45f9-b4b1-c819d3fa9ece --detach`.
 - Verify the new Sidereal `/health` JSON against the revision and source hash printed by the upload script. Release the matching Mac build and relay/PWA together after merge.
 - Re-deploy the site with `railway up ./Site --path-as-root --project 26f52bc8-daae-4371-aa70-4cebb2d0f222 --environment 1a3850e2-c49f-45c4-bb54-627dd102c646 --service 060788b3-4ab1-45fb-8623-68027835cbc0 --detach`.
