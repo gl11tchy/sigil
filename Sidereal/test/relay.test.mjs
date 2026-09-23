@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import net from 'node:net';
 import WebSocket from 'ws';
 import { createRelay } from '../server.mjs';
 import { importKey, seal } from '../public/crypto.mjs';
@@ -124,6 +125,19 @@ test('rejecting an unauthorized phone closes it and releases the slot', async t 
   const next = connect(base, room, 'phone', { origin: 'http://localhost:3099' });
   await once(next, 'open');
   assert.equal((await nextNotice).type, 'peer');
+});
+
+test('a client that resets a rejected upgrade does not crash the relay', { timeout: 5000 }, async t => {
+  const { base, relay } = await setup(t);
+  const closed = new Promise(resolve => relay.server.once('upgrade', (req, socket) => socket.once('close', resolve)));
+  const client = net.connect(Number(new URL(base).port), '127.0.0.1');
+  client.on('error', () => {});
+  await once(client, 'connect');
+  client.write('GET /connect?role=nope HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
+    + 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n');
+  client.resetAndDestroy();
+  await closed;
+  assert.equal((await fetch(`${base}/health`)).status, 200);
 });
 
 test('an older room survives a brief host disconnect and accepts reconnect', async t => {

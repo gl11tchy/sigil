@@ -80,6 +80,8 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
     room.phone?.terminate(); room.host?.terminate();
   };
   server.on('upgrade', (req, socket, head) => {
+    // Node removes its socket error listener before 'upgrade'; a peer reset would crash the relay.
+    socket.on('error', () => socket.destroy());
     const reject = () => { socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); };
     const rawURL = req.url;
     req.url = rawURL.split('?')[0]; // Downstream diagnostics must not retain queries.
