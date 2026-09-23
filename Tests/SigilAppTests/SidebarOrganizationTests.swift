@@ -243,7 +243,8 @@ struct SidebarOrganizationTests {
         let other = session(id: "other", cwd: "/p/b", updated: 1)
         let grouped = SidebarOrganization.projects(from: [pinned, kept, other]) { $0 }
         let project = grouped.first { $0.id == "/p/a" }!
-        let rows = SidebarOrganization.listedRows(in: project, from: [kept, other])
+        let listed = Set([kept, other].map(\.directory))
+        let rows = SidebarOrganization.listedRows(in: project, listed: listed)
         #expect(rows.map(\.id) == ["kept"])
     }
 }

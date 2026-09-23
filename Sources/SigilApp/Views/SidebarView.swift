@@ -363,8 +363,9 @@ struct SidebarView: View {
 
     @ViewBuilder
     private var projectList: some View {
-        let pinned = visibleProjects(model.pinnedProjects(), from: listedSessions)
-        let rest = visibleProjects(model.unpinnedProjects(), from: listedSessions)
+        // Home folders are grouped from the listed sessions, so no row needs a filter.
+        let pinned = model.pinnedProjects().map { ProjectRows(project: $0, rows: $0.sessions) }
+        let rest = model.unpinnedProjects().map { ProjectRows(project: $0, rows: $0.sessions) }
         ForEach(pinned, id: \.id) { item in
             projectRow(item.project, rows: item.rows)
         }
@@ -450,8 +451,9 @@ struct SidebarView: View {
     private func visibleProjects(
         _ projects: [SidebarProject], from sessions: [GrokSession]
     ) -> [ProjectRows] {
-        projects.compactMap { project in
-            let rows = SidebarOrganization.listedRows(in: project, from: sessions)
+        let listed = Set(sessions.map(\.directory))
+        return projects.compactMap { project in
+            let rows = SidebarOrganization.listedRows(in: project, listed: listed)
             return rows.isEmpty ? nil : ProjectRows(project: project, rows: rows)
         }
     }
@@ -805,8 +807,9 @@ struct SidebarView: View {
         case .search:
             return []
         case .archived:
+            let listed = Set(unpinned.map(\.directory))
             return (model.pinnedProjects() + model.unpinnedProjects()).flatMap { project in
-                SidebarOrganization.listedRows(in: project, from: unpinned)
+                SidebarOrganization.listedRows(in: project, listed: listed)
             }
         case .projectList:
             return []

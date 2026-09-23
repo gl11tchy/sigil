@@ -292,10 +292,10 @@ enum SidebarOrganization {
         return index
     }
 
-    /// Sessions from `project` that are also in `sessions`, in project order.
-    static func listedRows(in project: SidebarProject, from sessions: [GrokSession]) -> [GrokSession] {
-        let listed = Set(sessions.map(\.directory))
-        return project.sessions.filter { listed.contains($0.directory) }
+    /// Sessions from `project` whose directory is in `listed`, in project order.
+    /// Callers build `listed` once per pass, not once per project.
+    static func listedRows(in project: SidebarProject, listed: Set<URL>) -> [GrokSession] {
+        project.sessions.filter { listed.contains($0.directory) }
     }
 
     /// Unique name and path spellings for search paint, sample first, then each row.
