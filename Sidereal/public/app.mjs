@@ -321,9 +321,17 @@ function renderOutput(changedSession = false, prepended = false) {
   $('empty-output').querySelector('p').textContent = ended ? (canRestart ? 'Restart resumes a Grok chat. Other providers start a new conversation.' : 'Restart this session in Sigil on your Mac.') : selectedStatus === 'working' || selectedStatus === 'starting' ? 'Output will appear here.' : selected ? 'Send a message to this session.' : 'Choose New to start a session.';
   terminal.dataset.raw = String(rawMode);
   if (displayedOutput !== output || changedSession) {
+    // A repaint replaces the text and drops a selection the reader is making. Append
+    // new text after it, and hold any other repaint until the selection ends.
+    const selection = changedSession || prepended ? null : globalThis.getSelection?.();
+    const selecting = Boolean(selection && !selection.isCollapsed && terminal.contains(selection.anchorNode));
+    const extending = Boolean(displayedOutput) && output.startsWith(displayedOutput)
+      && ($('find-bar').hidden || !$('find-query').value);
+    if (selecting && !extending) { updateLatest(); return; }
+    if (selecting) terminal.append(output.slice(displayedOutput.length));
     displayedOutput = output;
     if (changedSession) findIndex = 0;
-    paintOutput();
+    if (!selecting) paintOutput();
     if (atBottom || changedSession) terminal.scrollTop = terminal.scrollHeight;
     // Older text went in above the reader. Keep the lines they were reading in place.
     else if (prepended) terminal.scrollTop = terminal.scrollHeight - fromEnd;

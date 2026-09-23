@@ -829,6 +829,33 @@ test('find output navigates literal matches without altering output', async ({ p
   } finally { mac.close(); }
 });
 
+test('new output keeps a selection the reader is making in the terminal', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  let terminal = 'First command\nStep 1 of 3';
+  const mac = await pair(page, baseURL, undefined, { get state() {
+    return { tabs: [{ id: 'one', title: 'Mobile layout review', status: 'working' }], selectedTabID: 'one', terminal, capabilities: [] };
+  } });
+  const polls = () => mac.actions.filter(action => action.action === 'state').length;
+  try {
+    await expect(page.locator('#terminal')).toHaveText('First command\nStep 1 of 3');
+    await page.evaluate(() => {
+      const text = document.getElementById('terminal').firstChild;
+      getSelection().setBaseAndExtent(text, 0, text, 'First command'.length);
+    });
+    terminal = 'First command\nStep 1 of 3\nthird line';
+    await expect(page.locator('#terminal')).toContainText('third line');
+    expect(await page.evaluate(() => getSelection().toString())).toBe('First command');
+    // Output that rewrites the displayed text waits until the selection ends.
+    terminal = 'First command\nStep 2 of 3\nthird line';
+    const seen = polls();
+    await expect.poll(polls).toBeGreaterThan(seen + 1);
+    await expect(page.locator('#terminal')).toContainText('Step 1 of 3');
+    expect(await page.evaluate(() => getSelection().toString())).toBe('First command');
+    await page.evaluate(() => getSelection().removeAllRanges());
+    await expect(page.locator('#terminal')).toHaveText('First command\nStep 2 of 3\nthird line');
+  } finally { mac.close(); }
+});
+
 test('phone return creates a newline and explicit send submits once', async ({ page, baseURL }) => {
   await page.emulateMedia({ media: 'screen' });
   await page.addInitScript(() => {
