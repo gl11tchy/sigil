@@ -82,6 +82,35 @@ struct TerminalRemoteSliceTests {
         #expect(text.hasPrefix("SAME\nTAIL"))
     }
 
+    @Test func staleEndAnchorStillUsesTheMatchNearestTheLoadedWindow() {
+        let box = "│" + String(repeating: " ", count: 79)
+        let loaded = box + "\nLIVE TAIL ⠋ 12s"
+        let rendered = box + "\n" + String(repeating: "x", count: 3_000) + "\n" + loaded
+        let index = TerminalController.earlierAnchorStart(
+            box,
+            endAnchor: "LIVE TAIL ⠙ 11s",
+            loadedCharacters: loaded.count,
+            in: rendered
+        )
+        let start = index.map { rendered.distance(from: rendered.startIndex, to: $0) }
+        #expect(start == rendered.count - loaded.count)
+    }
+
+    @Test func anchorOutsideTheWindowFallsBackToTheNearestMatch() {
+        let anchor = "ANCHOR"
+        let loaded = "LIVE TAIL"
+        let near = anchor + String(repeating: "y", count: 2_500)
+        let rendered = anchor + String(repeating: "x", count: 5_000) + near + loaded
+        let index = TerminalController.earlierAnchorStart(
+            anchor,
+            endAnchor: "GONE",
+            loadedCharacters: loaded.count,
+            in: rendered
+        )
+        let start = index.map { rendered.distance(from: rendered.startIndex, to: $0) }
+        #expect(start == rendered.count - loaded.count - near.count)
+    }
+
     @Test func hugeLoadedCountDoesNotTrap() {
         let controller = TerminalController()
         let slice = controller.remoteEarlierSlice(
