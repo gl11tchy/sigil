@@ -132,14 +132,24 @@ public enum BridgePrompt {
                 scalars.append(" ")
                 continue
             }
-            // Format characters render as nothing or reorder the text around
-            // them, so the approved banner would not match what is typed.
-            // Tag characters carry hidden text and leave no gap.
-            if scalar.properties.generalCategory == .format {
+            // Format and other default-ignorable characters render as nothing
+            // or reorder the text around them, so the approved banner would not
+            // match what is typed. Tag characters carry hidden text and leave
+            // no gap.
+            if scalar.properties.generalCategory == .format
+                || scalar.properties.isDefaultIgnorableCodePoint
+            {
                 if (0xE0000...0xE007F).contains(scalar.value) { continue }
                 let next = index + 1 < input.count ? input[index + 1] : nil
                 if scalar == "\u{200D}", isEmojiPart(scalars.last), isEmojiPart(next) {
                     scalars.append(scalar)
+                } else if isVariationSelector(scalar) {
+                    // A selector only restyles the character before it, so
+                    // dropping it joins nothing. After an emoji it picks the
+                    // emoji's presentation and stays.
+                    if scalar.value >= 0xFE0E, scalar.value <= 0xFE0F, isEmojiPart(scalars.last) {
+                        scalars.append(scalar)
+                    }
                 } else {
                     scalars.append(" ")
                 }
@@ -162,6 +172,13 @@ public enum BridgePrompt {
     private static func isEmojiPart(_ scalar: Unicode.Scalar?) -> Bool {
         guard let scalar, scalar.value > 0x7F else { return false }
         return scalar.properties.isEmoji || scalar == "\u{FE0F}"
+    }
+
+    private static func isVariationSelector(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 0x180B...0x180D, 0x180F, 0xFE00...0xFE0F, 0xE0100...0xE01EF: true
+        default: false
+        }
     }
 
     private static func displayTitle(_ title: String, fallback: String) -> String {
