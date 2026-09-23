@@ -222,7 +222,8 @@ private struct TopBar: View {
 
             IconButton(
                 systemImage: "sidebar.leading",
-                help: model.isSidebarVisible ? "Hide Sidebar (⌘B)" : "Show Sidebar (⌘B)"
+                help: model.isSidebarVisible ? "Hide Sidebar (⌘B)" : "Show Sidebar (⌘B)",
+                label: model.isSidebarVisible ? "Hide Sidebar" : "Show Sidebar"
             ) {
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) {
                     model.isSidebarVisible.toggle()
@@ -243,12 +244,17 @@ private struct TopBar: View {
 
             IconButton(
                 systemImage: "sidebar.trailing",
-                help: model.panel.isVisible ? "Hide Panel (⌥⌘B)" : "Show Panel (⌥⌘B)"
+                help: model.panel.isVisible ? "Hide Panel (⌥⌘B)" : "Show Panel (⌥⌘B)",
+                label: model.panel.isVisible ? "Hide Panel" : "Show Panel"
             ) {
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) { model.togglePanel() }
             }
 
-            IconButton(systemImage: "plus", help: "New Session in \(model.newSessionDirectory.abbreviatedPath) (⌘T)") {
+            IconButton(
+                systemImage: "plus",
+                help: "New Session in \(model.newSessionDirectory.abbreviatedPath) (⌘T)",
+                label: "New Session"
+            ) {
                 model.requestNewSession()
             }
             Menu {
@@ -317,7 +323,9 @@ private struct TopBar: View {
 /// A 20pt square borderless button. Every icon control in the chrome is one of these.
 struct IconButton: View {
     let systemImage: String
-    var help: String = ""
+    let help: String
+    /// What VoiceOver reads when `help` carries a shortcut or a path.
+    var label: String?
     let action: () -> Void
 
     @Environment(\.palette) private var palette
@@ -338,7 +346,7 @@ struct IconButton: View {
         .foregroundStyle(isHovering ? palette.text : palette.textDim)
         .onHover { isHovering = $0 }
         .help(help)
-        .accessibilityLabel(help)
+        .accessibilityLabel(label ?? help)
     }
 }
 

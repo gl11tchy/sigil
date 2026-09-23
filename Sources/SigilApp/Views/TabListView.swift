@@ -95,7 +95,7 @@ struct TabListView: View {
         .onHover { isHovering = $0 }
         .keyboardShortcut("t", modifiers: [.command, .control])
         .help("Tabs (⌃⌘T)")
-        .accessibilityLabel("Tabs (⌃⌘T)")
+        .accessibilityLabel("Tabs")
         .popover(isPresented: $isOpen, arrowEdge: .top) {
             tabList
                 .frame(width: 360)

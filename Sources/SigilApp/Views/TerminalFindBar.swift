@@ -38,11 +38,21 @@ struct TerminalFindBar: View {
                 .monospacedDigit()
                 .accessibilityLabel(counterLabel)
 
-            FindBarIconButton(systemName: "chevron.up", help: "Previous match (Shift+Return)", action: findPrevious)
-                .disabled(matchCount == 0)
-            FindBarIconButton(systemName: "chevron.down", help: "Next match (Return)", action: findNext)
-                .disabled(matchCount == 0)
-            FindBarIconButton(systemName: "xmark", help: "Close find (Escape)", action: dismiss)
+            FindBarIconButton(
+                systemName: "chevron.up",
+                help: "Previous match (Shift+Return)",
+                label: "Previous Match",
+                action: findPrevious
+            )
+            .disabled(matchCount == 0)
+            FindBarIconButton(
+                systemName: "chevron.down",
+                help: "Next match (Return)",
+                label: "Next Match",
+                action: findNext
+            )
+            .disabled(matchCount == 0)
+            FindBarIconButton(systemName: "xmark", help: "Close find (Escape)", label: "Close Find", action: dismiss)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
@@ -95,6 +105,7 @@ struct TerminalFindBar: View {
 private struct FindBarIconButton: View {
     let systemName: String
     let help: String
+    let label: String
     let action: () -> Void
 
     @Environment(\.palette) private var palette
@@ -120,6 +131,6 @@ private struct FindBarIconButton: View {
         )
         .onHover { isHovering = $0 }
         .help(help)
-        .accessibilityLabel(help)
+        .accessibilityLabel(label)
     }
 }

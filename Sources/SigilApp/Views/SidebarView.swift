@@ -175,7 +175,8 @@ struct SidebarView: View {
             )
             IconButton(
                 systemImage: "plus",
-                help: "New Session in \(model.newSessionDirectory.abbreviatedPath) (⌘T)"
+                help: "New Session in \(model.newSessionDirectory.abbreviatedPath) (⌘T)",
+                label: "New Session"
             ) {
                 model.requestNewSession()
             }
@@ -1252,7 +1253,8 @@ private struct DrillBar: View {
             if let newChat {
                 IconButton(
                     systemImage: "plus",
-                    help: "New Session in \(title) (⌘T)"
+                    help: "New Session in \(title) (⌘T)",
+                    label: "New Session in \(title)"
                 ) {
                     newChat()
                 }
