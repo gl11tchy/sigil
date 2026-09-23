@@ -3368,6 +3368,32 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func newSessionRecentsStopResolvingPathsOnceTheListIsFull() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        for index in 0..<12 {
+            let folder = try fixture.directory("project-\(index)")
+            try fixture.writeListedSession(id: "s-\(index)", cwd: folder.path)
+        }
+        let first = try fixture.directory("project-0")
+        for index in 0..<3 {
+            try fixture.writeListedSession(id: "again-\(index)", cwd: first.path)
+        }
+        await fixture.store.reload()
+        fixture.settings.showWorktreeSessions = true
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        var resolved = 0
+        let recents = NewSessionSheet.recentDirectories(in: model) { path in
+            resolved += 1
+            return GrokPaths.canonicalPath(path)
+        }
+        #expect(recents.count == 8)
+        #expect(resolved == 8)
+    }
+
+    @Test @MainActor
     func legacyMigrationAppendsWhenTheTargetConversationAlreadyHasANote() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }

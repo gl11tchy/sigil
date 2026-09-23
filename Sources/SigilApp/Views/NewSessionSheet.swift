@@ -50,23 +50,30 @@ struct NewSessionSheet: View {
         _provider = State(initialValue: provider)
     }
 
-    private var recents: [URL] { Self.recentDirectories(in: model) }
+    /// Read once when the sheet opens; it resolves every folder on disk.
+    @State private var recents: [URL] = []
 
     /// Distinct folders of recent conversations, filtered like the sidebar so
     /// agent worktrees, subagents and archived chats do not crowd out projects.
-    static func recentDirectories(in model: AppModel) -> [URL] {
+    static func recentDirectories(
+        in model: AppModel, canonicalPath: (String) -> String = GrokPaths.canonicalPath
+    ) -> [URL] {
+        var seenCwds = Set<String>()
         var seen = Set<String>()
+        var result: [URL] = []
         let settings = model.settings
-        return model.store.sessions.compactMap { session in
-            if !settings.showWorktreeSessions, isEphemeral(path: session.cwd) { return nil }
-            if !settings.showSubagentSessions, session.isSubagent { return nil }
-            if model.isArchived(session) { return nil }
-            let url = URL(fileURLWithPath: GrokPaths.canonicalPath(session.cwd))
-            guard seen.insert(url.path).inserted else { return nil }
-            return AppModel.isUsableDirectory(url) ? url : nil
+        for session in model.store.sessions {
+            if !settings.showWorktreeSessions, isEphemeral(path: session.cwd) { continue }
+            if !settings.showSubagentSessions, session.isSubagent { continue }
+            if model.isArchived(session) { continue }
+            // Resolve each stored folder once, and stop when the list is full.
+            guard seenCwds.insert(session.cwd).inserted else { continue }
+            let url = URL(fileURLWithPath: canonicalPath(session.cwd))
+            guard seen.insert(url.path).inserted, AppModel.isUsableDirectory(url) else { continue }
+            result.append(url)
+            if result.count == 8 { break }
         }
-        .prefix(8)
-        .map { $0 }
+        return result
     }
 
     private var recentChoices: [URL] {
@@ -128,6 +135,7 @@ struct NewSessionSheet: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: provider)
         .onAppear {
             directory = model.pendingSessionDirectory ?? model.newSessionDirectory
+            recents = Self.recentDirectories(in: model)
             modelName = model.settings.model.trimmingCharacters(in: .whitespacesAndNewlines)
             effort = model.settings.effort
         }
