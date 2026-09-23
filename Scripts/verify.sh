@@ -69,7 +69,10 @@ echo "==> swift test --no-parallel"
 swift test --no-parallel || fail "swift test"
 
 echo "==> bash -n"
-bash -n "$SCRIPT_DIR"/*.sh || fail "bash syntax"
+# bash -n reads only its first file and treats the rest as arguments.
+for script in "$SCRIPT_DIR"/*.sh; do
+  bash -n "$script" || fail "bash syntax: $script"
+done
 
 if command -v shellcheck >/dev/null 2>&1; then
   echo "==> shellcheck"
