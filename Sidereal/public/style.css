@@ -69,6 +69,7 @@ header:has(#session-toolbar:not([hidden])) { border-bottom: 1px solid var(--line
   display: flex; flex-direction: column; gap: 8px;
 }
 .connection-panel p { margin: 0 0 4px; font-size: 14px; }
+#forget { margin-top: 8px; }
 
 main, #controls { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
 
@@ -180,6 +181,10 @@ dialog { color: inherit; background: #111214; border: 1px solid var(--line); bor
 dialog::backdrop { background: #000a; }
 .sheet-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .sheet-heading h2 { margin: 0; font-size: 20px; font-weight: 600; }
+.sheet-error { margin: 0 0 12px; color: var(--amber); font-size: 14px; }
+#forget-detail, #replace-detail { margin: 0 0 16px; font-size: 14px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.destructive { color: var(--error); }
 #session-search { width: 100%; margin-bottom: 12px; }
 #open-heading, #saved-heading { margin: 16px 0 8px; font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
 #open-heading { margin-top: 4px; }

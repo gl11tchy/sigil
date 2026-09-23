@@ -49,7 +49,8 @@ async function pair(page, origin, initialOutput, options = {}) {
           ? (options.chats ?? []).filter(chat => `${chat.title} ${chat.folder}`.toLowerCase().includes(String(request.text || '').toLowerCase()))
           : undefined;
         const earlier = request.action === 'earlier'
-          ? (typeof options.earlier === 'string' ? options.earlier : '') : undefined;
+          ? (typeof options.earlier === 'function' ? options.earlier(request)
+            : typeof options.earlier === 'string' ? options.earlier : '') : undefined;
         if (options.rejectAction === request.action) {
           ws.send(JSON.stringify({ peer, data: await seal({ challenge, sequence: request.sequence, ok: false, error: 'Test action refused.' }, key, 'mac') }));
           return;
@@ -235,6 +236,36 @@ test('drafts, history position, and a keyboard-sized viewport stay usable', asyn
   } finally { mac.close(); }
 });
 
+test('loading earlier output keeps the text the reader was on in place', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  let batch = 0;
+  const earlier = () => {
+    batch += 1;
+    return Array.from({ length: 60 }, (_, i) => `Batch ${batch} line ${i + 1}: older output.`).join('\n') + '\n';
+  };
+  const mac = await pair(page, baseURL, undefined, { earlier });
+  try {
+    await expect.poll(() => mac.actions.filter(a => a.action === 'state').length).toBeGreaterThan(1);
+    const measure = (marker, top) => page.locator('#terminal').evaluate((el, [wanted, scrollToTop]) => {
+      if (scrollToTop) el.scrollTop = 0;
+      const node = el.firstChild;
+      const text = wanted || node.textContent.split('\n')[0];
+      const at = node.textContent.indexOf(text);
+      const range = document.createRange();
+      range.setStart(node, at); range.setEnd(node, at + 6);
+      const offset = range.getBoundingClientRect().top - el.getBoundingClientRect().top;
+      if (scrollToTop) el.dispatchEvent(new Event('scroll'));
+      return { text, offset };
+    }, [marker, top]);
+    const loads = mac.actions.filter(a => a.action === 'earlier').length;
+    const before = await measure(null, true);
+    await expect.poll(() => mac.actions.filter(a => a.action === 'earlier').length).toBe(loads + 1);
+    await expect(page.locator('#terminal')).toContainText(`Batch ${loads + 1} line 1:`);
+    const after = await measure(before.text, false);
+    expect(Math.abs(after.offset - before.offset)).toBeLessThan(40);
+  } finally { mac.close(); }
+});
+
 test('the visual viewport keeps the composer above an on-screen keyboard', async ({ page, baseURL }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   // Desktop browser runners cannot open an OS keyboard. Model its visual-only resize.
@@ -376,6 +407,86 @@ test('a photo from the phone is queued as a chip and sent as a file', async ({ p
     await expect.poll(() => mac.actions.filter(a => a.action === 'key' && a.text === 'enter').length).toBe(1);
     await expect(page.locator('#attachments')).toBeHidden();
     await page.screenshot({ path: testInfo.outputPath('attach.png') });
+  } finally { mac.close(); }
+});
+
+test('a multi-chunk file upload stays under the relay frame limit', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mac = await pair(page, baseURL);
+  try {
+    await page.locator('#attach').setInputFiles({
+      name: 'data.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(2 * 1024 * 1024, 7) });
+    await page.locator('#send').click();
+    await expect.poll(() => mac.actions.filter(a => a.action === 'key' && a.text === 'enter').length,
+      { timeout: 15000 }).toBe(1);
+    expect(mac.actions.filter(a => a.action === 'file').length).toBe(64);
+    await expect(page.locator('#attachments')).toBeHidden();
+    await expect(page.locator('#status')).toHaveText('Connected');
+  } finally { mac.close(); }
+});
+
+test('an attachment over 4 MB is refused when it is picked', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mac = await pair(page, baseURL);
+  try {
+    await page.locator('#attach').setInputFiles([
+      { name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('Test attachment') },
+      { name: 'report.pdf', mimeType: 'application/pdf', buffer: Buffer.alloc(5 * 1024 * 1024, 7) }]);
+    await expect(page.locator('#attachments')).toContainText('notes.txt');
+    await expect(page.locator('#attachments')).not.toContainText('report.pdf');
+    await expect(page.locator('#error')).toHaveText('Keep files under 4 MB.');
+  } finally { mac.close(); }
+});
+
+test('a failed send does not paste the uploaded files again on retry', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mac = await pair(page, baseURL, 'Ready', { rejectAction: 'input' });
+  const files = () => mac.actions.filter(a => a.action === 'file').length;
+  const inputs = () => mac.actions.filter(a => a.action === 'input').length;
+  try {
+    await page.locator('#attach').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('Test attachment') });
+    await page.locator('#message').fill('Please read this');
+    await page.locator('#send').click();
+    await expect(page.locator('#error')).toHaveText('Test action refused.');
+    expect(files()).toBe(1);
+    await expect(page.locator('#attachments')).toBeHidden();
+    await page.locator('#send').click();
+    await expect.poll(inputs).toBe(2);
+    expect(files()).toBe(1);
+  } finally { mac.close(); }
+});
+
+test('quick taps on the terminal keys are all sent in order', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mac = await pair(page, baseURL);
+  try {
+    await page.locator('#keys-toggle').click();
+    // Four taps faster than one relay round trip.
+    await page.evaluate(() => {
+      for (const key of ['down', 'down', 'down', 'enter']) document.querySelector(`[data-key="${key}"]`).click();
+    });
+    await expect.poll(() => mac.actions.filter(a => a.action === 'key').map(a => a.text))
+      .toEqual(['down', 'down', 'down', 'enter']);
+    await expect(page.locator('[data-key="down"]')).toBeEnabled();
+  } finally { mac.close(); }
+});
+
+test('a terminal key tapped during an attachment send does not land inside it', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mac = await pair(page, baseURL);
+  try {
+    await page.locator('#keys-toggle').click();
+    await page.locator('#attach').setInputFiles({
+      name: 'data.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(256 * 1024, 7) });
+    await page.locator('#message').fill('read this');
+    await page.locator('#send').click();
+    await expect.poll(() => mac.actions.filter(a => a.action === 'file').length).toBeGreaterThan(0);
+    await page.evaluate(() => document.querySelector('[data-key="enter"]').click());
+    await expect.poll(() => mac.actions.filter(a => a.action === 'key').length, { timeout: 15000 }).toBeGreaterThan(0);
+    await page.waitForTimeout(300);
+    const order = mac.actions.filter(a => ['file', 'input', 'key'].includes(a.action)).map(a => a.action);
+    expect(order).toEqual([...Array(8).fill('file'), 'input', 'key']);
+    await expect(page.locator('[data-key="enter"]')).toBeEnabled();
   } finally { mac.close(); }
 });
 
@@ -581,6 +692,59 @@ test('tree gutters do not wrap into a column of pipes on a phone', async ({ page
   } finally { mac.close(); }
 });
 
+test('a pairing link asks before it replaces the paired Mac and keeps it if pairing fails', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mac = await pair(page, baseURL);
+  const other = `${baseURL}/#room=${'1'.repeat(32)}&key=${'2'.repeat(64)}`;
+  try {
+    const dialog = page.locator('#replace-dialog');
+    await page.goto(other);
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('Replace the paired Mac?');
+    await page.screenshot({ path: testInfo.outputPath('replace-confirm.png'), animations: 'disabled' });
+    await page.locator('#replace-keep').click();
+    await expect(page.locator('#status')).toHaveText('Connected');
+    await page.goto(other);
+    await page.locator('#replace-accept').click();
+    await expect(dialog).toBeHidden();
+    await expect(page.locator('#status')).toHaveText(/Connecting|Disconnected/);
+    // The link's room has no Mac, so the old pairing must still be stored.
+    await page.goto(baseURL);
+    await expect(page.locator('#status')).toHaveText('Connected');
+  } finally { mac.close(); }
+});
+
+test('Forget this Mac asks first and Cancel keeps the pairing', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mac = await pair(page, baseURL);
+  try {
+    const dialog = page.locator('#forget-dialog');
+    await page.locator('#connection-toggle').click();
+    // Forget reads as destructive and sits apart from the buttons above it.
+    await expect(page.locator('#forget')).toHaveCSS('color', 'rgb(255, 95, 158)');
+    const gap = await page.evaluate(() => {
+      const buttons = [...document.querySelectorAll('.connection-panel button')].filter(button => !button.hidden);
+      const index = buttons.findIndex(button => button.id === 'forget');
+      return buttons[index].getBoundingClientRect().top - buttons[index - 1].getBoundingClientRect().bottom;
+    });
+    expect(gap).toBeGreaterThanOrEqual(16);
+    await page.locator('#forget').click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('Forget this Mac?');
+    await expect(page.locator('#forget-accept')).toHaveCSS('color', 'rgb(255, 95, 158)');
+    await page.screenshot({ path: testInfo.outputPath('forget-confirm.png'), animations: 'disabled' });
+    await page.locator('#forget-cancel').click();
+    await expect(dialog).toBeHidden();
+    await expect(page.locator('#controls')).toBeVisible();
+    await expect(page.locator('#status')).toHaveText('Connected');
+    await page.locator('#connection-toggle').click();
+    await page.locator('#forget').click();
+    await page.locator('#forget-accept').click();
+    await expect(page.locator('#welcome-actions')).toBeVisible();
+    await expect(page.locator('#controls')).toBeHidden();
+  } finally { mac.close(); }
+});
+
 test('the connection popover closes on Escape and outside pointer presses', async ({ page, baseURL }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const consoleErrors = [];
@@ -600,6 +764,36 @@ test('the connection popover closes on Escape and outside pointer presses', asyn
     await expect(details).toHaveJSProperty('open', false);
     expect(consoleErrors).toEqual([]);
     await page.screenshot({ path: testInfo.outputPath('popover.png') });
+  } finally { mac.close(); }
+});
+
+test('an error from a chats search shows inside the open Chats sheet', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mac = await pair(page, baseURL, undefined, { rejectAction: 'chats' });
+  try {
+    await page.locator('#sessions-toggle').click();
+    await page.locator('#session-search').fill('release');
+    const alert = page.locator('#sessions-dialog [role=alert]');
+    await expect(alert).toHaveText('Test action refused.');
+    await expect(alert).toBeInViewport();
+    await page.screenshot({ path: testInfo.outputPath('sheet-error.png') });
+    await page.locator('#sessions-close').click();
+    await expect(page.locator('#error')).toHaveText('Test action refused.');
+  } finally { mac.close(); }
+});
+
+test('opening Chats on a touch screen does not raise the keyboard', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    const original = window.matchMedia.bind(window);
+    window.matchMedia = query => /pointer:\s*fine/.test(query)
+      ? { ...original(query), matches: false, media: query } : original(query);
+  });
+  const mac = await pair(page, baseURL);
+  try {
+    await page.locator('#sessions-toggle').click();
+    await expect(page.locator('#sessions-dialog')).toBeVisible();
+    await expect(page.locator('#session-search')).not.toBeFocused();
   } finally { mac.close(); }
 });
 

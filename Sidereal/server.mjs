@@ -71,12 +71,21 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
     if (socket.bufferedAmount > 220000) { socket.terminate(); return; }
     socket.send(JSON.stringify(value));
   };
+  // Two Sigil copies can share one pairing. Hand the ticket to another room whose host is live.
+  const liveRoomFor = (ticket, except) => {
+    for (const [other, candidate] of rooms) {
+      if (other !== except && candidate.ticket === ticket && candidate.host) return other;
+    }
+  };
   const deleteRoom = id => {
     const room = rooms.get(id);
     if (!room) return;
     rooms.delete(id);
     clearTimeout(room.dropPhone);
-    if (room.ticket && tickets.get(room.ticket) === id) tickets.delete(room.ticket);
+    if (room.ticket && tickets.get(room.ticket) === id) {
+      const next = liveRoomFor(room.ticket, id);
+      if (next) tickets.set(room.ticket, next); else tickets.delete(room.ticket);
+    }
     room.phone?.terminate(); room.host?.terminate();
   };
   server.on('upgrade', (req, socket, head) => {
@@ -147,9 +156,13 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
               clearTimeout(room.dropPhone);
               room.dropPhone = undefined;
               if (route.ticket) {
-                if (room.ticket && room.ticket !== route.ticket && tickets.get(room.ticket) === id) tickets.delete(room.ticket);
-                tickets.set(route.ticket, id);
+                if (room.ticket && room.ticket !== route.ticket && tickets.get(room.ticket) === id) {
+                  const next = liveRoomFor(room.ticket, id);
+                  if (next) tickets.set(room.ticket, next); else tickets.delete(room.ticket);
+                }
                 room.ticket = route.ticket;
+                // A second copy must not take the phone from a room whose host is live.
+                if (!rooms.get(tickets.get(route.ticket))?.host || tickets.get(route.ticket) === id) tickets.set(route.ticket, id);
               }
               send(ws, { type: 'ready' });
               if (room.phone) send(ws, { type: 'peer', peer: room.peer });
@@ -175,6 +188,8 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
         if (!routed) return;
         if (role === 'host' && room.host === ws) {
           room.host = null; room.disconnectedAt = now();
+          const next = room.ticket && tickets.get(room.ticket) === id && liveRoomFor(room.ticket, id);
+          if (next) tickets.set(room.ticket, next);
           clearTimeout(room.dropPhone);
           const phone = room.phone;
           room.dropPhone = setTimeout(() => {

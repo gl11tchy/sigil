@@ -308,6 +308,37 @@ test('deleting an old room does not drop a ticket that moved to a newer room', a
   assert.equal((await notice).type, 'peer');
 });
 
+test('a second host with the same ticket keeps off the phone until the first host leaves', async t => {
+  const relay = createRelay({ publicOrigin: 'http://localhost:3099' });
+  t.after(() => relay.close());
+  relay.server.listen(0, '127.0.0.1');
+  await once(relay.server, 'listening');
+  const base = `http://127.0.0.1:${relay.server.address().port}`;
+  const within = promise => Promise.race([promise, new Promise(resolve => setTimeout(() => resolve('timeout'), 1000))]);
+  const first = await (await fetch(`${base}/rooms`, { method: 'POST' })).json();
+  const second = await (await fetch(`${base}/rooms`, { method: 'POST' })).json();
+  const installed = connect(base, first.room, 'host', {
+    headers: { Authorization: `Bearer ${first.hostToken}` }, ticket: ticket(),
+  });
+  await message(installed);
+  const copy = connect(base, second.room, 'host', {
+    headers: { Authorization: `Bearer ${second.hostToken}` }, ticket: ticket(),
+  });
+  await message(copy);
+  const notice = message(installed);
+  const phone = connect(base, null, 'phone', { origin: 'http://localhost:3099', ticket: ticket() });
+  assert.equal((await within(notice)).type, 'peer');
+  const left = message(installed);
+  phone.close();
+  await left;
+  installed.close();
+  await once(installed, 'close');
+  const handedOver = message(copy);
+  const next = connect(base, null, 'phone', { origin: 'http://localhost:3099', ticket: ticket() });
+  assert.equal((await within(handedOver)).type, 'peer');
+  next.close();
+});
+
 test('rebinding a room ticket drops the previous mapping', async t => {
   const { base, room, hostToken } = await setup(t);
   const first = 'ab'.repeat(32);

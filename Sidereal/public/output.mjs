@@ -17,6 +17,9 @@ const GROK_NAME = /^Grok [\w.-]+$/;
 const GROK_MODEL = /^\(?[\w-]+\)? · [\w-]+/;
 const TURN_STATUS = /^(?:Run |stop\b|user_prompt_submit|Thought for \d|Thinking(?:\.{3}|…)|Waiting for response|Worked for \d)/i;
 const SPINNER_PREFIX = new RegExp(`^[\\s${SPINNER}♦◆▼▽∴:|│]+`);
+// Only a turn or spinner glyph marks peeled status text; pipes and bullets frame real content.
+const TURN_GLYPH = /[\u2800-\u28FF\uFFFD◐◓◑◒♦◆▼▽]/;
+const FOOTER_ARROW = /^\d+[hms]?[\d.]*s?\s*[↓⬇][\d.]+k\b/;
 
 function tidy(line) {
   return line.trimEnd();
@@ -93,8 +96,8 @@ function isTurnChrome(line, previous) {
   if (/^[♦◆▼▽]\s+(?:Run |stop\b|user_prompt_submit|Thought for \d|Thinking(?:\.{3}|…)|Waiting for response|Worked for \d)/i.test(whole)) return true;
   if (/^(?:[♦◆∴:]\s*)?(?:Thought for \d|Thinking(?:\.{3}|…)|Waiting for response|Worked for \d)/i.test(whole)) return true;
   const peeled = peelSpinner(whole);
-  if (peeled && peeled !== whole && TURN_STATUS.test(peeled)) return true;
-  if (/^\d+[hms]?[\d.]*s?\s*[↓⬇]/.test(whole) || /^\d+[hms]?[\d.]*s?\s*[↓⬇]/.test(peeled)) return true;
+  if (peeled && peeled !== whole && TURN_GLYPH.test(whole.match(SPINNER_PREFIX)[0]) && TURN_STATUS.test(peeled)) return true;
+  if (FOOTER_ARROW.test(whole) || FOOTER_ARROW.test(peeled)) return true;
   if (/^\d{1,2}:\d{2} [AP]M$/.test(whole) || /^\d{1,2}:\d{2} [AP]M$/.test(peeled)) return Boolean(previous);
   if (/^∴\s/.test(whole) || /^∴\s/.test(peeled)) return true;
   if (/^\[stop\]$/i.test(peeled)) return true;
