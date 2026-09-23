@@ -108,6 +108,33 @@ struct SettingsViewTests {
         #expect(session.configurationChangeCount == 1)
         #expect(session.lastError == nil)
     }
+
+    @Test func tabMessagingSwitchShowsTheRequestWhileTheChangeRuns() {
+        var toggle = TabMessagingSwitch()
+        let started = toggle.request(true, saved: false)
+        #expect(started)
+        #expect(toggle.isOn(saved: false))
+
+        toggle.finish()
+        #expect(toggle.isOn(saved: true))
+    }
+
+    @Test func failedTabMessagingChangeFallsBackToTheSavedValue() {
+        var toggle = TabMessagingSwitch()
+        let started = toggle.request(false, saved: true)
+        #expect(started)
+        #expect(!toggle.isOn(saved: true))
+
+        toggle.finish()
+        #expect(toggle.isOn(saved: true))
+    }
+
+    @Test func tabMessagingRequestForTheSavedValueStartsNothing() {
+        var toggle = TabMessagingSwitch()
+        let started = toggle.request(true, saved: true)
+        #expect(!started)
+        #expect(toggle.isOn(saved: true))
+    }
 }
 
 /// Mirrors SettingsView: keystrokes mutate the draft; Return/focus-loss call `commit`.
