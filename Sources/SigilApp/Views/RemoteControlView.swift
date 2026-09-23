@@ -19,7 +19,10 @@ struct RemoteControlView: View {
                 }
                 if model.remoteControl.isEnabled {
                     LabeledContent("Status", value: model.remoteControl.status)
-                    Button("Disconnect", role: .destructive) { model.remoteControl.stop(revoke: true) }
+                    // Before a phone has paired there is nothing to revoke yet.
+                    Button(model.remoteControl.isPaired ? "Disconnect" : "Cancel", role: .destructive) {
+                        model.remoteControl.stop(revoke: true)
+                    }
                 } else {
                     Button("Connect Phone") { model.remoteControl.start(urlText: serverURL, model: model) }
                         .disabled(serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -31,34 +34,38 @@ struct RemoteControlView: View {
             }
             if let url = model.remoteControl.pairingURL, let expiry = model.remoteControl.expiresAt {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
-                    VStack(spacing: 12) {
+                    VStack(spacing: 10) {
                         if context.date < expiry {
                             if let image = Self.qrImage(url.absoluteString) {
                                 Image(nsImage: image)
                                     .interpolation(.none)
                                     .resizable()
                                     .scaledToFit()
-                                    .frame(width: 216, height: 216)
-                                    .padding(12)
+                                    .frame(width: 176, height: 176)
+                                    .padding(10)
                                     .background(.white)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
                                     .accessibilityLabel("QR code. Scan it on your phone to connect")
                             }
-                            Text("Scan this code on your phone")
-                            Button(copiedLink ? "Copied" : "Copy Pairing Link") {
-                                NSPasteboard.general.clearContents()
-                                copiedLink = NSPasteboard.general.setString(url.absoluteString, forType: .string)
+                            Text("Scan this code with your phone’s camera")
+                            HStack(spacing: 10) {
+                                Button(copiedLink ? "Copied" : "Copy Pairing Link") {
+                                    NSPasteboard.general.clearContents()
+                                    copiedLink = NSPasteboard.general.setString(url.absoluteString, forType: .string)
+                                }
+                                .help("Paste this link into Sigil Remote on your phone")
+                                Text("Expires in \(max(0, Int(expiry.timeIntervalSince(context.date)))) s")
+                                    .font(.caption)
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
                             }
-                            .help("Paste this link into Sigil Remote on your phone")
-                            Text("Expires in \(max(0, Int(expiry.timeIntervalSince(context.date)))) seconds")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                         } else {
                             Text("This code expired.")
                             Button("New Code") { model.remoteControl.start(urlText: serverURL, model: model) }
                         }
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 6)
                 }
             }
             if let error = model.remoteControl.error {
@@ -66,7 +73,8 @@ struct RemoteControlView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(minHeight: model.remoteControl.pairingURL == nil ? 280 : 550)
+        // Tall enough for the form, the code, and its buttons without a scroll.
+        .frame(minHeight: model.remoteControl.pairingURL == nil ? 280 : 640)
         .onChange(of: model.remoteControl.pairingURL) { _, _ in copiedLink = false }
         .onAppear { serverURL = RemoteControl.preferredOrigin(serverURL) }
     }

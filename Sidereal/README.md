@@ -68,8 +68,9 @@ The paperclip attaches photos or files from the phone; Sigil writes them on the 
 and pastes their paths into the session. Keys opens terminal controls. Stop appears
 while a turn is running. Latest returns to the newest output.
 Drafts stay with each session until the page closes; a lost connection keeps them editable.
-Connection settings are under the status in the top-right corner.
-Sessions opens a searchable list. Find searches the recent output with previous/next
+Connection settings are under the dot in the top-right corner.
+The session title at the top switches between open sessions. Chats opens a
+searchable list of open and saved chats. Find searches the recent output with previous/next
 matches. Connection settings also lets you copy the displayed output.
 Ended sessions offer Restart when the connected Mac supports it; drafts move to the
 restarted session. Older Macs still ask you to restart on the desktop.

@@ -71,10 +71,16 @@ function updateControls() {
   $('restart').hidden = !ended || !canRestart;
   $('copy-output').hidden = !selected;
   $('sessions-toggle').hidden = !connected;
-  $('session-status').textContent = !connected ? 'Reconnecting · draft kept' : ({ working: 'Working', starting: 'Starting…', idle: 'Ready', exited: 'Session ended' }[selectedStatus] || 'No session');
+  $('session-status').textContent = !connected ? 'Reconnecting…' : ({ working: 'Working', starting: 'Starting…', idle: 'Ready', exited: 'Session ended' }[selectedStatus] || 'No session');
   $('session-status').dataset.state = connected ? selectedStatus || '' : 'offline';
   if (document.body) document.body.dataset.connected = String(connected && !$('controls').hidden);
-  $('compose-status').textContent = busy ? 'Sending…' : !connected && selected ? 'Offline · draft kept' : ended ? 'Session ended' : '';
+  // An ended session already says so in the bar above, and Send is off.
+  const composeStatus = busy ? 'Sending…' : !connected && selected ? 'Offline · draft kept' : '';
+  $('compose-status').textContent = composeStatus;
+  // The row under the composer only exists when it has something to say: a
+  // status on the phone, or the send shortcut where a hardware keyboard is likely.
+  const tools = $('compose-tools');
+  if (tools) tools.hidden = !composeStatus && !hasFinePointer();
   $('find-next').disabled = $('find-previous').disabled = !findMatches.length;
   $('raw-toggle').hidden = !selected;
   $('forget').hidden = !credential;
@@ -90,6 +96,10 @@ function updateControls() {
     const hint = $(id);
     if (hint) hint.hidden = !standalone;
   }
+}
+function hasFinePointer() {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    && window.matchMedia('(pointer: fine)').matches;
 }
 function isStandaloneApp() {
   if (typeof navigator !== 'undefined' && navigator.standalone) return true;
@@ -252,8 +262,9 @@ function render(state) {
   $('welcome').hidden = true;
   $('controls').hidden = false;
   rawOutput = bucket ? bucket.history + bucket.tail : state.terminal;
+  // Connected, the header is the session: the brand yields to its title.
   $('session-toolbar').hidden = false;
-  $('brand').hidden = false;
+  $('brand').hidden = true;
   if ($('sessions-dialog').open) renderSessionList();
   renderOutput(changedSession);
   if (changedSession) { resizeMessage(); renderAttachments(); }
@@ -281,6 +292,9 @@ function renderSessionList() {
   const query = $('session-search').value.trim().toLocaleLowerCase();
   const matches = sessionTabs.filter(tab => tab.title.toLocaleLowerCase().includes(query));
   $('session-no-results').hidden = matches.length > 0;
+  $('session-no-results').textContent = sessionTabs.length ? 'No matching sessions.' : 'No open sessions.';
+  const openHeading = $('open-heading');
+  if (openHeading) openHeading.hidden = matches.length === 0;
   // Preserve focus during state polls: only rebuild if the displayed entries change.
   const signature = JSON.stringify([matches, selected]);
   if ($('session-list').dataset.signature === signature) return;

@@ -607,8 +607,8 @@ test('session search switches conversations and keeps each draft', async ({ page
   const mac = await pair(page, baseURL);
   try {
     await page.locator('#message').fill('Keep this draft');
-    await page.getByRole('button', { name: 'Browse sessions' }).click();
-    await page.getByRole('searchbox', { name: 'Search sessions' }).fill('release');
+    await page.getByRole('button', { name: 'Browse open and saved chats' }).click();
+    await page.getByRole('searchbox', { name: 'Search chats' }).fill('release');
     await expect(page.locator('#session-list button')).toHaveCount(1);
     await page.locator('#session-list button').click();
     await expect(page.locator('#terminal')).toContainText('Release checks');
@@ -703,14 +703,14 @@ test('session activity updates preserve keyboard focus inside the picker', async
   const statuses = { one: 'working' };
   const mac = await pair(page, baseURL, 'Output', { statuses });
   try {
-    await page.getByRole('button', { name: 'Browse sessions' }).click();
+    await page.getByRole('button', { name: 'Browse open and saved chats' }).click();
     const row = page.locator('#session-list button').filter({ hasText: 'Mobile layout review' });
     await row.focus();
     statuses.one = 'idle';
     await expect(row).toContainText('Ready');
     await expect(row).toBeFocused();
     await row.press('Escape');
-    await expect(page.getByRole('button', { name: 'Browse sessions' })).toBeFocused();
+    await expect(page.getByRole('button', { name: 'Browse open and saved chats' })).toBeFocused();
   } finally { mac.close(); }
 });
 

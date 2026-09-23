@@ -27,8 +27,9 @@ By gl11tchy.
   Restart opens a fresh CLI for other providers, not a resumed conversation.
   Other providers have no turn-completion integration. Sigil keeps submitted work
   active and warns before closing their running processes; silence does not mark completion.
-- **Thread sidebar.** Every conversation on this machine. Home is the project
-  list; open a folder to see its chats and start a new one with the plus. Recents
+- **Thread sidebar.** Every conversation on this machine. Home lists the
+  sessions that are open right now, with a light on the ones still working,
+  then the project list; open a folder to see its chats and start a new one with the plus. Recents
   and Archived sit under the folders as destinations you open. Search by title, folder or
   path. Click a chat to reopen it; if it is already open, the app moves to that
   tab. Hover archive on a chat or a project. Hover X closes an open tab, or
