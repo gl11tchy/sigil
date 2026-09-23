@@ -20,6 +20,7 @@
     <section>
       <h2>Install</h2>
       <p>Download <code>Sigil.zip</code> from the latest GitHub release. Unzip it and replace <code>/Applications/Sigil.app</code>.</p>
+      <p>The first time you open it, macOS may say it cannot verify Sigil. Open System Settings → Privacy &amp; Security and choose Open Anyway, or run <code>xattr -dr com.apple.quarantine /Applications/Sigil.app</code> in Terminal.</p>
       <p>Needs macOS 14 or later on Apple silicon, and the <code>grok</code> CLI at <code>~/.grok/bin/grok</code>. The zip is the GitHub Actions Mac build, not a universal binary. You can set another path in Settings.</p>
     </section>
     <section>
@@ -35,8 +36,8 @@
           <tr><th>Shortcut</th><th>Action</th></tr>
         </thead>
         <tbody>
-          <tr><td><kbd>⌘T</kbd></td><td>New session in the current folder</td></tr>
-          <tr><td><kbd>⌘⇧N</kbd></td><td>New session in another folder</td></tr>
+          <tr><td><kbd>⌘T</kbd></td><td>New session</td></tr>
+          <tr><td><kbd>⌘⇧N</kbd></td><td>New session (same as ⌘T)</td></tr>
           <tr><td><kbd>⌘W</kbd></td><td>Close tab</td></tr>
           <tr><td><kbd>⌘⇧F</kbd></td><td>Find conversations</td></tr>
           <tr><td><kbd>⌘B</kbd></td><td>Hide or show the thread list</td></tr>

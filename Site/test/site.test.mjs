@@ -68,6 +68,12 @@ test('PUBLIC_ORIGIN must be HTTPS except on loopback', () => {
   assert.doesNotThrow(() => createSite({ publicOrigin: 'https://sigilapp.dev' }).close());
 });
 
+test('a missing or unparsable PUBLIC_ORIGIN names the variable', () => {
+  assert.throws(() => createSite({ publicOrigin: undefined }), /PUBLIC_ORIGIN must be an HTTPS origin/);
+  assert.throws(() => createSite({ publicOrigin: '' }), /PUBLIC_ORIGIN must be an HTTPS origin/);
+  assert.throws(() => createSite({ publicOrigin: 'sigilapp.dev' }), /PUBLIC_ORIGIN must be an HTTPS origin/);
+});
+
 test('GET /health returns ok', async t => {
   const { base } = await setup(t);
   const { res, body } = await text(base, '/health');
@@ -133,6 +139,25 @@ test('GET /screenshot.png is the app window', async t => {
   assert.match(res.headers.get('content-type'), /image\/png/);
   const bytes = await res.arrayBuffer();
   assert.ok(bytes.byteLength > 1000);
+});
+
+test('a query string and HEAD reach the same page', async t => {
+  const { base } = await setup(t);
+  for (const path of ['/?fbclid=abc', '/docs?ref=x', '/docs/?utm_source=y']) {
+    const { res, body } = await text(base, path);
+    assert.equal(res.status, 200, path);
+    assert.match(body, /<h1[\s>]/);
+  }
+  for (const path of ['/', '/health']) {
+    const { res, body } = await text(base, path, 'HEAD');
+    assert.equal(res.status, 200, `HEAD ${path}`);
+    assert.equal(body, '');
+    assertSecurityHeaders(res);
+  }
+  const head = await fetch(`${base}/`, { method: 'HEAD' });
+  const get = await fetch(`${base}/`);
+  assert.equal(head.headers.get('content-length'), get.headers.get('content-length'));
+  assert.equal(head.headers.get('content-type'), get.headers.get('content-type'));
 });
 
 test('relay paths are 404', async t => {
