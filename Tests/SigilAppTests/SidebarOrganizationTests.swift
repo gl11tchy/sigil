@@ -133,7 +133,6 @@ struct SidebarOrganizationTests {
         #expect(project == recents)
         #expect(project == archived)
         #expect(project != .projectChats)
-        #expect(project != .projectSearch)
         #expect(project != .projectList)
         #expect(project != .recents)
         #expect(project != .archived)

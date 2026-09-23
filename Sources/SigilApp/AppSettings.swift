@@ -14,7 +14,6 @@ final class AppSettings {
         static let showEmptySessions = "sidebar.showEmptySessions"
         static let showWorktreeSessions = "sidebar.showWorktreeSessions"
         static let showSubagentSessions = "sidebar.showSubagentSessions"
-        static let sidebarMode = "sidebar.mode"
         static let focusedProjectPath = "sidebar.focusedProjectPath"
         static let pinnedConversations = "sidebar.pinnedConversations"
         static let pinnedProjects = "sidebar.pinnedProjects"
@@ -65,9 +64,6 @@ final class AppSettings {
     /// drown the parent chat in the sidebar. They still run in the background.
     var showSubagentSessions: Bool {
         didSet { defaults.set(showSubagentSessions, forKey: Key.showSubagentSessions) }
-    }
-    var sidebarMode: SidebarMode {
-        didSet { defaults.set(sidebarMode.rawValue, forKey: Key.sidebarMode) }
     }
     /// Empty means the Projects list, not a drilled-in folder.
     var focusedProjectPath: String {
@@ -160,13 +156,6 @@ final class AppSettings {
         showWorktreeSessions = defaults.bool(forKey: Key.showWorktreeSessions)
         showSubagentSessions = defaults.bool(forKey: Key.showSubagentSessions)
         optionAsMetaKey = defaults.bool(forKey: Key.optionAsMeta)
-        if let raw = defaults.string(forKey: Key.sidebarMode),
-            let mode = SidebarMode(rawValue: raw)
-        {
-            sidebarMode = mode
-        } else {
-            sidebarMode = .projects
-        }
         focusedProjectPath = defaults.string(forKey: Key.focusedProjectPath) ?? ""
         if let data = defaults.data(forKey: Key.pinnedConversations),
             let decoded = try? JSONDecoder().decode([OpenTabsSnapshot.Entry].self, from: data)

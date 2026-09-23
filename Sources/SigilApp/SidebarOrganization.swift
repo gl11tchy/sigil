@@ -1,21 +1,6 @@
 import Foundation
 import SigilKit
 
-/// Recents is a time-ordered thread list. Projects is a folder list you open.
-enum SidebarMode: String, CaseIterable, Identifiable, Sendable {
-    case recents
-    case projects
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .recents: return "Recents"
-        case .projects: return "Projects"
-        }
-    }
-}
-
 /// Which list the sidebar is showing. Home is always the folder list.
 enum SidebarSurface: Equatable, Sendable {
     case folders
@@ -32,8 +17,6 @@ enum SidebarListKind: Equatable, Sendable {
     case projectList
     /// Chats in the open folder.
     case projectChats
-    /// Search hits grouped by folder.
-    case projectSearch
     /// Ranked hits from every folder, including archived chats.
     case search
     /// Archived chats, grouped by folder.
