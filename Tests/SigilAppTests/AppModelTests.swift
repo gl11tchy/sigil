@@ -3351,6 +3351,41 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func deletingASelectionRescansTheSessionsOnce() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let scans = ScanCount()
+        let store = SessionStore(
+            root: fixture.grokHome.appendingPathComponent("sessions"),
+            timing: SessionStoreTiming(),
+            scanOperation: { root, cache, ignoringCache in
+                scans.increment()
+                return SessionScanner.scan(root: root, cache: cache, ignoringCache: ignoringCache)
+            }
+        )
+        let model = AppModel(
+            settings: fixture.settings,
+            store: store,
+            trashConversation: { _ in },
+            presentError: { _ in },
+            panel: RightPanel(
+                defaults: fixture.defaults,
+                notesStore: ConversationNotesStore(root: fixture.notesRoot)
+            ),
+            pairingStore: InMemoryRemotePairingStore()
+        )
+        defer { model.closeAllTabsAndWait() }
+
+        let selection = (1...5).map { makeSession(id: "s-\($0)", cwd: cwd) }
+        #expect(model.deleteConversations(selection) == 5)
+        #expect(await waitUntil { scans.value > 0 })
+        try await Task.sleep(for: .milliseconds(200))
+
+        #expect(scans.value == 1)
+    }
+
+    @Test @MainActor
     func legacyFolderNotesMigrateToTheNewestConversationInTheFolder() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
@@ -3750,6 +3785,14 @@ private func waitUntil(
         try? await Task.sleep(for: .milliseconds(10))
     }
     return condition()
+}
+
+private final class ScanCount: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int { lock.withLock { count } }
+    func increment() { lock.withLock { count += 1 } }
 }
 
 private final class RunnerProbe: @unchecked Sendable {
