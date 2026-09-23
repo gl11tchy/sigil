@@ -334,10 +334,11 @@ struct ExecutablePathDraft: Equatable {
     @MainActor
     func commit(stored: String) -> Outcome {
         let path = AppSettings.normalizedExecutablePath(text)
+        // An untouched field is no change, even when that path is missing.
+        guard path != AppSettings.normalizedExecutablePath(stored) else { return .unchanged }
         guard AppSettings.isExecutableFile(at: URL(fileURLWithPath: path)) else {
             return .rejected
         }
-        guard path != stored else { return .unchanged }
         return .applied(path)
     }
 }

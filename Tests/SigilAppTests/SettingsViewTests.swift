@@ -96,6 +96,22 @@ struct SettingsViewTests {
     }
 
     @Test @MainActor
+    func leavingAnUntouchedMissingPathRaisesNoError() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // A user without Grok keeps the default path, which does not exist.
+        let missing = root.appendingPathComponent("bin/grok").path
+        var session = PathFieldSession(stored: missing)
+        session.pressReturn()
+        #expect(session.lastError == nil)
+        session.resignFocus()
+        #expect(session.lastError == nil)
+        #expect(session.stored == missing)
+        #expect(session.configurationChangeCount == 0)
+    }
+
+    @Test @MainActor
     func paddedValidPathCommitsTheNormalizedString() throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
