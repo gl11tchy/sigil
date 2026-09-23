@@ -60,12 +60,7 @@ struct RootView: View {
             model.windowDidBecomeKey()
         }
         .onChange(of: announcementSnapshot) { old, new in
-            if let text = ScreenAnnouncement.change(from: old, to: new) {
-                AccessibilityNotification.Announcement(text).post()
-            }
-        }
-        .onChange(of: findAnnouncement) { _, text in
-            if let text { AccessibilityNotification.Announcement(text).post() }
+            announce(ScreenAnnouncement.change(from: old, to: new))
         }
         .ignoresSafeArea(.container, edges: .top)
     }
@@ -80,8 +75,11 @@ struct RootView: View {
         )
     }
 
-    private var findAnnouncement: String? {
-        ScreenAnnouncement.findMatches(query: model.findQuery, count: model.findMatchCount)
+    /// Speaks only while Sigil is the active app, so VoiceOver is not cut off
+    /// in another app. Unseen activity still shows on the tab.
+    private func announce(_ text: String?) {
+        guard let text, NSApp.isActive else { return }
+        AccessibilityNotification.Announcement(text).post()
     }
 
     // MARK: - Detail column
@@ -131,8 +129,9 @@ struct RootView: View {
                     reduceMotion ? .easeOut(duration: 0.1) : .easeOut(duration: 0.16),
                     value: model.isFindBarVisible
                 )
-                .onChange(of: model.findQuery) { _, _ in
+                .onChange(of: model.findQuery) { _, query in
                     model.applyFindQuery()
+                    announce(ScreenAnnouncement.findMatches(query: query, count: model.findMatchCount))
                 }
                 if let tab = model.selectedTab, let item = tab.bridgeInbox.first {
                     BridgeInboxBanner(
