@@ -43,21 +43,15 @@ public enum BridgeTargetMatch: Equatable, Sendable {
 /// Resolves a calling peer and a send/ask target against a fixed tab list.
 public enum BridgeRouting {
 
-    /// A supplied tab id is authoritative. Only fall back to the session id
-    /// when no tab id was supplied; a stale helper must not impersonate a new tab.
+    /// Only the tab id this copy handed out identifies a caller. A session id
+    /// is not enough: another copy of Sigil can resume the same session.
     public static func matchPeer(_ peer: BridgePeer, tabs: [BridgeTabRef]) -> BridgePeerMatch {
-        if let tabID = peer.tabID?.nilIfBlank {
-            guard let tab = tabs.first(where: { $0.tabID == tabID }) else {
-                return .notFound
-            }
-            return .found(tab)
+        guard let tabID = peer.tabID?.nilIfBlank,
+            let tab = tabs.first(where: { $0.tabID == tabID })
+        else {
+            return .notFound
         }
-        if let sessionID = peer.sessionID?.nilIfBlank,
-            let tab = tabs.first(where: { $0.sessionID == sessionID })
-        {
-            return .found(tab)
-        }
-        return .notFound
+        return .found(tab)
     }
 
     /// Match `target` as a tab id first (exact), then as a title (case-insensitive).

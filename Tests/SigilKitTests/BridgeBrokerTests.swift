@@ -234,14 +234,16 @@ struct BridgeRoutingTests {
         #expect(match == c.expected)
     }
 
-    @Test func peerUsesTabIDAuthoritativelyAndFallsBackOnlyWhenAbsent() {
+    @Test func peerMatchesOnlyByTabID() {
         #expect(
             BridgeRouting.matchPeer(BridgePeer(tabID: Self.alpha.tabID), tabs: Self.tabs)
                 == .found(Self.alpha)
         )
+        // Another copy of Sigil can resume the same session; only the tab id
+        // this copy handed out proves the caller is one of its tabs.
         #expect(
             BridgeRouting.matchPeer(BridgePeer(sessionID: "sess-beta"), tabs: Self.tabs)
-                == .found(Self.beta)
+                == .notFound
         )
         #expect(
             BridgeRouting.matchPeer(
@@ -253,6 +255,11 @@ struct BridgeRoutingTests {
 
     @Test func whitespaceOnlyPeerIsAnonymous() {
         #expect(BridgePeer(tabID: " \n", sessionID: "\t").isAnonymous)
+    }
+
+    @Test func sessionOnlyPeerIsAnonymous() {
+        #expect(BridgePeer(sessionID: "sess-beta").isAnonymous)
+        #expect(!BridgePeer(tabID: Self.alpha.tabID).isAnonymous)
     }
 }
 
