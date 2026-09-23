@@ -69,6 +69,7 @@ header:has(#session-toolbar:not([hidden])) { border-bottom: 1px solid var(--line
   display: flex; flex-direction: column; gap: 8px;
 }
 .connection-panel p { margin: 0 0 4px; font-size: 14px; }
+#forget { margin-top: 8px; }
 
 main, #controls { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
 
