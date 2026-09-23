@@ -22,7 +22,7 @@ struct ProviderBoundaryTests {
         #expect(tab.shouldWarnBeforeStopping)
         #expect(!tab.hasUnseenActivity)
         var warnings = 0
-        fixture.model.confirmStopWorking = {
+        fixture.model.confirmStopWorking = { _ in
             warnings += 1
             return false
         }
@@ -79,7 +79,7 @@ struct ProviderBoundaryTests {
         let other = try #require(fixture.model.newTab(in: fixture.root, provider: provider))
         other.noteTurnStarted()
         var warnings = 0
-        fixture.model.confirmStopWorking = {
+        fixture.model.confirmStopWorking = { _ in
             warnings += 1
             return false
         }

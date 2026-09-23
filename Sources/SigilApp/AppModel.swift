@@ -13,7 +13,7 @@ final class AppModel {
 
     typealias TrashConversation = (URL) throws -> Void
     typealias ErrorPresenter = (Error) -> Void
-    typealias ConfirmStopWorking = () -> Bool
+    typealias ConfirmStopWorking = (StopWorkingPrompt) -> Bool
 
     let settings: AppSettings
     let store: SessionStore
@@ -80,7 +80,7 @@ final class AppModel {
     private let presentError: ErrorPresenter
     /// Shown before a close or archive kills a tab that is mid-turn.
     @ObservationIgnored
-    var confirmStopWorking: ConfirmStopWorking = { AppModel.promptToStopWorking() }
+    var confirmStopWorking: ConfirmStopWorking = { $0.runModal() }
     @ObservationIgnored private let registrationRunner: BridgeRegistration.Runner
     @ObservationIgnored private let mcpBinaryOverride: URL?
     @ObservationIgnored private let tabMessagingSocketURL: URL
@@ -370,8 +370,8 @@ final class AppModel {
 
     private func archive(_ session: GrokSession, confirmIfWorking: Bool) {
         let matching = tabs.filter { tabMatches($0, sessionID: session.id, cwd: session.cwd) }
-        if confirmIfWorking, matching.contains(where: \.shouldWarnBeforeStopping),
-            !confirmStopWorking()
+        if confirmIfWorking, let prompt = StopWorkingPrompt(action: .archive, stopping: matching),
+            !confirmStopWorking(prompt)
         {
             return
         }
@@ -394,13 +394,14 @@ final class AppModel {
 
     /// Archives a multi-selection with at most one working-session prompt.
     func archive(_ sessions: [GrokSession]) {
-        let anyWorking = sessions.contains { session in
-            tabs.contains {
-                tabMatches($0, sessionID: session.id, cwd: session.cwd)
-                    && $0.shouldWarnBeforeStopping
-            }
+        let matching = tabs.filter { tab in
+            sessions.contains { tabMatches(tab, sessionID: $0.id, cwd: $0.cwd) }
         }
-        if anyWorking && !confirmStopWorking() { return }
+        if let prompt = StopWorkingPrompt(action: .archive, stopping: matching),
+            !confirmStopWorking(prompt)
+        {
+            return
+        }
         for session in sessions { archive(session, confirmIfWorking: false) }
     }
 
@@ -412,7 +413,9 @@ final class AppModel {
         let projectTabs = tabs.filter {
             $0.spec.provider == .grokBuild && samePath($0.workingDirectory.path, project.cwd)
         }
-        if projectTabs.contains(where: \.shouldWarnBeforeStopping), !confirmStopWorking() {
+        if let prompt = StopWorkingPrompt(action: .archive, stopping: projectTabs),
+            !confirmStopWorking(prompt)
+        {
             return
         }
         unpin(project)
@@ -1446,16 +1449,12 @@ final class AppModel {
     /// User-facing close: warn when the agent is mid-turn so a click does not kill work.
     func requestCloseTab(_ id: TerminalTab.ID) {
         guard let tab = tabs.first(where: { $0.id == id }) else { return }
-        if tab.shouldWarnBeforeStopping, !confirmStopWorking() { return }
+        if let prompt = StopWorkingPrompt(action: .closeTab, stopping: [tab]),
+            !confirmStopWorking(prompt)
+        {
+            return
+        }
         closeTab(id)
-    }
-
-    private static func promptToStopWorking() -> Bool {
-        let alert = NSAlert()
-        alert.messageText = "This session is still working."
-        alert.addButton(withTitle: "Close Tab")
-        alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn
     }
 
     func closeSelectedTab() {

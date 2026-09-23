@@ -3213,7 +3213,7 @@ struct AppModelTests {
         tab.noteTurnStarted()
         #expect(tab.shouldWarnBeforeStopping)
         let session = makeSession(id: try #require(tab.sessionID), cwd: cwd)
-        model.confirmStopWorking = { false }
+        model.confirmStopWorking = { _ in false }
         model.archive(session)
 
         #expect(model.tabs.map(\.id) == [tab.id])
@@ -3233,12 +3233,39 @@ struct AppModelTests {
         tab.noteTurnStarted()
         #expect(tab.shouldWarnBeforeStopping)
         let session = makeSession(id: try #require(tab.sessionID), cwd: cwd)
-        model.confirmStopWorking = { true }
+        model.confirmStopWorking = { _ in true }
         model.archive(session)
 
         #expect(model.tabs.isEmpty)
         #expect(model.isArchived(session))
         #expect(!model.isOpen(session))
+    }
+
+    @Test @MainActor
+    func archivingAProjectWithTwoWorkingChatsAsksAboutArchivingBoth() throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        for _ in 0..<2 { try #require(model.newTab(in: cwd)).noteTurnStarted() }
+        var prompts: [StopWorkingPrompt] = []
+        model.confirmStopWorking = {
+            prompts.append($0)
+            return false
+        }
+
+        model.archive(
+            SidebarProject(
+                id: cwd.path, name: "project", displayPath: cwd.path,
+                cwd: cwd.path, sessions: [], updatedAt: .now))
+
+        #expect(prompts.count == 1)
+        let prompt = try #require(prompts.first)
+        #expect(prompt.messageText == "2 sessions are still working. Archive anyway?")
+        #expect(prompt.buttonTitle == "Archive")
+        #expect(prompt.informativeText == "The responses in progress will stop.")
+        #expect(model.tabs.count == 2)
     }
 
     @Test @MainActor
@@ -3271,7 +3298,7 @@ struct AppModelTests {
         let other = makeSession(id: "s-other", cwd: cwd)
 
         var asked = 0
-        model.confirmStopWorking = {
+        model.confirmStopWorking = { _ in
             asked += 1
             return false
         }
@@ -3281,7 +3308,7 @@ struct AppModelTests {
         #expect(!model.isArchived(other))
         #expect(model.isOpen(working))
 
-        model.confirmStopWorking = {
+        model.confirmStopWorking = { _ in
             asked += 1
             return true
         }
