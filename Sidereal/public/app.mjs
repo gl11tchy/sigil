@@ -225,6 +225,7 @@ function render(state) {
   if (nextSelected !== null && (typeof nextSelected !== 'string' || !ids.has(nextSelected))) {
     throw new Error('Invalid Mac response');
   }
+  const allTabsNew = sessionTabs.length > 0 && !sessionTabs.some(tab => ids.has(tab.id));
   sessionTabs = state.tabs;
   canRestart = Array.isArray(state.capabilities) && state.capabilities.includes('restart');
   const bucket = nextSelected ? historyFor(nextSelected) : null;
@@ -235,17 +236,26 @@ function render(state) {
       pendingEarlier = null;
     }
   }
+  // Absence from a capped snapshot is not evidence that a tab closed.
+  // Older Macs omit the flag, so treat a full 100-row response conservatively.
+  const completeTabList = state.tabsTruncated === undefined ? state.tabs.length < 100 : !state.tabsTruncated;
   const changedSession = selected !== nextSelected;
   if (changedSession) {
     if (selected) drafts.set(selected, $('message').value);
+    // A Sigil restart gives every tab a new ID. Carry the draft to the tab the Mac selected.
+    if (selected && nextSelected && completeTabList && allTabsNew
+      && !drafts.get(nextSelected) && !attachmentDrafts.get(nextSelected)?.length) {
+      drafts.set(nextSelected, drafts.get(selected));
+      if (attachmentDrafts.has(selected)) {
+        attachmentDrafts.set(nextSelected, attachmentDrafts.get(selected));
+        attachmentDrafts.delete(selected);
+      }
+    }
     $('message').value = drafts.get(nextSelected) || '';
   }
   selected = nextSelected;
   selectedStatus = selected ? state.tabs.find(tab => tab.id === selected).status : null;
   tabCount = state.tabs.length;
-  // Absence from a capped snapshot is not evidence that a tab closed.
-  // Older Macs omit the flag, so treat a full 100-row response conservatively.
-  const completeTabList = state.tabsTruncated === undefined ? state.tabs.length < 100 : !state.tabsTruncated;
   if (completeTabList) for (const id of histories.keys()) if (!ids.has(id)) histories.delete(id);
   for (const id of drafts.keys()) { if (completeTabList && !ids.has(id)) drafts.delete(id); }
   for (const id of attachmentDrafts.keys()) {

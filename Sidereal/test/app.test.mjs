@@ -293,6 +293,23 @@ test('New falls back to a new session when the Mac has no project list', async (
   assert.equal(page.element('project-dialog').open, false);
 });
 
+test('a Sigil restart carries the draft and attachments to the restored tab', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('message').value = 'long message';
+  page.element('attach').files = [{ name: 'notes.txt', type: 'text/plain', size: 5 }];
+  page.element('attach').onchange();
+  assert.equal(page.element('attachments').children.length, 1);
+  await page.fireTimer(1000);
+  const poll = socket.sent.at(-1);
+  assert.equal(poll.action, 'state');
+  socket.receive({ data: JSON.stringify({ challenge: poll.challenge, sequence: poll.sequence, ok: true,
+    state: { tabs: [{ id: 'tab-9', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-9', terminal: 'READY' } }) });
+  await settle();
+  assert.equal(page.element('message').value, 'long message');
+  assert.equal(page.element('attachments').children.length, 1);
+});
+
 test('a command that times out keeps the socket so later commands can use it', async () => {
   const page = await browser();
   const socket = await page.authorize();
