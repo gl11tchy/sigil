@@ -118,8 +118,9 @@ struct NewSessionSheet: View {
             effort = model.settings.effort
         }
         .task(id: model.settings.executablePath) {
-            let found = await GrokModelCatalog.load(executable: model.settings.executableURL)
-            if !found.isEmpty { models = found }
+            if let found = await GrokModelCatalog.menuModels(executable: model.settings.executableURL) {
+                models = found
+            }
         }
     }
 

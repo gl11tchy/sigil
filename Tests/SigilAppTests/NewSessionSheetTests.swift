@@ -119,6 +119,25 @@ struct NewSessionSheetTests {
         #expect(!process.isRunning)
     }
 
+    @Test func aPathThatListsNoModelsShowsTheFallbackList() async {
+        // The menu must not keep the rows of the previous path.
+        let models = await GrokModelCatalog.menuModels(executable: URL(fileURLWithPath: "/opt/grok")) { _ in [] }
+        #expect(models == GrokModelCatalog.fallback)
+    }
+
+    @Test func aCancelledModelLoadChangesNothing() async {
+        // SwiftUI cancels the old path's load when the path changes; its late
+        // result must not replace the list for the new path.
+        let load = Task {
+            await GrokModelCatalog.menuModels(executable: URL(fileURLWithPath: "/opt/grok")) { _ in
+                try? await Task.sleep(for: .seconds(30))
+                return ["grok-old"]
+            }
+        }
+        load.cancel()
+        #expect(await load.value == nil)
+    }
+
     @Test @MainActor
     func sheetRendersLogosAndGrokOptionsOnlyForGrok() throws {
         _ = NSApplication.shared

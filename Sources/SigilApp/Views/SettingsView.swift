@@ -160,8 +160,9 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .onAppear { normalizeStoredModel() }
         .task(id: model.settings.executablePath) {
-            let found = await GrokModelCatalog.load(executable: model.settings.executableURL)
-            if !found.isEmpty { listedModels = found }
+            if let found = await GrokModelCatalog.menuModels(executable: model.settings.executableURL) {
+                listedModels = found
+            }
         }
         .alert(
             "Could not update Settings",

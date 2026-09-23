@@ -37,6 +37,18 @@ enum GrokModelCatalog: Sendable {
         return result
     }
 
+    /// The list a model menu shows for `executable`: the CLI's rows, or the
+    /// fallback when it lists none. Nil when the caller was cancelled (the path
+    /// changed), so a late list never replaces the one for the current path.
+    static func menuModels(
+        executable: URL,
+        loader: @Sendable (URL) async -> [String] = { await GrokModelCatalog.load(executable: $0) }
+    ) async -> [String]? {
+        let found = await loader(executable)
+        guard !Task.isCancelled else { return nil }
+        return found.isEmpty ? fallback : found
+    }
+
     /// Runs `grok models`. Empty when the CLI is missing, slow, or prints no rows.
     static func load(executable: URL) async -> [String] {
         let path = executable.path
