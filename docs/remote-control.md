@@ -27,7 +27,8 @@ Remote input has the same authority as typing in an open Grok session.
 - Commands and responses use AES-256-GCM (96-bit random nonce, 128-bit tag).
   Direction is authenticated. Each connection has a fresh Mac-generated challenge;
   each request has a strictly increasing sequence. No command retries or offline queue.
-- The Mac keeps the device key and ticket in Keychain (`AfterFirstUnlockThisDeviceOnly`).
+- The Mac keeps the device key and ticket in the login keychain. That keychain
+  is not bound to this Mac: Migration Assistant or a restore copies the pairing.
   The phone stores a non-extractable CryptoKey and the ticket in IndexedDB.
   Disconnecting in Sigil revokes Mac storage. Quitting does not.
 - The relay routes bounded ciphertext, not terminal contents or encryption keys.
