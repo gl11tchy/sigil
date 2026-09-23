@@ -379,6 +379,21 @@ test('a photo from the phone is queued as a chip and sent as a file', async ({ p
   } finally { mac.close(); }
 });
 
+test('a multi-chunk file upload stays under the relay frame limit', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mac = await pair(page, baseURL);
+  try {
+    await page.locator('#attach').setInputFiles({
+      name: 'data.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(2 * 1024 * 1024, 7) });
+    await page.locator('#send').click();
+    await expect.poll(() => mac.actions.filter(a => a.action === 'key' && a.text === 'enter').length,
+      { timeout: 15000 }).toBe(1);
+    expect(mac.actions.filter(a => a.action === 'file').length).toBe(64);
+    await expect(page.locator('#attachments')).toBeHidden();
+    await expect(page.locator('#status')).toHaveText('Connected');
+  } finally { mac.close(); }
+});
+
 test('the live Grok composer becomes readable status on a phone', async ({ page, baseURL }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const raw = Array.from({ length: 18 }, () => ' '.repeat(120)).join('\n') + '\n'

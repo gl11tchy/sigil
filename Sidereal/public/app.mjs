@@ -6,6 +6,7 @@ const drafts = new Map();
 const attachmentDrafts = new Map();
 const MAX_REMOTE_BYTES = 4 * 1024 * 1024;
 const CHUNK = 32 * 1024;
+let lastChunkAt = 0;
 function attachmentsFor(id = selected) {
   if (!id) return [];
   if (!attachmentDrafts.has(id)) attachmentDrafts.set(id, []);
@@ -697,6 +698,10 @@ async function uploadFile(file, tabID) {
   const count = Math.max(1, Math.ceil(payload.bytes.length / CHUNK));
   for (let index = 0; index < count; index++) {
     const piece = payload.bytes.subarray(index * CHUNK, index * CHUNK + CHUNK);
+    // The relay closes a socket over 30 frames/s, and the Mac replies once per chunk.
+    const wait = lastChunkAt + 50 - Date.now();
+    if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+    lastChunkAt = Date.now();
     await request('file', bytesToBase64(piece), tabID, false, { name: payload.name, index, count, transfer });
   }
 }
