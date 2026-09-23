@@ -58,18 +58,31 @@ final class RemoteControl {
     }
 
     func resumeIfPaired(model: AppModel) {
-        guard !store.revokeFailed, let pairing = store.load(), Self.origin(pairing.origin) != nil else { return }
+        guard !store.revokeFailed else { return }
+        let saved: RemotePairing?
+        do {
+            saved = try store.load()
+        } catch {
+            self.error = "Sigil could not read the saved phone pairing. Connect your phone again."
+            return
+        }
+        guard let pairing = saved, Self.origin(pairing.origin) != nil else { return }
         guard Self.preferredOrigin(pairing.origin) == pairing.origin else { return }
-        start(urlText: pairing.origin, model: model)
+        start(urlText: pairing.origin, model: model, saved: pairing)
     }
 
     func start(urlText: String, model: AppModel) {
+        start(urlText: urlText, model: model, saved: store.revokeFailed ? nil : try? store.load())
+    }
+
+    /// Takes the pairing already read, so one launch reads Keychain once.
+    private func start(urlText: String, model: AppModel, saved: RemotePairing?) {
         stop()
         guard let origin = Self.origin(Self.preferredOrigin(urlText)) else {
             error = "Enter the HTTPS address of your Sidereal server."
             return
         }
-        let restored = restoredSession(for: origin)
+        let restored = restoredSession(for: origin, saved: saved)
         let network = URLSession(configuration: .ephemeral)
         self.network = network
         isEnabled = true
@@ -240,8 +253,8 @@ final class RemoteControl {
         }
     }
 
-    private func restoredSession(for origin: URL) -> RemoteSession {
-        guard !store.revokeFailed, let saved = store.load(),
+    private func restoredSession(for origin: URL, saved: RemotePairing?) -> RemoteSession {
+        guard let saved,
             Self.preferredOrigin(saved.origin) == saved.origin,
             RemoteControl.origin(saved.origin)?.absoluteString == origin.absoluteString,
             RemoteCrypto.isValidKey(saved.deviceKey), RemoteCrypto.isValidKey(saved.ticket)

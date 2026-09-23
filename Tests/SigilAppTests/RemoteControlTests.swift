@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import Security
 import SigilKit
 import Testing
 
@@ -22,14 +23,14 @@ struct RemoteControlTests {
         let service = "app.sigil.remote.test.\(UUID().uuidString)"
         let store = KeychainRemotePairingStore(service: service)
         defer { store.clear() }
-        #expect(store.load() == nil)
+        #expect(try store.load() == nil)
         let pairing = RemotePairing(
             origin: "https://example.com", deviceKey: RemoteCrypto.randomKey(),
             ticket: RemoteCrypto.randomKey())
         store.save(pairing)
-        #expect(store.load() == pairing)
+        #expect(try store.load() == pairing)
         store.clear()
-        #expect(store.load() == nil)
+        #expect(try store.load() == nil)
     }
 
     @Test @MainActor func failedRevokeKeepsTheStoredPairing() {
@@ -69,6 +70,38 @@ struct RemoteControlTests {
         relaunched.resumeIfPaired(model: model)
         #expect(relaunched.isPaired)
         relaunched.stop()
+    }
+
+    @Test @MainActor func launchReadsTheSavedPairingOnlyOnce() {
+        let store = CountingStore(
+            pairing: RemotePairing(
+                origin: "http://127.0.0.1:9", deviceKey: RemoteCrypto.randomKey(), ticket: RemoteCrypto.randomKey()))
+        let remote = RemoteControl(store: store)
+        remote.resumeIfPaired(model: AppModel())
+        defer { remote.stop() }
+        #expect(remote.isPaired)
+        #expect(store.loads == 1)
+    }
+
+    @Test @MainActor func unreadableSavedPairingIsReportedAtLaunch() {
+        let remote = RemoteControl(store: UnreadableStore())
+        remote.resumeIfPaired(model: AppModel())
+        #expect(!remote.isEnabled)
+        #expect(remote.error == "Sigil could not read the saved phone pairing. Connect your phone again.")
+    }
+
+    @Test func keychainTreatsOnlyAMissingItemAsNotPaired() throws {
+        #expect(try KeychainRemotePairingStore.pairing(status: errSecItemNotFound, item: nil) == nil)
+        #expect(throws: KeychainRemotePairingStore.ReadError(status: errSecAuthFailed)) {
+            try KeychainRemotePairingStore.pairing(status: errSecAuthFailed, item: nil)
+        }
+        #expect(throws: KeychainRemotePairingStore.ReadError(status: errSecUserCanceled)) {
+            try KeychainRemotePairingStore.pairing(status: errSecUserCanceled, item: nil)
+        }
+        let pairing = RemotePairing(
+            origin: "https://example.com", deviceKey: RemoteCrypto.randomKey(), ticket: RemoteCrypto.randomKey())
+        let item = try JSONEncoder().encode(pairing) as CFData
+        #expect(try KeychainRemotePairingStore.pairing(status: errSecSuccess, item: item) == pairing)
     }
 
     @Test @MainActor func restoredPairingDoesNotShowAQRAndSurvivesStop() {
@@ -244,6 +277,26 @@ private final class FailingClearStore: RemotePairingStore {
         pairing = nil
         return true
     }
+}
+
+private final class CountingStore: RemotePairingStore {
+    private let pairing: RemotePairing
+    private(set) var loads = 0
+    var revokeFailed = false
+    init(pairing: RemotePairing) { self.pairing = pairing }
+    func load() -> RemotePairing? {
+        loads += 1
+        return pairing
+    }
+    func save(_: RemotePairing) {}
+    func clear() -> Bool { true }
+}
+
+private final class UnreadableStore: RemotePairingStore {
+    var revokeFailed = false
+    func load() throws -> RemotePairing? { throw KeychainRemotePairingStore.ReadError(status: errSecAuthFailed) }
+    func save(_: RemotePairing) {}
+    func clear() -> Bool { true }
 }
 
 /// A WebSocket server on loopback that can ignore pings, like a relay that

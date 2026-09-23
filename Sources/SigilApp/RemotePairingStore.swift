@@ -9,7 +9,9 @@ struct RemotePairing: Codable, Equatable, Sendable {
 }
 
 protocol RemotePairingStore: AnyObject {
-    func load() -> RemotePairing?
+    /// Returns nil only when no pairing is stored. Throws when a stored
+    /// pairing exists but cannot be read.
+    func load() throws -> RemotePairing?
     func save(_ pairing: RemotePairing)
     func clear() -> Bool
     /// True while a Disconnect could not delete the stored pairing. That
@@ -44,7 +46,11 @@ final class KeychainRemotePairingStore: RemotePairingStore {
         set { defaults.set(newValue, forKey: "remoteRevokeFailed") }
     }
 
-    func load() -> RemotePairing? {
+    struct ReadError: Error, Equatable {
+        let status: OSStatus
+    }
+
+    func load() throws -> RemotePairing? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -53,8 +59,16 @@ final class KeychainRemotePairingStore: RemotePairingStore {
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-            let data = item as? Data,
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        return try Self.pairing(status: status, item: item)
+    }
+
+    /// Only a missing item means "not paired". A denied Keychain prompt, for
+    /// example after an update with a new signature, must not look like one.
+    static func pairing(status: OSStatus, item: CFTypeRef?) throws -> RemotePairing? {
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else { throw ReadError(status: status) }
+        guard let data = item as? Data,
             let pairing = try? JSONDecoder().decode(RemotePairing.self, from: data),
             RemoteCrypto.isValidKey(pairing.deviceKey), RemoteCrypto.isValidKey(pairing.ticket)
         else { return nil }
