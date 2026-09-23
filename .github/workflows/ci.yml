@@ -17,7 +17,9 @@ concurrency:
 jobs:
   verify:
     name: Build, test, and smoke check
-    runs-on: macos-15
+    # A fresh macOS 15 + Xcode 16.4 Tart VM per job on the owner's Mac
+    # (gl11tchy/gh-runner-broker mac/macos-supervisor.sh). Jobs wait while the Mac is off.
+    runs-on: [self-hosted, sigil-vm]
     timeout-minutes: 45
     steps:
       - name: Check out source
