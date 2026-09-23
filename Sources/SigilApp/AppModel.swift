@@ -593,19 +593,24 @@ final class AppModel {
     }
 
     /// One-time move of UserDefaults folder notes onto per-conversation files.
-    /// Each folder note lands on the newest conversation in that folder; when
-    /// that conversation already has a note the legacy text is appended, not
-    /// dropped. Folders with no conversation yet keep their entry for a later
-    /// launch.
+    /// Each folder note lands on the newest conversation the sidebar lists in
+    /// that folder (an open one first); when that conversation already has a
+    /// note the legacy text is appended, not dropped. Folders with no listed
+    /// conversation yet keep their entry for a later launch.
     func migrateLegacyPanelNotes() {
         let legacy = panel.legacyFolderNotes
         guard !legacy.isEmpty else { return }
         var remaining = legacy
         for (folder, text) in legacy {
+            let listed = store.sessions.filter {
+                samePath($0.cwd, folder) && !isArchived($0) && !$0.isSubagent
+                    && (isReal($0) || isOpen($0))
+            }
+            let newest = { (sessions: [GrokSession]) in
+                sessions.max(by: { $0.updatedAt < $1.updatedAt })
+            }
             guard !text.isEmpty,
-                let session = store.sessions
-                    .filter({ samePath($0.cwd, folder) })
-                    .max(by: { $0.updatedAt < $1.updatedAt })
+                let session = newest(listed.filter { isOpen($0) }) ?? newest(listed)
             else { continue }
             let existing = panel.notes(forSessionID: session.id, cwd: session.cwd)
             let section = "\n\n---\n\n" + text

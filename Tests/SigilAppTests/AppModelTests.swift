@@ -3255,6 +3255,51 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func legacyFolderNotesSkipConversationsTheSidebarHides() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let hiddenOnly = try fixture.directory("hidden-only")
+        try fixture.writeListedSession(
+            id: "real", cwd: cwd.path, summary: "Real", updatedAt: "2026-07-01T00:00:00Z")
+        try fixture.writeListedSession(
+            id: "archived", cwd: cwd.path, summary: "Archived", updatedAt: "2026-07-15T00:00:00Z")
+        try fixture.writeListedSession(
+            id: "empty", cwd: cwd.path, summary: "", messages: 2, updatedAt: "2026-08-01T00:00:00Z")
+        try fixture.writeListedSession(
+            id: "child", cwd: cwd.path, summary: "Child", sessionKind: "subagent",
+            updatedAt: "2026-08-15T00:00:00Z")
+        try fixture.writeListedSession(
+            id: "only-child", cwd: hiddenOnly.path, summary: "Child", sessionKind: "subagent")
+        let withTab = try fixture.directory("with-tab")
+        try fixture.writeListedSession(
+            id: "open-older", cwd: withTab.path, summary: "Open", updatedAt: "2026-07-01T00:00:00Z")
+        try fixture.writeListedSession(
+            id: "closed-newer", cwd: withTab.path, summary: "Closed", updatedAt: "2026-08-01T00:00:00Z")
+        await fixture.store.reload()
+        fixture.settings.archivedConversations = [.init(sessionID: "archived", cwd: cwd.path)]
+        let legacy = [cwd.path: "folder note", hiddenOnly.path: "kept note", withTab.path: "tab note"]
+        fixture.defaults.set(try JSONEncoder().encode(legacy), forKey: "panel.notes")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        model.open(try #require(fixture.store.sessions.first { $0.id == "open-older" }))
+
+        model.migrateLegacyPanelNotes()
+
+        // A conversation open in a tab wins over a newer closed one.
+        #expect(model.panel.notes(forSessionID: "open-older", cwd: withTab.path) == "tab note")
+        #expect(model.panel.notes(forSessionID: "closed-newer", cwd: withTab.path) == "")
+
+        #expect(model.panel.notes(forSessionID: "real", cwd: cwd.path) == "folder note")
+        for hidden in ["archived", "empty", "child"] {
+            #expect(model.panel.notes(forSessionID: hidden, cwd: cwd.path) == "")
+        }
+        // A folder with only hidden conversations keeps its note for later.
+        #expect(model.panel.notes(forSessionID: "only-child", cwd: hiddenOnly.path) == "")
+        #expect(model.panel.legacyFolderNotes == [hiddenOnly.path: "kept note"])
+    }
+
+    @Test @MainActor
     func legacyMigrationAppendsWhenTheTargetConversationAlreadyHasANote() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
