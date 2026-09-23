@@ -144,6 +144,57 @@ struct NewSessionSheetTests {
         #expect(await load.value == nil)
     }
 
+    /// A stand-in `zsh` that runs the command without reading any profile,
+    /// and a fake `grok` with the given script body.
+    private func fakeModelsCLI(_ body: String) throws -> (dir: URL, shell: URL, grok: URL) {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("grok-models-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let shell = dir.appendingPathComponent("zsh")
+        try "#!/bin/sh\nshift\nexec /bin/sh -c \"$@\"\n".write(to: shell, atomically: true, encoding: .utf8)
+        let grok = dir.appendingPathComponent("grok")
+        try body.write(to: grok, atomically: true, encoding: .utf8)
+        for file in [shell, grok] {
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
+        }
+        return (dir, shell, grok)
+    }
+
+    @Test func theModelListReturnsWhenABackgroundChildKeepsTheOutputOpen() async throws {
+        // A profile helper started in the background inherits stdout and
+        // outlives the CLI; the list must not wait for it.
+        let cli = try fakeModelsCLI("#!/bin/sh\n/bin/sleep 8 &\necho '* grok-a'\n")
+        defer { try? FileManager.default.removeItem(at: cli.dir) }
+        let start = ContinuousClock.now
+        let models = await GrokModelCatalog.load(executable: cli.grok, shellPath: cli.shell.path)
+        #expect(models == ["grok-a"])
+        #expect(ContinuousClock.now - start < .seconds(2))
+    }
+
+    @Test func cancellingTheModelListStopsTheCLI() async throws {
+        let cli = try fakeModelsCLI("#!/bin/sh\necho $$ > \"$0.pid\"\nexec /bin/sleep 30\n")
+        defer { try? FileManager.default.removeItem(at: cli.dir) }
+        let pidFile = cli.grok.path + ".pid"
+        let load = Task {
+            await GrokModelCatalog.load(executable: cli.grok, shellPath: cli.shell.path)
+        }
+        let started = ContinuousClock.now
+        while !FileManager.default.fileExists(atPath: pidFile), ContinuousClock.now - started < .seconds(5) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let pid = try #require(
+            Int32(try String(contentsOfFile: pidFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
+        let cancelled = ContinuousClock.now
+        load.cancel()
+        #expect(await load.value == [])
+        #expect(ContinuousClock.now - cancelled < .seconds(1.5))
+        let stopDeadline = ContinuousClock.now + .seconds(3)
+        while kill(pid, 0) == 0, ContinuousClock.now < stopDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(kill(pid, 0) != 0)
+    }
+
     @Test @MainActor
     func sheetRendersLogosAndGrokOptionsOnlyForGrok() throws {
         _ = NSApplication.shared

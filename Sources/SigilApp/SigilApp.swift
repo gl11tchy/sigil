@@ -10,19 +10,10 @@ struct SigilApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView(model: model)
-                .frame(
-                    minWidth: WindowColumns.minimumWidth(
-                        sidebarVisible: model.isSidebarVisible,
-                        panelVisible: model.panel.isVisible
-                    ),
-                    minHeight: 460
-                )
-                .background(WindowCloseGuard { model.tabs.contains(where: \.shouldWarnBeforeStopping) })
-                .onAppear {
-                    delegate.model = model
-                    delegate.startRemoteIdleSleep(model)
-                }
+            Self.mainWindow(model: model) {
+                delegate.model = model
+                delegate.startRemoteIdleSleep(model)
+            }
         }
         .windowStyle(.hiddenTitleBar)
         .commands { GrokCommands(model: model) }
@@ -30,6 +21,24 @@ struct SigilApp: App {
         Settings {
             SettingsView(model: model)
         }
+    }
+
+    /// The window's content. SwiftUI names the window it saves and restores
+    /// after this type, so a new modifier here strands the window an earlier
+    /// build saved, and the app launches with none. Add modifiers in
+    /// `RootView` instead.
+    @MainActor static func mainWindow(
+        model: AppModel, onAppear: @escaping () -> Void
+    ) -> some View {
+        RootView(model: model)
+            .frame(
+                minWidth: WindowColumns.minimumWidth(
+                    sidebarVisible: model.isSidebarVisible,
+                    panelVisible: model.panel.isVisible
+                ),
+                minHeight: 460
+            )
+            .onAppear(perform: onAppear)
     }
 }
 
