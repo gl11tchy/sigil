@@ -79,6 +79,8 @@ struct SidebarView: View {
         }
         .background(palette.sidebar)
         .overlay(alignment: .trailing) { Rectangle().fill(palette.hairline).frame(width: 1) }
+        .onChange(of: focus) { _, focus in model.isSidebarFocused = focus != nil }
+        .onDisappear { model.isSidebarFocused = false }
         .alert(
             deleteConfirmationTitle,
             isPresented: Binding(
