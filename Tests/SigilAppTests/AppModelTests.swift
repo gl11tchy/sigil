@@ -117,6 +117,37 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func restoreKeepsEachTabsChosenModelAndEffort() throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
+        defer { fixture.cleanup() }
+        fixture.settings.model = "model-a"
+        fixture.settings.effort = "low"
+        let chosen = try fixture.directory("chosen")
+        let older = try fixture.directory("older")
+        try fixture.createSession(id: "older-id", cwd: older)
+
+        let first = fixture.model()
+        let tab = try #require(first.newTab(in: chosen, model: "model-b", effort: "high"))
+        let sessionID = try #require(tab.sessionID)
+        try fixture.createSession(id: sessionID, cwd: chosen)
+        var snapshot = fixture.settings.openTabs
+        first.closeAllTabsAndWait()
+        // An entry saved before tabs kept their model falls back to Settings.
+        snapshot.tabs.append(.init(sessionID: "older-id", cwd: older.path))
+        fixture.settings.openTabs = snapshot
+
+        let second = fixture.model()
+        defer { second.closeAllTabsAndWait() }
+        second.restoreOpenTabs()
+        let restored = try #require(second.tabs.first { $0.sessionID == sessionID })
+        #expect(restored.spec.model == "model-b")
+        #expect(restored.spec.reasoningEffort == "high")
+        let legacy = try #require(second.tabs.first { $0.sessionID == "older-id" })
+        #expect(legacy.spec.model == "model-a")
+        #expect(legacy.spec.reasoningEffort == "low")
+    }
+
+    @Test @MainActor
     func unavailableRestoredTabIsNotErased() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }

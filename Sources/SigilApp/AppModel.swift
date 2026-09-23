@@ -2240,8 +2240,8 @@ final class AppModel {
                 executable: settings.executableURL,
                 workingDirectory: workingDirectory,
                 mode: .resume(sessionID: entry.sessionID),
-                model: settings.model.nilIfEmpty,
-                reasoningEffort: settings.effort.nilIfEmpty,
+                model: entry.model ?? settings.model.nilIfEmpty,
+                reasoningEffort: entry.effort ?? settings.effort.nilIfEmpty,
                 themeName: settings.theme.grokThemeName,
                 themeVariables: settings.theme.grokThemeEnvironment
             )
@@ -2263,7 +2263,9 @@ final class AppModel {
         guard !isRestoringTabs else { return }
         var entries = tabs.compactMap { tab -> OpenTabsSnapshot.Entry? in
             guard let sessionID = tab.sessionID else { return nil }
-            return OpenTabsSnapshot.Entry(sessionID: sessionID, cwd: tab.workingDirectory.path)
+            return OpenTabsSnapshot.Entry(
+                sessionID: sessionID, cwd: tab.workingDirectory.path,
+                model: tab.spec.model, effort: tab.spec.reasoningEffort)
         }
         let liveKeys = Set(entries.map { entryKey($0) })
         entries.append(
