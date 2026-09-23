@@ -250,7 +250,7 @@ private struct TopBar: View {
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) { model.togglePanel() }
             }
 
-            IconButton(systemImage: "plus", help: "New Session in \(model.newSessionDirectory.abbreviatedPath) (⌘T)") {
+            IconButton(systemImage: "plus", help: "New Session… (⌘T)") {
                 model.requestNewSession()
             }
             Menu {
