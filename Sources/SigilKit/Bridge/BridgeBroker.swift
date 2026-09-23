@@ -189,7 +189,7 @@ public enum BridgePrompt {
 /// In-flight `ask_tab` questions. Every resume path (reply, timeout, target exit,
 /// tab close) goes through one gate so the continuation runs exactly once.
 @MainActor
-public final class PendingAskRegistry: @unchecked Sendable {
+public final class PendingAskRegistry {
 
     public enum Outcome: Equatable, Sendable {
         case answered(String)
