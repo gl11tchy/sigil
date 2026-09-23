@@ -156,32 +156,28 @@ struct BridgeRoutingTests {
         sessionID: "sess-alpha",
         title: "Alpha",
         directory: "/tmp/a",
-        status: "idle",
-        isRunning: true
+        status: "idle"
     )
     private static let beta = BridgeTabRef(
         tabID: "22222222-2222-2222-2222-222222222222",
         sessionID: "sess-beta",
         title: "Beta",
         directory: "/tmp/b",
-        status: "working",
-        isRunning: true
+        status: "working"
     )
     private static let betaTwin = BridgeTabRef(
         tabID: "33333333-3333-3333-3333-333333333333",
         sessionID: "sess-beta-2",
         title: "Beta",
         directory: "/tmp/c",
-        status: "idle",
-        isRunning: true
+        status: "idle"
     )
     private static let delta = BridgeTabRef(
         tabID: "44444444-4444-4444-4444-444444444444",
         sessionID: "sess-delta",
         title: "Delta",
         directory: "/tmp/d",
-        status: "exited",
-        isRunning: false
+        status: "exited"
     )
 
     private static let tabs = [alpha, beta, betaTwin, delta]

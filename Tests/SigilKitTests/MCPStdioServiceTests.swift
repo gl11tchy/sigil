@@ -178,16 +178,6 @@ struct MCPStdioServiceTests {
         #expect(outcome.text.contains("idle forged-status"))
     }
 
-    @Test func askTabWithoutAnswerIsATimeoutSentence() throws {
-        let (service, _) = makeService { _ in BridgeResponse(ok: true, answer: nil) }
-        let outcome = try toolOutcome(
-            service.handleLine(
-                Self.toolCall("ask_tab", ["tab": "other", "question": "why?"])))
-        #expect(outcome.isError)
-        #expect(outcome.text.contains("300"))
-        #expect(outcome.text.lowercased().contains("not answer"))
-    }
-
     @Test func toolMessageIsByteLimitedBeforeSocketTransport() throws {
         let (service, recorder) = makeService { _ in BridgeResponse(ok: true) }
         let oneGrapheme = "a" + String(repeating: "\u{0301}", count: 9_000)

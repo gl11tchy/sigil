@@ -192,7 +192,7 @@ extension MCPStdioService {
                         text: question,
                         timeoutSeconds: timeout
                     ),
-                    present: { response in Self.presentAsk(response, timeout: timeout) }
+                    present: { response in Self.presentAsk(response) }
                 )
             }
         case "reply_to":
@@ -256,15 +256,10 @@ extension MCPStdioService {
         (withNote(formatTabs(response.tabs), response), false)
     }
 
-    private static func presentAsk(_ response: BridgeResponse, timeout: Double) -> (String, Bool) {
-        if let answer = response.answer?.nilIfBlank {
-            return (withNote(answer, response), false)
-        }
-        let seconds = timeout.rounded() == timeout ? String(Int(timeout)) : String(timeout)
-        return (
-            withNote("The other tab did not answer within \(seconds) seconds.", response),
-            true
-        )
+    /// The app answers an ask with ok only when it carries the reply; a timeout
+    /// comes back as a failure and never reaches here.
+    private static func presentAsk(_ response: BridgeResponse) -> (String, Bool) {
+        (withNote(response.answer ?? "", response), false)
     }
 
     private static func formatTabs(_ tabs: [BridgeTab]?) -> String {

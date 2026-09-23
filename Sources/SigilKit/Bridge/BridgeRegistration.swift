@@ -54,13 +54,6 @@ public struct BridgeRegistration: Sendable {
         return true
     }
 
-    /// True when `grok mcp list` reports a server called `sigil`.
-    public func isInstalled() -> Bool {
-        let (code, output) = runner(executable, ["mcp", "list"])
-        guard code == 0 else { return false }
-        return Self.listingContainsServer(output)
-    }
-
     /// Registers `mcpBinary` as the `sigil` stdio server. Throws with the CLI's own
     /// output on failure, so the UI can show the user what grok said.
     public func install(mcpBinary: URL) throws {
