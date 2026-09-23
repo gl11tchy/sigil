@@ -12,10 +12,14 @@ protocol RemotePairingStore: AnyObject {
     func load() -> RemotePairing?
     func save(_ pairing: RemotePairing)
     func clear() -> Bool
+    /// True while a Disconnect could not delete the stored pairing. That
+    /// pairing must not be used again, in this run or after a relaunch.
+    var revokeFailed: Bool { get set }
 }
 
 final class InMemoryRemotePairingStore: RemotePairingStore {
     private var pairing: RemotePairing?
+    var revokeFailed = false
 
     func load() -> RemotePairing? { pairing }
     func save(_ pairing: RemotePairing) { self.pairing = pairing }
@@ -28,9 +32,16 @@ final class InMemoryRemotePairingStore: RemotePairingStore {
 final class KeychainRemotePairingStore: RemotePairingStore {
     private let service: String
     private let account = "pairing"
+    private let defaults: UserDefaults
 
-    init(service: String = "app.sigil.remote") {
+    init(service: String = "app.sigil.remote", defaults: UserDefaults = .standard) {
         self.service = service
+        self.defaults = defaults
+    }
+
+    var revokeFailed: Bool {
+        get { defaults.bool(forKey: "remoteRevokeFailed") }
+        set { defaults.set(newValue, forKey: "remoteRevokeFailed") }
     }
 
     func load() -> RemotePairing? {

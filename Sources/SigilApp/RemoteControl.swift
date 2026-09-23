@@ -58,7 +58,7 @@ final class RemoteControl {
     }
 
     func resumeIfPaired(model: AppModel) {
-        guard let pairing = store.load(), Self.origin(pairing.origin) != nil else { return }
+        guard !store.revokeFailed, let pairing = store.load(), Self.origin(pairing.origin) != nil else { return }
         guard Self.preferredOrigin(pairing.origin) == pairing.origin else { return }
         start(urlText: pairing.origin, model: model)
     }
@@ -196,6 +196,7 @@ final class RemoteControl {
 
     func stop(revoke: Bool = false) {
         let forgotten = !revoke || store.clear()
+        if revoke { store.revokeFailed = !forgotten }
         generation = UUID()
         task?.cancel()
         task = nil
@@ -240,7 +241,7 @@ final class RemoteControl {
     }
 
     private func restoredSession(for origin: URL) -> RemoteSession {
-        guard let saved = store.load(),
+        guard !store.revokeFailed, let saved = store.load(),
             Self.preferredOrigin(saved.origin) == saved.origin,
             RemoteControl.origin(saved.origin)?.absoluteString == origin.absoluteString,
             RemoteCrypto.isValidKey(saved.deviceKey), RemoteCrypto.isValidKey(saved.ticket)

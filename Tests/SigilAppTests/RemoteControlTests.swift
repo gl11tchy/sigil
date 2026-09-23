@@ -46,6 +46,31 @@ struct RemoteControlTests {
         #expect(!remote.isEnabled)
     }
 
+    @Test @MainActor func failedRevokeIsNotRestoredByConnectOrAtLaunch() {
+        let origin = "http://127.0.0.1:9"
+        let store = FailingClearStore(
+            pairing: RemotePairing(
+                origin: origin, deviceKey: RemoteCrypto.randomKey(), ticket: RemoteCrypto.randomKey()))
+        let model = AppModel()
+        let remote = RemoteControl(store: store)
+        remote.start(urlText: origin, model: model)
+        #expect(remote.isPaired)
+        remote.stop(revoke: true)
+        remote.start(urlText: origin, model: model)
+        #expect(!remote.isPaired)
+        remote.stop()
+        let relaunched = RemoteControl(store: store)
+        relaunched.resumeIfPaired(model: model)
+        #expect(!relaunched.isEnabled)
+        store.clearSucceeds = true
+        relaunched.stop(revoke: true)
+        store.save(
+            RemotePairing(origin: origin, deviceKey: RemoteCrypto.randomKey(), ticket: RemoteCrypto.randomKey()))
+        relaunched.resumeIfPaired(model: model)
+        #expect(relaunched.isPaired)
+        relaunched.stop()
+    }
+
     @Test @MainActor func restoredPairingDoesNotShowAQRAndSurvivesStop() {
         let store = InMemoryRemotePairingStore()
         store.save(
@@ -209,10 +234,16 @@ struct RemoteControlTests {
 
 private final class FailingClearStore: RemotePairingStore {
     private var pairing: RemotePairing?
+    var clearSucceeds = false
+    var revokeFailed = false
     init(pairing: RemotePairing) { self.pairing = pairing }
     func load() -> RemotePairing? { pairing }
     func save(_ pairing: RemotePairing) { self.pairing = pairing }
-    func clear() -> Bool { false }
+    func clear() -> Bool {
+        guard clearSucceeds else { return false }
+        pairing = nil
+        return true
+    }
 }
 
 /// A WebSocket server on loopback that can ignore pings, like a relay that
