@@ -175,9 +175,12 @@ build_inputs_differ_from_head() {
   fi
   # Ignored files count too when they sit under the sources, because SwiftPM
   # compiles them regardless. Scoped to those paths so .build and dist, which
-  # are ignored on purpose, do not make every install refuse.
-  if [[ -n "$(git -C "$ROOT" status --porcelain --ignored=matching -- \
-    Sources Tests Resources 2>/dev/null)" ]]; then
+  # are ignored on purpose, do not make every install refuse. Finder's
+  # .DS_Store is never a build input. Git quotes a path with a space in it.
+  local ignored
+  ignored="$(git -C "$ROOT" status --porcelain --ignored=matching -- \
+    Sources Tests Resources 2>/dev/null | grep -v '/\.DS_Store"\?$' || true)"
+  if [[ -n "$ignored" ]]; then
     return 0
   fi
   # Dependency sources are compiled from .build/checkouts, which is ignored, so

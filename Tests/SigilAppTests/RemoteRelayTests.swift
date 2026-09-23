@@ -47,6 +47,26 @@ struct RemoteRelayTests {
         #expect(!store.revokeFailed)
         #expect(!remote.revokeFailed)
     }
+
+    @Test @MainActor func oversizedRequestGetsAnErrorReplyAndKeepsThePhonePaired() async throws {
+        let relay = try await RelayFixture()
+        defer { relay.stop() }
+        let model = AppModel()
+        let remote = RemoteControl(store: InMemoryRemotePairingStore())
+        defer { remote.stop() }
+        remote.start(urlText: relay.origin, model: model)
+        let paired = try await relay.pair(remote)
+        defer { paired.phone.close() }
+        let oversized = RemoteRequest(
+            challenge: paired.challenge, sequence: 2, action: "chats", text: String(repeating: "b", count: 8_193))
+        let reply = try await paired.phone.request(oversized, key: paired.device)
+        #expect(!reply.ok)
+        #expect(reply.sequence == 2)
+        #expect(reply.error == "Too long to send. Shorten it and try again.")
+        let state = try await paired.phone.request(
+            RemoteRequest(challenge: paired.challenge, sequence: 3, action: "state"), key: paired.device)
+        #expect(state.ok)
+    }
 }
 
 private final class UnsavableStore: RemotePairingStore {

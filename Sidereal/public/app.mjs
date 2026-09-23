@@ -132,7 +132,7 @@ function isStandaloneApp() {
 }
 function offline(message = 'Disconnected') {
   connected = false;
-  $('status').textContent = message;
+  $('status').textContent = $('status-live').textContent = message;
   $('status').dataset.connected = 'false';
   clearTimeout(pollTimer);
   clearTimeout(connectTimer);
@@ -166,6 +166,8 @@ function applyTail(bucket, next) {
   const overlap = overlapSuffixPrefix(loaded, next);
   if (overlap > 0) {
     bucket.history = loaded.slice(0, loaded.length - overlap);
+    // Streamed output takes this path on every poll; keep the newest text under the cap.
+    if (bucket.history.length > 400_000) bucket.history = bucket.history.slice(-400_000);
     bucket.tail = next;
     return;
   }
@@ -212,6 +214,14 @@ function prependSlice(bucket, slice) {
 }
 function takeChars(text, count) {
   return [...text].slice(0, count).join('');
+}
+function takeGraphemes(text, count) {
+  const out = [];
+  for (const { segment } of new Intl.Segmenter().segment(text)) {
+    if (out.length === count) break;
+    out.push(segment);
+  }
+  return out.join('');
 }
 function takeEnd(text, count) {
   const chars = [...text];
@@ -316,12 +326,20 @@ function renderOutput(changedSession = false, prepended = false) {
   $('empty-output').hidden = Boolean(output);
   const ended = Boolean(selected) && selectedStatus === 'exited';
   $('empty-output').querySelector('h2').textContent = ended ? 'Session ended' : selectedStatus === 'working' ? 'Working…' : selectedStatus === 'starting' ? 'Starting session…' : selected ? 'Ready when you are.' : 'No open sessions.';
-  $('empty-output').querySelector('p').textContent = ended ? (canRestart ? 'Restart to pick up where you left off.' : 'Restart this session in Sigil on your Mac.') : selectedStatus === 'working' || selectedStatus === 'starting' ? 'Output will appear here.' : selected ? 'Send a message to this session.' : 'Choose New to start a session.';
+  $('empty-output').querySelector('p').textContent = ended ? (canRestart ? 'Restart resumes a Grok chat. Other providers start a new conversation.' : 'Restart this session in Sigil on your Mac.') : selectedStatus === 'working' || selectedStatus === 'starting' ? 'Output will appear here.' : selected ? 'Send a message to this session.' : 'Choose New to start a session.';
   terminal.dataset.raw = String(rawMode);
   if (displayedOutput !== output || changedSession) {
+    // A repaint replaces the text and drops a selection the reader is making. Append
+    // new text after it, and hold any other repaint until the selection ends.
+    const selection = changedSession || prepended ? null : globalThis.getSelection?.();
+    const selecting = Boolean(selection && !selection.isCollapsed && terminal.contains(selection.anchorNode));
+    const extending = Boolean(displayedOutput) && output.startsWith(displayedOutput)
+      && ($('find-bar').hidden || !$('find-query').value);
+    if (selecting && !extending) { updateLatest(); return; }
+    if (selecting) terminal.append(output.slice(displayedOutput.length));
     displayedOutput = output;
     if (changedSession) findIndex = 0;
-    paintOutput();
+    if (!selecting) paintOutput();
     if (atBottom || changedSession) terminal.scrollTop = terminal.scrollHeight;
     // Older text went in above the reader. Keep the lines they were reading in place.
     else if (prepended) terminal.scrollTop = terminal.scrollHeight - fromEnd;
@@ -371,7 +389,8 @@ function searchSaved() {
   const token = ++searchToken;
   if (!query || !$('sessions-dialog').open) { renderSaved([]); return; }
   renderSaved([], { pending: true });
-  request('chats', query).then(reply => {
+  // The Mac reads 200 characters, and text over 8 KB drops the connection.
+  request('chats', utf8Limited(takeGraphemes(query, 200), 8192)).then(reply => {
     if (token !== searchToken || $('session-search').value.trim() !== query) return;
     renderSaved(reply.chats, { truncated: reply.chatsTruncated === true });
   }).catch(error => { if (token === searchToken) showError(error.message); });
@@ -631,7 +650,7 @@ function connect() {
           reconnectDelay = 500;
           clearTimeout(connectTimer);
           connected = true; busy = false;
-          $('status').textContent = 'Connected'; $('status').dataset.connected = 'true';
+          $('status').textContent = $('status-live').textContent = 'Connected'; $('status').dataset.connected = 'true';
           showError(''); updateControls(); poll();
         }).catch(error => { showError(error.message); });
       } else if (frame.error === 'unauthorized') {
@@ -790,7 +809,9 @@ async function sendText(submit) {
   const text = $('message').value;
   const files = attachmentsFor().slice();
   if (!text.trim() && !files.length) return;
-  if (new TextEncoder().encode(text).length > 8192) { showError('Keep the message under 8 KB.'); return; }
+  // Check the text as sent: after attachments it gains a leading space.
+  const payload = files.length ? ` ${text}` : text;
+  if (new TextEncoder().encode(payload).length > 8192) { showError('Keep the message under 8 KB.'); return; }
   const target = selected, current = generation;
   // Size-check every file before the Mac pastes any of them into the prompt.
   const payloads = [];
@@ -804,7 +825,7 @@ async function sendText(submit) {
     if (selected === target) renderAttachments();
   }
   if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
-  if (text.trim()) await request('input', files.length ? ` ${text}` : text, target);
+  if (text.trim()) await request('input', payload, target);
   if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
   if (submit) {
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -905,15 +926,18 @@ $('restart').onclick = () => void perform(() => request('restart'));
 $('attach-toggle').onclick = () => $('attach').click();
 $('attach').onchange = () => {
   const list = attachmentsFor();
-  const room = 16 - list.length;
-  for (const file of [...$('attach').files].slice(0, Math.max(0, room))) {
+  let tooBig = false, overLimit = false;
+  for (const file of $('attach').files) {
     // Photos are compressed before upload; other files must already fit.
-    if (!isImageFile(file) && file.size > MAX_REMOTE_BYTES) { showError('Keep files under 4 MB.'); continue; }
+    if (!isImageFile(file) && file.size > MAX_REMOTE_BYTES) { tooBig = true; continue; }
+    if (list.length >= 16) { overLimit = true; continue; }
     list.push({
       file, name: file.name || 'file',
       preview: isImageFile(file) ? URL.createObjectURL(file) : '',
     });
   }
+  const problems = [tooBig && 'Keep files under 4 MB.', overLimit && 'Up to 16 files per message. The rest were not added.'];
+  if (tooBig || overLimit) showError(problems.filter(Boolean).join(' '));
   $('attach').value = '';
   renderAttachments();
 };
@@ -991,6 +1015,8 @@ async function startScan() {
     return;
   }
   showError('');
+  $('scanner-error').hidden = true;
+  $('scanner-error').textContent = '';
   const run = ++scanRun;
   let stream;
   try {
@@ -1041,7 +1067,11 @@ async function startScan() {
           beginPair(result).catch(error => showError(error.message));
           return;
         }
-        if (result?.error) showError(result.error);
+        if (result?.error) {
+          // #error sits under the full-screen scanner. Show the reason on the scanner only.
+          if ($('scanner-error').textContent !== result.error) $('scanner-error').textContent = result.error;
+          $('scanner-error').hidden = false;
+        }
       }
     }
     requestAnimationFrame(tick);

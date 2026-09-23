@@ -1,4 +1,4 @@
-const CACHE = 'sidereal-shell-v23';
+const CACHE = 'sidereal-shell-v24';
 const SHELL = ['/', '/app.mjs', '/output.mjs', '/crypto.mjs', '/pairing.mjs', '/style.css', '/manifest.webmanifest', '/icon.svg', '/icon-180.png', '/icon-192.png', '/icon-512.png'];
 self.addEventListener('install', event => {
   self.skipWaiting();

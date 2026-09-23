@@ -141,6 +141,17 @@ test('attached file names keep their extension and non-Latin letters', async () 
   assert.ok(bytes(wide) <= 80);
 });
 
+test('streamed output that overlaps each poll keeps history under the cap', async () => {
+  const { app } = await browser();
+  const bucket = { history: '', tail: '', exhausted: false };
+  const line = n => `line ${String(n).padStart(6, '0')} ${'x'.repeat(1000)}\n`;
+  const window = start => Array.from({ length: 40 }, (_, i) => line(start + i)).join('');
+  // Each poll scrolls 20 lines, and the old and new snapshots share the other 20.
+  for (let start = 0; start <= 20 * 30; start += 20) app.applyTail(bucket, window(start));
+  assert.ok(bucket.history.length <= 400_000, `history is ${bucket.history.length} characters`);
+  assert.ok((bucket.history + bucket.tail).endsWith(window(600)));
+});
+
 test('Send clears the draft only after the Enter acknowledgement', async () => {
   const page = await browser();
   const socket = await page.authorize();
@@ -160,6 +171,73 @@ test('Send clears the draft only after the Enter acknowledgement', async () => {
   await settle();
   assert.equal(page.element('message').value, '');
   assert.equal(page.element('send').disabled, true); // Empty messages cannot be sent.
+});
+
+test('an 8 KB message with an attachment is refused before anything is sent', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('attach').files = [{ name: 'notes.txt', type: 'text/plain', size: 5 }];
+  page.element('attach').onchange();
+  page.element('message').value = 'a'.repeat(8192);
+  page.element('compose').onsubmit({ preventDefault() {} });
+  await settle();
+  assert.match(page.element('error').textContent, /under 8 KB/);
+  assert.deepEqual(socket.sent.map(request => request.action), ['state']);
+});
+
+test('picking more than 16 files says the rest were not added', async () => {
+  const page = await browser();
+  await page.authorize();
+  page.element('attach').files = Array.from({ length: 20 }, (_, index) => ({ name: `note${index}.txt`, type: 'text/plain', size: 5 }));
+  page.element('attach').onchange();
+  assert.equal(page.app.attachmentsFor().length, 16);
+  assert.match(page.element('error').textContent, /Up to 16 files per message/);
+});
+
+test('an oversized file keeps its own error and does not use a free slot', async () => {
+  const page = await browser();
+  await page.authorize();
+  page.element('attach').files = Array.from({ length: 15 }, (_, index) => ({ name: `note${index}.txt`, type: 'text/plain', size: 5 }));
+  page.element('attach').onchange();
+  page.element('attach').files = [
+    { name: 'big.zip', type: 'application/zip', size: 5 * 1024 * 1024 },
+    { name: 'last.txt', type: 'text/plain', size: 5 },
+  ];
+  page.element('attach').onchange();
+  assert.equal(page.app.attachmentsFor().length, 16);
+  assert.equal(page.element('error').textContent, 'Keep files under 4 MB.');
+});
+
+test('a sent attachment leaves the queue when the Mac switches tabs during the send', async () => {
+  const page = await browser();
+  page.app.btoa = btoa;
+  const socket = await page.authorize();
+  const both = selectedTabID => ({ tabs: [
+    { id: 'tab-1', title: 'One', status: 'idle' }, { id: 'tab-2', title: 'Two', status: 'idle' }],
+    selectedTabID, terminal: 'READY' });
+  const answer = (request, state) => socket.receive({ data: JSON.stringify({
+    challenge: request.challenge, sequence: request.sequence, ok: true, state }) });
+  page.element('attach').files = [{ name: 'notes.txt', type: 'text/plain', size: 5,
+    arrayBuffer: async () => new Uint8Array([1, 2, 3, 4, 5]).buffer }];
+  page.element('attach').onchange();
+  page.element('message').value = 'look';
+  page.element('compose').onsubmit({ preventDefault() {} });
+  await settle(); await settle();
+  const file = socket.sent.at(-1);
+  assert.equal(file.action, 'file');
+  assert.equal(file.tabID, 'tab-1');
+  answer(file, both('tab-2'));
+  await settle(); await settle();
+  answer(socket.sent.at(-1), both('tab-2'));
+  await settle();
+  await page.fireTimer(100);
+  answer(socket.sent.at(-1), both('tab-2'));
+  await settle();
+  assert.deepEqual(socket.sent.map(request => request.action), ['state', 'file', 'input', 'key']);
+  await page.fireTimer(1000);
+  answer(socket.sent.at(-1), both('tab-1'));
+  await settle();
+  assert.equal(page.element('attachments').hidden, true);
 });
 
 test('a refused Enter keeps the sent draft and reports the failure', async () => {
@@ -802,6 +880,46 @@ test('a new search clears the previous saved chats before the reply', async () =
   assert.equal(second.action, 'chats');
   assert.equal(second.text, 'two');
   assert.equal(socket.sent.filter(item => item.action === 'open').length, 0);
+});
+
+test('a long chats search sends only the 200 characters the Mac reads', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('sessions-toggle').onclick();
+  page.element('session-search').value = `${'😀'.repeat(150)}${'x'.repeat(9000)}`;
+  page.element('session-search').oninput();
+  await settle();
+  const sent = socket.sent.at(-1);
+  assert.equal(sent.action, 'chats');
+  assert.equal([...sent.text].length, 200);
+  assert.ok(sent.text.startsWith('😀'.repeat(150)));
+  assert.equal(socket.readyState, 1);
+});
+
+test('a chats search counts characters the way the Mac does', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('sessions-toggle').onclick();
+  // Each family emoji is five code points and one character to the Mac.
+  const query = `${'👨‍👩‍👧'.repeat(100)}needle`;
+  page.element('session-search').value = query;
+  page.element('session-search').oninput();
+  await settle();
+  assert.equal(socket.sent.at(-1).text, query);
+});
+
+test('a chats search of stacked accents stays under the 8 KB the Mac accepts', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('sessions-toggle').onclick();
+  page.element('session-search').value = `e${'\u0301'.repeat(100)}`.repeat(200);
+  page.element('session-search').oninput();
+  await settle();
+  const sent = socket.sent.at(-1);
+  assert.equal(sent.action, 'chats');
+  assert.ok(new TextEncoder().encode(sent.text).length <= 8192);
+  assert.ok(sent.text.startsWith(`e${'\u0301'.repeat(100)}`));
+  assert.equal(socket.readyState, 1);
 });
 
 test('a shortened chat list says it is partial', async () => {

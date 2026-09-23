@@ -127,6 +127,23 @@ test('rejecting an unauthorized phone closes it and releases the slot', async t 
   assert.equal((await nextNotice).type, 'peer');
 });
 
+test('a host that rejects a phone and closes at once still reaches the phone', { timeout: 5000 }, async t => {
+  const { base, room, hostToken } = await setup(t);
+  const host = connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` } });
+  await message(host);
+  const notice = message(host);
+  const phone = connect(base, room, 'phone', { origin: 'http://localhost:3099' });
+  const { peer } = await notice;
+  const rejected = message(phone);
+  // One write carries the rejection and the close frame, as when the Mac
+  // revokes a pairing and cancels its socket straight away.
+  host._socket.cork();
+  host.send(JSON.stringify({ peer, error: 'unauthorized' }));
+  host.close();
+  host._socket.uncork();
+  assert.equal((await rejected).error, 'unauthorized');
+});
+
 test('a client that resets a rejected upgrade does not crash the relay', { timeout: 5000 }, async t => {
   const { base, relay } = await setup(t);
   const closed = new Promise(resolve => relay.server.once('upgrade', (req, socket) => socket.once('close', resolve)));
@@ -239,6 +256,32 @@ test('an unknown ticket still connects when the room id is present', async t => 
   const phone = connect(base, room, 'phone', { origin: 'http://localhost:3099', ticket: ticket() });
   await once(phone, 'open');
   assert.equal((await notice).type, 'peer');
+});
+
+test('after a phone routes by ticket, a room-only phone cannot evict it', { timeout: 5000 }, async t => {
+  const { base, room, hostToken } = await setup(t);
+  const origin = 'http://localhost:3099';
+  const host = connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` }, ticket: ticket() });
+  await message(host);
+  const peers = [];
+  host.on('message', data => { const frame = JSON.parse(data); if (frame.type === 'peer') peers.push(frame.peer); });
+  // The QR room still bootstraps a phone before any phone holds the ticket.
+  const bootstrap = connect(base, room, 'phone', { origin });
+  await once(bootstrap, 'open');
+  while (peers.length < 1) await new Promise(resolve => setTimeout(resolve, 10));
+  bootstrap.close();
+  await once(bootstrap, 'close');
+  const paired = connect(base, room, 'phone', { origin, ticket: ticket() });
+  await once(paired, 'open');
+  while (peers.length < 2) await new Promise(resolve => setTimeout(resolve, 10));
+  const stranger = connect(base, room, 'phone', { origin });
+  const first = await Promise.race([
+    once(stranger, 'close').then(([code]) => `stranger ${code}`),
+    once(paired, 'close').then(() => 'paired'),
+  ]);
+  assert.equal(first, 'stranger 1008');
+  assert.equal(paired.readyState, WebSocket.OPEN);
+  assert.equal(peers.length, 2);
 });
 
 test('oversized frames are rejected', async t => {
