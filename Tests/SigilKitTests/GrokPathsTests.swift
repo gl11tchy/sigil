@@ -105,3 +105,39 @@ func sessionFolderNameMatchesTheCLI(cwd: String, expected: String) {
 func blake3MatchesTheReferenceHash(input: String, expected: String) {
     #expect(BLAKE3.hexDigest(Array(input.utf8)) == expected)
 }
+
+/// A throwaway zsh home, so no test reads the developer's own profile.
+private func loginShellEnvironment(zshrc: String) throws -> (home: URL, environment: [String: String]) {
+    let home = FileManager.default.temporaryDirectory
+        .appendingPathComponent("grok-home-probe-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+    try zshrc.write(to: home.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8)
+    let environment = [
+        "HOME": home.path, "ZDOTDIR": home.path, "SHELL": "/bin/zsh", "PATH": "/usr/bin:/bin",
+    ]
+    return (home, environment)
+}
+
+@Test func loginShellGrokHomeReadsTheProfilesExport() throws {
+    // Noise on stdout and a helper that keeps stdout open must not matter.
+    let shell = try loginShellEnvironment(
+        zshrc: "echo 'welcome back'\n/bin/sleep 5 &!\nexport GROK_HOME=\"$HOME/tools/grok\"\n")
+    defer { try? FileManager.default.removeItem(at: shell.home) }
+    let start = Date()
+    #expect(GrokPaths.loginShellGrokHome(environment: shell.environment) == shell.home.path + "/tools/grok")
+    #expect(Date().timeIntervalSince(start) < 2)
+}
+
+@Test func loginShellGrokHomeIsNilWhenTheProfileSetsNone() throws {
+    let shell = try loginShellEnvironment(zshrc: "echo 'GROK_HOME is not here'\n")
+    defer { try? FileManager.default.removeItem(at: shell.home) }
+    #expect(GrokPaths.loginShellGrokHome(environment: shell.environment) == nil)
+}
+
+@Test func loginShellGrokHomeGivesUpOnASlowProfile() throws {
+    let shell = try loginShellEnvironment(zshrc: "/bin/sleep 10\nexport GROK_HOME=/slow\n")
+    defer { try? FileManager.default.removeItem(at: shell.home) }
+    let start = Date()
+    #expect(GrokPaths.loginShellGrokHome(environment: shell.environment, timeout: 0.5) == nil)
+    #expect(Date().timeIntervalSince(start) < 2)
+}

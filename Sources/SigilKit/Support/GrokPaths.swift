@@ -28,6 +28,67 @@ public enum GrokPaths {
         return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok")
     }
 
+    /// `GROK_HOME` as the user's login shell exports it. A Grok tab starts the
+    /// CLI through `$SHELL -lic`, so this is the root the CLI writes to even
+    /// when the app itself was opened from the Dock without the variable.
+    /// Nil when the shell exports none, fails, or runs past `timeout`.
+    public static func loginShellGrokHome(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        timeout: TimeInterval = 2
+    ) -> String? {
+        let marker = "__SIGIL_GROK_HOME__="
+        let requested = environment["SHELL"] ?? "/bin/zsh"
+        let shell = FileManager.default.isExecutableFile(atPath: requested) ? requested : "/bin/zsh"
+        let arguments: [String]
+        switch URL(fileURLWithPath: shell).lastPathComponent {
+        case "zsh", "bash", "sh":
+            arguments = ["-lic", "printf '\\n%s%s\\n' \"$1\" \"$GROK_HOME\"", "sigil-grok-home", marker]
+        case "fish":
+            arguments = ["-lic", "printf '\\n%s%s\\n' $argv[1] \"$GROK_HOME\"", marker]
+        default:
+            // Grok tabs run the CLI directly under other shells, so it sees
+            // the app's own environment.
+            return nil
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: shell)
+        process.arguments = arguments
+        process.environment = environment
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        try? output.fileHandleForWriting.close()
+        guard exited.wait(timeout: .now() + timeout) == .success else {
+            // An interactive shell ignores SIGTERM.
+            kill(process.processIdentifier, SIGKILL)
+            return nil
+        }
+        // A profile helper started in the background may still hold stdout,
+        // so read only what is already there instead of waiting for EOF.
+        let descriptor = output.fileHandleForReading.fileDescriptor
+        _ = fcntl(descriptor, F_SETFL, fcntl(descriptor, F_GETFL) | O_NONBLOCK)
+        var data = Data()
+        var chunk = [UInt8](repeating: 0, count: 16_384)
+        while case let count = read(descriptor, &chunk, chunk.count), count > 0 {
+            data.append(contentsOf: chunk[0..<count])
+        }
+        try? output.fileHandleForReading.close()
+        guard process.terminationStatus == 0 else { return nil }
+        let line = String(decoding: data, as: UTF8.self)
+            .split(whereSeparator: \.isNewline)
+            .last { $0.hasPrefix(marker) }
+        guard let value = line?.dropFirst(marker.count), !value.isEmpty else { return nil }
+        return String(value)
+    }
+
     /// `~/.grok/sessions` — one subdirectory per working directory.
     public static var sessionsRoot: URL { home.appendingPathComponent("sessions") }
 
