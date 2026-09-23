@@ -241,7 +241,7 @@ test('an unknown ticket still connects when the room id is present', async t => 
   assert.equal((await notice).type, 'peer');
 });
 
-test('after a phone routes by ticket, a room-only phone cannot evict it', async t => {
+test('after a phone routes by ticket, a room-only phone cannot evict it', { timeout: 5000 }, async t => {
   const { base, room, hostToken } = await setup(t);
   const origin = 'http://localhost:3099';
   const host = connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` }, ticket: ticket() });
