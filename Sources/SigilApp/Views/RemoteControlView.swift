@@ -24,6 +24,9 @@ struct RemoteControlView: View {
                         model.remoteControl.stop(revoke: true)
                     }
                 } else {
+                    if model.remoteControl.revokeFailed {
+                        Button("Disconnect", role: .destructive) { model.remoteControl.stop(revoke: true) }
+                    }
                     Button("Connect Phone") { model.remoteControl.start(urlText: serverURL, model: model) }
                         .disabled(serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
