@@ -88,7 +88,7 @@ async function browser({ hash = '', saved } = {}) {
       return request;
     },
   };
-  vm.runInNewContext(source, {
+  const app = {
     readableOutput, pairingFromText, document, location, history: { replaceState() {} }, indexedDB,
     window: { addEventListener: (name, callback) => events.set(name, callback) },
     navigator: {}, crypto: { subtle: {} }, URL, URLSearchParams, TextEncoder,
@@ -98,7 +98,8 @@ async function browser({ hash = '', saved } = {}) {
     open: async frame => JSON.parse(frame),
     setTimeout(callback, delay) { const id = ++nextTimer; timers.set(id, { callback, delay }); return id; },
     clearTimeout: id => timers.delete(id),
-  });
+  };
+  vm.runInNewContext(source, app);
   await settle();
   async function authorize(ws = sockets.at(-1)) {
     ws.receive({ hello: (sockets.length % 2 ? 'b' : 'c').repeat(64) });
@@ -122,8 +123,23 @@ async function browser({ hash = '', saved } = {}) {
     element('compose').onsubmit({ preventDefault() { prevented = true; } });
     assert.equal(prevented, true);
   }
-  return { element, events, location, sockets, authorize, fireTimer, submit, sealed, timers, stored: () => structuredClone(stored), reloads: () => reloads };
+  return { app, element, events, location, sockets, authorize, fireTimer, submit, sealed, timers, stored: () => structuredClone(stored), reloads: () => reloads };
 }
+
+test('attached file names keep their extension and non-Latin letters', async () => {
+  const { app } = await browser();
+  const bytes = value => new TextEncoder().encode(value).length;
+  assert.equal(app.remoteFileName('文档.pdf'), '文档.pdf');
+  assert.equal(app.remoteFileName('Отчёт.txt'), 'Отчёт.txt');
+  assert.equal(app.remoteFileName('é.json'), 'é.json');
+  assert.equal(app.remoteFileName('???.csv'), 'file.csv');
+  const long = app.remoteFileName(`${'a'.repeat(90)}.pdf`);
+  assert.match(long, /^a+\.pdf$/);
+  assert.ok(bytes(long) <= 80);
+  const wide = app.remoteFileName(`${'文'.repeat(40)}.xlsx`);
+  assert.match(wide, /^文+\.xlsx$/);
+  assert.ok(bytes(wide) <= 80);
+});
 
 test('Send clears the draft only after the Enter acknowledgement', async () => {
   const page = await browser();

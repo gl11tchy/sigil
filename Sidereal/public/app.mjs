@@ -13,12 +13,17 @@ function attachmentsFor(id = selected) {
 }
 function remoteFileName(name) {
   const base = String(name || 'file').split(/[/\\]/).pop();
-  const mapped = [...base].map(ch => /[A-Za-z0-9._-]/.test(ch) ? ch : '-').join('')
-    .replace(/-+/g, '-').replace(/^[.-]+|[.-]+$/g, '') || 'file';
-  const bytes = new TextEncoder();
-  let out = mapped;
-  while (bytes.encode(out).length > 80) out = out.slice(0, -1);
-  return out || 'file';
+  const clean = part => [...part].map(ch => /[\p{L}\p{M}\p{N}._-]/u.test(ch) ? ch : '-').join('')
+    .replace(/-+/g, '-').replace(/^[.-]+|[.-]+$/g, '');
+  const bytes = value => new TextEncoder().encode(value).length;
+  // Keep the extension: the Mac CLI reads the file type from it.
+  const dot = base.lastIndexOf('.');
+  let ext = dot > 0 ? clean(base.slice(dot + 1)) : '';
+  if (bytes(ext) > 16) ext = '';
+  const suffix = ext ? `.${ext}` : '';
+  const stem = [...(clean(ext ? base.slice(0, dot) : base) || 'file')];
+  while (stem.length > 1 && bytes(stem.join('') + suffix) > 80) stem.pop();
+  return (stem.join('').replace(/[.-]+$/, '') || 'file') + suffix;
 }
 let tabsSignature = '';
 let sessionTabs = [], canRestart = false;
