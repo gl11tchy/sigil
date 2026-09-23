@@ -77,7 +77,7 @@ function updateControls() {
     if (element.id === 'restart') { element.disabled = disabled || !ended; return; }
     if (element.id === 'new') { element.disabled = disabled; return; }
     if (element.id === 'tabs') { element.disabled = disabled || tabCount === 0; return; }
-    if (element.id === 'stop' || element.id === 'interrupt') {
+    if (element.id === 'stop' || element.id === 'interrupt' || element.dataset.key) {
       element.disabled = !connected || !selected || ended; return;
     }
     element.disabled = disabled || !selected || ended;
@@ -916,7 +916,8 @@ $('message').addEventListener('keydown', event => {
   event.preventDefault();
   void perform(() => sendText(true));
 });
-document.querySelectorAll('[data-key]').forEach(button => { button.onclick = () => void perform(() => request('key', button.dataset.key)); });
+// request() already sends in order, so a quick tap is queued instead of dropped.
+document.querySelectorAll('[data-key]').forEach(button => { button.onclick = () => request('key', button.dataset.key).catch(error => showError(error.message)); });
 $('reconnect').onclick = $('welcome-reconnect').onclick = () => { stopped = false; revoked = false; reconnectDelay = 500; connect(); };
 $('forget').onclick = async () => {
   stopped = true; ++generation; clearTimeout(reconnectTimer); socket?.close(); offline();

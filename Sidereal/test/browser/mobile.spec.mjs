@@ -456,6 +456,21 @@ test('a failed send does not paste the uploaded files again on retry', async ({ 
   } finally { mac.close(); }
 });
 
+test('quick taps on the terminal keys are all sent in order', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mac = await pair(page, baseURL);
+  try {
+    await page.locator('#keys-toggle').click();
+    // Four taps faster than one relay round trip.
+    await page.evaluate(() => {
+      for (const key of ['down', 'down', 'down', 'enter']) document.querySelector(`[data-key="${key}"]`).click();
+    });
+    await expect.poll(() => mac.actions.filter(a => a.action === 'key').map(a => a.text))
+      .toEqual(['down', 'down', 'down', 'enter']);
+    await expect(page.locator('[data-key="down"]')).toBeEnabled();
+  } finally { mac.close(); }
+});
+
 test('the live Grok composer becomes readable status on a phone', async ({ page, baseURL }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const raw = Array.from({ length: 18 }, () => ' '.repeat(120)).join('\n') + '\n'
