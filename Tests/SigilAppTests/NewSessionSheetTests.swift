@@ -119,6 +119,12 @@ struct NewSessionSheetTests {
         #expect(!process.isRunning)
     }
 
+    @Test(arguments: [CLIProvider.claudeCode, .codex, .devin, .cursor])
+    func otherProvidersNeverAskGrokForModels(provider: CLIProvider) {
+        #expect(NewSessionLaunch.modelListPath(provider: provider, executablePath: "/opt/grok") == nil)
+        #expect(NewSessionLaunch.modelListPath(provider: .grokBuild, executablePath: "/opt/grok") == "/opt/grok")
+    }
+
     @Test func aPathThatListsNoModelsShowsTheFallbackList() async {
         // The menu must not keep the rows of the previous path.
         let models = await GrokModelCatalog.menuModels(executable: URL(fileURLWithPath: "/opt/grok")) { _ in [] }

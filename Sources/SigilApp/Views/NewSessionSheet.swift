@@ -20,6 +20,12 @@ enum NewSessionLaunch: Equatable {
         return (model, effort)
     }
 
+    /// The Grok path whose model list the sheet loads. Nil for other
+    /// providers, which have no model menu, so `grok models` never runs.
+    static func modelListPath(provider: CLIProvider, executablePath: String) -> String? {
+        showsModelAndEffort(provider) ? executablePath : nil
+    }
+
     static func action(selected: CLIProvider, tapped: CLIProvider) -> Action {
         selected == tapped ? .start(tapped) : .select(tapped)
     }
@@ -117,7 +123,11 @@ struct NewSessionSheet: View {
             modelName = model.settings.model.trimmingCharacters(in: .whitespacesAndNewlines)
             effort = model.settings.effort
         }
-        .task(id: model.settings.executablePath) {
+        .task(
+            id: NewSessionLaunch.modelListPath(
+                provider: provider, executablePath: model.settings.executablePath)
+        ) {
+            guard NewSessionLaunch.showsModelAndEffort(provider) else { return }
             if let found = await GrokModelCatalog.menuModels(executable: model.settings.executableURL) {
                 models = found
             }
