@@ -50,6 +50,10 @@ final class AppModel {
             if oldValue, !isSidebarVisible { refocusTerminalAfterHiding(.sidebar) }
         }
     }
+    /// Set by the sidebar and its divider from their SwiftUI focus, so hiding
+    /// the sidebar moves focus only when it leaves with the column.
+    @ObservationIgnored var isSidebarFocused = false
+    @ObservationIgnored var isSidebarDividerFocused = false
     /// Bumped by Find Conversations so the search field takes focus even when
     /// the sidebar just became visible, or already had it.
     private(set) var searchFocusToken = 0
@@ -1489,7 +1493,8 @@ final class AppModel {
         guard let view = selectedTab?.controller.view, let window = view.window else { return }
         let focus = KeyboardFocus.classify(
             window.firstResponder, in: window, sessionView: view,
-            panelShellView: panel.shell?.view)
+            panelShellView: panel.shell?.view,
+            sidebarHasFocus: isSidebarFocused || isSidebarDividerFocused)
         if focus.needsTerminalAfterHiding(column) { focusSelectedTerminal() }
     }
 

@@ -77,28 +77,36 @@ struct AppShellTests {
         let notes = NSTextView()
         let search = NSTextView()
         search.isFieldEditor = true
-        func focus(_ responder: NSResponder?) -> KeyboardFocus {
+        let swiftUIControl = NSResponder()
+        func focus(_ responder: NSResponder?, sidebarHasFocus: Bool = false) -> KeyboardFocus {
             KeyboardFocus.classify(
-                responder, in: window, sessionView: session, panelShellView: shell)
+                responder, in: window, sessionView: session, panelShellView: shell,
+                sidebarHasFocus: sidebarHasFocus)
         }
 
         #expect(focus(session) == .sessionTerminal)
         #expect(focus(shellChild) == .panel)
         #expect(focus(notes) == .panel)
         #expect(focus(search) == .elsewhere)
+        #expect(focus(search, sidebarHasFocus: true) == .sidebar)
+        #expect(focus(swiftUIControl) == .elsewhere)
+        #expect(focus(swiftUIControl, sidebarHasFocus: true) == .sidebar)
+        #expect(focus(notes, sidebarHasFocus: true) == .panel)
         #expect(focus(nil) == .lost)
         #expect(focus(window) == .lost)
         #expect(focus(window.contentView) == .lost)
     }
 
     @Test func hidingAColumnRefocusesTheTerminalOnlyWhenFocusLeftWithIt() {
-        #expect(KeyboardFocus.elsewhere.needsTerminalAfterHiding(.sidebar))
+        #expect(KeyboardFocus.sidebar.needsTerminalAfterHiding(.sidebar))
+        #expect(!KeyboardFocus.elsewhere.needsTerminalAfterHiding(.sidebar))
         #expect(KeyboardFocus.lost.needsTerminalAfterHiding(.sidebar))
         #expect(!KeyboardFocus.panel.needsTerminalAfterHiding(.sidebar))
         #expect(!KeyboardFocus.sessionTerminal.needsTerminalAfterHiding(.sidebar))
         #expect(KeyboardFocus.panel.needsTerminalAfterHiding(.panel))
         #expect(KeyboardFocus.lost.needsTerminalAfterHiding(.panel))
         #expect(!KeyboardFocus.elsewhere.needsTerminalAfterHiding(.panel))
+        #expect(!KeyboardFocus.sidebar.needsTerminalAfterHiding(.panel))
         #expect(!KeyboardFocus.sessionTerminal.needsTerminalAfterHiding(.panel))
     }
 
@@ -114,6 +122,50 @@ struct AppShellTests {
         try #require(window.contentView).addSubview(tab.controller.view)
         defer { tab.controller.view.removeFromSuperview() }
         #expect(window.makeFirstResponder(sidebarList))
+        model.isSidebarFocused = true
+        await flushMainAsync()
+        model.needsTerminalFocus = false
+
+        model.isSidebarVisible = false
+        await flushMainAsync()
+
+        #expect(model.needsTerminalFocus)
+    }
+
+    @Test func hidingTheSidebarLeavesFocusOnAControlOutsideIt() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        let tab = try #require(model.newTab(in: try fixture.directory("project")))
+        defer { model.closeAllTabsAndWait() }
+        let window = makeClosableWindow()
+        let panelDivider = FocusableView()
+        try #require(window.contentView).addSubview(panelDivider)
+        try #require(window.contentView).addSubview(tab.controller.view)
+        defer { tab.controller.view.removeFromSuperview() }
+        #expect(window.makeFirstResponder(panelDivider))
+        await flushMainAsync()
+        model.needsTerminalFocus = false
+
+        model.isSidebarVisible = false
+        await flushMainAsync()
+
+        #expect(!model.needsTerminalFocus)
+    }
+
+    @Test func hidingTheSidebarWithItsDividerFocusedGivesFocusBackToTheTerminal() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        let tab = try #require(model.newTab(in: try fixture.directory("project")))
+        defer { model.closeAllTabsAndWait() }
+        let window = makeClosableWindow()
+        let sidebarDivider = FocusableView()
+        try #require(window.contentView).addSubview(sidebarDivider)
+        try #require(window.contentView).addSubview(tab.controller.view)
+        defer { tab.controller.view.removeFromSuperview() }
+        #expect(window.makeFirstResponder(sidebarDivider))
+        model.isSidebarDividerFocused = true
         await flushMainAsync()
         model.needsTerminalFocus = false
 
