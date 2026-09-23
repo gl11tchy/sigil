@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import SigilKit
+import os
 
 /// Outbound-only encrypted remote control; no LAN listener.
 @MainActor
@@ -110,6 +111,8 @@ final class RemoteControl {
                     socket.maximumMessageSize = 110_000
                     self.socket = socket
                     socket.resume()
+                    let keepAlive = Task { await Self.keepAlive(socket) }
+                    defer { keepAlive.cancel() }
                     var peer: String?
                     var routed = false
                     while !Task.isCancelled, self.generation == current {
@@ -206,6 +209,26 @@ final class RemoteControl {
         expiresAt = nil
         status = "Off"
         error = forgotten ? nil : "Could not forget this phone. Try Disconnect again."
+    }
+
+    /// The relay drops a silent host while this Mac sleeps, and the FIN can be
+    /// lost. receive() then waits forever on a half-open socket. Cancel the
+    /// socket when a ping goes unanswered, so the loop reconnects.
+    nonisolated static func keepAlive(
+        _ socket: URLSessionWebSocketTask, interval: Duration = .seconds(15), timeout: Duration = .seconds(10)
+    ) async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: interval)
+            guard !Task.isCancelled else { return }
+            let answered = OSAllocatedUnfairLock(initialState: false)
+            socket.sendPing { error in answered.withLock { $0 = error == nil } }
+            try? await Task.sleep(for: timeout)
+            guard !Task.isCancelled else { return }
+            guard answered.withLock({ $0 }) else {
+                socket.cancel(with: .goingAway, reason: nil)
+                return
+            }
+        }
     }
 
     private func restoredSession(for origin: URL) -> RemoteSession {

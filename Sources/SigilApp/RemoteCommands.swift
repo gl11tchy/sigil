@@ -63,6 +63,8 @@ enum RemoteCommands {
                         GrokPaths.canonicalPath($0.cwd) == GrokPaths.canonicalPath(folder)
                     })
                 else { return failure(request, "Choose a project folder.") }
+                guard AppModel.isUsableDirectory(URL(fileURLWithPath: project.cwd))
+                else { return failure(request, "Restore the folder on your Mac, then try again.") }
                 let remembered = model.settings.defaultDirectory
                 let focused = model.settings.focusedProjectPath
                 guard model.newTab(in: URL(fileURLWithPath: project.cwd)) != nil else {
@@ -74,6 +76,8 @@ enum RemoteCommands {
                 if model.settings.focusedProjectPath != focused {
                     model.settings.focusedProjectPath = focused
                 }
+            } else if !AppModel.isUsableDirectory(model.newSessionDirectory) {
+                return failure(request, "Restore the folder on your Mac, then try again.")
             } else if model.newTab(in: model.newSessionDirectory) == nil {
                 return failure(request, "Could not start a session. Check Sigil on your Mac.")
             }
@@ -93,6 +97,13 @@ enum RemoteCommands {
                     $0.id == id && GrokPaths.canonicalPath($0.cwd) == wanted
                 })
             else { return failure(request, "That chat is not available.") }
+            // AppModel reports these with a modal alert, which would block this loop.
+            if !model.isOpen(session) {
+                guard model.settings.executableExists
+                else { return failure(request, "Restore the Grok CLI on your Mac, then try again.") }
+                guard AppModel.isUsableDirectory(URL(fileURLWithPath: session.cwd))
+                else { return failure(request, "Restore the folder on your Mac, then try again.") }
+            }
             model.open(session)
             let opened = model.tabs.contains {
                 $0.sessionID == session.id

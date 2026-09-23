@@ -2350,7 +2350,7 @@ final class AppModel {
             || info.arguments.contains { $0.contains(".xctest") }
     }
 
-    private static func isUsableDirectory(_ url: URL) -> Bool {
+    static func isUsableDirectory(_ url: URL) -> Bool {
         var isDirectory: ObjCBool = false
         return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
             && isDirectory.boolValue

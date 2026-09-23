@@ -628,6 +628,51 @@ test('a snapshot with no overlap keeps the previous tail', async () => {
   assert.match(text, /NEW_WINDOW_ONLY/);
 });
 
+test('a sliding snapshot under a fixed footer keeps each line once', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  const lines = Array.from({ length: 40 }, (_, index) => `line ${String(index).padStart(3, '0')} of the streamed answer`);
+  const snapshot = step => lines.slice(step * 3, step * 3 + 20).join('\n') + `\n\nFOOTER Thinking… ${9 + step}s`;
+  for (let step = 0; step < 6; step++) {
+    await page.fireTimer(1000);
+    const poll = socket.sent.at(-1);
+    socket.receive({ data: JSON.stringify({
+      challenge: poll.challenge, sequence: poll.sequence, ok: true,
+      state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'working' }], selectedTabID: 'tab-1', terminal: snapshot(step) },
+    }) });
+    await settle();
+  }
+  const text = page.element('terminal').textContent;
+  for (const line of lines.slice(0, 35)) assert.equal(text.split(line).length - 1, 1, line);
+  assert.equal(text.split('FOOTER').length - 1, 1);
+  assert.match(text, /FOOTER Thinking… 14s$/);
+});
+
+test('a repeated block keeps the text between its copies when the snapshot slides', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  const block = Array.from({ length: 8 }, (_, index) => `    at frame${index} (worker.js:${index + 10})`).join('\n');
+  const snapshots = [
+    `PREFIX_LINE\n${block}\nUNIQUE_BETWEEN_COPIES\n${block}\n\nFOOTER Thinking… 9s`,
+    `${block}\nNEW_AFTER_SECOND_COPY\n\nFOOTER Thinking… 10s`,
+  ];
+  for (const terminal of snapshots) {
+    await page.fireTimer(1000);
+    const poll = socket.sent.at(-1);
+    socket.receive({ data: JSON.stringify({
+      challenge: poll.challenge, sequence: poll.sequence, ok: true,
+      state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'working' }], selectedTabID: 'tab-1', terminal },
+    }) });
+    await settle();
+  }
+  const text = page.element('terminal').textContent;
+  for (const marker of ['PREFIX_LINE', 'UNIQUE_BETWEEN_COPIES', 'NEW_AFTER_SECOND_COPY']) {
+    assert.equal(text.split(marker).length - 1, 1, marker);
+  }
+  assert.equal(text.split('at frame0 ').length - 1, 2);
+  assert.equal(text.split('FOOTER').length - 1, 1);
+});
+
 test('a redraw replaces the live tail instead of appending it', async () => {
   const page = await browser();
   const socket = await page.authorize();

