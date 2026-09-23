@@ -144,6 +144,19 @@ final class BridgeServerTests: XCTestCase {
         XCTAssertEqual(env.delegate.listedPeers, [])
     }
 
+    func testSessionOnlyPeerIsRefused() async throws {
+        let env = try TestEnv()
+        defer { env.tearDown() }
+
+        let response = try await env.roundTrip(
+            BridgeRequest(method: .listTabs, from: BridgePeer(sessionID: "sess-1"))
+        )
+
+        XCTAssertEqual(response.ok, false)
+        XCTAssertEqual(response.error, "this client was not launched by Sigil")
+        XCTAssertEqual(env.delegate.listedPeers, [])
+    }
+
     func testGarbageFrameLeavesServerAlive() async throws {
         let env = try TestEnv()
         defer { env.tearDown() }

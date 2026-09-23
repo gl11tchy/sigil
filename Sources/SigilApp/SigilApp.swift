@@ -6,28 +6,25 @@ import SwiftUI
 @main
 struct SigilApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @State private var model = AppModel()
+    @State private var model: AppModel
+
+    init() {
+        // A Dock launch lacks the profile's GROK_HOME, but the CLI, started
+        // through the login shell, has it. Adopt it before the model reads it.
+        if ProcessInfo.processInfo.environment["GROK_HOME"]?.isEmpty ?? true,
+            let grokHome = GrokPaths.loginShellGrokHome()
+        {
+            setenv("GROK_HOME", grokHome, 1)
+        }
+        _model = State(initialValue: AppModel())
+    }
 
     var body: some Scene {
         WindowGroup {
-            RootView(model: model)
-                .frame(
-                    minWidth: WindowColumns.minimumWidth(
-                        sidebarVisible: model.isSidebarVisible,
-                        panelVisible: model.panel.isVisible
-                    ),
-                    minHeight: 460
-                )
-                .background(
-                    WindowCloseGuard {
-                        model.tabs.contains(where: \.shouldWarnBeforeStopping)
-                            || model.panel.shellHasForegroundJob
-                    }
-                )
-                .onAppear {
-                    delegate.model = model
-                    delegate.startRemoteIdleSleep(model)
-                }
+            Self.mainWindow(model: model) {
+                delegate.model = model
+                delegate.startRemoteIdleSleep(model)
+            }
         }
         .windowStyle(.hiddenTitleBar)
         .commands { GrokCommands(model: model) }
@@ -35,6 +32,24 @@ struct SigilApp: App {
         Settings {
             SettingsView(model: model)
         }
+    }
+
+    /// The window's content. SwiftUI names the window it saves and restores
+    /// after this type, so a new modifier here strands the window an earlier
+    /// build saved, and the app launches with none. Add modifiers in
+    /// `RootView` instead.
+    @MainActor static func mainWindow(
+        model: AppModel, onAppear: @escaping () -> Void
+    ) -> some View {
+        RootView(model: model)
+            .frame(
+                minWidth: WindowColumns.minimumWidth(
+                    sidebarVisible: model.isSidebarVisible,
+                    panelVisible: model.panel.isVisible
+                ),
+                minHeight: 460
+            )
+            .onAppear(perform: onAppear)
     }
 }
 

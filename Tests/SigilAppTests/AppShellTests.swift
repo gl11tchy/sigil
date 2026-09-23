@@ -17,6 +17,21 @@ struct AppShellTests {
         #expect(!NSWindow.allowsAutomaticWindowTabbing)
     }
 
+    /// Builds before the close guard saved their window under this name. A
+    /// launch that restores such a window finds no match for a new name and
+    /// opens no window at all.
+    @Test func theWindowKeepsTheNameEarlierBuildsSavedItUnder() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let window = SigilApp.mainWindow(model: fixture.model()) {}
+
+        #expect(
+            String(reflecting: type(of: window))
+                == "SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, "
+                + "SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>"
+        )
+    }
+
     @Test func errorAlertsShowTheirInstruction() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }

@@ -117,6 +117,62 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func restoreKeepsEachTabsChosenModelAndEffort() throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
+        defer { fixture.cleanup() }
+        fixture.settings.model = "model-a"
+        fixture.settings.effort = "low"
+        let chosen = try fixture.directory("chosen")
+        let older = try fixture.directory("older")
+        try fixture.createSession(id: "older-id", cwd: older)
+
+        let first = fixture.model()
+        let tab = try #require(first.newTab(in: chosen, model: "model-b", effort: "high"))
+        let sessionID = try #require(tab.sessionID)
+        try fixture.createSession(id: sessionID, cwd: chosen)
+        var snapshot = fixture.settings.openTabs
+        first.closeAllTabsAndWait()
+        // An entry saved before tabs kept their model falls back to Settings.
+        snapshot.tabs.append(.init(sessionID: "older-id", cwd: older.path))
+        fixture.settings.openTabs = snapshot
+
+        let second = fixture.model()
+        defer { second.closeAllTabsAndWait() }
+        second.restoreOpenTabs()
+        let restored = try #require(second.tabs.first { $0.sessionID == sessionID })
+        #expect(restored.spec.model == "model-b")
+        #expect(restored.spec.reasoningEffort == "high")
+        let legacy = try #require(second.tabs.first { $0.sessionID == "older-id" })
+        #expect(legacy.spec.model == "model-a")
+        #expect(legacy.spec.reasoningEffort == "low")
+    }
+
+    @Test @MainActor
+    func restoreKeepsATabsChosenCLIDefault() throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
+        defer { fixture.cleanup() }
+        fixture.settings.model = "model-a"
+        fixture.settings.effort = "low"
+        let chosen = try fixture.directory("chosen")
+
+        let first = fixture.model()
+        // "CLI default" in the new-session sheet overrides the Settings default.
+        let tab = try #require(first.newTab(in: chosen, model: "", effort: ""))
+        let sessionID = try #require(tab.sessionID)
+        try fixture.createSession(id: sessionID, cwd: chosen)
+        let snapshot = fixture.settings.openTabs
+        first.closeAllTabsAndWait()
+        fixture.settings.openTabs = snapshot
+
+        let second = fixture.model()
+        defer { second.closeAllTabsAndWait() }
+        second.restoreOpenTabs()
+        let restored = try #require(second.tabs.first { $0.sessionID == sessionID })
+        #expect(restored.spec.model == nil)
+        #expect(restored.spec.reasoningEffort == nil)
+    }
+
+    @Test @MainActor
     func unavailableRestoredTabIsNotErased() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
@@ -273,7 +329,7 @@ struct AppModelTests {
 
         #expect(model.tabs.count == 1)
         #expect(model.tabs[0].workingDirectory.resolvingSymlinksInPath().path == cwdB.path)
-        #expect(fixture.settings.openTabs.tabs == [.init(sessionID: id, cwd: cwdB.path)])
+        #expect(fixture.settings.openTabs.tabs == [.init(sessionID: id, cwd: cwdB.path, model: "", effort: "")])
         #expect(fixture.settings.openTabs.selectedCWD == cwdB.path)
         model.closeAllTabsAndWait()
     }
@@ -3436,6 +3492,8 @@ struct AppModelTests {
         try fixture.writeListedSession(
             id: "new", cwd: cwd.path, summary: "New", updatedAt: "2026-08-01T00:00:00Z")
         await fixture.store.reload()
+        // Fixture folders are temporary, which the sidebar treats as worktrees.
+        fixture.settings.showWorktreeSessions = true
         let orphanPath = fixture.root.appendingPathComponent("nowhere").path
         let legacy = [cwd.path: "folder note", orphanPath: "orphan note"]
         fixture.defaults.set(try JSONEncoder().encode(legacy), forKey: "panel.notes")
@@ -3451,12 +3509,166 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func sidebarListChangesKeepAnotherRunningCopysEdits() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let elsewhere = try fixture.directory("elsewhere")
+        for id in ["mine", "theirs", "archive-me", "their-archive"] {
+            try fixture.writeListedSession(id: id, cwd: cwd.path, summary: id)
+        }
+        try fixture.writeListedSession(id: "far", cwd: elsewhere.path, summary: "Far")
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        func session(_ id: String) throws -> GrokSession {
+            try #require(fixture.store.sessions.first { $0.id == id })
+        }
+        // A second running copy of the app shares these defaults and changes
+        // every list after this copy loaded them.
+        let otherCopy = AppSettings(defaults: fixture.defaults)
+        otherCopy.pinnedConversations = [.init(sessionID: "theirs", cwd: cwd.path)]
+        otherCopy.pinnedProjects = [elsewhere.path]
+        otherCopy.archivedConversations = [.init(sessionID: "their-archive", cwd: cwd.path)]
+        otherCopy.conversationNames = [.init(sessionID: "theirs", cwd: cwd.path, name: "Theirs")]
+
+        model.pin(try session("mine"))
+        model.pin(
+            SidebarProject(
+                id: cwd.path, name: "project", displayPath: cwd.path, cwd: cwd.path, sessions: [],
+                updatedAt: Date()))
+        model.archive(try session("archive-me"))
+        model.rename(try session("mine"), to: "Mine")
+        model.pruneMissingPins()
+
+        let stored = AppSettings(defaults: fixture.defaults)
+        #expect(Set(stored.pinnedConversations.map(\.sessionID)) == ["mine", "theirs"])
+        #expect(Set(stored.pinnedProjects) == [cwd.path, elsewhere.path])
+        #expect(Set(stored.archivedConversations.map(\.sessionID)) == ["archive-me", "their-archive"])
+        #expect(Set(stored.conversationNames.map(\.name)) == ["Mine", "Theirs"])
+    }
+
+    @Test @MainActor
+    func pruneKeepsAnotherCopysNewEntriesUntilAScanCouldSeeThem() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        try fixture.writeListedSession(id: "known", cwd: cwd.path, summary: "Known")
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        // Another running copy creates a conversation after this copy's last
+        // scan, then pins, archives and names it.
+        let otherCopy = AppSettings(defaults: fixture.defaults)
+        let fresh = OpenTabsSnapshot.Entry(sessionID: "fresh", cwd: cwd.path)
+        let freshFolder = fixture.root.appendingPathComponent("fresh-folder").path
+        otherCopy.pinnedConversations = [fresh]
+        otherCopy.pinnedProjects = [freshFolder]
+        otherCopy.archivedConversations = [fresh]
+        otherCopy.conversationNames = [.init(sessionID: "fresh", cwd: cwd.path, name: "Fresh")]
+
+        model.pruneMissingPins()
+
+        var stored = AppSettings(defaults: fixture.defaults)
+        #expect(stored.pinnedConversations == [fresh])
+        #expect(stored.pinnedProjects == [freshFolder])
+        #expect(stored.archivedConversations == [fresh])
+        #expect(stored.conversationNames.map(\.name) == ["Fresh"])
+
+        // A scan that began after this copy read them still finds nothing,
+        // so they are stale and go.
+        await fixture.store.reload()
+        model.pruneMissingPins()
+
+        stored = AppSettings(defaults: fixture.defaults)
+        #expect(stored.pinnedConversations.isEmpty)
+        #expect(stored.pinnedProjects.isEmpty)
+        #expect(stored.archivedConversations.isEmpty)
+        #expect(stored.conversationNames.isEmpty)
+    }
+
+    @Test @MainActor
+    func legacyFolderNotesSkipConversationsTheSidebarHides() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let hiddenOnly = try fixture.directory("hidden-only")
+        try fixture.writeListedSession(
+            id: "real", cwd: cwd.path, summary: "Real", updatedAt: "2026-07-01T00:00:00Z")
+        try fixture.writeListedSession(
+            id: "archived", cwd: cwd.path, summary: "Archived", updatedAt: "2026-07-15T00:00:00Z")
+        try fixture.writeListedSession(
+            id: "empty", cwd: cwd.path, summary: "", messages: 2, updatedAt: "2026-08-01T00:00:00Z")
+        try fixture.writeListedSession(
+            id: "child", cwd: cwd.path, summary: "Child", sessionKind: "subagent",
+            updatedAt: "2026-08-15T00:00:00Z")
+        try fixture.writeListedSession(
+            id: "only-child", cwd: hiddenOnly.path, summary: "Child", sessionKind: "subagent")
+        let withTab = try fixture.directory("with-tab")
+        try fixture.writeListedSession(
+            id: "open-older", cwd: withTab.path, summary: "Open", updatedAt: "2026-07-01T00:00:00Z")
+        try fixture.writeListedSession(
+            id: "closed-newer", cwd: withTab.path, summary: "Closed", updatedAt: "2026-08-01T00:00:00Z")
+        await fixture.store.reload()
+        // Fixture folders are temporary, which the sidebar treats as worktrees.
+        fixture.settings.showWorktreeSessions = true
+        fixture.settings.archivedConversations = [.init(sessionID: "archived", cwd: cwd.path)]
+        let legacy = [cwd.path: "folder note", hiddenOnly.path: "kept note", withTab.path: "tab note"]
+        fixture.defaults.set(try JSONEncoder().encode(legacy), forKey: "panel.notes")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        model.open(try #require(fixture.store.sessions.first { $0.id == "open-older" }))
+
+        model.migrateLegacyPanelNotes()
+
+        // A conversation open in a tab wins over a newer closed one.
+        #expect(model.panel.notes(forSessionID: "open-older", cwd: withTab.path) == "tab note")
+        #expect(model.panel.notes(forSessionID: "closed-newer", cwd: withTab.path) == "")
+
+        #expect(model.panel.notes(forSessionID: "real", cwd: cwd.path) == "folder note")
+        for hidden in ["archived", "empty", "child"] {
+            #expect(model.panel.notes(forSessionID: hidden, cwd: cwd.path) == "")
+        }
+        // A folder with only hidden conversations keeps its note for later.
+        #expect(model.panel.notes(forSessionID: "only-child", cwd: hiddenOnly.path) == "")
+        #expect(model.panel.legacyFolderNotes == [hiddenOnly.path: "kept note"])
+    }
+
+    @Test @MainActor
+    func legacyFolderNotesFollowTheSidebarFilterSettings() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let children = try fixture.directory("children")
+        try fixture.writeListedSession(
+            id: "child", cwd: children.path, summary: "Child", sessionKind: "subagent")
+        await fixture.store.reload()
+        fixture.settings.showSubagentSessions = true
+        fixture.defaults.set(
+            try JSONEncoder().encode([children.path: "child note"]), forKey: "panel.notes")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        // Fixture folders are temporary, so a hidden worktree cannot take the note.
+        model.migrateLegacyPanelNotes()
+        #expect(model.panel.notes(forSessionID: "child", cwd: children.path) == "")
+        #expect(model.panel.legacyFolderNotes == [children.path: "child note"])
+
+        // Once the sidebar lists it, a subagent conversation takes the note.
+        fixture.settings.showWorktreeSessions = true
+        model.migrateLegacyPanelNotes()
+        #expect(model.panel.notes(forSessionID: "child", cwd: children.path) == "child note")
+        #expect(model.panel.legacyFolderNotes.isEmpty)
+    }
+
+    @Test @MainActor
     func legacyMigrationAppendsWhenTheTargetConversationAlreadyHasANote() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
         let cwd = try fixture.directory("project")
         try fixture.writeListedSession(id: "new", cwd: cwd.path, summary: "New")
         await fixture.store.reload()
+        // Fixture folders are temporary, which the sidebar treats as worktrees.
+        fixture.settings.showWorktreeSessions = true
         let model = fixture.model()
         defer { model.closeAllTabsAndWait() }
         // The user typed a note before the migration ran.
@@ -3479,6 +3691,8 @@ struct AppModelTests {
         let cwd = try fixture.directory("project")
         try fixture.writeListedSession(id: "new", cwd: cwd.path, summary: "New")
         await fixture.store.reload()
+        // Fixture folders are temporary, which the sidebar treats as worktrees.
+        fixture.settings.showWorktreeSessions = true
         let model = fixture.model()
         defer { model.closeAllTabsAndWait() }
         model.panel.setNotes("TODO later", forSessionID: "new", cwd: cwd.path)
@@ -3499,6 +3713,8 @@ struct AppModelTests {
         let cwd = try fixture.directory("project")
         try fixture.writeListedSession(id: "new", cwd: cwd.path, summary: "New")
         await fixture.store.reload()
+        // Fixture folders are temporary, which the sidebar treats as worktrees.
+        fixture.settings.showWorktreeSessions = true
         let model = fixture.model()
         defer { model.closeAllTabsAndWait() }
         model.panel.setNotes("mine\n\n---\n\nfolder note", forSessionID: "new", cwd: cwd.path)
