@@ -129,6 +129,14 @@ private func loginShellEnvironment(zshrc: String) throws -> (home: URL, environm
     #expect(Date().timeIntervalSince(start) < 2)
 }
 
+@Test func loginShellGrokHomeReadsPastAProfileThatFillsThePipe() throws {
+    // More output than a pipe buffer holds must not stall the shell.
+    let shell = try loginShellEnvironment(
+        zshrc: "/usr/bin/head -c 300000 /dev/zero | /usr/bin/tr '\\0' x\nexport GROK_HOME=/chatty\n")
+    defer { try? FileManager.default.removeItem(at: shell.home) }
+    #expect(GrokPaths.loginShellGrokHome(environment: shell.environment) == "/chatty")
+}
+
 @Test func loginShellGrokHomeIsNilWhenTheProfileSetsNone() throws {
     let shell = try loginShellEnvironment(zshrc: "echo 'GROK_HOME is not here'\n")
     defer { try? FileManager.default.removeItem(at: shell.home) }

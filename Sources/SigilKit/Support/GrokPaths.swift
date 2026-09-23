@@ -66,20 +66,30 @@ public enum GrokPaths {
             return nil
         }
         try? output.fileHandleForWriting.close()
-        guard exited.wait(timeout: .now() + timeout) == .success else {
-            // An interactive shell ignores SIGTERM.
-            kill(process.processIdentifier, SIGKILL)
-            return nil
-        }
         // A profile helper started in the background may still hold stdout,
         // so read only what is already there instead of waiting for EOF.
         let descriptor = output.fileHandleForReading.fileDescriptor
         _ = fcntl(descriptor, F_SETFL, fcntl(descriptor, F_GETFL) | O_NONBLOCK)
         var data = Data()
         var chunk = [UInt8](repeating: 0, count: 16_384)
-        while case let count = read(descriptor, &chunk, chunk.count), count > 0 {
-            data.append(contentsOf: chunk[0..<count])
+        func drain() {
+            while case let count = read(descriptor, &chunk, chunk.count), count > 0 {
+                data.append(contentsOf: chunk[0..<count])
+            }
         }
+        // Keep draining while the shell runs: a chatty profile blocks once
+        // the pipe buffer is full and would never reach the marker.
+        let deadline = DispatchTime.now() + timeout
+        while exited.wait(timeout: .now() + .milliseconds(10)) == .timedOut {
+            drain()
+            guard DispatchTime.now() < deadline else {
+                // An interactive shell ignores SIGTERM.
+                kill(process.processIdentifier, SIGKILL)
+                try? output.fileHandleForReading.close()
+                return nil
+            }
+        }
+        drain()
         try? output.fileHandleForReading.close()
         guard process.terminationStatus == 0 else { return nil }
         let line = String(decoding: data, as: UTF8.self)
