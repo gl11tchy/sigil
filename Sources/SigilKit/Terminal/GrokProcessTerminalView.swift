@@ -38,6 +38,11 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
 
     override func paste(_ sender: Any) {
         if pasteDroppedContent(from: NSPasteboard.general) { return }
+        // Finder also puts a refused file's name on the pasteboard as text.
+        if TerminalDrop.hasUnsafeFileName(TerminalDrop.fileURLs(from: NSPasteboard.general)) {
+            NSSound.beep()
+            return
+        }
         super.paste(sender)
     }
 
