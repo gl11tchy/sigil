@@ -334,9 +334,12 @@ public final class TerminalController {
     /// One-based index of the current hit, or `0` when there are none.
     public var findMatchIndex: Int { search.current.map { $0 + 1 } ?? 0 }
 
-    /// Sets a plain-text query and selects the first hit, if any.
+    /// Sets a plain-text query and selects the newest hit at or above the
+    /// bottom of the viewport, so the view stays on the output being read.
     public func setFindQuery(_ query: String) {
-        search.setQuery(query, in: findBufferRows())
+        let terminal = terminalView.getTerminal()
+        let viewportBottom = terminal.buffer.yDisp + terminal.rows - 1
+        search.setQuery(query, in: findBufferRows(), startingAtOrAbove: viewportBottom)
         applyFindSelection()
     }
 

@@ -357,6 +357,20 @@ struct TerminalControllerTests {
         #expect(controller.view.accessibilityLabel() == "Shell terminal")
     }
 
+    @Test func findStartsAtTheNewestHitOnScreenNotTheOldestInScrollback() throws {
+        let controller = TerminalController()
+        let view = try #require(controller.view as? TerminalView)
+        let filler = (0..<300).map { "filler \($0)" }.joined(separator: "\r\n")
+        view.feed(text: "needle old\r\n" + filler + "\r\nneedle new\r\n")
+        let top = view.getTerminal().buffer.yDisp
+
+        controller.setFindQuery("needle")
+
+        #expect(controller.findMatchCount == 2)
+        #expect(controller.findMatchIndex == 2)
+        #expect(view.getTerminal().buffer.yDisp == top)
+    }
+
     @Test func anAlreadyReapedChildIsGoneEvenIfItsPIDCouldBeReused() throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/true")
