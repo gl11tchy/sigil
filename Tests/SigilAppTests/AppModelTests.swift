@@ -224,6 +224,28 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func aTabThatWasWorkingDuringAThemeChangeRelaunchesWhenItsTurnEnds() async throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let original = try #require(model.newTab(in: cwd))
+        let sessionID = try #require(original.sessionID)
+        original.noteTurnStarted()
+        fixture.settings.themeName = TerminalTheme.twitch.name
+        model.applyTheme()
+        #expect(model.tabs.first?.id == original.id)
+
+        try await Task.sleep(for: TerminalTab.idleFallbackSilence + .milliseconds(500))
+
+        let relaunched = try #require(model.tabs.first)
+        #expect(relaunched.id != original.id)
+        #expect(relaunched.sessionID == sessionID)
+        #expect(relaunched.spec.themeName == TerminalTheme.twitch.grokThemeName)
+    }
+
+    @Test @MainActor
     func failedTrashRestartsOnlyStoppedTabAndPreservesSelectionAndSnapshot() throws {
         let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
         defer { fixture.cleanup() }

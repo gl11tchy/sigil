@@ -49,6 +49,8 @@ final class TerminalTab: Identifiable {
     private(set) var hasUnseenActivity = false
     private(set) var bridgeInbox: [BridgeInboxItem] = []
     var onUnseenActivityChange: (() -> Void)?
+    /// Called when a turn ends, so work held back until then can run.
+    var onSettle: (() -> Void)?
     private var hasUnseenTurnCompletion = false
     private var unseenBridgeItemIDs: Set<UUID> = []
 
@@ -246,6 +248,7 @@ final class TerminalTab: Identifiable {
         stopTurnTracking()
         activity = .idle
         if !isSelected() { markUnseenTurnCompletion() }
+        onSettle?()
     }
 
     private func armIdleFallback() {

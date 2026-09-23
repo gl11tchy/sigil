@@ -36,6 +36,8 @@ final class AppModel {
     var isFindBarVisible = false
     /// True when a tab was selected while the main window could not take focus.
     var needsTerminalFocus = false
+    /// Grok tabs that kept the old theme because they were busy.
+    @ObservationIgnored private var themeRestartsWhenSettled: Set<TerminalTab.ID> = []
     var findQuery = ""
     var findMatchIndex = 0
     var findMatchCount = 0
@@ -1363,6 +1365,9 @@ final class AppModel {
         let tabID = UUID()
         let tab = TerminalTab(id: tabID, spec: tagged(spec, tabID: tabID), settings: settings)
         tab.onUnseenActivityChange = { [weak self] in self?.refreshDockIndicator() }
+        tab.onSettle = { [weak self, weak tab] in
+            if let self, let tab { self.restartForThemeWhenSettled(tab) }
+        }
         tabs.append(tab)
         selectedTabID = tab.id
         if !isRestoringTabs { clearDeferredSelection() }
@@ -1424,6 +1429,9 @@ final class AppModel {
         let tabID = UUID()
         let tab = TerminalTab(id: tabID, spec: tagged(spec, tabID: tabID), settings: settings)
         tab.onUnseenActivityChange = { [weak self] in self?.refreshDockIndicator() }
+        tab.onSettle = { [weak self, weak tab] in
+            if let self, let tab { self.restartForThemeWhenSettled(tab) }
+        }
         tab.sessionTitle = old.sessionTitle
         tab.restoreUnseenActivity(from: old)
         let newID = tab.id
@@ -1887,8 +1895,29 @@ final class AppModel {
         let vars = settings.theme.grokThemeEnvironment
         for tab in tabs where tab.spec.provider == .grokBuild {
             if tab.spec.themeName == name, tab.spec.themeVariables == vars { continue }
-            if tab.shouldWarnBeforeStopping { continue }
+            if tab.shouldWarnBeforeStopping {
+                themeRestartsWhenSettled.insert(tab.id)
+                continue
+            }
             restartTab(id: tab.id)
+        }
+    }
+
+    /// A tab that kept the old theme because it was busy relaunches on the new
+    /// one once it settles, unless the theme was changed back meanwhile.
+    private func restartForThemeWhenSettled(_ tab: TerminalTab) {
+        guard themeRestartsWhenSettled.contains(tab.id) else { return }
+        DispatchQueue.main.async { [weak self, weak tab] in
+            guard let self, let tab, self.tabs.contains(where: { $0 === tab }),
+                !tab.shouldWarnBeforeStopping
+            else { return }
+            self.themeRestartsWhenSettled.remove(tab.id)
+            let theme = self.settings.theme
+            guard
+                tab.spec.themeName != theme.grokThemeName
+                    || tab.spec.themeVariables != theme.grokThemeEnvironment
+            else { return }
+            self.restartTab(id: tab.id)
         }
     }
 
