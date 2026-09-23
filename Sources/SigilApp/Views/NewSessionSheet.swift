@@ -23,6 +23,13 @@ enum NewSessionLaunch: Equatable {
     static func action(selected: CLIProvider, tapped: CLIProvider) -> Action {
         selected == tapped ? .start(tapped) : .select(tapped)
     }
+
+    /// Left and right arrows walk the row in screen order and stop at its ends.
+    static func provider(after current: CLIProvider, movingBy offset: Int) -> CLIProvider {
+        let all = CLIProvider.allCases
+        guard let index = all.firstIndex(of: current) else { return current }
+        return all[min(max(index + offset, all.startIndex), all.index(before: all.endIndex))]
+    }
 }
 
 /// Chooses a provider and starts its CLI in the requested folder.
@@ -38,6 +45,7 @@ struct NewSessionSheet: View {
     @State private var effort = ""
     @State private var models = GrokModelCatalog.fallback
     @FocusState private var focusedProvider: CLIProvider?
+    @FocusState private var isProviderRowFocused: Bool
 
     init(model: AppModel, provider: CLIProvider = .grokBuild) {
         self.model = model
@@ -112,6 +120,7 @@ struct NewSessionSheet: View {
         .environment(\.palette, Palette(theme: model.settings.theme))
         .tint(Palette(theme: model.settings.theme).accent)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: provider)
+        .defaultFocus($isProviderRowFocused, true)
         .onAppear {
             directory = model.pendingSessionDirectory ?? model.newSessionDirectory
             modelName = model.settings.model.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -144,6 +153,16 @@ struct NewSessionSheet: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Provider")
+        .focusable()
+        .focusEffectDisabled()
+        .focused($isProviderRowFocused)
+        .onKeyPress(.leftArrow) { moveProvider(by: -1) }
+        .onKeyPress(.rightArrow) { moveProvider(by: 1) }
+    }
+
+    private func moveProvider(by offset: Int) -> KeyPress.Result {
+        provider = NewSessionLaunch.provider(after: provider, movingBy: offset)
+        return .handled
     }
 
     private var folderRow: some View {
