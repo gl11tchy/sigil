@@ -2231,29 +2231,36 @@ private func textTruncationMode(_ truncation: SearchMatchHighlight.Truncation) -
 }
 
 /// Accent on matched runs only. Empty query (or no hit in this string) is plain `Text`.
-private struct SearchHighlightedText: View {
+struct SearchHighlightedText: View {
     let runs: [SearchMatchHighlight.Run]
     let match: Color
     let rest: Color
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
 
     var body: some View {
         if runs.contains(where: \.isMatch) {
-            Text(Self.attributed(runs, match: match, rest: rest))
+            Text(
+                Self.attributed(
+                    runs, match: match, rest: rest, underlineMatches: differentiateWithoutColor))
         } else {
             Text(runs.map(\.text).joined())
                 .foregroundStyle(rest)
         }
     }
 
-    private static func attributed(
+    static func attributed(
         _ runs: [SearchMatchHighlight.Run],
         match: Color,
-        rest: Color
+        rest: Color,
+        underlineMatches: Bool
     ) -> AttributedString {
         var result = AttributedString()
         for run in runs {
             var piece = AttributedString(run.text)
             piece.foregroundColor = run.isMatch ? match : rest
+            // The accent sits close to the title's luminance, so a user who asked
+            // not to rely on color gets an underline on the matched characters.
+            if run.isMatch, underlineMatches { piece.underlineStyle = .single }
             result += piece
         }
         return result
