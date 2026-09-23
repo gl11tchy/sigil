@@ -77,6 +77,7 @@ final class TerminalTab: Identifiable {
         self.id = id
         self.spec = spec
         self.controller = TerminalController(theme: settings.theme, fontSize: settings.fontSize)
+        controller.optionAsMetaKey = settings.optionAsMetaKey
         self.completionEventsURL =
             completionEventsURL
             ?? spec.sessionDirectory?.appendingPathComponent("updates.jsonl")

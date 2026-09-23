@@ -85,6 +85,16 @@ struct AppSettingsTests {
     }
 
     @Test @MainActor
+    func optionAsMetaKeyIsOffByDefaultAndRemembered() {
+        let defaults = isolatedDefaults()
+        defer { defaults.reset() }
+        let first = AppSettings(defaults: defaults.value)
+        #expect(!first.optionAsMetaKey)
+        first.optionAsMetaKey = true
+        #expect(AppSettings(defaults: defaults.value).optionAsMetaKey)
+    }
+
+    @Test @MainActor
     func persistedFontSizeIsClampedToTheSliderRange() {
         for (stored, expected) in [
             (-20.0, 8.0), (1000.0, 32.0), (Double.infinity, 13.0), (Double.nan, 13.0),
