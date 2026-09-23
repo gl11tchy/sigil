@@ -34,7 +34,7 @@ let findIndex = 0, findMatches = [], displayedOutput = null;
 let rawOutput = '', rawMode = false;
 let credential, bootstrap, newDeviceKey, socket, challenge, sequence = 0, selected;
 let selectedStatus = null, tabCount = 0;
-let connected = false, busy = false, stopped = false, reconnectTimer, pollTimer, connectTimer, generation = 0;
+let connected = false, busy = false, stopped = false, revoked = false, reconnectTimer, pollTimer, connectTimer, generation = 0;
 let commandEpoch = 0, reconnectDelay = 500;
 let incoming = Promise.resolve(), outgoing = Promise.resolve(), pending = new Map();
 // A modal sheet makes the page inert, so its errors show inside the sheet.
@@ -101,12 +101,14 @@ function updateControls() {
   $('raw-toggle').hidden = !selected;
   $('forget').hidden = !credential;
   $('reconnect').hidden = !credential || connected;
+  // After the Mac rejects the pairing, scanning again is the way back.
+  const waiting = Boolean(credential) && !revoked;
   const actions = $('welcome-actions');
-  if (actions) actions.hidden = Boolean(credential);
+  if (actions) actions.hidden = waiting;
   $('welcome-reconnect').hidden = !credential;
-  $('welcome').querySelector('h2').textContent = credential ? 'Reconnecting to your Mac' : 'Pick up where you left off.';
-  $('welcome').querySelector('p').textContent = credential ? 'Keep Sigil open and your Mac awake.' : 'Your sessions. Your tools. Away from your desk.';
-  $('welcome').querySelector('.pairing-steps').hidden = Boolean(credential);
+  $('welcome').querySelector('h2').textContent = revoked && credential ? 'Pair again' : credential ? 'Reconnecting to your Mac' : 'Pick up where you left off.';
+  $('welcome').querySelector('p').textContent = waiting ? 'Keep Sigil open and your Mac awake.' : 'Your sessions. Your tools. Away from your desk.';
+  $('welcome').querySelector('.pairing-steps').hidden = waiting;
   const standalone = isStandaloneApp();
   for (const id of ['standalone-hint', 'standalone-panel-hint']) {
     const hint = $(id);
@@ -628,7 +630,11 @@ function connect() {
       } else if (frame.error === 'unauthorized') {
         // A dropped pairing acknowledgement can leave the Mac already using the device key.
         if (bootstrap) { bootstrap = null; newDeviceKey = null; ws.close(); }
-        else { stopped = true; showError('Pairing expired or was disconnected. Scan a new code in Sigil.'); ws.close(); }
+        else {
+          stopped = true; revoked = true;
+          $('controls').hidden = true; $('welcome').hidden = false;
+          showError('Pairing expired or was disconnected. Scan a new code in Sigil.'); ws.close();
+        }
       } else if (frame.data) {
         const reply = await open(frame.data, credential.key, 'mac');
         if (current !== generation) return;
@@ -900,10 +906,10 @@ $('message').addEventListener('keydown', event => {
   void perform(() => sendText(true));
 });
 document.querySelectorAll('[data-key]').forEach(button => { button.onclick = () => void perform(() => request('key', button.dataset.key)); });
-$('reconnect').onclick = $('welcome-reconnect').onclick = () => { stopped = false; reconnectDelay = 500; connect(); };
+$('reconnect').onclick = $('welcome-reconnect').onclick = () => { stopped = false; revoked = false; reconnectDelay = 500; connect(); };
 $('forget').onclick = async () => {
   stopped = true; ++generation; clearTimeout(reconnectTimer); socket?.close(); offline();
-  credential = null; bootstrap = null; newDeviceKey = null; selected = null; drafts.clear(); tabsSignature = '';
+  credential = null; revoked = false; bootstrap = null; newDeviceKey = null; selected = null; drafts.clear(); tabsSignature = '';
   selectedStatus = null; tabCount = 0;
   $('keys').hidden = true; $('keys-toggle').setAttribute('aria-expanded', 'false');
   clearAttachments();
@@ -945,7 +951,7 @@ async function beginPair(pairing) {
   newDeviceKey = randomKey();
   credential = { room: pairing.room, key: await importKey(newDeviceKey) };
   await storage('put', credential);
-  stopped = false;
+  stopped = false; revoked = false;
   reconnectDelay = 500;
   updateControls();
   connect();
@@ -1022,7 +1028,7 @@ if ($('paste-link')) $('paste-link').onclick = async () => {
   $('pairing-link').focus();
   try {
     const text = await navigator.clipboard.readText();
-    if (credential) return;
+    if (credential && !revoked) return;
     const result = pairingFromText(text, location.origin);
     if (result?.room) { showError(''); await beginPair(result); return; }
     if (result?.error) showError(result.error);

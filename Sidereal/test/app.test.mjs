@@ -603,6 +603,19 @@ test('unauthorized without bootstrap stops automatic reconnect and asks for a ne
   assert.equal(page.element('status').textContent, 'Disconnected');
 });
 
+test('a rejected pairing shows Scan and Paste so the phone can pair again', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  socket.receive({ error: 'unauthorized' });
+  await settle();
+  assert.equal(page.element('welcome').hidden, false);
+  assert.equal(page.element('controls').hidden, true);
+  assert.equal(page.element('welcome-actions').hidden, false);
+  assert.equal(page.element('welcome-.pairing-steps').hidden, false);
+  assert.equal(page.element('welcome-h2').textContent, 'Pair again');
+  assert.match(page.element('error').textContent, /Scan a new code/);
+});
+
 
 test('routing uses a separate sealed first message, never the URL or the device key', async () => {
   const ticket = 'd'.repeat(64);
