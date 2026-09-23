@@ -18,6 +18,7 @@ struct SigilApp: App {
                     ),
                     minHeight: 460
                 )
+                .background(WindowCloseGuard { model.tabs.contains(where: \.shouldWarnBeforeStopping) })
                 .onAppear {
                     delegate.model = model
                     delegate.startRemoteIdleSleep(model)
@@ -44,6 +45,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // constructed still lands in a report. applicationDidFinishLaunching
         // runs after all of that and would already be too late.
         CrashReporter.install()
+    }
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        Self.turnOffWindowTabbing()
+    }
+
+    /// Every window would share one model, and a terminal view lives in only
+    /// one window. A native window tab would take the terminals from the first.
+    @MainActor static func turnOffWindowTabbing() {
+        NSWindow.allowsAutomaticWindowTabbing = false
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }

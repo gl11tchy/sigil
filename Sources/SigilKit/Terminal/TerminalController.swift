@@ -58,8 +58,8 @@ public final class TerminalController {
         }
         terminal.setAccessibilityElement(true)
         terminal.setAccessibilityRole(.textArea)
-        terminal.setAccessibilityLabel("Grok terminal")
-        terminal.setAccessibilityValue("")
+        terminal.setAccessibilityLabel("Terminal")
+        terminal.accessibilityText = { [weak self] in self?.accessibilitySnapshot() ?? "" }
         apply(theme: theme)
     }
 
@@ -106,6 +106,7 @@ public final class TerminalController {
         lastActivityFire = nil
         activityFlushTask?.cancel()
         activityFlushTask = nil
+        terminalView.setAccessibilityLabel("Shell terminal")
 
         let environment = spec.environment().map { "\($0.key)=\($0.value)" }
         let command = spec.hostCommand()
@@ -145,9 +146,6 @@ public final class TerminalController {
         terminalView.terminateHosted()
         isRunning = false
 
-        // Only replace a running escalation when there is a new child to chase;
-        // a second terminate() must not cancel the first one's escalation.
-        escalationTask?.cancel()
         escalationTask = Task { [weak self] in
             for delay in Self.escalationDelays {
                 try? await Task.sleep(for: delay)
@@ -336,9 +334,12 @@ public final class TerminalController {
     /// One-based index of the current hit, or `0` when there are none.
     public var findMatchIndex: Int { search.current.map { $0 + 1 } ?? 0 }
 
-    /// Sets a plain-text query and selects the first hit, if any.
+    /// Sets a plain-text query and selects the newest hit at or above the
+    /// bottom of the viewport, so the view stays on the output being read.
     public func setFindQuery(_ query: String) {
-        search.setQuery(query, in: findBufferRows())
+        let terminal = terminalView.getTerminal()
+        let viewportBottom = terminal.buffer.yDisp + terminal.rows - 1
+        search.setQuery(query, in: findBufferRows(), startingAtOrAbove: viewportBottom)
         applyFindSelection()
     }
 
@@ -481,11 +482,13 @@ public final class TerminalController {
         let windowEnd = rendered.index(approx, offsetBy: after)
         if windowStart < windowEnd {
             let endOnce =
-                endAnchor.isEmpty ? nil : rendered.range(of: endAnchor, options: .backwards)
+                endAnchor.isEmpty ? nil : rendered.range(of: endAnchor, options: [.backwards, .literal])
             var best: String.Index?
             var bestDistance = Int.max
             var search = windowStart
-            while search < windowEnd, let range = rendered.range(of: needle, range: search..<windowEnd) {
+            while search < windowEnd,
+                let range = rendered.range(of: needle, options: .literal, range: search..<windowEnd)
+            {
                 let matchesEnd =
                     endAnchor.isEmpty || (endOnce.map { range.lowerBound <= $0.lowerBound } ?? true)
                 if matchesEnd {
@@ -501,10 +504,11 @@ public final class TerminalController {
             }
             if let best { return best }
         }
-        guard !endAnchor.isEmpty, let end = rendered.range(of: endAnchor, options: .backwards) else {
+        guard !endAnchor.isEmpty, let end = rendered.range(of: endAnchor, options: [.backwards, .literal]) else {
             // A stale end anchor proves nothing, so keep the match nearest the loaded window.
-            let earlier = rendered.range(of: needle, options: .backwards, range: rendered.startIndex..<approx)
-            let later = rendered.range(of: needle, range: approx..<rendered.endIndex)
+            let earlier = rendered.range(
+                of: needle, options: [.backwards, .literal], range: rendered.startIndex..<approx)
+            let later = rendered.range(of: needle, options: .literal, range: approx..<rendered.endIndex)
             guard let earlier else { return later?.lowerBound }
             guard let later else { return earlier.lowerBound }
             let earlierGap = rendered.distance(from: earlier.lowerBound, to: approx)
@@ -512,7 +516,7 @@ public final class TerminalController {
             return earlierGap <= laterGap ? earlier.lowerBound : later.lowerBound
         }
         let region = rendered[..<end.upperBound]
-        return region.range(of: needle, options: .backwards)?.lowerBound
+        return region.range(of: needle, options: [.backwards, .literal])?.lowerBound
     }
 
     /// Finds the first missing row in O(log n), rather than walking all 10,000
@@ -700,7 +704,7 @@ extension TerminalController {
     }
 
     private func updateAccessibilitySnapshot() {
-        terminalView.setAccessibilityValue(accessibilitySnapshot())
+        NSAccessibility.post(element: terminalView, notification: .valueChanged)
     }
 
     private func handleProcessExit(_ rawStatus: Int32?) {
