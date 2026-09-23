@@ -1,0 +1,22 @@
+b84: sidebar search clear button, driven through System Events on process SigilUX
+
+Before: search field AXValue = "zzzq"
+Clear button present: AXHelp = "Clear search", AXSize = 20 x 20 pt
+
+AXPress on the clear button
+
+After: search field AXValue = ""
+Clear buttons remaining: 0
+
+AXGroup | t= | d= | h= | v= | en=
+  AXImage | t= | d= | h= | v= | en=true
+  AXTextField | t= | d=Search conversations | h= | v= | en=true
+  AXButton | t= | d= | h=New Session in /Users/Shared/sigil-ux/projects/acme-api (⌘T) | v= | en=true
+  AXButton | t= | d= | h=Back to projects | v= | en=true
+  AXScrollArea | t= | d= | h= | v= | en=
+    AXOpaqueProviderGroup | t= | d= | h= | v= | en=true
+      AXButton | t= | d= | h=Make the sidebar search rank folders too
+      AXButton | t= | d= | h=Summarise the acme-api service and its layout
+
+Hit-area check (the b84 change): query set again to "zzzq"; clear button AXPosition 512,302, AXSize 20x20; glyph is 10pt, centred at 522,312.
+Mouse click (harness click tool) at 514,304, inside the 20pt frame and outside the glyph: search AXValue = "", clear buttons = 0.
