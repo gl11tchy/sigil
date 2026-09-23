@@ -188,10 +188,13 @@ struct GrokCommands: Commands {
             Divider()
             Button("Increase Font Size") { model.adjustFontSize(by: 1) }
                 .keyboardShortcut("+", modifiers: .command)
+                .disabled(!model.canIncreaseFontSize)
             Button("Decrease Font Size") { model.adjustFontSize(by: -1) }
                 .keyboardShortcut("-", modifiers: .command)
+                .disabled(!model.canDecreaseFontSize)
             Button("Actual Size") { model.resetFontSize() }
                 .keyboardShortcut("0", modifiers: .command)
+                .disabled(!model.canResetFontSize)
             Divider()
             Button("Reload Conversations") { Task { await model.store.reload() } }
                 .keyboardShortcut("r", modifiers: .command)

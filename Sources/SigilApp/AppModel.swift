@@ -1846,6 +1846,11 @@ final class AppModel {
         applyAppearance()
     }
 
+    /// The View menu turns each font item off where it would do nothing.
+    var canIncreaseFontSize: Bool { settings.fontSize < 32 }
+    var canDecreaseFontSize: Bool { settings.fontSize > 8 }
+    var canResetFontSize: Bool { settings.fontSize != 13 }
+
     func applyAppearance() {
         // Sheets, alerts, menus, and the Settings window are system-rendered;
         // they follow the app appearance, so the shell picks it, not macOS.

@@ -3258,6 +3258,27 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func fontSizeMenuItemsTurnOffAtTheirLimits() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        model.settings.fontSize = 13
+        #expect(model.canIncreaseFontSize)
+        #expect(model.canDecreaseFontSize)
+        #expect(!model.canResetFontSize)
+
+        model.settings.fontSize = 32
+        #expect(!model.canIncreaseFontSize)
+        #expect(model.canResetFontSize)
+
+        model.settings.fontSize = 8
+        #expect(!model.canDecreaseFontSize)
+        #expect(model.canIncreaseFontSize)
+    }
+
+    @Test @MainActor
     func archivingASelectionArchivesEveryChat() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
