@@ -3242,6 +3242,22 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func newSessionInFolderAsksForTheFolderFirst() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let chosen = try fixture.directory("chosen")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        model.requestNewSessionInFolder { nil }
+        #expect(!model.isShowingNewSessionSheet)
+
+        model.requestNewSessionInFolder { chosen }
+        #expect(model.isShowingNewSessionSheet)
+        #expect(model.pendingSessionDirectory == chosen)
+    }
+
+    @Test @MainActor
     func archivingASelectionArchivesEveryChat() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }

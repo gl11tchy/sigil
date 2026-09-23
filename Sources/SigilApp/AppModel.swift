@@ -1284,6 +1284,12 @@ final class AppModel {
         isShowingNewSessionSheet = true
     }
 
+    /// ⇧⌘N: choose the folder first, then open the new-session sheet on it.
+    func requestNewSessionInFolder(choose: () -> URL?) {
+        guard let folder = choose() else { return }
+        requestNewSession(in: folder)
+    }
+
     @discardableResult
     func newTab(
         in directory: URL, model: String? = nil, effort: String? = nil,

@@ -111,10 +111,12 @@ struct GrokCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("New Session") { model.requestNewSession() }
+            Button("New Session…") { model.requestNewSession() }
                 .keyboardShortcut("t", modifiers: .command)
-            Button("New Session in Folder…") { model.requestNewSession() }
-                .keyboardShortcut("n", modifiers: [.command, .shift])
+            Button("New Session in Folder…") {
+                model.requestNewSessionInFolder { model.pickDirectory() }
+            }
+            .keyboardShortcut("n", modifiers: [.command, .shift])
         }
 
         CommandGroup(after: .newItem) {
