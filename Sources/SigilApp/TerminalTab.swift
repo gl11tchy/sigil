@@ -101,9 +101,11 @@ final class TerminalTab: Identifiable {
 
     var title: String {
         if let sessionTitle, !sessionTitle.isEmpty { return sessionTitle }
-        if spec.provider != .grokBuild { return spec.provider.name }
         let name = workingDirectory.lastPathComponent
-        return name.isEmpty ? workingDirectory.path : name
+        let folder = name.isEmpty ? workingDirectory.path : name
+        // Two tabs of one provider must not share a title.
+        if spec.provider != .grokBuild { return "\(spec.provider.name) · \(folder)" }
+        return folder
     }
 
     var isRunning: Bool {
@@ -431,11 +433,17 @@ final class TerminalTab: Identifiable {
         refreshUnseenActivity()
     }
 
-    /// Preserves the unread marker when a stopped tab has to be replaced after
-    /// an operation fails. The replacement already owns its callback.
+    /// Carries what a replaced tab still owes the user: its queued messages and
+    /// an unread finished turn. Questions stay behind, because closing the old
+    /// tab has already answered them. The replacement already owns its callback.
     func restoreUnseenActivity(from previous: TerminalTab) {
-        guard previous.hasUnseenActivity else { return }
-        hasUnseenTurnCompletion = true
+        let carried = previous.bridgeInbox.filter { item in
+            item.requestID == nil && !bridgeInbox.contains { $0.id == item.id }
+        }
+        bridgeInbox.append(contentsOf: carried)
+        unseenBridgeItemIDs.formUnion(
+            carried.map(\.id).filter { previous.unseenBridgeItemIDs.contains($0) })
+        if previous.hasUnseenTurnCompletion { hasUnseenTurnCompletion = true }
         refreshUnseenActivity()
     }
 
