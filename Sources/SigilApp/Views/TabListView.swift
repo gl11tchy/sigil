@@ -127,7 +127,10 @@ struct TabListView: View {
             .focusable()
             .focused($listFocused)
             .defaultFocus($listFocused, true)
-            .onAppear { focusList() }
+            .onAppear {
+                focusList()
+                if let highlighted { proxy.scrollTo(highlighted, anchor: .center) }
+            }
             .onKeyPress(.upArrow) {
                 move(-1)
                 return .handled
