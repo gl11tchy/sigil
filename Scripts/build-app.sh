@@ -216,6 +216,7 @@ if [[ ! -s "$ICNS" ]]; then
 fi
 
 PLIST_TEMPLATE="$ROOT/Resources/Info.plist"
+ENTITLEMENTS="$ROOT/Resources/Sigil.entitlements"
 if [[ ! -f "$PLIST_TEMPLATE" ]]; then
   echo "error: missing $PLIST_TEMPLATE" >&2
   exit 1
@@ -274,8 +275,13 @@ if [[ "$IDENTITY" != "-" ]]; then
   if [[ "$DISTRIBUTION" == "1" ]]; then
     echo "==> codesign (hardened runtime)"
     codesign --force --options runtime --timestamp --sign "$IDENTITY" "$CONTENTS/MacOS/sigil-mcp"
-    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$CONTENTS/MacOS/Sigil"
-    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
+    # Programs in a tab reach the camera, microphone and other private data
+    # through Sigil, so the hardened runtime needs Sigil's entitlements for
+    # macOS to ask the user at all.
+    codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS" \
+      --sign "$IDENTITY" "$CONTENTS/MacOS/Sigil"
+    codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS" \
+      --sign "$IDENTITY" "$APP"
   else
     echo "==> codesign (stable identity)"
     codesign --force --deep --sign "$IDENTITY" "$APP"
