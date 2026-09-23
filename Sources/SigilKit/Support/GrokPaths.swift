@@ -7,6 +7,7 @@ import Foundation
 /// The directory name is the session's working directory, percent-encoded with the
 /// RFC 3986 *unreserved* set left intact (`A-Z a-z 0-9 - . _ ~`); everything else,
 /// including `/` and `+`, becomes `%XX`. Verified against grok 1.0.4 on 2026-08-17.
+/// A name over 255 bytes is hashed instead; see `sessionFolderName(forCanonicalPath:)`.
 public enum GrokPaths {
 
     /// Characters the CLI leaves untouched when encoding a working directory.
@@ -63,6 +64,37 @@ public enum GrokPaths {
         directoryName.removingPercentEncoding
     }
 
+    /// The per-directory folder name the CLI uses (`encode_cwd_dirname` in
+    /// xai-grok-config/src/paths.rs). A percent-encoded name over 255 bytes
+    /// cannot exist on disk, so the CLI switches to `<slug of leaf>-<BLAKE3 hex16>`.
+    public static func sessionFolderName(forCanonicalPath path: String) -> String {
+        let encoded = encode(path: path)
+        if encoded.utf8.count <= 255 { return encoded }
+        let hash = BLAKE3.hexDigest(Array(path.utf8)).prefix(16)
+        let components = path.split(separator: "/").filter { $0 != "." }
+        let leaf = components.last.flatMap { $0 == ".." ? nil : String($0) } ?? "workspace"
+        let slug = slugify(leaf, maximumLength: 40)
+        return "\(slug.isEmpty ? "workspace" : slug)-\(hash)"
+    }
+
+    /// The CLI's `slugify`: lowercase, keep ASCII letters and digits, collapse
+    /// every other run to one `-`, trim dashes, then cut to `maximumLength`.
+    static func slugify(_ input: String, maximumLength: Int) -> String {
+        var result = ""
+        var previousDash = false
+        for scalar in input.lowercased().unicodeScalars {
+            if scalar.isASCII, scalar.properties.isAlphabetic || ("0"..."9").contains(scalar) {
+                result.unicodeScalars.append(scalar)
+                previousDash = false
+            } else if !previousDash {
+                result.append("-")
+                previousDash = true
+            }
+        }
+        let trimmed = result.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return String(trimmed.prefix(maximumLength))
+    }
+
     /// The directory holding one session's transcript and metadata.
     ///
     /// `cwd` is resolved through `realpath` first, because the CLI records the
@@ -71,7 +103,7 @@ public enum GrokPaths {
         let resolved = canonicalPath(cwd)
         return
             sessionsRoot
-            .appendingPathComponent(encode(path: resolved))
+            .appendingPathComponent(sessionFolderName(forCanonicalPath: resolved))
             .appendingPathComponent(sessionID)
     }
 

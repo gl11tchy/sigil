@@ -42,3 +42,66 @@ func encodeDecodeRoundTrip(path: String) {
             .appendingPathComponent("session").path
     )
 }
+
+/// Expected names come from the CLI's own `encode_cwd_dirname`
+/// (xai-grok-config/src/paths.rs), run on these exact inputs.
+@Test(arguments: [
+    ("/Users/me/project", "%2FUsers%2Fme%2Fproject"),
+    ("/" + String(repeating: "a", count: 252), "%2F" + String(repeating: "a", count: 252)),
+    (
+        "/" + String(repeating: "a", count: 253),
+        String(repeating: "a", count: 40) + "-50c7dff428fae2f5"
+    ),
+    ("/Users/太郎/ドキュメント/開発プロジェクト/顧客向け在庫管理システム", "workspace-15372090c54a9144"),
+    ("/Users/test/" + String(repeating: "中", count: 30), "workspace-43f12fb9a5ee1037"),
+    (
+        "/Users/me/" + String(repeating: "a", count: 300),
+        String(repeating: "a", count: 40) + "-f7dc6e54ae78d59c"
+    ),
+    (
+        "/Users/me/Café Project/" + String(repeating: "x/", count: 60) + "Résumé Ünïcode-Tool_v2",
+        "r-sum-n-code-tool-v2-8adce93e205b3a25"
+    ),
+    ("/Users/me/" + String(repeating: "c", count: 2100) + "/Leaf Dir", "leaf-dir-12c3a99ff4273f0d"),
+])
+func sessionFolderNameMatchesTheCLI(cwd: String, expected: String) {
+    #expect(GrokPaths.sessionFolderName(forCanonicalPath: cwd) == expected)
+}
+
+@Test func sessionDirectoryUsesTheCLIsHashedNameForALongPath() throws {
+    let base = FileManager.default.temporaryDirectory
+        .appendingPathComponent("grok-paths-\(UUID().uuidString)")
+    let cwd = base.appendingPathComponent("太郎/ドキュメント/開発プロジェクト/顧客向け在庫管理システム")
+    try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: base) }
+
+    let folder = GrokPaths.sessionDirectory(cwd: cwd.path, sessionID: "session")
+        .deletingLastPathComponent()
+
+    #expect(folder.lastPathComponent.utf8.count <= 255)
+    #expect(folder.lastPathComponent.hasPrefix("workspace-"))
+    #expect(
+        folder.lastPathComponent
+            == GrokPaths.sessionFolderName(forCanonicalPath: GrokPaths.canonicalPath(cwd.path)))
+    #expect(folder.deletingLastPathComponent() == GrokPaths.sessionsRoot)
+}
+
+@Test(arguments: [
+    ("", "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"),
+    ("abc", "6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85"),
+    (
+        "/Users/me/" + String(repeating: "b", count: 1100),
+        "2672786d4a9bd868f52171fede1d9563c5404287770b248560b00d8340bbb25d"
+    ),
+    (
+        "/Users/me/" + String(repeating: "c", count: 2100) + "/Leaf Dir",
+        "12c3a99ff4273f0dc8dccc7ee3a64361e07b238d41b1de782f4751a5f81a2c4b"
+    ),
+    (
+        "/Users/me/" + String(repeating: "d", count: 3000),
+        "7929950973cfcd721ce22e53b2ee551adbe9ada3af361b84b75d7e5e869f9c28"
+    ),
+])
+func blake3MatchesTheReferenceHash(input: String, expected: String) {
+    #expect(BLAKE3.hexDigest(Array(input.utf8)) == expected)
+}
