@@ -1281,6 +1281,8 @@ private struct DrillBar: View {
             .onHover { isHoveringBack = $0 }
             .help("Back to projects")
             .accessibilityLabel("Back to projects")
+            // The title is the only thing that says where the user is.
+            .accessibilityValue(title)
             Spacer(minLength: 4)
             if showsArchive, let toggleArchive {
                 IconButton(systemImage: "archivebox", help: "Archive Project") {
