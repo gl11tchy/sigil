@@ -649,6 +649,21 @@ test('the connection popover closes on Escape and outside pointer presses', asyn
   } finally { mac.close(); }
 });
 
+test('an error from a chats search shows inside the open Chats sheet', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mac = await pair(page, baseURL, undefined, { rejectAction: 'chats' });
+  try {
+    await page.locator('#sessions-toggle').click();
+    await page.locator('#session-search').fill('release');
+    const alert = page.locator('#sessions-dialog [role=alert]');
+    await expect(alert).toHaveText('Test action refused.');
+    await expect(alert).toBeInViewport();
+    await page.screenshot({ path: testInfo.outputPath('sheet-error.png') });
+    await page.locator('#sessions-close').click();
+    await expect(page.locator('#error')).toHaveText('Test action refused.');
+  } finally { mac.close(); }
+});
+
 test('session search switches conversations and keeps each draft', async ({ page, baseURL }) => {
   const mac = await pair(page, baseURL);
   try {

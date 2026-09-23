@@ -37,7 +37,17 @@ let selectedStatus = null, tabCount = 0;
 let connected = false, busy = false, stopped = false, reconnectTimer, pollTimer, connectTimer, generation = 0;
 let commandEpoch = 0, reconnectDelay = 500;
 let incoming = Promise.resolve(), outgoing = Promise.resolve(), pending = new Map();
-const showError = text => { $('error').textContent = text; $('error').hidden = !text; };
+// A modal sheet makes the page inert, so its errors show inside the sheet.
+const sheetErrors = { 'sessions-dialog': 'sessions-error', 'project-dialog': 'project-error' };
+const showError = text => {
+  const open = Object.keys(sheetErrors).find(id => $(id).open);
+  for (const id of ['error', ...Object.values(sheetErrors)]) { $(id).textContent = ''; $(id).hidden = true; }
+  const target = $(open ? sheetErrors[open] : 'error');
+  target.textContent = text; target.hidden = !text;
+};
+for (const [dialog, id] of Object.entries(sheetErrors)) {
+  $(dialog).addEventListener('close', () => { if ($(id).textContent) showError($(id).textContent); });
+}
 
 async function storage(mode, value) {
   const db = await new Promise((resolve, reject) => {

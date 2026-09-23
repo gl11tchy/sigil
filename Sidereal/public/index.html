@@ -34,6 +34,7 @@
   </header>
   <dialog id="sessions-dialog" aria-labelledby="sessions-heading">
     <div class="sheet-heading"><h2 id="sessions-heading">Chats</h2><button id="sessions-close" type="button">Done</button></div>
+    <p id="sessions-error" class="sheet-error" role="alert" hidden></p>
     <input id="session-search" type="search" placeholder="Search open and saved chats" aria-label="Search chats" autocomplete="off">
     <h3 id="open-heading">Open</h3>
     <div id="session-list"></div>
@@ -44,6 +45,7 @@
   </dialog>
   <dialog id="project-dialog" aria-labelledby="project-heading">
     <div class="sheet-heading"><h2 id="project-heading">Choose a project</h2><button id="project-cancel" type="button">Cancel</button></div>
+    <p id="project-error" class="sheet-error" role="alert" hidden></p>
     <div id="project-list"></div>
     <p id="project-empty" hidden>No projects yet.</p>
   </dialog>
