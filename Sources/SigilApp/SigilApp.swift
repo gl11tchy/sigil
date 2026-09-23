@@ -18,6 +18,7 @@ struct SigilApp: App {
                     ),
                     minHeight: 460
                 )
+                .background(WindowCloseGuard { model.tabs.contains(where: \.shouldWarnBeforeStopping) })
                 .onAppear {
                     delegate.model = model
                     delegate.startRemoteIdleSleep(model)
