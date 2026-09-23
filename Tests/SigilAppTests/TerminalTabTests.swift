@@ -374,6 +374,30 @@ struct TerminalTabTests {
         }
     }
 
+    @Test func otherProviderTabsInDifferentFoldersHaveDifferentTitles() {
+        let suite = "TerminalTabTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let settings = AppSettings(defaults: defaults)
+        func claudeTab(in folder: String) -> TerminalTab {
+            TerminalTab(
+                spec: GrokLaunchSpec(
+                    executable: URL(fileURLWithPath: "/usr/bin/true"),
+                    workingDirectory: URL(fileURLWithPath: "/tmp/\(folder)"),
+                    mode: .continueLatest,
+                    provider: .claudeCode
+                ),
+                settings: settings
+            )
+        }
+
+        let api = claudeTab(in: "api")
+        let web = claudeTab(in: "web")
+
+        #expect(api.title == "Claude Code · api")
+        #expect(web.title == "Claude Code · web")
+    }
+
     private func makeTab(
         mode: GrokLaunchSpec.Mode = .continueLatest,
         completionEventsURL: URL? = nil
