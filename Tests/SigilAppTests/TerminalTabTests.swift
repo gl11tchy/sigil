@@ -68,6 +68,32 @@ struct TerminalTabTests {
         #expect(markerChanges == 1)
     }
 
+    @Test func aReplacementKeepsQueuedMessagesButNotQuestions() {
+        let previous = makeTab()
+        previous.enqueueBridgePrompt("plain")
+        previous.enqueueBridgePrompt("question", requestID: "ask-1")
+        let replacement = makeTab()
+
+        replacement.restoreUnseenActivity(from: previous)
+        replacement.restoreUnseenActivity(from: previous)
+
+        #expect(replacement.bridgeInbox.map(\.prompt) == ["plain"])
+        #expect(replacement.hasUnseenActivity)
+        replacement.dismissNextBridgePrompt()
+        #expect(!replacement.hasUnseenActivity)
+    }
+
+    @Test func aReplacementShowsNoUnreadDotForAnAnsweredQuestion() {
+        let previous = makeTab()
+        previous.enqueueBridgePrompt("question", requestID: "ask-1")
+        let replacement = makeTab()
+
+        replacement.restoreUnseenActivity(from: previous)
+
+        #expect(replacement.bridgeInbox.isEmpty)
+        #expect(!replacement.hasUnseenActivity)
+    }
+
     @Test func recognizesOnlyGrokBusySpinnerTitles() {
         #expect(TerminalTab.isBusyTerminalTitle("⠼ - Waiting for response… - grok"))
         #expect(TerminalTab.isBusyTerminalTitle("⠹ - Thinking - grok"))
