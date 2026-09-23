@@ -49,6 +49,13 @@
     <div id="project-list"></div>
     <p id="project-empty" hidden>No projects yet.</p>
   </dialog>
+  <dialog id="forget-dialog" aria-labelledby="forget-heading" aria-describedby="forget-detail">
+    <form method="dialog">
+      <div class="sheet-heading"><h2 id="forget-heading">Forget this Mac?</h2></div>
+      <p id="forget-detail">To connect again, scan a new code in Sigil on your Mac. Unsent drafts on this phone are deleted.</p>
+      <div class="dialog-actions"><button id="forget-cancel" value="cancel">Cancel</button><button id="forget-accept" class="destructive" value="forget">Forget</button></div>
+    </form>
+  </dialog>
   <main>
     <section id="welcome">
       <img src="/icon.svg" width="56" height="56" alt="">

@@ -673,6 +673,29 @@ test('tree gutters do not wrap into a column of pipes on a phone', async ({ page
   } finally { mac.close(); }
 });
 
+test('Forget this Mac asks first and Cancel keeps the pairing', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mac = await pair(page, baseURL);
+  try {
+    const dialog = page.locator('#forget-dialog');
+    await page.locator('#connection-toggle').click();
+    await page.locator('#forget').click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('Forget this Mac?');
+    await expect(page.locator('#forget-accept')).toHaveCSS('color', 'rgb(255, 95, 158)');
+    await page.screenshot({ path: testInfo.outputPath('forget-confirm.png'), animations: 'disabled' });
+    await page.locator('#forget-cancel').click();
+    await expect(dialog).toBeHidden();
+    await expect(page.locator('#controls')).toBeVisible();
+    await expect(page.locator('#status')).toHaveText('Connected');
+    await page.locator('#connection-toggle').click();
+    await page.locator('#forget').click();
+    await page.locator('#forget-accept').click();
+    await expect(page.locator('#welcome-actions')).toBeVisible();
+    await expect(page.locator('#controls')).toBeHidden();
+  } finally { mac.close(); }
+});
+
 test('the connection popover closes on Escape and outside pointer presses', async ({ page, baseURL }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const consoleErrors = [];

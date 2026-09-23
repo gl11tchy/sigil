@@ -919,7 +919,14 @@ $('message').addEventListener('keydown', event => {
 // request() already sends in order, so a quick tap is queued instead of dropped.
 document.querySelectorAll('[data-key]').forEach(button => { button.onclick = () => request('key', button.dataset.key).catch(error => showError(error.message)); });
 $('reconnect').onclick = $('welcome-reconnect').onclick = () => { stopped = false; revoked = false; reconnectDelay = 500; connect(); };
-$('forget').onclick = async () => {
+// Forgetting cannot be undone from the phone, so it asks first.
+$('forget').onclick = () => {
+  $('connection').open = false;
+  $('forget-dialog').returnValue = '';
+  $('forget-dialog').showModal();
+};
+$('forget-dialog').addEventListener('close', () => { if ($('forget-dialog').returnValue === 'forget') void forget(); });
+async function forget() {
   stopped = true; ++generation; clearTimeout(reconnectTimer); socket?.close(); offline();
   credential = null; revoked = false; bootstrap = null; newDeviceKey = null; selected = null; drafts.clear(); tabsSignature = '';
   selectedStatus = null; tabCount = 0;
@@ -933,7 +940,7 @@ $('forget').onclick = async () => {
   $('terminal').textContent = ''; $('message').value = ''; $('controls').hidden = true; $('welcome').hidden = false;
   try { await storage('delete'); showError(''); } catch { showError('Could not clear pairing. Clear this site’s data in browser settings.'); }
   updateControls();
-};
+}
 let scanRun = 0;
 function loadJsQR() {
   if (typeof globalThis.jsQR === 'function') return Promise.resolve(globalThis.jsQR);
