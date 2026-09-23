@@ -714,10 +714,12 @@ struct SidebarView: View {
         Section {
             content()
         } header: {
+            // DESIGN.md: section titles stay in SF.
             Text("\(title.uppercased()) (\(count))")
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(.system(size: 10, weight: .medium))
                 .tracking(0.6)
                 .foregroundStyle(palette.textFaint)
+                .accessibilityAddTraits(.isHeader)
                 .padding(.horizontal, 14)
                 .padding(.top, isFirst ? 10 : 18)
                 .padding(.bottom, 4)
