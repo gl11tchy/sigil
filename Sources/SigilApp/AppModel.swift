@@ -1546,6 +1546,9 @@ final class AppModel {
             } else {
                 // Remove the global entry before stopping the working local server.
                 // A failed removal therefore leaves all three states consistently on.
+                // The registration is shared, so only the copy holding the socket
+                // may remove it; taking the socket throws while another copy has it.
+                try startTabMessaging()
                 try await removeTabMessagingRegistration()
                 stopTabMessaging()
             }

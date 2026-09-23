@@ -555,6 +555,40 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func turningMessagingOffWithoutTheSocketLeavesTheOtherCopysRegistration() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let ownerProbe = RunnerProbe()
+        ownerProbe.setResponse((0, "ok"))
+        let owner = fixture.model(registrationRunner: ownerProbe.run, mcpBinary: fixture.executable)
+        defer { owner.closeAllTabsAndWait() }
+        try await owner.setTabMessaging(enabled: true)
+        #expect(owner.isTabMessagingAvailable)
+        #expect(fixture.settings.isTabMessagingEnabled)
+
+        let secondProbe = RunnerProbe()
+        secondProbe.setResponse((0, "| sigil |"))
+        let second = fixture.model(
+            registrationRunner: secondProbe.run, mcpBinary: fixture.executable)
+        defer { second.closeAllTabsAndWait() }
+
+        await #expect(throws: (any Error).self) {
+            try await second.setTabMessaging(enabled: false)
+        }
+
+        #expect(!secondProbe.calls.contains { $0.contains("remove") })
+        #expect(fixture.settings.isTabMessagingEnabled)
+        #expect(owner.isTabMessagingAvailable)
+        #expect(!second.isTabMessagingAvailable)
+
+        ownerProbe.setResponse((0, "| sigil |"))
+        try await owner.setTabMessaging(enabled: false)
+        #expect(ownerProbe.calls.contains { $0.contains("remove") })
+        #expect(!fixture.settings.isTabMessagingEnabled)
+        #expect(!owner.isTabMessagingAvailable)
+    }
+
+    @Test @MainActor
     func restoreOpenTabsCompletesWhileRegistrationHangs() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
