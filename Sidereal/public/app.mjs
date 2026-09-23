@@ -373,7 +373,8 @@ function searchSaved() {
   const token = ++searchToken;
   if (!query || !$('sessions-dialog').open) { renderSaved([]); return; }
   renderSaved([], { pending: true });
-  request('chats', query).then(reply => {
+  // The Mac reads 200 characters, and text over 8 KB drops the connection.
+  request('chats', takeChars(query, 200)).then(reply => {
     if (token !== searchToken || $('session-search').value.trim() !== query) return;
     renderSaved(reply.chats, { truncated: reply.chatsTruncated === true });
   }).catch(error => { if (token === searchToken) showError(error.message); });

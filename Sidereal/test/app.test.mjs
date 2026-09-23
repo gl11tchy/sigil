@@ -815,6 +815,20 @@ test('a new search clears the previous saved chats before the reply', async () =
   assert.equal(socket.sent.filter(item => item.action === 'open').length, 0);
 });
 
+test('a long chats search sends only the 200 characters the Mac reads', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('sessions-toggle').onclick();
+  page.element('session-search').value = `${'😀'.repeat(150)}${'x'.repeat(9000)}`;
+  page.element('session-search').oninput();
+  await settle();
+  const sent = socket.sent.at(-1);
+  assert.equal(sent.action, 'chats');
+  assert.equal([...sent.text].length, 200);
+  assert.ok(sent.text.startsWith('😀'.repeat(150)));
+  assert.equal(socket.readyState, 1);
+});
+
 test('a shortened chat list says it is partial', async () => {
   const page = await browser();
   const socket = await page.authorize();
