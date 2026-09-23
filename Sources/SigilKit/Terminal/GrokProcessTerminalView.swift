@@ -15,6 +15,8 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
     var onChildOutput: (() -> Void)?
     /// Invoked when the user submits the current prompt with Return.
     var onUserSubmit: (() -> Void)?
+    /// Builds the VoiceOver value when an assistive client asks, not on every output tick.
+    var accessibilityText: (() -> String)?
     private var isForwardingBracketedPaste = false
     /// Held strongly here: `terminalDelegate` is weak.
     private lazy var clipboardGuard = ClipboardGuard(view: self)
@@ -126,6 +128,10 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
             kill(pid, SIGTERM)
         }
         process.terminate()
+    }
+
+    override func accessibilityValue() -> Any? {
+        accessibilityText?() ?? super.accessibilityValue()
     }
 
     override func dataReceived(slice: ArraySlice<UInt8>) {
