@@ -1927,8 +1927,10 @@ private struct SessionRow: View {
     }
 
     private var rowHelpText: String {
-        "\(title)\n\(session.displayPath)\n"
-            + "\(session.messageCount) messages · \(session.updatedAt.longRelative)"
+        let messages =
+            session.messageCount == 1 ? "1 message" : "\(session.messageCount) messages"
+        return "\(title)\n\(session.displayPath)\n"
+            + "\(messages) · \(session.updatedAt.longRelative)"
     }
 
     private var rowAccessibilityValue: String {
