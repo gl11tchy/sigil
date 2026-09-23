@@ -185,6 +185,38 @@ test('an 8 KB message with an attachment is refused before anything is sent', as
   assert.deepEqual(socket.sent.map(request => request.action), ['state']);
 });
 
+test('a sent attachment leaves the queue when the Mac switches tabs during the send', async () => {
+  const page = await browser();
+  page.app.btoa = btoa;
+  const socket = await page.authorize();
+  const both = selectedTabID => ({ tabs: [
+    { id: 'tab-1', title: 'One', status: 'idle' }, { id: 'tab-2', title: 'Two', status: 'idle' }],
+    selectedTabID, terminal: 'READY' });
+  const answer = (request, state) => socket.receive({ data: JSON.stringify({
+    challenge: request.challenge, sequence: request.sequence, ok: true, state }) });
+  page.element('attach').files = [{ name: 'notes.txt', type: 'text/plain', size: 5,
+    arrayBuffer: async () => new Uint8Array([1, 2, 3, 4, 5]).buffer }];
+  page.element('attach').onchange();
+  page.element('message').value = 'look';
+  page.element('compose').onsubmit({ preventDefault() {} });
+  await settle(); await settle();
+  const file = socket.sent.at(-1);
+  assert.equal(file.action, 'file');
+  assert.equal(file.tabID, 'tab-1');
+  answer(file, both('tab-2'));
+  await settle(); await settle();
+  answer(socket.sent.at(-1), both('tab-2'));
+  await settle();
+  await page.fireTimer(100);
+  answer(socket.sent.at(-1), both('tab-2'));
+  await settle();
+  assert.deepEqual(socket.sent.map(request => request.action), ['state', 'file', 'input', 'key']);
+  await page.fireTimer(1000);
+  answer(socket.sent.at(-1), both('tab-1'));
+  await settle();
+  assert.equal(page.element('attachments').hidden, true);
+});
+
 test('a refused Enter keeps the sent draft and reports the failure', async () => {
   const page = await browser();
   const socket = await page.authorize();
