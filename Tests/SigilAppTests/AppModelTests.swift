@@ -376,6 +376,24 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func optionAsMetaSettingReachesOpenAndNewTabs() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let first = try #require(model.newTab(in: cwd))
+        #expect(!first.controller.optionAsMetaKey)
+
+        model.settings.optionAsMetaKey = true
+        model.applyOptionAsMetaKey()
+        let second = try #require(model.newTab(in: cwd))
+
+        #expect(first.controller.optionAsMetaKey)
+        #expect(second.controller.optionAsMetaKey)
+    }
+
+    @Test @MainActor
     func findCommandRefocusesAnOpenFindBarInsteadOfClosingIt() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }

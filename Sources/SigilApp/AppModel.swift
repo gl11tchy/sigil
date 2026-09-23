@@ -1798,6 +1798,7 @@ final class AppModel {
     func restartPanelShell() {
         panel.restartShell(
             in: currentDirectory, theme: settings.theme, fontSize: settings.fontSize)
+        panel.shell?.optionAsMetaKey = settings.optionAsMetaKey
     }
 
     /// Starts whatever the visible tool needs, with the app's own theme and size.
@@ -1806,6 +1807,7 @@ final class AppModel {
         if panel.mode == .shell {
             panel.startShellIfNeeded(
                 in: currentDirectory, theme: settings.theme, fontSize: settings.fontSize)
+            panel.shell?.optionAsMetaKey = settings.optionAsMetaKey
         } else {
             panel.prepare(in: currentDirectory)
         }
@@ -1833,6 +1835,13 @@ final class AppModel {
         }
         panel.shell?.setFontSize(settings.fontSize)
         panel.shell?.apply(theme: settings.theme)
+    }
+
+    func applyOptionAsMetaKey() {
+        for tab in tabs {
+            tab.controller.optionAsMetaKey = settings.optionAsMetaKey
+        }
+        panel.shell?.optionAsMetaKey = settings.optionAsMetaKey
     }
 
     /// The Grok TUI reads `GROK_THEME` when the process starts. Recolouring
