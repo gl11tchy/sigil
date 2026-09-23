@@ -69,6 +69,13 @@ struct NewSessionSheetTests {
         #expect(NewSessionLaunch.action(selected: .cursor, tapped: .cursor) == .start(.cursor))
     }
 
+    @Test func arrowKeysMoveAlongTheProviderRowAndStopAtItsEnds() {
+        #expect(NewSessionLaunch.provider(after: .claudeCode, movingBy: 1) == .codex)
+        #expect(NewSessionLaunch.provider(after: .grokBuild, movingBy: -1) == .cursor)
+        #expect(NewSessionLaunch.provider(after: .grokBuild, movingBy: 1) == .grokBuild)
+        #expect(NewSessionLaunch.provider(after: .claudeCode, movingBy: -1) == .claudeCode)
+    }
+
     @Test func pathDataKeepsImplicitCurvesAndArcs() {
         // The second cubic is relative, so it ends 10pt past the first.
         let curve = SVGPath.bounds(of: "M0 0 c0 0 0 0 10 0 0 0 0 0 10 10")
