@@ -99,9 +99,10 @@ struct NewSessionSheetTests {
                 "-lic", "exec \"$@\"", "sigil-grok-models", "/usr/local/bin/grok", "models",
             ]
         )
-        let direct = GrokModelCatalog.launch(executable: "/usr/local/bin/grok", shellPath: "/bin/echo")
-        #expect(direct.executable == "/usr/local/bin/grok")
-        #expect(direct.arguments == ["models"])
+        // Like a Grok tab, a shell without the -lic launch falls back to zsh.
+        let other = GrokModelCatalog.launch(executable: "/usr/local/bin/grok", shellPath: "/bin/tcsh")
+        #expect(other.executable == "/bin/zsh")
+        #expect(other.arguments == zsh.arguments)
     }
 
     @Test func aModelNameKeepsNoSurroundingSpace() {

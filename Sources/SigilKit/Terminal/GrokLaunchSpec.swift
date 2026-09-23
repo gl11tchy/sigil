@@ -113,10 +113,10 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         let fallback = URL(fileURLWithPath: "/bin/zsh")
         let requested = URL(fileURLWithPath: processEnvironment["SHELL"] ?? fallback.path)
         var shell = FileManager.default.isExecutableFile(atPath: requested.path) ? requested : fallback
+        if !["zsh", "bash", "sh", "fish"].contains(shell.lastPathComponent) {
+            shell = fallback
+        }
         if provider != .grokBuild {
-            if !["zsh", "bash", "sh", "fish"].contains(shell.lastPathComponent) {
-                shell = fallback
-            }
             let command = searchesPATH ? provider.command : executable.path
             // Arguments stay positional, including paths containing shell metacharacters.
             if shell.lastPathComponent == "fish" {
@@ -137,20 +137,16 @@ public struct GrokLaunchSpec: Sendable, Hashable {
                 ] + arguments()
             )
         }
-        switch shell.lastPathComponent {
-        case "zsh", "bash", "sh":
-            return HostCommand(
-                executable: shell,
-                arguments: ["-lic", "exec \"$@\"", "sigil-grok", executable.path] + arguments()
-            )
-        case "fish":
+        if shell.lastPathComponent == "fish" {
             return HostCommand(
                 executable: shell,
                 arguments: ["-lic", "exec $argv", executable.path] + arguments()
             )
-        default:
-            return HostCommand(executable: executable, arguments: arguments())
         }
+        return HostCommand(
+            executable: shell,
+            arguments: ["-lic", "exec \"$@\"", "sigil-grok", executable.path] + arguments()
+        )
     }
 
     /// Environment for the child process: the user's login environment plus the

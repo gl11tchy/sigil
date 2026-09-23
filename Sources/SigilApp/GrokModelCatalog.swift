@@ -67,7 +67,7 @@ enum GrokModelCatalog: Sendable {
         case "fish":
             return (shell, ["-lic", "exec $argv", executable, "models"])
         default:
-            return (executable, ["models"])
+            return (fallback, ["-lic", "exec \"$@\"", "sigil-grok-models", executable, "models"])
         }
     }
 
