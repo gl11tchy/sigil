@@ -194,6 +194,7 @@ dialog::backdrop { background: #000a; }
 #session-list button[aria-current="true"] { background: var(--selected); border-color: var(--line); }
 #session-list small, #saved-list small, #project-list small, #saved-empty, #project-empty, #session-no-results { color: var(--muted); font-size: 12px; }
 #session-no-results, #saved-empty, #project-empty { margin: 4px 0 0; padding: 0 12px; }
+#saved-list small, #project-list small, #find-count { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
 
 /* Wider screens. */
 @media (min-width: 700px) {

@@ -838,6 +838,25 @@ test('opening Chats on a touch screen does not raise the keyboard', async ({ pag
   } finally { mac.close(); }
 });
 
+test('folder paths in the project and chats sheets use the mono face', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mac = await pair(page, baseURL, undefined, { chats: [{ id: 'saved-1', title: 'Release notes', folder: '/Users/me/Code/sigil' }] });
+  try {
+    await page.getByRole('button', { name: 'New session' }).click();
+    const project = page.locator('#project-list small').first();
+    await expect(project).toHaveText('/tmp/release');
+    await expect(project).toHaveCSS('font-family', /monospace/);
+    await page.screenshot({ path: testInfo.outputPath('projects.png'), animations: 'disabled' });
+    await page.locator('#project-cancel').click();
+    await page.getByRole('button', { name: 'Browse open and saved chats' }).click();
+    await page.getByRole('searchbox', { name: 'Search chats' }).fill('release');
+    const saved = page.locator('#saved-list small').first();
+    await expect(saved).toHaveText('/Users/me/Code/sigil');
+    await expect(saved).toHaveCSS('font-family', /monospace/);
+    await page.screenshot({ path: testInfo.outputPath('saved.png'), animations: 'disabled' });
+  } finally { mac.close(); }
+});
+
 test('session search switches conversations and keeps each draft', async ({ page, baseURL }) => {
   const mac = await pair(page, baseURL);
   try {
