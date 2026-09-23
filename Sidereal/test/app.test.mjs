@@ -648,6 +648,31 @@ test('a sliding snapshot under a fixed footer keeps each line once', async () =>
   assert.match(text, /FOOTER Thinking… 14s$/);
 });
 
+test('a repeated block keeps the text between its copies when the snapshot slides', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  const block = Array.from({ length: 8 }, (_, index) => `    at frame${index} (worker.js:${index + 10})`).join('\n');
+  const snapshots = [
+    `PREFIX_LINE\n${block}\nUNIQUE_BETWEEN_COPIES\n${block}\n\nFOOTER Thinking… 9s`,
+    `${block}\nNEW_AFTER_SECOND_COPY\n\nFOOTER Thinking… 10s`,
+  ];
+  for (const terminal of snapshots) {
+    await page.fireTimer(1000);
+    const poll = socket.sent.at(-1);
+    socket.receive({ data: JSON.stringify({
+      challenge: poll.challenge, sequence: poll.sequence, ok: true,
+      state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'working' }], selectedTabID: 'tab-1', terminal },
+    }) });
+    await settle();
+  }
+  const text = page.element('terminal').textContent;
+  for (const marker of ['PREFIX_LINE', 'UNIQUE_BETWEEN_COPIES', 'NEW_AFTER_SECOND_COPY']) {
+    assert.equal(text.split(marker).length - 1, 1, marker);
+  }
+  assert.equal(text.split('at frame0 ').length - 1, 2);
+  assert.equal(text.split('FOOTER').length - 1, 1);
+});
+
 test('a redraw replaces the live tail instead of appending it', async () => {
   const page = await browser();
   const socket = await page.authorize();

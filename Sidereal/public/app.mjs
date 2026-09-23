@@ -145,8 +145,13 @@ function applyTail(bucket, next) {
   }
   // A sliding window under a fixed footer has no suffix/prefix overlap.
   // Keep only the old text that scrolled out above the new snapshot's start.
+  // Repeated blocks can match early; take the match that agrees longest, then the latest.
   const start = next.slice(0, 200);
-  const at = start.trim() ? bucket.tail.indexOf(start) : -1;
+  let at = -1, agreed = -1;
+  for (let i = start.trim() ? bucket.tail.indexOf(start) : -1; i >= 0; i = bucket.tail.indexOf(start, i + 1)) {
+    const shared = commonPrefixLength(bucket.tail.slice(i), next);
+    if (shared >= agreed) { agreed = shared; at = i; }
+  }
   const scrolled = at > 0 ? bucket.tail.slice(0, at) : bucket.tail;
   const room = 400_000 - bucket.history.length;
   if (room > 0) bucket.history += scrolled.slice(0, room);
