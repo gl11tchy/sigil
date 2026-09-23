@@ -6,6 +6,7 @@ const drafts = new Map();
 const attachmentDrafts = new Map();
 const MAX_REMOTE_BYTES = 4 * 1024 * 1024;
 const CHUNK = 32 * 1024;
+let lastChunkAt = 0;
 function attachmentsFor(id = selected) {
   if (!id) return [];
   if (!attachmentDrafts.has(id)) attachmentDrafts.set(id, []);
@@ -13,25 +14,42 @@ function attachmentsFor(id = selected) {
 }
 function remoteFileName(name) {
   const base = String(name || 'file').split(/[/\\]/).pop();
-  const mapped = [...base].map(ch => /[A-Za-z0-9._-]/.test(ch) ? ch : '-').join('')
-    .replace(/-+/g, '-').replace(/^[.-]+|[.-]+$/g, '') || 'file';
-  const bytes = new TextEncoder();
-  let out = mapped;
-  while (bytes.encode(out).length > 80) out = out.slice(0, -1);
-  return out || 'file';
+  const clean = part => [...part].map(ch => /[\p{L}\p{M}\p{N}._-]/u.test(ch) ? ch : '-').join('')
+    .replace(/-+/g, '-').replace(/^[.-]+|[.-]+$/g, '');
+  const bytes = value => new TextEncoder().encode(value).length;
+  // Keep the extension: the Mac CLI reads the file type from it.
+  const dot = base.lastIndexOf('.');
+  let ext = dot > 0 ? clean(base.slice(dot + 1)) : '';
+  if (bytes(ext) > 16) ext = '';
+  const suffix = ext ? `.${ext}` : '';
+  const stem = [...(clean(ext ? base.slice(0, dot) : base) || 'file')];
+  while (stem.length > 1 && bytes(stem.join('') + suffix) > 80) stem.pop();
+  return (stem.join('').replace(/[.-]+$/, '') || 'file') + suffix;
 }
 let tabsSignature = '';
 let sessionTabs = [], canRestart = false;
+// Set by each Mac handshake; only the first state after one can show a restarted Mac.
+let freshHandshake = false;
 const histories = new Map();
 let pendingEarlier = null, earlierFlight = false, searchToken = 0;
 let findIndex = 0, findMatches = [], displayedOutput = null;
 let rawOutput = '', rawMode = false;
 let credential, bootstrap, newDeviceKey, socket, challenge, sequence = 0, selected;
 let selectedStatus = null, tabCount = 0;
-let connected = false, busy = false, stopped = false, reconnectTimer, pollTimer, connectTimer, generation = 0;
+let connected = false, busy = false, stopped = false, revoked = false, unsaved = false, reconnectTimer, pollTimer, connectTimer, generation = 0;
 let commandEpoch = 0, reconnectDelay = 500;
 let incoming = Promise.resolve(), outgoing = Promise.resolve(), pending = new Map();
-const showError = text => { $('error').textContent = text; $('error').hidden = !text; };
+// A modal sheet makes the page inert, so its errors show inside the sheet.
+const sheetErrors = { 'sessions-dialog': 'sessions-error', 'project-dialog': 'project-error' };
+const showError = text => {
+  const open = Object.keys(sheetErrors).find(id => $(id).open);
+  for (const id of ['error', ...Object.values(sheetErrors)]) { $(id).textContent = ''; $(id).hidden = true; }
+  const target = $(open ? sheetErrors[open] : 'error');
+  target.textContent = text; target.hidden = !text;
+};
+for (const [dialog, id] of Object.entries(sheetErrors)) {
+  $(dialog).addEventListener('close', () => { if ($(id).textContent) showError($(id).textContent); });
+}
 
 async function storage(mode, value) {
   const db = await new Promise((resolve, reject) => {
@@ -64,6 +82,8 @@ function updateControls() {
     if (element.id === 'stop' || element.id === 'interrupt') {
       element.disabled = !connected || !selected || ended; return;
     }
+    // Keys queue behind each other, but never land between a send's files and its Enter.
+    if (element.dataset.key) { element.disabled = disabled || !selected || ended; return; }
     element.disabled = disabled || !selected || ended;
   });
   $('send').disabled = disabled || !selected || ended || !($('message').value.trim() || attachmentsFor().length);
@@ -85,12 +105,14 @@ function updateControls() {
   $('raw-toggle').hidden = !selected;
   $('forget').hidden = !credential;
   $('reconnect').hidden = !credential || connected;
+  // After the Mac rejects the pairing, scanning again is the way back.
+  const waiting = Boolean(credential) && !revoked;
   const actions = $('welcome-actions');
-  if (actions) actions.hidden = Boolean(credential);
+  if (actions) actions.hidden = waiting;
   $('welcome-reconnect').hidden = !credential;
-  $('welcome').querySelector('h2').textContent = credential ? 'Reconnecting to your Mac' : 'Pick up where you left off.';
-  $('welcome').querySelector('p').textContent = credential ? 'Keep Sigil open and your Mac awake.' : 'Your sessions. Your tools. Away from your desk.';
-  $('welcome').querySelector('.pairing-steps').hidden = Boolean(credential);
+  $('welcome').querySelector('h2').textContent = revoked && credential ? 'Pair again' : credential ? 'Reconnecting to your Mac' : 'Pick up where you left off.';
+  $('welcome').querySelector('p').textContent = waiting ? 'Keep Sigil open and your Mac awake.' : 'Your sessions. Your tools. Away from your desk.';
+  $('welcome').querySelector('.pairing-steps').hidden = waiting;
   const standalone = isStandaloneApp();
   for (const id of ['standalone-hint', 'standalone-panel-hint']) {
     const hint = $(id);
@@ -219,27 +241,43 @@ function render(state) {
   if (nextSelected !== null && (typeof nextSelected !== 'string' || !ids.has(nextSelected))) {
     throw new Error('Invalid Mac response');
   }
+  const allTabsNew = freshHandshake && sessionTabs.length > 0 && !sessionTabs.some(tab => ids.has(tab.id));
+  freshHandshake = false;
   sessionTabs = state.tabs;
   canRestart = Array.isArray(state.capabilities) && state.capabilities.includes('restart');
   const bucket = nextSelected ? historyFor(nextSelected) : null;
+  let prepended = false;
   if (bucket) {
     applyTail(bucket, state.terminal);
     if (pendingEarlier) {
-      if (pendingEarlier.tabID === nextSelected) prependSlice(bucket, pendingEarlier.slice);
+      if (pendingEarlier.tabID === nextSelected) {
+        const before = bucket.history.length;
+        prependSlice(bucket, pendingEarlier.slice);
+        prepended = bucket.history.length !== before;
+      }
       pendingEarlier = null;
     }
   }
+  // Absence from a capped snapshot is not evidence that a tab closed.
+  // Older Macs omit the flag, so treat a full 100-row response conservatively.
+  const completeTabList = state.tabsTruncated === undefined ? state.tabs.length < 100 : !state.tabsTruncated;
   const changedSession = selected !== nextSelected;
   if (changedSession) {
     if (selected) drafts.set(selected, $('message').value);
+    // A Sigil restart gives every tab a new ID. Carry the draft to the tab the Mac selected.
+    if (selected && nextSelected && completeTabList && allTabsNew
+      && !drafts.get(nextSelected) && !attachmentDrafts.get(nextSelected)?.length) {
+      drafts.set(nextSelected, drafts.get(selected));
+      if (attachmentDrafts.has(selected)) {
+        attachmentDrafts.set(nextSelected, attachmentDrafts.get(selected));
+        attachmentDrafts.delete(selected);
+      }
+    }
     $('message').value = drafts.get(nextSelected) || '';
   }
   selected = nextSelected;
   selectedStatus = selected ? state.tabs.find(tab => tab.id === selected).status : null;
   tabCount = state.tabs.length;
-  // Absence from a capped snapshot is not evidence that a tab closed.
-  // Older Macs omit the flag, so treat a full 100-row response conservatively.
-  const completeTabList = state.tabsTruncated === undefined ? state.tabs.length < 100 : !state.tabsTruncated;
   if (completeTabList) for (const id of histories.keys()) if (!ids.has(id)) histories.delete(id);
   for (const id of drafts.keys()) { if (completeTabList && !ids.has(id)) drafts.delete(id); }
   for (const id of attachmentDrafts.keys()) {
@@ -266,13 +304,14 @@ function render(state) {
   $('session-toolbar').hidden = false;
   $('brand').hidden = true;
   if ($('sessions-dialog').open) renderSessionList();
-  renderOutput(changedSession);
+  renderOutput(changedSession, prepended);
   if (changedSession) { resizeMessage(); renderAttachments(); }
   updateControls();
 }
-function renderOutput(changedSession = false) {
+function renderOutput(changedSession = false, prepended = false) {
   const terminal = $('terminal');
   const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
+  const fromEnd = terminal.scrollHeight - terminal.scrollTop;
   const output = rawMode ? rawOutput : readableOutput(rawOutput);
   $('empty-output').hidden = Boolean(output);
   const ended = Boolean(selected) && selectedStatus === 'exited';
@@ -284,6 +323,8 @@ function renderOutput(changedSession = false) {
     if (changedSession) findIndex = 0;
     paintOutput();
     if (atBottom || changedSession) terminal.scrollTop = terminal.scrollHeight;
+    // Older text went in above the reader. Keep the lines they were reading in place.
+    else if (prepended) terminal.scrollTop = terminal.scrollHeight - fromEnd;
   }
   updateLatest();
 }
@@ -476,7 +517,9 @@ $('sessions-toggle').onclick = () => {
   $('session-search').value = '';
   searchToken++;
   renderSaved([]);
-  renderSessionList(); $('sessions-dialog').showModal(); $('session-search').focus();
+  renderSessionList(); $('sessions-dialog').showModal();
+  // On a touch screen, focus would raise the keyboard over the list.
+  if (hasFinePointer()) $('session-search').focus();
 };
 $('sessions-close').onclick = () => $('sessions-dialog').close();
 $('sessions-dialog').addEventListener('close', () => { if (!$('sessions-toggle').hidden) $('sessions-toggle').focus(); });
@@ -579,10 +622,12 @@ function connect() {
         pending.clear();
         challenge = frame.hello;
         sequence = 0;
+        freshHandshake = true;
         const authorization = bootstrap ? request('pair', newDeviceKey, undefined, true) : request('state');
         authorization.then(() => {
           if (current !== generation) return;
           bootstrap = null; newDeviceKey = null;
+          if (unsaved) { unsaved = false; storage('put', credential).catch(error => showError(error.message)); }
           reconnectDelay = 500;
           clearTimeout(connectTimer);
           connected = true; busy = false;
@@ -592,7 +637,11 @@ function connect() {
       } else if (frame.error === 'unauthorized') {
         // A dropped pairing acknowledgement can leave the Mac already using the device key.
         if (bootstrap) { bootstrap = null; newDeviceKey = null; ws.close(); }
-        else { stopped = true; showError('Pairing expired or was disconnected. Scan a new code in Sigil.'); ws.close(); }
+        else {
+          stopped = true; revoked = true;
+          $('controls').hidden = true; $('welcome').hidden = false;
+          showError('Pairing expired or was disconnected. Scan a new code in Sigil.'); ws.close();
+        }
       } else if (frame.data) {
         const reply = await open(frame.data, credential.key, 'mac');
         if (current !== generation) return;
@@ -686,12 +735,15 @@ async function prepareFile(file) {
   if (file.size > MAX_REMOTE_BYTES) throw new Error('Keep files under 4 MB.');
   return { name: remoteFileName(file.name), bytes: new Uint8Array(await file.arrayBuffer()) };
 }
-async function uploadFile(file, tabID) {
-  const payload = await prepareFile(file);
+async function uploadFile(payload, tabID) {
   const transfer = randomKey().slice(0, 32);
   const count = Math.max(1, Math.ceil(payload.bytes.length / CHUNK));
   for (let index = 0; index < count; index++) {
     const piece = payload.bytes.subarray(index * CHUNK, index * CHUNK + CHUNK);
+    // The relay closes a socket over 30 frames/s, and the Mac replies once per chunk.
+    const wait = lastChunkAt + 50 - Date.now();
+    if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+    lastChunkAt = Date.now();
     await request('file', bytesToBase64(piece), tabID, false, { name: payload.name, index, count, transfer });
   }
 }
@@ -740,7 +792,17 @@ async function sendText(submit) {
   if (!text.trim() && !files.length) return;
   if (new TextEncoder().encode(text).length > 8192) { showError('Keep the message under 8 KB.'); return; }
   const target = selected, current = generation;
-  for (const item of files) await uploadFile(item.file, target);
+  // Size-check every file before the Mac pastes any of them into the prompt.
+  const payloads = [];
+  for (const item of files) payloads.push(await prepareFile(item.file));
+  for (const [index, item] of files.entries()) {
+    await uploadFile(payloads[index], target);
+    // The Mac has pasted this file, so a retry must not send it again.
+    const list = attachmentDrafts.get(target);
+    const at = list ? list.indexOf(item) : -1;
+    if (at >= 0) { list.splice(at, 1); if (item.preview) URL.revokeObjectURL(item.preview); }
+    if (selected === target) renderAttachments();
+  }
   if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
   if (text.trim()) await request('input', files.length ? ` ${text}` : text, target);
   if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
@@ -821,7 +883,13 @@ $('compose').onsubmit = event => { event.preventDefault(); void perform(() => se
 $('paste').onclick = () => void perform(() => sendText(false));
 $('tabs').onchange = () => void perform(() => request('select', undefined, $('tabs').value));
 $('new').onclick = () => void perform(async () => {
-  const reply = await request('projects');
+  let reply;
+  try { reply = await request('projects'); } catch (error) {
+    // A Mac without the project list starts New in its current folder.
+    if (error.message !== 'Unknown action.') throw error;
+    await request('new');
+    return;
+  }
   renderProjects(reply.projects, 0, reply.projectsTruncated === true);
 });
 $('project-cancel').onclick = () => $('project-dialog').close();
@@ -839,6 +907,8 @@ $('attach').onchange = () => {
   const list = attachmentsFor();
   const room = 16 - list.length;
   for (const file of [...$('attach').files].slice(0, Math.max(0, room))) {
+    // Photos are compressed before upload; other files must already fit.
+    if (!isImageFile(file) && file.size > MAX_REMOTE_BYTES) { showError('Keep files under 4 MB.'); continue; }
     list.push({
       file, name: file.name || 'file',
       preview: isImageFile(file) ? URL.createObjectURL(file) : '',
@@ -853,11 +923,19 @@ $('message').addEventListener('keydown', event => {
   event.preventDefault();
   void perform(() => sendText(true));
 });
-document.querySelectorAll('[data-key]').forEach(button => { button.onclick = () => void perform(() => request('key', button.dataset.key)); });
-$('reconnect').onclick = $('welcome-reconnect').onclick = () => { stopped = false; reconnectDelay = 500; connect(); };
-$('forget').onclick = async () => {
+// request() already sends in order, so a quick tap is queued instead of dropped.
+document.querySelectorAll('[data-key]').forEach(button => { button.onclick = () => request('key', button.dataset.key).catch(error => showError(error.message)); });
+$('reconnect').onclick = $('welcome-reconnect').onclick = () => { stopped = false; revoked = false; reconnectDelay = 500; connect(); };
+// Forgetting cannot be undone from the phone, so it asks first.
+$('forget').onclick = () => {
+  $('connection').open = false;
+  $('forget-dialog').returnValue = '';
+  $('forget-dialog').showModal();
+};
+$('forget-dialog').addEventListener('close', () => { if ($('forget-dialog').returnValue === 'forget') void forget(); });
+async function forget() {
   stopped = true; ++generation; clearTimeout(reconnectTimer); socket?.close(); offline();
-  credential = null; bootstrap = null; newDeviceKey = null; selected = null; drafts.clear(); tabsSignature = '';
+  credential = null; revoked = false; unsaved = false; bootstrap = null; newDeviceKey = null; selected = null; drafts.clear(); tabsSignature = '';
   selectedStatus = null; tabCount = 0;
   $('keys').hidden = true; $('keys-toggle').setAttribute('aria-expanded', 'false');
   clearAttachments();
@@ -869,7 +947,7 @@ $('forget').onclick = async () => {
   $('terminal').textContent = ''; $('message').value = ''; $('controls').hidden = true; $('welcome').hidden = false;
   try { await storage('delete'); showError(''); } catch { showError('Could not clear pairing. Clear this site’s data in browser settings.'); }
   updateControls();
-};
+}
 let scanRun = 0;
 function loadJsQR() {
   if (typeof globalThis.jsQR === 'function') return Promise.resolve(globalThis.jsQR);
@@ -898,8 +976,9 @@ async function beginPair(pairing) {
   bootstrap = await importKey(pairing.key);
   newDeviceKey = randomKey();
   credential = { room: pairing.room, key: await importKey(newDeviceKey) };
-  await storage('put', credential);
-  stopped = false;
+  // Keep the stored pairing until the Mac accepts this one.
+  unsaved = true;
+  stopped = false; revoked = false;
   reconnectDelay = 500;
   updateControls();
   connect();
@@ -976,7 +1055,7 @@ if ($('paste-link')) $('paste-link').onclick = async () => {
   $('pairing-link').focus();
   try {
     const text = await navigator.clipboard.readText();
-    if (credential) return;
+    if (credential && !revoked) return;
     const result = pairingFromText(text, location.origin);
     if (result?.room) { showError(''); await beginPair(result); return; }
     if (result?.error) showError(result.error);
@@ -1013,13 +1092,23 @@ document.addEventListener('visibilitychange', () => {
   else if (connected) poll();
   else if (!stopped) connect();
 });
+function confirmReplace() {
+  const dialog = $('replace-dialog');
+  dialog.returnValue = '';
+  dialog.showModal();
+  return new Promise(resolve => dialog.addEventListener('close', () => resolve(dialog.returnValue === 'replace'), { once: true }));
+}
 async function start() {
   const fragment = new URLSearchParams(location.hash.slice(1));
   const pairing = pairingFromText(location.hash, location.origin);
   history.replaceState(null, '', location.pathname);
   if (!crypto.subtle) throw new Error('Open Sidereal using HTTPS.');
-  if (pairing?.room) await beginPair(pairing);
-  else if (pairing?.error || fragment.has('room') || fragment.has('key')) {
+  if (pairing?.room) {
+    // A link must not silently replace a working pairing.
+    const saved = await storage('get');
+    if (!saved || await confirmReplace()) await beginPair(pairing);
+    else { credential = saved; updateControls(); connect(); }
+  } else if (pairing?.error || fragment.has('room') || fragment.has('key')) {
     throw new Error(pairing?.error || 'Invalid code. Scan a new code in Sigil.');
   } else {
     credential = await storage('get');

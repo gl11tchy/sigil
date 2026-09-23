@@ -128,7 +128,7 @@ struct GrokCommands: Commands {
             .disabled(!model.canExportSelectedTranscript)
             Button("Rename Conversation") {
                 if let session = model.sessionForSelectedTab() {
-                    model.beginRename(session)
+                    model.beginRename(session, returnFocus: .terminal)
                 }
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])

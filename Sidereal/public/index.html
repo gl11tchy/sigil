@@ -28,12 +28,13 @@
         <button id="copy-output" type="button" hidden>Copy output</button>
         <button id="raw-toggle" type="button" aria-pressed="false" hidden>Show raw terminal</button>
         <button id="reconnect" hidden>Reconnect</button>
-        <button id="forget" hidden>Forget this Mac</button>
+        <button id="forget" class="destructive" hidden>Forget this Mac</button>
       </div>
     </details>
   </header>
   <dialog id="sessions-dialog" aria-labelledby="sessions-heading">
     <div class="sheet-heading"><h2 id="sessions-heading">Chats</h2><button id="sessions-close" type="button">Done</button></div>
+    <p id="sessions-error" class="sheet-error" role="alert" hidden></p>
     <input id="session-search" type="search" placeholder="Search open and saved chats" aria-label="Search chats" autocomplete="off">
     <h3 id="open-heading">Open</h3>
     <div id="session-list"></div>
@@ -44,8 +45,23 @@
   </dialog>
   <dialog id="project-dialog" aria-labelledby="project-heading">
     <div class="sheet-heading"><h2 id="project-heading">Choose a project</h2><button id="project-cancel" type="button">Cancel</button></div>
+    <p id="project-error" class="sheet-error" role="alert" hidden></p>
     <div id="project-list"></div>
     <p id="project-empty" hidden>No projects yet.</p>
+  </dialog>
+  <dialog id="replace-dialog" aria-labelledby="replace-heading" aria-describedby="replace-detail">
+    <form method="dialog">
+      <div class="sheet-heading"><h2 id="replace-heading">Replace the paired Mac?</h2></div>
+      <p id="replace-detail">This phone is already paired with a Mac. Replace it only if this link came from Sigil on your own Mac.</p>
+      <div class="dialog-actions"><button id="replace-keep" value="keep">Keep current</button><button id="replace-accept" class="destructive" value="replace">Replace</button></div>
+    </form>
+  </dialog>
+  <dialog id="forget-dialog" aria-labelledby="forget-heading" aria-describedby="forget-detail">
+    <form method="dialog">
+      <div class="sheet-heading"><h2 id="forget-heading">Forget this Mac?</h2></div>
+      <p id="forget-detail">To connect again, scan a new code in Sigil on your Mac. Unsent drafts on this phone are deleted.</p>
+      <div class="dialog-actions"><button id="forget-cancel" value="cancel">Cancel</button><button id="forget-accept" class="destructive" value="forget">Forget</button></div>
+    </form>
   </dialog>
   <main>
     <section id="welcome">

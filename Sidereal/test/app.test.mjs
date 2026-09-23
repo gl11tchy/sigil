@@ -10,10 +10,10 @@ const source = (await readFile(new URL('../public/app.mjs', import.meta.url), 'u
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
 // Run the real handlers; only browser services and encryption are replaced.
-async function browser({ hash = '', saved } = {}) {
+async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { device: true } } } = {}) {
   const elements = new Map(), events = new Map(), timers = new Map(), sockets = [];
   let nextTimer = 0, reloads = 0;
-  let stored = saved ?? { room: 'a'.repeat(32), key: { device: true } };
+  let stored = saved;
   const sealed = [];
   const element = id => {
     if (!elements.has(id)) elements.set(id, {
@@ -88,7 +88,7 @@ async function browser({ hash = '', saved } = {}) {
       return request;
     },
   };
-  vm.runInNewContext(source, {
+  const app = {
     readableOutput, pairingFromText, document, location, history: { replaceState() {} }, indexedDB,
     window: { addEventListener: (name, callback) => events.set(name, callback) },
     navigator: {}, crypto: { subtle: {} }, URL, URLSearchParams, TextEncoder,
@@ -98,7 +98,8 @@ async function browser({ hash = '', saved } = {}) {
     open: async frame => JSON.parse(frame),
     setTimeout(callback, delay) { const id = ++nextTimer; timers.set(id, { callback, delay }); return id; },
     clearTimeout: id => timers.delete(id),
-  });
+  };
+  vm.runInNewContext(source, app);
   await settle();
   async function authorize(ws = sockets.at(-1)) {
     ws.receive({ hello: (sockets.length % 2 ? 'b' : 'c').repeat(64) });
@@ -122,8 +123,23 @@ async function browser({ hash = '', saved } = {}) {
     element('compose').onsubmit({ preventDefault() { prevented = true; } });
     assert.equal(prevented, true);
   }
-  return { element, events, location, sockets, authorize, fireTimer, submit, sealed, timers, stored: () => structuredClone(stored), reloads: () => reloads };
+  return { app, element, events, location, sockets, authorize, fireTimer, submit, sealed, timers, stored: () => structuredClone(stored), reloads: () => reloads };
 }
+
+test('attached file names keep their extension and non-Latin letters', async () => {
+  const { app } = await browser();
+  const bytes = value => new TextEncoder().encode(value).length;
+  assert.equal(app.remoteFileName('文档.pdf'), '文档.pdf');
+  assert.equal(app.remoteFileName('Отчёт.txt'), 'Отчёт.txt');
+  assert.equal(app.remoteFileName('é.json'), 'é.json');
+  assert.equal(app.remoteFileName('???.csv'), 'file.csv');
+  const long = app.remoteFileName(`${'a'.repeat(90)}.pdf`);
+  assert.match(long, /^a+\.pdf$/);
+  assert.ok(bytes(long) <= 80);
+  const wide = app.remoteFileName(`${'文'.repeat(40)}.xlsx`);
+  assert.match(wide, /^文+\.xlsx$/);
+  assert.ok(bytes(wide) <= 80);
+});
 
 test('Send clears the draft only after the Enter acknowledgement', async () => {
   const page = await browser();
@@ -256,6 +272,60 @@ test('an unanswered connection reports and closes after ten seconds', async () =
   page.element('reconnect').onclick();
   await page.authorize();
   assert.equal(page.element('status').textContent, 'Connected');
+});
+
+test('New falls back to a new session when the Mac has no project list', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('new').onclick();
+  await settle();
+  const projects = socket.sent.at(-1);
+  assert.equal(projects.action, 'projects');
+  socket.receive({ data: JSON.stringify({
+    challenge: projects.challenge, sequence: projects.sequence, ok: false, error: 'Unknown action.' }) });
+  await settle();
+  const created = socket.sent.at(-1);
+  assert.equal(created.action, 'new');
+  assert.equal(created.text, undefined);
+  socket.reply(created);
+  await settle();
+  assert.equal(page.element('error').hidden, true);
+  assert.equal(page.element('project-dialog').open, false);
+});
+
+test('a Sigil restart carries the draft and attachments to the restored tab', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('message').value = 'long message';
+  page.element('attach').files = [{ name: 'notes.txt', type: 'text/plain', size: 5 }];
+  page.element('attach').onchange();
+  assert.equal(page.element('attachments').children.length, 1);
+  // The restarted Mac joins again, so the relay brings a new handshake.
+  socket.receive({ hello: 'd'.repeat(64) });
+  await settle();
+  const state = socket.sent.at(-1);
+  assert.equal(state.action, 'state');
+  socket.receive({ data: JSON.stringify({ challenge: state.challenge, sequence: state.sequence, ok: true,
+    state: { tabs: [{ id: 'tab-9', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-9', terminal: 'READY' } }) });
+  await settle();
+  assert.equal(page.element('message').value, 'long message');
+  assert.equal(page.element('attachments').children.length, 1);
+});
+
+test('a new session on the same Mac does not take the closed tab\'s draft', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('message').value = 'long message';
+  page.element('attach').files = [{ name: 'notes.txt', type: 'text/plain', size: 5 }];
+  page.element('attach').onchange();
+  await page.fireTimer(1000);
+  const poll = socket.sent.at(-1);
+  assert.equal(poll.action, 'state');
+  socket.receive({ data: JSON.stringify({ challenge: poll.challenge, sequence: poll.sequence, ok: true,
+    state: { tabs: [{ id: 'tab-9', title: 'Other', status: 'idle' }], selectedTabID: 'tab-9', terminal: 'READY' } }) });
+  await settle();
+  assert.equal(page.element('message').value, '');
+  assert.equal(page.element('attachments').children.length, 0);
 });
 
 test('a command that times out keeps the socket so later commands can use it', async () => {
@@ -521,7 +591,7 @@ test('duplicate hello does not reset sequence or replace a pending request', asy
 });
 
 test('unauthorized after a dropped pairing acknowledgement retries with the persisted device key', async () => {
-  const page = await browser({ hash: `#room=${'a'.repeat(32)}&key=${'b'.repeat(64)}` });
+  const page = await browser({ hash: `#room=${'a'.repeat(32)}&key=${'b'.repeat(64)}`, saved: null });
   const socket = page.sockets.at(-1);
   socket.receive({ hello: 'c'.repeat(64) });
   await settle();
@@ -549,6 +619,19 @@ test('unauthorized without bootstrap stops automatic reconnect and asks for a ne
   await settle();
   assert.equal(page.sockets.length, 1);
   assert.equal(page.element('status').textContent, 'Disconnected');
+});
+
+test('a rejected pairing shows Scan and Paste so the phone can pair again', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  socket.receive({ error: 'unauthorized' });
+  await settle();
+  assert.equal(page.element('welcome').hidden, false);
+  assert.equal(page.element('controls').hidden, true);
+  assert.equal(page.element('welcome-actions').hidden, false);
+  assert.equal(page.element('welcome-.pairing-steps').hidden, false);
+  assert.equal(page.element('welcome-h2').textContent, 'Pair again');
+  assert.match(page.element('error').textContent, /Scan a new code/);
 });
 
 

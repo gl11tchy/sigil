@@ -116,11 +116,11 @@ struct ScrollbackSearch: Equatable, Sendable {
         logicalLines(rows).flatMap { logical in
             var found: [Match] = []
             var searchRange = logical.text.startIndex..<logical.text.endIndex
+            // Offsets carry forward from the previous hit, so a long line stays linear.
+            var offset = 0
             while let hit = logical.text.range(of: query, options: fold, range: searchRange) {
-                let startOffset = logical.text.distance(
-                    from: logical.text.startIndex, to: hit.lowerBound)
-                let endOffset = logical.text.distance(
-                    from: logical.text.startIndex, to: hit.upperBound)
+                let startOffset = offset + logical.text.distance(from: searchRange.lowerBound, to: hit.lowerBound)
+                let endOffset = startOffset + logical.text.distance(from: hit.lowerBound, to: hit.upperBound)
                 guard logical.positions.indices.contains(startOffset),
                     logical.positions.indices.contains(endOffset)
                 else { break }
@@ -136,6 +136,7 @@ struct ScrollbackSearch: Equatable, Sendable {
                     )
                 )
                 searchRange = hit.upperBound..<logical.text.endIndex
+                offset = endOffset
             }
             return found
         }

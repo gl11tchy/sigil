@@ -13,15 +13,19 @@ final class RemoteControl {
     private(set) var expiresAt: Date?
     private(set) var status = "Off"
     private(set) var error: String?
+    /// A Disconnect could not delete the pairing, so the view keeps offering it.
+    private(set) var revokeFailed: Bool
 
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var socket: URLSessionWebSocketTask?
+    @ObservationIgnored private var peer: String?
     @ObservationIgnored private var generation = UUID()
     @ObservationIgnored private var network: URLSession?
     @ObservationIgnored private let store: any RemotePairingStore
 
     init(store: any RemotePairingStore = KeychainRemotePairingStore()) {
         self.store = store
+        revokeFailed = store.revokeFailed
     }
 
     static let productionOrigin = "https://remote.sigilapp.dev"
@@ -57,18 +61,31 @@ final class RemoteControl {
     }
 
     func resumeIfPaired(model: AppModel) {
-        guard let pairing = store.load(), Self.origin(pairing.origin) != nil else { return }
+        guard !store.revokeFailed else { return }
+        let saved: RemotePairing?
+        do {
+            saved = try store.load()
+        } catch {
+            self.error = "Sigil could not read the saved phone pairing. Connect your phone again."
+            return
+        }
+        guard let pairing = saved, Self.origin(pairing.origin) != nil else { return }
         guard Self.preferredOrigin(pairing.origin) == pairing.origin else { return }
-        start(urlText: pairing.origin, model: model)
+        start(urlText: pairing.origin, model: model, saved: pairing)
     }
 
     func start(urlText: String, model: AppModel) {
+        start(urlText: urlText, model: model, saved: store.revokeFailed ? nil : try? store.load())
+    }
+
+    /// Takes the pairing already read, so one launch reads Keychain once.
+    private func start(urlText: String, model: AppModel, saved: RemotePairing?) {
         stop()
         guard let origin = Self.origin(Self.preferredOrigin(urlText)) else {
             error = "Enter the HTTPS address of your Sidereal server."
             return
         }
-        let restored = restoredSession(for: origin)
+        let restored = restoredSession(for: origin, saved: saved)
         let network = URLSession(configuration: .ephemeral)
         self.network = network
         isEnabled = true
@@ -81,6 +98,7 @@ final class RemoteControl {
             guard let self, self.generation == current, !Task.isCancelled else { return }
             var session = restored
             var room: Room?
+            var unsaved: String?
             var pairingURL: URL?
             var retry = 1
             var failures = 0
@@ -113,7 +131,7 @@ final class RemoteControl {
                     socket.resume()
                     let keepAlive = Task { await Self.keepAlive(socket) }
                     defer { keepAlive.cancel() }
-                    var peer: String?
+                    self.peer = nil
                     var routed = false
                     while !Task.isCancelled, self.generation == current {
                         let message = try await socket.receive()
@@ -136,15 +154,15 @@ final class RemoteControl {
                             failures = 0
                             self.status = session.isPaired ? "Phone disconnected" : "Scan to connect"
                             self.pairingURL = session.isPaired ? nil : pairingURL
-                            self.error = nil
+                            self.error = unsaved
                         } else if frame.type == "peer", let id = frame.peer, id.count <= 64 {
-                            peer = id
+                            self.peer = id
                             session.resetConnection()
                             try await self.send(Frame(peer: id, hello: session.challenge), socket: socket)
-                        } else if frame.type == "left", frame.peer == peer {
-                            peer = nil
+                        } else if frame.type == "left", frame.peer == self.peer {
+                            self.peer = nil
                             self.status = session.isPaired ? "Phone disconnected" : "Scan to connect"
-                        } else if let id = frame.peer, id == peer, let ciphertext = frame.data {
+                        } else if let id = frame.peer, id == self.peer, let ciphertext = frame.data {
                             do {
                                 let firstPair = !session.isPaired
                                 let command = try session.accept(ciphertext)
@@ -157,9 +175,18 @@ final class RemoteControl {
                                 self.expiresAt = nil
                                 self.status = "Phone connected"
                                 if firstPair, let key = session.deviceKey {
-                                    self.store.save(
+                                    if self.store.save(
                                         RemotePairing(
                                             origin: origin.absoluteString, deviceKey: key, ticket: session.ticket))
+                                    {
+                                        // Saving deleted the old item, so no unrevoked pairing is left.
+                                        self.store.revokeFailed = false
+                                        self.revokeFailed = false
+                                    } else {
+                                        unsaved =
+                                            "Sigil could not save this pairing in Keychain. It ends when Sigil quits."
+                                        self.error = unsaved
+                                    }
                                 }
                                 var reply = RemoteCommands.execute(command, model: model)
                                 reply.ticket = session.ticket
@@ -195,12 +222,23 @@ final class RemoteControl {
 
     func stop(revoke: Bool = false) {
         let forgotten = !revoke || store.clear()
+        if revoke {
+            store.revokeFailed = !forgotten
+            revokeFailed = !forgotten
+        }
         generation = UUID()
         task?.cancel()
         task = nil
-        socket?.cancel(with: .goingAway, reason: nil)
+        if revoke, let socket, let peer {
+            // The relay forwards this and closes the phone, which then stops
+            // reconnecting and asks for a new scan. A plain stop stays silent.
+            Self.send(Frame(peer: peer, error: "unauthorized"), thenClose: socket, network: network)
+        } else {
+            socket?.cancel(with: .goingAway, reason: nil)
+            network?.invalidateAndCancel()
+        }
         socket = nil
-        network?.invalidateAndCancel()
+        peer = nil
         network = nil
         RemoteCommands.uploads = RemoteUpload.Inbox()
         isEnabled = false
@@ -231,8 +269,8 @@ final class RemoteControl {
         }
     }
 
-    private func restoredSession(for origin: URL) -> RemoteSession {
-        guard let saved = store.load(),
+    private func restoredSession(for origin: URL, saved: RemotePairing?) -> RemoteSession {
+        guard let saved,
             Self.preferredOrigin(saved.origin) == saved.origin,
             RemoteControl.origin(saved.origin)?.absoluteString == origin.absoluteString,
             RemoteCrypto.isValidKey(saved.deviceKey), RemoteCrypto.isValidKey(saved.ticket)
@@ -257,6 +295,14 @@ final class RemoteControl {
     private func send(_ frame: Frame, socket: URLSessionWebSocketTask) async throws {
         let bytes = try JSONEncoder().encode(frame)
         try await socket.send(.string(String(decoding: bytes, as: UTF8.self)))
+    }
+
+    private static func send(_ frame: Frame, thenClose socket: URLSessionWebSocketTask, network: URLSession?) {
+        let bytes = (try? JSONEncoder().encode(frame)) ?? Data()
+        socket.send(.string(String(decoding: bytes, as: UTF8.self))) { _ in
+            socket.cancel(with: .goingAway, reason: nil)
+            network?.invalidateAndCancel()
+        }
     }
 
     private struct Room: Decodable {

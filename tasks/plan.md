@@ -22,13 +22,14 @@ ASSUMPTIONS: Readable companion, not a pixel TUI. Attach writes to SigilDrops an
 ### Phase 3: Phone UI
 - [x] Task 5: Attach, chips, Stop while working, composer layout.
 - [x] Task 6: Playwright + native tests. Evidence: `tasks/verify.md`.
-- [ ] Task 7: Redeploy Sidereal and record the revision. The active deployment,
+- [x] Task 7: Redeploy Sidereal and record the revision. The active deployment,
   `c5c7e7de-76a8-44d0-8d89-a1fdbe349ce2`, postdates #43 by under a minute, but the service
   deploys from local uploads, so it carries a snapshot id and no SHA and nothing proves what
   is in it. Local-upload stamping is now implemented: `Scripts/deploy-sidereal.sh`
   packages a Git SHA, dirty flag, and runtime hash; `/health` exposes and validates it.
   Closing Task 7 still needs a coordinated live Mac/relay/PWA release and the matching
   health response. The follow-up release request authorizes deployment after PR review and merge.
+  Done 2026-09-23: #66 records the deploy, and `/health` reports revision 199cc86.
 
 ## Risks
 | Risk | Mitigation |

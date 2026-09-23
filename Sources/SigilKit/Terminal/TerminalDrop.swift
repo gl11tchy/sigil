@@ -39,6 +39,20 @@ public enum TerminalDrop {
         !path.unicodeScalars.contains { $0.properties.generalCategory == .control }
     }
 
+    /// Pasted text keeps tab and line breaks and loses every other control
+    /// character: ESC, the rest of C0, DEL and C1. An embedded ESC[201~ (or the
+    /// 8-bit CSI U+009B) would otherwise end bracketed paste early.
+    public static func sanitizedPasteText(_ text: String) -> String {
+        var scalars = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars
+        where scalar == "\t" || scalar == "\n" || scalar == "\r"
+            || scalar.properties.generalCategory != .control
+        {
+            scalars.append(scalar)
+        }
+        return String(scalars)
+    }
+
     public static func hasUnsafeFileName(_ urls: [URL]) -> Bool {
         urls.contains { !isSafeToPaste($0.path) }
     }
@@ -82,7 +96,8 @@ public enum TerminalDrop {
         return nil
     }
 
-    public static let cacheKeepCount = 8
+    /// One policy for every writer: room for two full phone messages of attachments.
+    public static let cacheKeepCount = 2 * maxFiles
 
     public static func sanitizedFileName(_ name: String) -> String {
         let base = URL(fileURLWithPath: name).lastPathComponent
@@ -106,7 +121,7 @@ public enum TerminalDrop {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("drop-\(UUID().uuidString)-\(sanitizedFileName(name))")
         try data.write(to: url, options: .withoutOverwriting)
-        pruneCache(in: directory, keeping: max(cacheKeepCount, maxFiles), protecting: url)
+        pruneCache(in: directory, keeping: cacheKeepCount, protecting: url)
         return url
     }
 
