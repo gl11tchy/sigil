@@ -274,13 +274,15 @@ struct SidebarView: View {
             .onChange(of: focus) { _, newFocus in
                 if newFocus == .list { showKeyboardRowIfListFocused() }
             }
-            .onKeyPress(.upArrow) {
+            // ⇧ comes from the key event itself, not the keyboard state when a
+            // queued or repeated press is finally handled.
+            .onKeyPress(.upArrow, phases: [.down, .repeat]) { press in
                 if model.renamingSessionKey != nil { return .ignored }
-                return moveKeyboardSelection(by: -1)
+                return moveKeyboardSelection(by: -1, shift: press.modifiers.contains(.shift))
             }
-            .onKeyPress(.downArrow) {
+            .onKeyPress(.downArrow, phases: [.down, .repeat]) { press in
                 if model.renamingSessionKey != nil { return .ignored }
-                return moveKeyboardSelection(by: 1)
+                return moveKeyboardSelection(by: 1, shift: press.modifiers.contains(.shift))
             }
             .onKeyPress(.return) {
                 if model.renamingSessionKey != nil { return .ignored }
@@ -1077,11 +1079,10 @@ struct SidebarView: View {
         return .handled
     }
 
-    private func moveKeyboardSelection(by delta: Int) -> KeyPress.Result {
+    private func moveKeyboardSelection(by delta: Int, shift: Bool) -> KeyPress.Result {
         let ids = visibleRowIDs()
         guard !ids.isEmpty else { return .ignored }
-        let extending =
-            NSEvent.modifierFlags.contains(.shift) && listKind != .projectList
+        let extending = shift && listKind != .projectList
         let anchor = extending ? (selectionAnchor ?? keyboardSelectionID) : nil
         if let current = keyboardSelectionID, let index = ids.firstIndex(of: current) {
             keyboardSelectionID = ids[min(max(index + delta, 0), ids.count - 1)]
