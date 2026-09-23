@@ -182,7 +182,7 @@ dialog::backdrop { background: #000a; }
 .sheet-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .sheet-heading h2 { margin: 0; font-size: 20px; font-weight: 600; }
 .sheet-error { margin: 0 0 12px; color: var(--amber); font-size: 14px; }
-#forget-detail { margin: 0 0 16px; font-size: 14px; }
+#forget-detail, #replace-detail { margin: 0 0 16px; font-size: 14px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .destructive { color: var(--error); }
 #session-search { width: 100%; margin-bottom: 12px; }

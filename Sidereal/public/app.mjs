@@ -34,7 +34,7 @@ let findIndex = 0, findMatches = [], displayedOutput = null;
 let rawOutput = '', rawMode = false;
 let credential, bootstrap, newDeviceKey, socket, challenge, sequence = 0, selected;
 let selectedStatus = null, tabCount = 0;
-let connected = false, busy = false, stopped = false, revoked = false, reconnectTimer, pollTimer, connectTimer, generation = 0;
+let connected = false, busy = false, stopped = false, revoked = false, unsaved = false, reconnectTimer, pollTimer, connectTimer, generation = 0;
 let commandEpoch = 0, reconnectDelay = 500;
 let incoming = Promise.resolve(), outgoing = Promise.resolve(), pending = new Map();
 // A modal sheet makes the page inert, so its errors show inside the sheet.
@@ -621,6 +621,7 @@ function connect() {
         authorization.then(() => {
           if (current !== generation) return;
           bootstrap = null; newDeviceKey = null;
+          if (unsaved) { unsaved = false; storage('put', credential).catch(error => showError(error.message)); }
           reconnectDelay = 500;
           clearTimeout(connectTimer);
           connected = true; busy = false;
@@ -928,7 +929,7 @@ $('forget').onclick = () => {
 $('forget-dialog').addEventListener('close', () => { if ($('forget-dialog').returnValue === 'forget') void forget(); });
 async function forget() {
   stopped = true; ++generation; clearTimeout(reconnectTimer); socket?.close(); offline();
-  credential = null; revoked = false; bootstrap = null; newDeviceKey = null; selected = null; drafts.clear(); tabsSignature = '';
+  credential = null; revoked = false; unsaved = false; bootstrap = null; newDeviceKey = null; selected = null; drafts.clear(); tabsSignature = '';
   selectedStatus = null; tabCount = 0;
   $('keys').hidden = true; $('keys-toggle').setAttribute('aria-expanded', 'false');
   clearAttachments();
@@ -969,7 +970,8 @@ async function beginPair(pairing) {
   bootstrap = await importKey(pairing.key);
   newDeviceKey = randomKey();
   credential = { room: pairing.room, key: await importKey(newDeviceKey) };
-  await storage('put', credential);
+  // Keep the stored pairing until the Mac accepts this one.
+  unsaved = true;
   stopped = false; revoked = false;
   reconnectDelay = 500;
   updateControls();
@@ -1084,13 +1086,23 @@ document.addEventListener('visibilitychange', () => {
   else if (connected) poll();
   else if (!stopped) connect();
 });
+function confirmReplace() {
+  const dialog = $('replace-dialog');
+  dialog.returnValue = '';
+  dialog.showModal();
+  return new Promise(resolve => dialog.addEventListener('close', () => resolve(dialog.returnValue === 'replace'), { once: true }));
+}
 async function start() {
   const fragment = new URLSearchParams(location.hash.slice(1));
   const pairing = pairingFromText(location.hash, location.origin);
   history.replaceState(null, '', location.pathname);
   if (!crypto.subtle) throw new Error('Open Sidereal using HTTPS.');
-  if (pairing?.room) await beginPair(pairing);
-  else if (pairing?.error || fragment.has('room') || fragment.has('key')) {
+  if (pairing?.room) {
+    // A link must not silently replace a working pairing.
+    const saved = await storage('get');
+    if (!saved || await confirmReplace()) await beginPair(pairing);
+    else { credential = saved; updateControls(); connect(); }
+  } else if (pairing?.error || fragment.has('room') || fragment.has('key')) {
     throw new Error(pairing?.error || 'Invalid code. Scan a new code in Sigil.');
   } else {
     credential = await storage('get');

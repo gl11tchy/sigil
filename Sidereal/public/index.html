@@ -49,6 +49,13 @@
     <div id="project-list"></div>
     <p id="project-empty" hidden>No projects yet.</p>
   </dialog>
+  <dialog id="replace-dialog" aria-labelledby="replace-heading" aria-describedby="replace-detail">
+    <form method="dialog">
+      <div class="sheet-heading"><h2 id="replace-heading">Replace the paired Mac?</h2></div>
+      <p id="replace-detail">This phone is already paired with a Mac. Replace it only if this link came from Sigil on your own Mac.</p>
+      <div class="dialog-actions"><button id="replace-keep" value="keep">Keep current</button><button id="replace-accept" class="destructive" value="replace">Replace</button></div>
+    </form>
+  </dialog>
   <dialog id="forget-dialog" aria-labelledby="forget-heading" aria-describedby="forget-detail">
     <form method="dialog">
       <div class="sheet-heading"><h2 id="forget-heading">Forget this Mac?</h2></div>

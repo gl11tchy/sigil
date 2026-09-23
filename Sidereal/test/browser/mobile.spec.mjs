@@ -673,6 +673,28 @@ test('tree gutters do not wrap into a column of pipes on a phone', async ({ page
   } finally { mac.close(); }
 });
 
+test('a pairing link asks before it replaces the paired Mac and keeps it if pairing fails', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mac = await pair(page, baseURL);
+  const other = `${baseURL}/#room=${'1'.repeat(32)}&key=${'2'.repeat(64)}`;
+  try {
+    const dialog = page.locator('#replace-dialog');
+    await page.goto(other);
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('Replace the paired Mac?');
+    await page.screenshot({ path: testInfo.outputPath('replace-confirm.png'), animations: 'disabled' });
+    await page.locator('#replace-keep').click();
+    await expect(page.locator('#status')).toHaveText('Connected');
+    await page.goto(other);
+    await page.locator('#replace-accept').click();
+    await expect(dialog).toBeHidden();
+    await expect(page.locator('#status')).toHaveText(/Connecting|Disconnected/);
+    // The link's room has no Mac, so the old pairing must still be stored.
+    await page.goto(baseURL);
+    await expect(page.locator('#status')).toHaveText('Connected');
+  } finally { mac.close(); }
+});
+
 test('Forget this Mac asks first and Cancel keeps the pairing', async ({ page, baseURL }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const mac = await pair(page, baseURL);

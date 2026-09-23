@@ -10,10 +10,10 @@ const source = (await readFile(new URL('../public/app.mjs', import.meta.url), 'u
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
 // Run the real handlers; only browser services and encryption are replaced.
-async function browser({ hash = '', saved } = {}) {
+async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { device: true } } } = {}) {
   const elements = new Map(), events = new Map(), timers = new Map(), sockets = [];
   let nextTimer = 0, reloads = 0;
-  let stored = saved ?? { room: 'a'.repeat(32), key: { device: true } };
+  let stored = saved;
   const sealed = [];
   const element = id => {
     if (!elements.has(id)) elements.set(id, {
@@ -573,7 +573,7 @@ test('duplicate hello does not reset sequence or replace a pending request', asy
 });
 
 test('unauthorized after a dropped pairing acknowledgement retries with the persisted device key', async () => {
-  const page = await browser({ hash: `#room=${'a'.repeat(32)}&key=${'b'.repeat(64)}` });
+  const page = await browser({ hash: `#room=${'a'.repeat(32)}&key=${'b'.repeat(64)}`, saved: null });
   const socket = page.sockets.at(-1);
   socket.receive({ hello: 'c'.repeat(64) });
   await settle();
