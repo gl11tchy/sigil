@@ -594,6 +594,85 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func turningMessagingOffWithoutTheSocketLeavesTheOtherCopysRegistration() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let ownerProbe = RunnerProbe()
+        ownerProbe.setResponse((0, "ok"))
+        let owner = fixture.model(registrationRunner: ownerProbe.run, mcpBinary: fixture.executable)
+        defer { owner.closeAllTabsAndWait() }
+        try await owner.setTabMessaging(enabled: true)
+        #expect(owner.isTabMessagingAvailable)
+        #expect(fixture.settings.isTabMessagingEnabled)
+
+        let secondProbe = RunnerProbe()
+        secondProbe.setResponse((0, "| sigil |"))
+        let second = fixture.model(
+            registrationRunner: secondProbe.run, mcpBinary: fixture.executable)
+        defer { second.closeAllTabsAndWait() }
+
+        await #expect(throws: (any Error).self) {
+            try await second.setTabMessaging(enabled: false)
+        }
+
+        #expect(!secondProbe.calls.contains { $0.contains("remove") })
+        #expect(fixture.settings.isTabMessagingEnabled)
+        #expect(owner.isTabMessagingAvailable)
+        #expect(!second.isTabMessagingAvailable)
+
+        ownerProbe.setResponse((0, "| sigil |"))
+        try await owner.setTabMessaging(enabled: false)
+        #expect(ownerProbe.calls.contains { $0.contains("remove") })
+        #expect(!fixture.settings.isTabMessagingEnabled)
+        #expect(!owner.isTabMessagingAvailable)
+    }
+
+    @Test @MainActor
+    func aLoopingSenderCannotFloodAnotherTabsInbox() throws {
+        _ = NSApplication.shared
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let sender = try #require(model.newTab(in: cwd))
+        let target = try #require(model.newTab(in: cwd))
+        let bridge = TabBridge(model: model, socketURL: fixture.socketURL)
+        let peer = BridgePeer(tabID: sender.id.uuidString)
+
+        let responses = (0..<100).map { index in
+            bridge.bridgeSend(from: peer, to: target.id.uuidString, message: "spam \(index)")
+        }
+
+        #expect(responses.first?.ok == true)
+        #expect(target.bridgeInbox.count < 100)
+        #expect(responses.filter(\.ok).count == target.bridgeInbox.count)
+        #expect(responses.last?.ok == false)
+        #expect(responses.last?.error?.contains("unread") == true)
+
+        target.dismissNextBridgePrompt()
+        #expect(bridge.bridgeSend(from: peer, to: target.id.uuidString, message: "after").ok)
+    }
+
+    @Test @MainActor
+    func registrationCommandsRunOffTheCooperativePool() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let probe = RunnerProbe()
+        probe.setResponse((0, "| sigil |"))
+        let model = fixture.model(registrationRunner: probe.run, mcpBinary: fixture.executable)
+        defer { model.closeAllTabsAndWait() }
+
+        try await model.setTabMessaging(enabled: true)
+        try await model.setTabMessaging(enabled: false)
+
+        #expect(probe.calls.contains { $0.contains("add") })
+        #expect(probe.calls.contains { $0.contains("remove") })
+        #expect(!probe.queueLabels.isEmpty)
+        #expect(probe.queueLabels.allSatisfy { !$0.contains("cooperative") })
+    }
+
+    @Test @MainActor
     func restoreOpenTabsCompletesWhileRegistrationHangs() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
@@ -3645,12 +3724,21 @@ private final class RunnerProbe: @unchecked Sendable {
     private var storedCalls: [[String]] = []
     private var storedResponses: [(Int32, String)] = []
     private var storedResponse: (Int32, String) = (0, "")
+    private var storedQueueLabels: [String] = []
     private var gate: CallGate?
 
     var calls: [[String]] {
         lock.lock()
         defer { lock.unlock() }
         return storedCalls
+    }
+
+    /// The dispatch queue each call ran on, to prove none ran on the Swift
+    /// concurrency cooperative pool.
+    var queueLabels: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedQueueLabels
     }
 
     func setResponse(_ value: (Int32, String)) {
@@ -3678,8 +3766,10 @@ private final class RunnerProbe: @unchecked Sendable {
         lock.unlock()
         gate?.waitWhileClosed()
 
+        let queueLabel = String(cString: __dispatch_queue_get_label(nil))
         lock.lock()
         storedCalls.append(arguments)
+        storedQueueLabels.append(queueLabel)
         let result: (Int32, String)
         if storedResponses.isEmpty {
             result = storedResponse

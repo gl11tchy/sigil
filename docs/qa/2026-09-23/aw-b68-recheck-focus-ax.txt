@@ -1,0 +1,20 @@
+## b68 a) sidebar list focus, then View > Hide Sidebar
+after clicking the 'Summarise the acme-api…' row:
+role=AXTextArea desc="Grok Build terminal" title="" id="" value="sandbox:workspace /Users/Shared/sigil-ux…"
+after clicking inside the sidebar list (YESTERDAY header):
+role=? desc="" title="" id="" value=""
+after View > Hide Sidebar:
+role=AXTextArea desc="Grok Build terminal" title="" id="" value="sandbox:workspace /Users/Shared/sigil-ux…"
+## b68 b) sidebar search field focus, then View > Hide Sidebar
+after clicking the sidebar search field:
+role=AXTextField desc="Search conversations" title="" id="" value=""
+after View > Hide Sidebar:
+role=AXTextArea desc="Grok Build terminal" title="" id="" value="sandbox:workspace /Users/Shared/sigil-ux…"
+## b68 c) terminal find field focus, then View > Hide Sidebar
+after View > Show Sidebar:
+role=AXTextArea desc="Grok Build terminal" title="" id="" value="sandbox:workspace /Users/Shared/sigil-ux…"
+after Edit > Find:
+role=AXTextField desc="Find in terminal" title="" id="" value=""
+after View > Hide Sidebar:
+role=AXTextField desc="Find in terminal" title="" id="" value=""
+  ^ role=AXGroup desc="" title="" id="" value=""
