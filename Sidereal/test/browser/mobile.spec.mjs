@@ -170,6 +170,8 @@ test('a rejected code shows its reason on the scanner, above the camera', async 
   await page.getByRole('button', { name: 'Scan code' }).click();
   const reason = page.locator('#scanner').getByRole('alert');
   await expect(reason).toHaveText('This code is for a different Sidereal address.');
+  // One alert only: the page's own error line sits under the scanner.
+  await expect(page.locator('#error')).toBeHidden();
   expect(await reason.evaluate(element => {
     const box = element.getBoundingClientRect();
     return document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2) === element;

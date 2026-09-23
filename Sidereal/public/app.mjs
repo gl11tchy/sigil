@@ -1068,8 +1068,7 @@ async function startScan() {
           return;
         }
         if (result?.error) {
-          showError(result.error);
-          // #error sits under the full-screen scanner. Show the reason on the scanner too.
+          // #error sits under the full-screen scanner. Show the reason on the scanner only.
           if ($('scanner-error').textContent !== result.error) $('scanner-error').textContent = result.error;
           $('scanner-error').hidden = false;
         }
