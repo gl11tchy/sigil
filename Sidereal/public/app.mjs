@@ -166,6 +166,8 @@ function applyTail(bucket, next) {
   const overlap = overlapSuffixPrefix(loaded, next);
   if (overlap > 0) {
     bucket.history = loaded.slice(0, loaded.length - overlap);
+    // Streamed output takes this path on every poll; keep the newest text under the cap.
+    if (bucket.history.length > 400_000) bucket.history = bucket.history.slice(-400_000);
     bucket.tail = next;
     return;
   }

@@ -141,6 +141,17 @@ test('attached file names keep their extension and non-Latin letters', async () 
   assert.ok(bytes(wide) <= 80);
 });
 
+test('streamed output that overlaps each poll keeps history under the cap', async () => {
+  const { app } = await browser();
+  const bucket = { history: '', tail: '', exhausted: false };
+  const line = n => `line ${String(n).padStart(6, '0')} ${'x'.repeat(1000)}\n`;
+  const window = start => Array.from({ length: 40 }, (_, i) => line(start + i)).join('');
+  // Each poll scrolls 20 lines, and the old and new snapshots share the other 20.
+  for (let start = 0; start <= 20 * 30; start += 20) app.applyTail(bucket, window(start));
+  assert.ok(bucket.history.length <= 400_000, `history is ${bucket.history.length} characters`);
+  assert.ok((bucket.history + bucket.tail).endsWith(window(600)));
+});
+
 test('Send clears the draft only after the Enter acknowledgement', async () => {
   const page = await browser();
   const socket = await page.authorize();
