@@ -425,6 +425,37 @@ test('a multi-chunk file upload stays under the relay frame limit', async ({ pag
   } finally { mac.close(); }
 });
 
+test('an attachment over 4 MB is refused when it is picked', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mac = await pair(page, baseURL);
+  try {
+    await page.locator('#attach').setInputFiles([
+      { name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('Test attachment') },
+      { name: 'report.pdf', mimeType: 'application/pdf', buffer: Buffer.alloc(5 * 1024 * 1024, 7) }]);
+    await expect(page.locator('#attachments')).toContainText('notes.txt');
+    await expect(page.locator('#attachments')).not.toContainText('report.pdf');
+    await expect(page.locator('#error')).toHaveText('Keep files under 4 MB.');
+  } finally { mac.close(); }
+});
+
+test('a failed send does not paste the uploaded files again on retry', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mac = await pair(page, baseURL, 'Ready', { rejectAction: 'input' });
+  const files = () => mac.actions.filter(a => a.action === 'file').length;
+  const inputs = () => mac.actions.filter(a => a.action === 'input').length;
+  try {
+    await page.locator('#attach').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('Test attachment') });
+    await page.locator('#message').fill('Please read this');
+    await page.locator('#send').click();
+    await expect(page.locator('#error')).toHaveText('Test action refused.');
+    expect(files()).toBe(1);
+    await expect(page.locator('#attachments')).toBeHidden();
+    await page.locator('#send').click();
+    await expect.poll(inputs).toBe(2);
+    expect(files()).toBe(1);
+  } finally { mac.close(); }
+});
+
 test('the live Grok composer becomes readable status on a phone', async ({ page, baseURL }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const raw = Array.from({ length: 18 }, () => ' '.repeat(120)).join('\n') + '\n'

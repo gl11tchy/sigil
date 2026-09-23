@@ -728,8 +728,7 @@ async function prepareFile(file) {
   if (file.size > MAX_REMOTE_BYTES) throw new Error('Keep files under 4 MB.');
   return { name: remoteFileName(file.name), bytes: new Uint8Array(await file.arrayBuffer()) };
 }
-async function uploadFile(file, tabID) {
-  const payload = await prepareFile(file);
+async function uploadFile(payload, tabID) {
   const transfer = randomKey().slice(0, 32);
   const count = Math.max(1, Math.ceil(payload.bytes.length / CHUNK));
   for (let index = 0; index < count; index++) {
@@ -786,7 +785,17 @@ async function sendText(submit) {
   if (!text.trim() && !files.length) return;
   if (new TextEncoder().encode(text).length > 8192) { showError('Keep the message under 8 KB.'); return; }
   const target = selected, current = generation;
-  for (const item of files) await uploadFile(item.file, target);
+  // Size-check every file before the Mac pastes any of them into the prompt.
+  const payloads = [];
+  for (const item of files) payloads.push(await prepareFile(item.file));
+  for (const [index, item] of files.entries()) {
+    await uploadFile(payloads[index], target);
+    // The Mac has pasted this file, so a retry must not send it again.
+    const list = attachmentDrafts.get(target);
+    const at = list ? list.indexOf(item) : -1;
+    if (at >= 0) { list.splice(at, 1); if (item.preview) URL.revokeObjectURL(item.preview); }
+    if (selected === target) renderAttachments();
+  }
   if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
   if (text.trim()) await request('input', files.length ? ` ${text}` : text, target);
   if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
@@ -891,6 +900,8 @@ $('attach').onchange = () => {
   const list = attachmentsFor();
   const room = 16 - list.length;
   for (const file of [...$('attach').files].slice(0, Math.max(0, room))) {
+    // Photos are compressed before upload; other files must already fit.
+    if (!isImageFile(file) && file.size > MAX_REMOTE_BYTES) { showError('Keep files under 4 MB.'); continue; }
     list.push({
       file, name: file.name || 'file',
       preview: isImageFile(file) ? URL.createObjectURL(file) : '',
