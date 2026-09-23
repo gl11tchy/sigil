@@ -684,7 +684,9 @@ struct SidebarView: View {
                     Button("Reset Name") { model.resetName(session) }
                 }
                 Divider()
-                Button("Open in New Tab") { model.open(session) }
+                Button(model.isOpen(session) ? "Show Tab" : "Open in New Tab") {
+                    model.open(session)
+                }
                 if model.isOpen(session) {
                     Button("Close Tab") { dismissSession(session) }
                 }
