@@ -66,6 +66,10 @@ struct RightPanelView: View {
         case .shell:
             if let shell = panel.shell {
                 TerminalPane(controller: shell, background: palette.groundNSColor)
+                    .task(id: ObjectIdentifier(shell)) {
+                        await Task.yield()
+                        model.focusPanelShell()
+                    }
             } else {
                 PanelPlaceholder(text: "Starting a shell…")
             }

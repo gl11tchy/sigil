@@ -36,6 +36,8 @@ final class AppModel {
     var isFindBarVisible = false
     /// True when a tab was selected while the main window could not take focus.
     var needsTerminalFocus = false
+    /// True when the panel shell was opened before its view reached the window.
+    @ObservationIgnored private var needsPanelShellFocus = false
     var findQuery = ""
     var findMatchIndex = 0
     var findMatchCount = 0
@@ -1819,6 +1821,7 @@ final class AppModel {
         panel.toggle(mode, in: currentDirectory)
         preparePanel()
         if wasVisible, !panel.isVisible { refocusTerminalAfterHiding(.panel) }
+        requestPanelShellFocusIfShown()
     }
 
     /// Opens or closes the panel on whatever tool it last showed.
@@ -1827,6 +1830,7 @@ final class AppModel {
         panel.toggle(nil, in: currentDirectory)
         preparePanel()
         if wasVisible, !panel.isVisible { refocusTerminalAfterHiding(.panel) }
+        requestPanelShellFocusIfShown()
     }
 
     /// Kills the scratch shell and starts a new one in the current folder.
@@ -1834,6 +1838,27 @@ final class AppModel {
         panel.restartShell(
             in: currentDirectory, theme: settings.theme, fontSize: settings.fontSize)
         panel.shell?.optionAsMetaKey = settings.optionAsMetaKey
+        requestPanelShellFocusIfShown()
+    }
+
+    /// Opening the shell means typing into it, not into the tab behind it.
+    private func requestPanelShellFocusIfShown() {
+        needsPanelShellFocus = panel.isVisible && panel.mode == .shell
+        focusPanelShell()
+    }
+
+    /// Moves focus into the panel shell once its view is in the window. The
+    /// panel calls this again when a new shell view appears.
+    func focusPanelShell() {
+        guard needsPanelShellFocus else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.needsPanelShellFocus, self.panel.isVisible,
+                self.panel.mode == .shell, let shell = self.panel.shell,
+                let window = shell.view.window, window.attachedSheet == nil
+            else { return }
+            self.needsPanelShellFocus = false
+            shell.focus()
+        }
     }
 
     /// Starts whatever the visible tool needs, with the app's own theme and size.
