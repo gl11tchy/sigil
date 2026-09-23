@@ -147,7 +147,7 @@ struct GrokCommands: Commands {
         }
 
         CommandGroup(after: .pasteboard) {
-            Button("Find") { model.toggleFindBar() }
+            Button("Find") { model.showFindBar() }
                 .keyboardShortcut("f", modifiers: .command)
                 .disabled(model.selectedTab == nil)
             Button("Find Conversations") { model.focusSidebarSearch() }

@@ -376,6 +376,27 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func findCommandRefocusesAnOpenFindBarInsteadOfClosingIt() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        _ = try #require(model.newTab(in: cwd))
+
+        model.showFindBar()
+        #expect(model.isFindBarVisible)
+        model.findQuery = "error"
+        let token = model.findFocusToken
+
+        model.showFindBar()
+
+        #expect(model.isFindBarVisible)
+        #expect(model.findQuery == "error")
+        #expect(model.findFocusToken == token + 1)
+    }
+
+    @Test @MainActor
     func readingAChatThenLeavingClearsItsUnreadDot() throws {
         _ = NSApplication.shared
         let fixture = try ModelFixture()

@@ -1883,11 +1883,15 @@ final class AppModel {
 
     // MARK: - Find
 
-    func toggleFindBar() {
+    /// Bumped by Cmd-F while the bar is open so its field takes focus again.
+    private(set) var findFocusToken = 0
+
+    /// Cmd-F opens the bar, or refocuses it; Escape and the close button dismiss it.
+    func showFindBar() {
+        guard selectedTab != nil else { return }
         if isFindBarVisible {
-            dismissFindBar()
+            findFocusToken += 1
         } else {
-            guard selectedTab != nil else { return }
             isFindBarVisible = true
         }
     }
