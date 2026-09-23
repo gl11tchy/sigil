@@ -919,7 +919,8 @@ $('attach-toggle').onclick = () => $('attach').click();
 $('attach').onchange = () => {
   const list = attachmentsFor();
   const room = 16 - list.length;
-  for (const file of [...$('attach').files].slice(0, Math.max(0, room))) {
+  const files = [...$('attach').files];
+  for (const file of files.slice(0, Math.max(0, room))) {
     // Photos are compressed before upload; other files must already fit.
     if (!isImageFile(file) && file.size > MAX_REMOTE_BYTES) { showError('Keep files under 4 MB.'); continue; }
     list.push({
@@ -927,6 +928,7 @@ $('attach').onchange = () => {
       preview: isImageFile(file) ? URL.createObjectURL(file) : '',
     });
   }
+  if (files.length > room) showError('Up to 16 files per message. The rest were not added.');
   $('attach').value = '';
   renderAttachments();
 };

@@ -185,6 +185,15 @@ test('an 8 KB message with an attachment is refused before anything is sent', as
   assert.deepEqual(socket.sent.map(request => request.action), ['state']);
 });
 
+test('picking more than 16 files says the rest were not added', async () => {
+  const page = await browser();
+  await page.authorize();
+  page.element('attach').files = Array.from({ length: 20 }, (_, index) => ({ name: `note${index}.txt`, type: 'text/plain', size: 5 }));
+  page.element('attach').onchange();
+  assert.equal(page.app.attachmentsFor().length, 16);
+  assert.match(page.element('error').textContent, /Up to 16 files per message/);
+});
+
 test('a sent attachment leaves the queue when the Mac switches tabs during the send', async () => {
   const page = await browser();
   page.app.btoa = btoa;
