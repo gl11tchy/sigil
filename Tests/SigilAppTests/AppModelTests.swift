@@ -3361,6 +3361,45 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func pruneKeepsAnotherCopysNewEntriesUntilAScanCouldSeeThem() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        try fixture.writeListedSession(id: "known", cwd: cwd.path, summary: "Known")
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        // Another running copy creates a conversation after this copy's last
+        // scan, then pins, archives and names it.
+        let otherCopy = AppSettings(defaults: fixture.defaults)
+        let fresh = OpenTabsSnapshot.Entry(sessionID: "fresh", cwd: cwd.path)
+        let freshFolder = fixture.root.appendingPathComponent("fresh-folder").path
+        otherCopy.pinnedConversations = [fresh]
+        otherCopy.pinnedProjects = [freshFolder]
+        otherCopy.archivedConversations = [fresh]
+        otherCopy.conversationNames = [.init(sessionID: "fresh", cwd: cwd.path, name: "Fresh")]
+
+        model.pruneMissingPins()
+
+        var stored = AppSettings(defaults: fixture.defaults)
+        #expect(stored.pinnedConversations == [fresh])
+        #expect(stored.pinnedProjects == [freshFolder])
+        #expect(stored.archivedConversations == [fresh])
+        #expect(stored.conversationNames.map(\.name) == ["Fresh"])
+
+        // A scan that began after this copy read them still finds nothing,
+        // so they are stale and go.
+        await fixture.store.reload()
+        model.pruneMissingPins()
+
+        stored = AppSettings(defaults: fixture.defaults)
+        #expect(stored.pinnedConversations.isEmpty)
+        #expect(stored.pinnedProjects.isEmpty)
+        #expect(stored.archivedConversations.isEmpty)
+        #expect(stored.conversationNames.isEmpty)
+    }
+
+    @Test @MainActor
     func legacyFolderNotesSkipConversationsTheSidebarHides() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }

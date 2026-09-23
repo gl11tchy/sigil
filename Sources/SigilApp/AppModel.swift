@@ -86,6 +86,9 @@ final class AppModel {
     /// Refreshes what a crash report would say Sigil was doing. Observation
     /// ignores it: nothing in the UI reads it.
     @ObservationIgnored private var crashStateTask: Task<Void, Never>?
+    /// Shared-list entries another running copy added, with the store's scan
+    /// count when this copy first read them. See `awaitsScan`.
+    @ObservationIgnored private var sharedArrivals: [String: Int] = [:]
 
     init(
         settings: AppSettings = AppSettings(),
@@ -555,8 +558,12 @@ final class AppModel {
     /// Drops pins, archives, and names whose conversations are gone, after a successful scan.
     func pruneMissingPins() {
         guard !store.isLoading, store.loadError == nil else { return }
+        let held = sharedListKeys()
         settings.reloadSharedLists()
-        let remainingPins = pruningMissing(settings.pinnedConversations)
+        for key in sharedListKeys().subtracting(held) where sharedArrivals[key] == nil {
+            sharedArrivals[key] = store.scanSequence
+        }
+        let remainingPins = pruningMissing(settings.pinnedConversations, list: "pin")
         if remainingPins != settings.pinnedConversations {
             settings.pinnedConversations = remainingPins
         }
@@ -564,7 +571,7 @@ final class AppModel {
         if remainingProjectPins != settings.pinnedProjects {
             settings.pinnedProjects = remainingProjectPins
         }
-        let remainingArchives = pruningMissing(settings.archivedConversations)
+        let remainingArchives = pruningMissing(settings.archivedConversations, list: "archive")
         if remainingArchives != settings.archivedConversations {
             settings.archivedConversations = remainingArchives
         }
@@ -579,7 +586,28 @@ final class AppModel {
         {
             settings.focusedProjectPath = ""
         }
+        sharedArrivals = sharedArrivals.filter { $0.value >= store.appliedScanSequence }
         migrateLegacyPanelNotes()
+    }
+
+    /// One key per entry in the lists running copies share, tagged by list.
+    private func sharedListKeys() -> Set<String> {
+        Set(settings.pinnedConversations.map { sharedKey("pin", $0.sessionID, $0.cwd) })
+            .union(settings.pinnedProjects.map { sharedKey("project", $0) })
+            .union(settings.archivedConversations.map { sharedKey("archive", $0.sessionID, $0.cwd) })
+            .union(settings.conversationNames.map { sharedKey("name", $0.sessionID, $0.cwd) })
+    }
+
+    private func sharedKey(_ parts: String...) -> String {
+        parts.joined(separator: "\u{0}")
+    }
+
+    /// True while the shown scan began before this copy read the entry from
+    /// another copy. That copy may have created the conversation after the
+    /// scan started, so a missing match is not yet proof the entry is stale.
+    private func awaitsScan(_ key: String) -> Bool {
+        guard let seen = sharedArrivals[key] else { return false }
+        return store.appliedScanSequence <= seen
     }
 
     /// Pruning and legacy-note migration follow the store's own loading, not a
@@ -637,10 +665,13 @@ final class AppModel {
         }
     }
 
-    private func pruningMissing(_ entries: [OpenTabsSnapshot.Entry]) -> [OpenTabsSnapshot.Entry] {
+    private func pruningMissing(
+        _ entries: [OpenTabsSnapshot.Entry], list: String
+    ) -> [OpenTabsSnapshot.Entry] {
         entries.filter { entry in
             store.sessions.contains { $0.id == entry.sessionID && samePath($0.cwd, entry.cwd) }
                 || tabs.contains { tabMatches($0, sessionID: entry.sessionID, cwd: entry.cwd) }
+                || awaitsScan(sharedKey(list, entry.sessionID, entry.cwd))
         }
     }
 
@@ -648,6 +679,7 @@ final class AppModel {
         paths.filter { path in
             store.sessions.contains { samePath($0.cwd, path) }
                 || tabs.contains { samePath($0.workingDirectory.path, path) }
+                || awaitsScan(sharedKey("project", path))
         }
     }
 
@@ -655,6 +687,7 @@ final class AppModel {
         names.filter { record in
             store.sessions.contains { $0.id == record.sessionID && samePath($0.cwd, record.cwd) }
                 || tabs.contains { tabMatches($0, sessionID: record.sessionID, cwd: record.cwd) }
+                || awaitsScan(sharedKey("name", record.sessionID, record.cwd))
         }
     }
 
