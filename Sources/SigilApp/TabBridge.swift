@@ -180,13 +180,8 @@ final class TabBridge: BridgeServerDelegate {
         dest: BridgeTabRef,
         requestID: String? = nil
     ) -> BridgeResponse {
-        if case .exited = tab.activity {
-            let title = model?.title(for: tab) ?? dest.title
-            return .failure("tab \"\(title)\" (\(tab.id.uuidString)) is not running")
-        }
         // Never inject unsolicited keystrokes. The tab shows a small inbox and
         // the user chooses when to submit the prompt.
-        guard !prompt.isEmpty else { return .failure("message is empty") }
         guard tab.bridgeInbox.count < Self.maxUnreadPrompts else {
             return .failure(
                 "tab \"\(dest.title)\" already has \(Self.maxUnreadPrompts) unread messages; try again after the user reads them"
