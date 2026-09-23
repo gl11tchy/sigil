@@ -309,6 +309,14 @@ test('keeps list and status markers that are not spinner chrome', () => {
   assert.equal(readableOutput('⣿ GPU utilization'), '⣿ GPU utilization');
 });
 
+test('keeps content rows that start with Run or Stop after a pipe or bullet', () => {
+  const table = '| Action | Command |\n| Run tests | npm test |\n| Stop server | Ctrl+C |';
+  assert.equal(readableOutput(table), table);
+  assert.equal(readableOutput('│ Run tests │ npm test │'), '│ Run tests │ npm test │');
+  assert.equal(readableOutput('● Run the migration before you deploy.'), '● Run the migration before you deploy.');
+  assert.equal(readableOutput('10 ↓ rows were dropped'), '10 ↓ rows were dropped');
+});
+
 test('keeps documentation that mentions a stop control', () => {
   assert.equal(
     readableOutput('Use the ↓ control labeled [stop]'),
