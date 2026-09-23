@@ -224,7 +224,7 @@ private struct TopBar: View {
                 systemImage: "sidebar.leading",
                 help: model.isSidebarVisible ? "Hide Sidebar (⌘B)" : "Show Sidebar (⌘B)"
             ) {
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) {
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
                     model.isSidebarVisible.toggle()
                 }
             }
@@ -245,7 +245,7 @@ private struct TopBar: View {
                 systemImage: "sidebar.trailing",
                 help: model.panel.isVisible ? "Hide Panel (⌥⌘B)" : "Show Panel (⌥⌘B)"
             ) {
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) { model.togglePanel() }
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) { model.togglePanel() }
             }
 
             IconButton(systemImage: "plus", help: "New Session in \(model.newSessionDirectory.abbreviatedPath) (⌘T)") {

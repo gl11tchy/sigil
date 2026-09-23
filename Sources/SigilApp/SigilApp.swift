@@ -170,11 +170,11 @@ struct GrokCommands: Commands {
 
         CommandGroup(after: .toolbar) {
             Button(model.isSidebarVisible ? "Hide Sidebar" : "Show Sidebar") {
-                model.isSidebarVisible.toggle()
+                Self.animateColumn { model.isSidebarVisible.toggle() }
             }
             .keyboardShortcut("b", modifiers: .command)
             Button(model.panel.isVisible ? "Hide Panel" : "Show Panel") {
-                model.togglePanel()
+                Self.animateColumn { model.togglePanel() }
             }
             .keyboardShortcut("b", modifiers: [.command, .option])
             Menu("Panel") {
@@ -217,6 +217,12 @@ struct GrokCommands: Commands {
             }
             Button("Reveal Crash Logs") { model.revealCrashLogs() }
         }
+    }
+
+    /// The same motion as the toolbar buttons, so ⌘B does not snap.
+    private static func animateColumn(_ change: () -> Void) {
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16), change)
     }
 
     /// ⌘W belongs to the window in front. Settings and About get the system
