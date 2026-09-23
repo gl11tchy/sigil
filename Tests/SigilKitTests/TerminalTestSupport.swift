@@ -68,6 +68,48 @@ enum TerminalTestSupport {
         return condition()
     }
 
+    struct InputCaptureNotReady: Error {}
+
+    /// Starts a child that puts its tty in raw mode, optionally turns on
+    /// bracketed paste, and copies every byte it reads to the returned file.
+    @MainActor
+    static func startInputCapture(
+        in controller: TerminalController,
+        bracketedPaste: Bool
+    ) async throws -> URL {
+        let helper = try makeFlagStrippingHelper()
+        let capture = helper.deletingLastPathComponent().appendingPathComponent("input.bin")
+        let mode = bracketedPaste ? "\\033[?2004h" : ""
+        controller.start(
+            launchSpec(
+                executable: helper,
+                extraArguments: [
+                    "/bin/sh", "-c",
+                    "stty raw -echo; printf '\(mode)CAPTURE_READY'; exec /bin/cat > \"$1\"",
+                    "sh", capture.path,
+                ]
+            )
+        )
+        guard await waitUntil({ controller.bufferText().contains("CAPTURE_READY") }) else {
+            throw InputCaptureNotReady()
+        }
+        return capture
+    }
+
+    /// Sends a sentinel after whatever the test typed, then returns the bytes
+    /// the child read before it.
+    @MainActor
+    static func capturedInput(_ capture: URL, from controller: TerminalController) async -> [UInt8] {
+        let sentinel = Array("@@CAPTURE_END@@".utf8)
+        controller.send(text: "@@CAPTURE_END@@")
+        var bytes: [UInt8] = []
+        let ended = await waitUntil {
+            bytes = (try? [UInt8](Data(contentsOf: capture))) ?? []
+            return bytes.count >= sentinel.count && Array(bytes.suffix(sentinel.count)) == sentinel
+        }
+        return ended ? Array(bytes.dropLast(sentinel.count)) : bytes
+    }
+
     static func processIsAlive(_ pid: pid_t) -> Bool {
         guard pid > 0 else { return false }
         return kill(pid, 0) == 0

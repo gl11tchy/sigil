@@ -42,13 +42,20 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
     }
 
     override func paste(_ sender: Any) {
-        if pasteDroppedContent(from: NSPasteboard.general) { return }
+        paste(from: NSPasteboard.general)
+    }
+
+    /// Cmd-V. Takes the pasteboard so tests do not touch the user's clipboard.
+    func paste(from pasteboard: NSPasteboard) {
+        if pasteDroppedContent(from: pasteboard) { return }
         // Finder also puts a refused file's name on the pasteboard as text.
-        if TerminalDrop.hasUnsafeFileName(TerminalDrop.fileURLs(from: NSPasteboard.general)) {
+        if TerminalDrop.hasUnsafeFileName(TerminalDrop.fileURLs(from: pasteboard)) {
             NSSound.beep()
             return
         }
-        super.paste(sender)
+        guard let text = pasteboard.string(forType: .string), !text.isEmpty else { return }
+        unmarkText()
+        sendPaste(text)
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
@@ -73,12 +80,18 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
         guard let paths = try? TerminalDrop.pathsToPaste(from: pasteboard), !paths.isEmpty else {
             return false
         }
-        let text = TerminalDrop.pasteText(for: paths)
+        sendPaste(TerminalDrop.pasteText(for: paths))
+        return true
+    }
+
+    /// Pasted text cannot carry ESC or other controls: an embedded ESC[201~
+    /// would end bracketed paste early and run the rest as typed keys.
+    private func sendPaste(_ text: String) {
+        let safe = TerminalDrop.sanitizedPasteText(text)
         let bracketed = getTerminal().bracketedPasteMode
         if bracketed { send(txt: "\u{1b}[200~") }
-        send(txt: text)
+        send(txt: safe)
         if bracketed { send(txt: "\u{1b}[201~") }
-        return true
     }
 
     func startHosted(
