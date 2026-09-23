@@ -1547,6 +1547,9 @@ final class AppModel {
             } else {
                 // Remove the global entry before stopping the working local server.
                 // A failed removal therefore leaves all three states consistently on.
+                // The registration is shared, so only the copy holding the socket
+                // may remove it; taking the socket throws while another copy has it.
+                try startTabMessaging()
                 try await removeTabMessagingRegistration()
                 stopTabMessaging()
             }
@@ -1622,19 +1625,31 @@ final class AppModel {
         guard let helper = mcpBinaryOverride ?? BridgeRegistration.bundledMCPBinary else {
             throw TabMessagingChangeError.helperMissing
         }
-        try await Task.detached(priority: .userInitiated) {
+        try await Self.runOffCooperativePool {
             let registration = BridgeRegistration(executable: executable, runner: runner)
             try registration.install(mcpBinary: helper)
-        }.value
+        }
     }
 
     private func removeTabMessagingRegistration() async throws {
         let executable = settings.executableURL
         let runner = registrationRunner
-        try await Task.detached(priority: .userInitiated) {
+        try await Self.runOffCooperativePool {
             let registration = BridgeRegistration(executable: executable, runner: runner)
             try registration.remove()
-        }.value
+        }
+    }
+
+    /// `grok mcp` waits on semaphores for up to about a minute. A Swift task
+    /// would park one of the few cooperative-pool threads for that long.
+    private nonisolated static func runOffCooperativePool(
+        _ work: @escaping @Sendable () throws -> Void
+    ) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(with: Result { try work() })
+            }
+        }
     }
 
     private func stopTabMessaging() {
