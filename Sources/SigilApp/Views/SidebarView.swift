@@ -21,6 +21,20 @@ enum SidebarActivityDot {
     }
 }
 
+/// VoiceOver value for a folder row. The row combines its children, so the
+/// working dot and the pin glyph are spoken here or not at all.
+enum ProjectRowAccessibility {
+    static func value(countLabel: String, isActive: Bool, isWorking: Bool, isPinned: Bool)
+        -> String
+    {
+        var value = countLabel
+        if isActive { value += ", one open" }
+        if isWorking { value += ", working" }
+        if isPinned { value += ", pinned" }
+        return value
+    }
+}
+
 /// The thread viewer: every Grok Build conversation on this machine.
 ///
 /// Home is the project list. Recents and Archived sit under it as destinations
@@ -1473,7 +1487,14 @@ private struct ProjectListRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel(title)
-        .accessibilityValue(isActive ? "\(countLabel), one open" : countLabel)
+        .accessibilityValue(
+            ProjectRowAccessibility.value(
+                countLabel: countLabel,
+                isActive: isActive,
+                isWorking: isWorking,
+                isPinned: isPinned && showsPin
+            )
+        )
         .accessibilityAction(.default, open)
         .modifier(NamedActionIf(name: "New Session", enabled: canStart, action: newChat))
         .modifier(
