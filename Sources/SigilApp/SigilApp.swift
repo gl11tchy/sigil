@@ -215,11 +215,15 @@ struct GrokCommands: Commands {
             }
         }
 
-        CommandGroup(after: .help) {
+        CommandGroup(after: .appInfo) {
             Button("Check for Updates…") {
                 NSWorkspace.shared.open(
                     URL(string: "https://github.com/gl11tchy/sigil/releases/latest")!)
             }
+        }
+
+        // Sigil has no help book, so the default Help item would only say so.
+        CommandGroup(replacing: .help) {
             Button("Reveal Crash Logs") { model.revealCrashLogs() }
         }
     }
