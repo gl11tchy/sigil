@@ -264,6 +264,15 @@ struct SidebarOrganizationTests {
         #expect(SidebarOrganization.homeRowID(leaving: .project, projectID: nil) == nil)
     }
 
+    /// Set order follows the launch's hash seed; the anchor must follow the list.
+    @Test func droppingTheAnchorReanchorsOnTheFirstVisibleSelectedRow() {
+        let rows = (1...30).map { "row\($0)" }
+        let selection = Set(rows.dropFirst(4))
+
+        #expect(SidebarOrganization.reanchor(selection: selection, in: rows) == "row5")
+        #expect(SidebarOrganization.reanchor(selection: [], in: rows) == nil)
+    }
+
     /// A focused list always shows where the keys are.
     @Test func focusedListAlwaysHasAHighlightedRow() {
         let rows = ["a", "b", "c"]

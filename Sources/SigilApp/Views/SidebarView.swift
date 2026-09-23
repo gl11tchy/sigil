@@ -1164,7 +1164,10 @@ struct SidebarView: View {
         if modifiers.contains(.command) {
             if multiSelection.contains(key) {
                 multiSelection.remove(key)
-                if selectionAnchor == key { selectionAnchor = multiSelection.first }
+                if selectionAnchor == key {
+                    selectionAnchor = SidebarOrganization.reanchor(
+                        selection: multiSelection, in: visibleRowIDs())
+                }
             } else {
                 multiSelection.insert(key)
                 selectionAnchor = key

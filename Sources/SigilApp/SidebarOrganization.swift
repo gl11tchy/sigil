@@ -127,6 +127,13 @@ enum SidebarOrganization {
         return Set(rowIDs[min(a, b)...max(a, b)])
     }
 
+    /// The range anchor after ⌘-click drops the current one: the first row still
+    /// selected, in visible order (the rule `pruneMultiSelection` uses), so the
+    /// next ⇧-click selects the same range on every launch.
+    static func reanchor(selection: Set<String>, in rowIDs: [String]) -> String? {
+        rowIDs.first(where: selection.contains)
+    }
+
     /// Recents and Archived are destinations, not folders.
     static func destinationRowIDs(recentsCount: Int, archivedCount: Int) -> [String] {
         var ids: [String] = []
