@@ -120,6 +120,21 @@ struct RemoteControlTests {
         #expect(try KeychainRemotePairingStore.pairing(status: errSecSuccess, item: item) == pairing)
     }
 
+    @Test func keychainReportsAStoredPairingItCannotDecode() throws {
+        var badKey = RemotePairing(origin: "https://example.com", deviceKey: "short", ticket: RemoteCrypto.randomKey())
+        let items: [CFTypeRef?] = [
+            nil, "not data" as CFString, Data("{".utf8) as CFData,
+            try JSONEncoder().encode(badKey) as CFData,
+        ]
+        badKey.deviceKey = RemoteCrypto.randomKey()
+        badKey.ticket = "short"
+        for item in items + [try JSONEncoder().encode(badKey) as CFData] {
+            #expect(throws: KeychainRemotePairingStore.ReadError(status: errSecDecode)) {
+                try KeychainRemotePairingStore.pairing(status: errSecSuccess, item: item)
+            }
+        }
+    }
+
     @Test @MainActor func restoredPairingDoesNotShowAQRAndSurvivesStop() {
         let store = InMemoryRemotePairingStore()
         store.save(

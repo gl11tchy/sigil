@@ -75,7 +75,7 @@ final class KeychainRemotePairingStore: RemotePairingStore {
         guard let data = item as? Data,
             let pairing = try? JSONDecoder().decode(RemotePairing.self, from: data),
             RemoteCrypto.isValidKey(pairing.deviceKey), RemoteCrypto.isValidKey(pairing.ticket)
-        else { return nil }
+        else { throw ReadError(status: errSecDecode) }
         return pairing
     }
 
