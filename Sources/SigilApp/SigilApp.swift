@@ -46,6 +46,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CrashReporter.install()
     }
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        Self.turnOffWindowTabbing()
+    }
+
+    /// Every window would share one model, and a terminal view lives in only
+    /// one window. A native window tab would take the terminals from the first.
+    @MainActor static func turnOffWindowTabbing() {
+        NSWindow.allowsAutomaticWindowTabbing = false
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationDidBecomeActive(_ notification: Notification) {
