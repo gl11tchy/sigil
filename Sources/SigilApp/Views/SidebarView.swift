@@ -1256,7 +1256,7 @@ private struct DrillBar: View {
                 IconButton(
                     systemImage: "plus",
                     help: "New Session in \(title) (⌘T)",
-                    label: "New Session in \(title)"
+                    label: "New Session"
                 ) {
                     newChat()
                 }
