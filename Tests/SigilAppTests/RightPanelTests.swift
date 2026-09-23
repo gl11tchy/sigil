@@ -176,6 +176,42 @@ struct RightPanelTests {
     }
 
     @Test @MainActor
+    func restartingThePanelShellDoesNotBlockOnTheOldShell() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let oldHome = ProcessInfo.processInfo.environment["HOME"]
+        let oldShell = ProcessInfo.processInfo.environment["SHELL"]
+        setenv("HOME", root.path, 1)
+        setenv("SHELL", "/bin/zsh", 1)
+        defer {
+            if let oldHome { setenv("HOME", oldHome, 1) } else { unsetenv("HOME") }
+            if let oldShell { setenv("SHELL", oldShell, 1) } else { unsetenv("SHELL") }
+            try? FileManager.default.removeItem(at: root)
+        }
+        let (panel, notesRoot) = makePanel()
+        defer { try? FileManager.default.removeItem(at: notesRoot) }
+
+        panel.startShellIfNeeded(in: root)
+        let first = try #require(panel.shell)
+        let oldPID = try #require((first.view as? LocalProcessTerminalView)?.process.shellPid)
+        // An interactive zsh at its prompt ignores SIGTERM.
+        try await Task.sleep(for: .milliseconds(500))
+
+        let elapsed = ContinuousClock().measure { panel.restartShell(in: root) }
+        let second = try #require(panel.shell)
+        defer { second.terminateAndWait() }
+
+        #expect(second !== first)
+        #expect(elapsed < .milliseconds(300))
+        let deadline = ContinuousClock.now + .seconds(3)
+        while kill(oldPID, 0) == 0, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(kill(oldPID, 0) != 0)
+    }
+
+    @Test @MainActor
     func aStoredWidthIsClampedToTheAllowedRange() {
         let name = "RightPanelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!

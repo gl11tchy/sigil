@@ -104,9 +104,11 @@ final class RightPanel {
         controller.startShell(ShellLaunchSpec(workingDirectory: directory))
     }
 
-    /// Kills the shell and starts a fresh one in `directory`.
+    /// Kills the shell and starts a fresh one in `directory`. The old shell is
+    /// stopped in the background: an interactive shell ignores SIGTERM, and
+    /// waiting for the SIGKILL would freeze the window.
     func restartShell(in directory: URL, theme: TerminalTheme = .grokNight, fontSize: CGFloat = 13) {
-        shell?.terminateAndWait()
+        shell?.terminate()
         shell = TerminalController(theme: theme, fontSize: fontSize)
         shellDirectory = directory
         shell?.startShell(ShellLaunchSpec(workingDirectory: directory))
