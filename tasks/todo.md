@@ -4,9 +4,10 @@
 - [x] Encrypted chunked file upload pastes a Mac path
 - [x] Phone attach, chips, Stop, 44px targets
 - [x] Tests and browser (`tasks/verify.md`)
-- [ ] Deploy: confirm the running Sidereal revision carries all of this. Blocked on the
+- [x] Deploy: confirm the running Sidereal revision carries all of this. Blocked on the
   previous uploads having no readable revision. Stamped uploads are implemented;
   a live coordinated release and matching `/health` response remain Task 7.
+  Done 2026-09-23: #66 records the deploy, and `/health` reports revision 199cc86.
 
 ## Remote-stack hardening
 
