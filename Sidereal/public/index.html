@@ -21,7 +21,7 @@
       <button id="new" type="button" aria-label="New session">+ New</button>
     </div>
     <details class="connection" id="connection">
-      <summary id="connection-toggle" aria-label="Connection settings"><span id="status" role="status">Not connected</span><span aria-hidden="true">⌄</span></summary>
+      <summary id="connection-toggle" aria-labelledby="status connection-label"><span id="status">Not connected</span><span id="connection-label" hidden>connection settings</span><span aria-hidden="true">⌄</span></summary>
       <div class="connection-panel">
         <p>Keep Sigil running. You should not need to scan again.</p>
         <p id="standalone-panel-hint" class="standalone-hint" hidden>This icon is split from Safari on iPhone. Delete it, then Add to Home Screen from Safari and turn off Open as Web App.</p>
@@ -31,6 +31,7 @@
         <button id="forget" class="destructive" hidden>Forget this Mac</button>
       </div>
     </details>
+    <span id="status-live" class="sr-only" role="status"></span>
   </header>
   <dialog id="sessions-dialog" aria-labelledby="sessions-heading">
     <div class="sheet-heading"><h2 id="sessions-heading">Chats</h2><button id="sessions-close" type="button">Done</button></div>

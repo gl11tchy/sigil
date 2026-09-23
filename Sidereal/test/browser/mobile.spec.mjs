@@ -772,6 +772,20 @@ test('Forget this Mac asks first and Cancel keeps the pairing', async ({ page, b
   } finally { mac.close(); }
 });
 
+test('the connection control is named by the visible status', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(baseURL);
+  const toggle = page.locator('#connection-toggle');
+  await expect(toggle).toHaveAccessibleName('Not connected connection settings');
+  const mac = await pair(page, baseURL);
+  try {
+    await expect(toggle).toHaveAccessibleName('Connected connection settings');
+    // Status changes are announced from outside the summary, which flattens its children.
+    await expect(toggle.locator('[role=status]')).toHaveCount(0);
+    await expect(page.getByRole('status').filter({ hasText: /^Connected$/ })).toHaveCount(1);
+  } finally { mac.close(); }
+});
+
 test('the connection popover closes on Escape and outside pointer presses', async ({ page, baseURL }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const consoleErrors = [];

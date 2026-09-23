@@ -132,7 +132,7 @@ function isStandaloneApp() {
 }
 function offline(message = 'Disconnected') {
   connected = false;
-  $('status').textContent = message;
+  $('status').textContent = $('status-live').textContent = message;
   $('status').dataset.connected = 'false';
   clearTimeout(pollTimer);
   clearTimeout(connectTimer);
@@ -642,7 +642,7 @@ function connect() {
           reconnectDelay = 500;
           clearTimeout(connectTimer);
           connected = true; busy = false;
-          $('status').textContent = 'Connected'; $('status').dataset.connected = 'true';
+          $('status').textContent = $('status-live').textContent = 'Connected'; $('status').dataset.connected = 'true';
           showError(''); updateControls(); poll();
         }).catch(error => { showError(error.message); });
       } else if (frame.error === 'unauthorized') {
