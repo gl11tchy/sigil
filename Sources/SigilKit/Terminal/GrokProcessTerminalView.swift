@@ -16,6 +16,8 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
     /// Invoked when the user submits the current prompt with Return.
     var onUserSubmit: (() -> Void)?
     private var isForwardingBracketedPaste = false
+    /// Held strongly here: `terminalDelegate` is weak.
+    private lazy var clipboardGuard = ClipboardGuard(view: self)
 
     var isProcessRunning: Bool { process.running }
 
@@ -24,16 +26,19 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         registerForDraggedTypes(TerminalDrop.pasteboardTypes)
+        terminalDelegate = clipboardGuard
     }
 
     override init(frame: CGRect, font: NSFont? = nil, options: TerminalOptions) {
         super.init(frame: frame, font: font, options: options)
         registerForDraggedTypes(TerminalDrop.pasteboardTypes)
+        terminalDelegate = clipboardGuard
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         registerForDraggedTypes(TerminalDrop.pasteboardTypes)
+        terminalDelegate = clipboardGuard
     }
 
     override func paste(_ sender: Any) {
@@ -143,4 +148,57 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
 
     private static let bracketedPasteStart: [UInt8] = [0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E]
     private static let bracketedPasteEnd: [UInt8] = [0x1B, 0x5B, 0x32, 0x30, 0x31, 0x7E]
+}
+
+/// Stands in as the view's `terminalDelegate` so OSC 52 cannot reach the Mac
+/// clipboard. Child output could otherwise read it back into the pty (a remote
+/// host over ssh gets the user's last copy) or replace it silently.
+/// `LocalProcessTerminalView` implements both calls as `public`, not `open`, so
+/// a subclass cannot override them. Everything else goes to the view.
+private final class ClipboardGuard: TerminalViewDelegate {
+    unowned let view: GrokProcessTerminalView
+
+    init(view: GrokProcessTerminalView) {
+        self.view = view
+    }
+
+    func clipboardRead(source: TerminalView) -> Data? { nil }
+
+    func clipboardCopy(source: TerminalView, content: Data) {}
+
+    func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
+        view.sizeChanged(source: source, newCols: newCols, newRows: newRows)
+    }
+
+    func setTerminalTitle(source: TerminalView, title: String) {
+        view.setTerminalTitle(source: source, title: title)
+    }
+
+    func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
+        view.hostCurrentDirectoryUpdate(source: source, directory: directory)
+    }
+
+    func send(source: TerminalView, data: ArraySlice<UInt8>) {
+        view.send(source: source, data: data)
+    }
+
+    func scrolled(source: TerminalView, position: Double) {
+        view.scrolled(source: source, position: position)
+    }
+
+    func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
+        view.requestOpenLink(source: source, link: link, params: params)
+    }
+
+    func bell(source: TerminalView) {
+        view.bell(source: source)
+    }
+
+    func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {
+        view.iTermContent(source: source, content: content)
+    }
+
+    func rangeChanged(source: TerminalView, startY: Int, endY: Int) {
+        view.rangeChanged(source: source, startY: startY, endY: endY)
+    }
 }
