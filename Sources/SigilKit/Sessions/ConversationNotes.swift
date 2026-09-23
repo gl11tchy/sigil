@@ -18,6 +18,8 @@ public final class ConversationNotesStore {
     /// Pending persistence per file: a text to write, or nil to delete.
     private var dirty: [String: String?] = [:]
     private var flushTask: Task<Void, Never>?
+    /// Paths a debounced write could not save, waiting to go back in `dirty`.
+    private nonisolated let failedWrites = OSAllocatedUnfairLock(initialState: [URL]())
 
     private nonisolated static let log = Logger(subsystem: "com.gl11tchy.sigil", category: "notes")
     /// Keystrokes coalesce into one write per quiet window of this length.
@@ -83,8 +85,30 @@ public final class ConversationNotesStore {
     public func flushNow() {
         flushTask?.cancel()
         flushTask = nil
+        // Let earlier debounced writes finish, so their failures are retried here.
+        writeQueue.sync {}
+        requeueFailedWrites()
         let pending = takePending()
-        writeQueue.sync { Self.write(pending) }
+        requeue(writeQueue.sync { Self.write(pending) })
+    }
+
+    private func requeueFailedWrites() {
+        requeue(
+            failedWrites.withLock { failed in
+                defer { failed.removeAll() }
+                return failed
+            })
+    }
+
+    /// Puts paths whose write or delete failed back in the queue, so the next
+    /// flush tries again. The cache holds the newest text, so a later edit wins
+    /// over the failed one; an empty text is a delete.
+    private func requeue(_ failed: [URL]) {
+        for url in failed where dirty[url.path] == nil {
+            // Only the flat-layout delete has no cached text.
+            let text = cache[url.path] ?? ""
+            dirty[url.path] = text.isEmpty ? .some(nil) : text
+        }
     }
 
     private func scheduleFlush() {
@@ -119,12 +143,19 @@ public final class ConversationNotesStore {
         label: "com.gl11tchy.sigil.notes", qos: .utility)
 
     private func persist(_ pending: (writes: [(url: URL, data: Data)], deletes: [URL])) {
-        writeQueue.async { Self.write(pending) }
+        writeQueue.async { [failedWrites] in
+            let failed = Self.write(pending)
+            guard !failed.isEmpty else { return }
+            failedWrites.withLock { $0 += failed }
+            Task { @MainActor [weak self] in self?.requeueFailedWrites() }
+        }
     }
 
+    /// Returns the files it could not write or delete.
     private nonisolated static func write(
         _ pending: (writes: [(url: URL, data: Data)], deletes: [URL])
-    ) {
+    ) -> [URL] {
+        var failed: [URL] = []
         let fm = FileManager.default
         for (url, data) in pending.writes {
             do {
@@ -135,6 +166,7 @@ public final class ConversationNotesStore {
                 log.error(
                     "note write failed for \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)"
                 )
+                failed.append(url)
             }
         }
         for url in pending.deletes {
@@ -142,8 +174,10 @@ public final class ConversationNotesStore {
                 log.error(
                     "note delete failed for \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)"
                 )
+                failed.append(url)
             }
         }
+        return failed
     }
 
     /// The first notes build wrote `notes/<id>.md` with no folder; adopt that
