@@ -259,6 +259,44 @@ struct SessionStoreTests {
         }
     }
 
+    @Test func aMissingRootDoesNotRescanOnUnrelatedFolderChanges() async throws {
+        // Without ~/.grok the nearest existing folder is the home folder;
+        // its churn must not drive scans.
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Sigil-missing-root-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let recorder = ScanRecorder()
+        let store = SessionStore(
+            root: base.appendingPathComponent("grok/sessions", isDirectory: true),
+            timing: SessionStoreTiming(
+                debounceDelay: .milliseconds(50),
+                maximumDebounceDelay: .milliseconds(150),
+                watcherRetryDelay: .seconds(30),
+                watcherLatency: 0.05
+            ),
+            scanOperation: { root, cache, _ in
+                await recorder.record()
+                return SessionScanner.scan(root: root, cache: cache)
+            }
+        )
+        store.start()
+        defer { store.stop() }
+        try await waitUntil { !store.isLoading }
+        try await Task.sleep(for: .milliseconds(400))
+        let baseline = await recorder.count
+
+        for index in 0..<5 {
+            try FileManager.default.createDirectory(
+                at: base.appendingPathComponent("unrelated-\(index)/child"),
+                withIntermediateDirectories: true)
+            try await Task.sleep(for: .milliseconds(60))
+        }
+        try await Task.sleep(for: .milliseconds(500))
+
+        #expect(await recorder.count == baseline)
+    }
+
     @Test func continuousEventsCannotStarveScans() async throws {
         let recorder = ScanRecorder()
         let timing = SessionStoreTiming(

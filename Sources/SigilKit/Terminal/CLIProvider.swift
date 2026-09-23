@@ -34,7 +34,10 @@ public enum CLIProvider: String, CaseIterable, Identifiable, Sendable {
     /// choices first, then include the providers' standard installation folders.
     static var fallbackPath: String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return ["\(home)/.local/bin", "\(home)/.bun/bin", "/opt/homebrew/bin", "/usr/local/bin"]
-            .joined(separator: ":")
+        return [
+            "\(home)/.local/bin", "\(home)/.claude/local", "\(home)/.bun/bin", "/opt/homebrew/bin",
+            "/usr/local/bin",
+        ]
+        .joined(separator: ":")
     }
 }

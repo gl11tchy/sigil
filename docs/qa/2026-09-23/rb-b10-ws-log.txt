@@ -1,0 +1,63 @@
+# b10 recheck, SigilUX debug build of pr-remote-b 13c5ad8, relay on localhost:3197. Frame keys only.
+# Copy Pairing Link clipboard types: public.utf8-plain-text, org.nspasteboard.ConcealedType
+## phone A (paired with the link)
+21:45:02.026 ws open ws://localhost:3197/connect?role=phone
+21:45:02.027 ws recv keys=route
+21:45:02.028 ws sent keys=route
+21:45:02.029 ws recv keys=hello
+21:46:12.805 ws closed
+21:46:13.305 ws open ws://localhost:3197/connect?role=phone
+21:46:13.313 ws recv keys=route
+21:46:13.313 ws sent keys=route
+21:46:13.315 ws recv keys=hello
+(plus 136 data replies)
+## phone B (same old link, opened at 21:46:12)
+21:46:12.790 ws open ws://localhost:3197/connect?role=phone
+21:46:12.794 ws recv keys=route
+21:46:12.794 ws sent keys=route
+21:46:15.825 ws closed
+21:46:16.323 ws open ws://localhost:3197/connect?role=phone
+21:46:16.327 ws recv keys=route
+21:46:16.327 ws sent keys=route
+21:46:16.335 ws closed
+21:46:17.337 ws open ws://localhost:3197/connect?role=phone
+21:46:17.338 ws recv keys=route
+21:46:17.338 ws sent keys=route
+21:46:17.340 ws closed
+21:46:19.346 ws open ws://localhost:3197/connect?role=phone
+21:46:19.351 ws recv keys=route
+21:46:19.351 ws sent keys=route
+21:46:19.354 ws closed
+21:46:23.364 ws open ws://localhost:3197/connect?role=phone
+21:46:23.365 ws recv keys=route
+21:46:23.368 ws sent keys=route
+21:46:23.371 ws closed
+21:46:31.378 ws open ws://localhost:3197/connect?role=phone
+21:46:31.381 ws recv keys=route
+21:46:31.381 ws sent keys=route
+21:46:31.384 ws closed
+21:46:39.390 ws open ws://localhost:3197/connect?role=phone
+21:46:39.392 ws recv keys=route
+21:46:39.392 ws sent keys=route
+21:46:39.394 ws closed
+21:46:47.403 ws open ws://localhost:3197/connect?role=phone
+21:46:47.406 ws recv keys=route
+21:46:47.406 ws sent keys=route
+21:46:47.410 ws closed
+21:46:55.417 ws open ws://localhost:3197/connect?role=phone
+21:46:55.427 ws recv keys=route
+21:46:55.427 ws sent keys=route
+21:46:55.432 ws closed
+21:47:03.436 ws open ws://localhost:3197/connect?role=phone
+21:47:03.437 ws recv keys=route
+21:47:03.437 ws sent keys=route
+21:47:03.439 ws closed
+21:47:11.446 ws open ws://localhost:3197/connect?role=phone
+21:47:11.447 ws recv keys=route
+21:47:11.447 ws sent keys=route
+21:47:11.449 ws closed
+21:47:19.456 ws open ws://localhost:3197/connect?role=phone
+21:47:19.457 ws recv keys=route
+21:47:19.457 ws sent keys=route
+21:47:19.459 ws closed
+## statuses after phone B: B=Connecting… A=Connected Mac=Phone connected

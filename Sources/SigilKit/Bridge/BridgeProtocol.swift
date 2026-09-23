@@ -17,10 +17,10 @@ public enum BridgeProtocol {
     public static let version = 1
 }
 
-/// Who is speaking. Sigil sets `SIGIL_TAB_ID` on each child, and `grok` puts
-/// `GROK_SESSION_ID` in the environment of every MCP server it launches, so a
-/// caller can be resolved even when the app never chose the session id itself
-/// (a `--continue` tab).
+/// Who is speaking. Sigil sets `SIGIL_TAB_ID` on each child, and only that
+/// identifies the caller. `grok` also puts `GROK_SESSION_ID` on every MCP server
+/// it launches; it is carried for diagnostics but never trusted, because another
+/// copy of Sigil can resume the same session.
 public struct BridgePeer: Codable, Sendable, Hashable {
     public var tabID: String?
     public var sessionID: String?
@@ -30,10 +30,10 @@ public struct BridgePeer: Codable, Sendable, Hashable {
         self.sessionID = sessionID
     }
 
-    /// True when neither identifier is present, which means the client was not
-    /// launched by Sigil and cannot be placed in the tab list.
+    /// True when no tab id is present, which means the client was not launched
+    /// by a Sigil tab and cannot be placed in the tab list.
     public var isAnonymous: Bool {
-        tabID?.nilIfBlank == nil && sessionID?.nilIfBlank == nil
+        tabID?.nilIfBlank == nil
     }
 }
 
