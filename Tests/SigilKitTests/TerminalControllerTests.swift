@@ -326,6 +326,51 @@ struct TerminalControllerTests {
         )
     }
 
+    @Test func accessibilityValueIsBuiltWhenAskedNotOnEveryOutputTick() throws {
+        let controller = TerminalController()
+        let view = try #require(controller.view as? TerminalView)
+
+        view.feed(text: "AX_ON_DEMAND")
+
+        let value = controller.view.accessibilityValue() as? String
+        #expect(value?.contains("AX_ON_DEMAND") == true)
+    }
+
+    @Test func scratchShellIsNotAnnouncedAsGrok() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let oldHome = ProcessInfo.processInfo.environment["HOME"]
+        let oldShell = ProcessInfo.processInfo.environment["SHELL"]
+        setenv("HOME", root.path, 1)
+        setenv("SHELL", "/bin/sh", 1)
+        defer {
+            if let oldHome { setenv("HOME", oldHome, 1) } else { unsetenv("HOME") }
+            if let oldShell { setenv("SHELL", oldShell, 1) } else { unsetenv("SHELL") }
+            try? FileManager.default.removeItem(at: root)
+        }
+        let controller = TerminalController()
+        #expect(controller.view.accessibilityLabel() == "Terminal")
+
+        controller.startShell(ShellLaunchSpec(workingDirectory: root))
+        defer { controller.terminateAndWait() }
+
+        #expect(controller.view.accessibilityLabel() == "Shell terminal")
+    }
+
+    @Test func findStartsAtTheNewestHitOnScreenNotTheOldestInScrollback() throws {
+        let controller = TerminalController()
+        let view = try #require(controller.view as? TerminalView)
+        let filler = (0..<300).map { "filler \($0)" }.joined(separator: "\r\n")
+        view.feed(text: "needle old\r\n" + filler + "\r\nneedle new\r\n")
+        let top = view.getTerminal().buffer.yDisp
+
+        controller.setFindQuery("needle")
+
+        #expect(controller.findMatchCount == 2)
+        #expect(controller.findMatchIndex == 2)
+        #expect(view.getTerminal().buffer.yDisp == top)
+    }
+
     @Test func anAlreadyReapedChildIsGoneEvenIfItsPIDCouldBeReused() throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/true")
