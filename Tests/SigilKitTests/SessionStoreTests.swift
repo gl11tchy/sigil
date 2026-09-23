@@ -306,6 +306,28 @@ struct SessionStoreTests {
         #expect(harness.store.search(queryCase.query).map(\.id) == queryCase.expectedIDs)
     }
 
+    @Test func searchFollowsTheLatestScan() async throws {
+        let harness = try FixtureHarness()
+        defer { harness.tearDown() }
+        try harness.write(
+            fixture: "minimal.json",
+            cwd: "/Users/exec",
+            id: "019ffeab-c76b-7fe1-be40-508369febd51"
+        )
+        await harness.store.scan(ignoringCache: false)
+        #expect(harness.store.search("keyholding").isEmpty)
+
+        try harness.write(
+            fixture: "full.json",
+            cwd: "/Users/exec/Documents/keyholding-v0-v2",
+            id: "019f780a-34d7-7993-aadc-f23a46c40a73"
+        )
+        await harness.store.scan(ignoringCache: false)
+
+        #expect(harness.store.search("keyholding").map(\.id) == ["019f780a-34d7-7993-aadc-f23a46c40a73"])
+        #expect(harness.store.search("Users exec").count == 2)
+    }
+
     @Test func emptySearchDoesNotComputeDisplayedTitle() async throws {
         let harness = try FixtureHarness()
         defer { harness.tearDown() }

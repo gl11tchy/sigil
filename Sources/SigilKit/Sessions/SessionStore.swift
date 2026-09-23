@@ -29,6 +29,8 @@ public final class SessionStore {
 
     public let root: URL
     @ObservationIgnored private var cache: [String: SessionCacheEntry] = [:]
+    /// Folded search fields, one per entry of `sessions`, in the same order.
+    @ObservationIgnored private var searchKeys: [SessionScanner.SearchKey] = []
     @ObservationIgnored private var isStarted = false
     @ObservationIgnored private var scanSequence = 0
     @ObservationIgnored private var appliedScanSequence = 0
@@ -152,13 +154,11 @@ public final class SessionStore {
         _ query: String,
         displayedTitle: ((GrokSession) -> String)? = nil
     ) -> [GrokSession] {
-        if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return sessions
-        }
-        return sessions.compactMap { session -> (GrokSession, SessionScanner.SearchRank)? in
+        guard let query = SessionScanner.SearchQuery(query) else { return sessions }
+        return zip(sessions, searchKeys).compactMap { session, key -> (GrokSession, SessionScanner.SearchRank)? in
             guard
                 let rank = SessionScanner.searchRank(
-                    session,
+                    key,
                     query: query,
                     displayedTitle: displayedTitle?(session)
                 )
@@ -214,6 +214,7 @@ public final class SessionStore {
         cache = result.cache
         if sessions != result.sessions {
             sessions = result.sessions
+            searchKeys = sessions.map(SessionScanner.SearchKey.init)
         }
         if loadError != result.loadError {
             loadError = result.loadError
