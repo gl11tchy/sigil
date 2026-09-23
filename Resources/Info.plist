@@ -26,11 +26,35 @@
 	<string>public.app-category.developer-tools</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>A program running in Sigil wants to control another app.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>A program running in Sigil wants to use Bluetooth.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>A program running in Sigil wants to use your calendars.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>A program running in Sigil wants to use your calendars.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>A program running in Sigil wants to use the camera.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>A program running in Sigil wants to use your contacts.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright gl11tchy</string>
+	<key>NSLocationUsageDescription</key>
+	<string>A program running in Sigil wants to use your location.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>A program running in Sigil wants to use your location.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>A program running in Sigil wants to use the microphone.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>A program running in Sigil wants to use your photo library.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>A program running in Sigil wants to use your reminders.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>A program running in Sigil wants to use your reminders.</string>
 </dict>
 </plist>

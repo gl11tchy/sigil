@@ -132,6 +132,9 @@ struct SettingsView: View {
                 isOn: Bindable(model.settings).showSubagentSessions
             )
 
+            Toggle("Use Option as Meta key", isOn: Bindable(model.settings).optionAsMetaKey)
+                .onChange(of: model.settings.optionAsMetaKey) { _, _ in model.applyOptionAsMetaKey() }
+
             Section {
                 Toggle(
                     "Let tabs message each other",

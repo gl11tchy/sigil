@@ -152,6 +152,35 @@ test('scan falls back to paste when the camera is missing', async ({ page, baseU
   await expect(page.locator('#scanner')).toBeHidden();
 });
 
+test('a rejected code shows its reason on the scanner, above the camera', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {
+      getUserMedia: async () => {
+        const canvas = Object.assign(document.createElement('canvas'), { width: 64, height: 64 });
+        const context = canvas.getContext('2d');
+        setInterval(() => { context.fillStyle = '#fff'; context.fillRect(0, 0, 64, 64); }, 50);
+        return canvas.captureStream(10);
+      },
+    } });
+    // Every frame reads as a code from another Sidereal address.
+    globalThis.jsQR = () => ({ data: `https://evil.example/#room=${'ab'.repeat(16)}&key=${'cd'.repeat(32)}` });
+  });
+  await page.goto(baseURL);
+  await page.getByRole('button', { name: 'Scan code' }).click();
+  const reason = page.locator('#scanner').getByRole('alert');
+  await expect(reason).toHaveText('This code is for a different Sidereal address.');
+  // One alert only: the page's own error line sits under the scanner.
+  await expect(page.locator('#error')).toBeHidden();
+  expect(await reason.evaluate(element => {
+    const box = element.getBoundingClientRect();
+    return document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2) === element;
+  })).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('scanner-error.png') });
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.locator('#scanner')).toBeHidden();
+});
+
 test('a stored ticket reconnects without a QR fragment or URL ticket', async ({ page, baseURL }) => {
   const urls = [];
   page.on('websocket', socket => urls.push(new URL(socket.url())));
@@ -745,6 +774,20 @@ test('Forget this Mac asks first and Cancel keeps the pairing', async ({ page, b
   } finally { mac.close(); }
 });
 
+test('the connection control is named by the visible status', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(baseURL);
+  const toggle = page.locator('#connection-toggle');
+  await expect(toggle).toHaveAccessibleName('Not connected connection settings');
+  const mac = await pair(page, baseURL);
+  try {
+    await expect(toggle).toHaveAccessibleName('Connected connection settings');
+    // Status changes are announced from outside the summary, which flattens its children.
+    await expect(toggle.locator('[role=status]')).toHaveCount(0);
+    await expect(page.getByRole('status').filter({ hasText: /^Connected$/ })).toHaveCount(1);
+  } finally { mac.close(); }
+});
+
 test('the connection popover closes on Escape and outside pointer presses', async ({ page, baseURL }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const consoleErrors = [];
@@ -797,6 +840,25 @@ test('opening Chats on a touch screen does not raise the keyboard', async ({ pag
   } finally { mac.close(); }
 });
 
+test('folder paths in the project and chats sheets use the mono face', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mac = await pair(page, baseURL, undefined, { chats: [{ id: 'saved-1', title: 'Release notes', folder: '/Users/me/Code/sigil' }] });
+  try {
+    await page.getByRole('button', { name: 'New session' }).click();
+    const project = page.locator('#project-list small').first();
+    await expect(project).toHaveText('/tmp/release');
+    await expect(project).toHaveCSS('font-family', /monospace/);
+    await page.screenshot({ path: testInfo.outputPath('projects.png'), animations: 'disabled' });
+    await page.locator('#project-cancel').click();
+    await page.getByRole('button', { name: 'Browse open and saved chats' }).click();
+    await page.getByRole('searchbox', { name: 'Search chats' }).fill('release');
+    const saved = page.locator('#saved-list small').first();
+    await expect(saved).toHaveText('/Users/me/Code/sigil');
+    await expect(saved).toHaveCSS('font-family', /monospace/);
+    await page.screenshot({ path: testInfo.outputPath('saved.png'), animations: 'disabled' });
+  } finally { mac.close(); }
+});
+
 test('session search switches conversations and keeps each draft', async ({ page, baseURL }) => {
   const mac = await pair(page, baseURL);
   try {
@@ -826,6 +888,33 @@ test('find output navigates literal matches without altering output', async ({ p
     await expect(page.getByRole('button', { name: 'Next match' })).toBeDisabled();
     await page.getByRole('searchbox', { name: 'Find in output' }).press('Escape');
     await expect(page.locator('#find-bar')).toBeHidden();
+  } finally { mac.close(); }
+});
+
+test('new output keeps a selection the reader is making in the terminal', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  let terminal = 'First command\nStep 1 of 3';
+  const mac = await pair(page, baseURL, undefined, { get state() {
+    return { tabs: [{ id: 'one', title: 'Mobile layout review', status: 'working' }], selectedTabID: 'one', terminal, capabilities: [] };
+  } });
+  const polls = () => mac.actions.filter(action => action.action === 'state').length;
+  try {
+    await expect(page.locator('#terminal')).toHaveText('First command\nStep 1 of 3');
+    await page.evaluate(() => {
+      const text = document.getElementById('terminal').firstChild;
+      getSelection().setBaseAndExtent(text, 0, text, 'First command'.length);
+    });
+    terminal = 'First command\nStep 1 of 3\nthird line';
+    await expect(page.locator('#terminal')).toContainText('third line');
+    expect(await page.evaluate(() => getSelection().toString())).toBe('First command');
+    // Output that rewrites the displayed text waits until the selection ends.
+    terminal = 'First command\nStep 2 of 3\nthird line';
+    const seen = polls();
+    await expect.poll(polls).toBeGreaterThan(seen + 1);
+    await expect(page.locator('#terminal')).toContainText('Step 1 of 3');
+    expect(await page.evaluate(() => getSelection().toString())).toBe('First command');
+    await page.evaluate(() => getSelection().removeAllRanges());
+    await expect(page.locator('#terminal')).toHaveText('First command\nStep 2 of 3\nthird line');
   } finally { mac.close(); }
 });
 

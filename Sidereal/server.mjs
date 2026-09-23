@@ -130,8 +130,10 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
         try { value = JSON.parse(bytes.toString()); } catch { ws.close(1008); return; }
         if (!value || typeof value !== 'object' || Array.isArray(value)) { ws.close(1008); return; }
         incoming = incoming.then(async () => {
-          if (ws.readyState !== WebSocket.OPEN) return;
           if (!routed) {
+            // A frame that arrived with the close frame still goes through;
+            // only a new route needs a live socket.
+            if (ws.readyState !== WebSocket.OPEN) return;
             if (typeof value.route !== 'string' || value.route.length > 2048) { ws.close(1008); return; }
             const route = await open(value.route, await importKey(routingKey), `relay-${role}`);
             if (ws.readyState !== WebSocket.OPEN) return;
@@ -141,9 +143,14 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
               ws.close(1008); return;
             }
             if (role === 'phone') {
-              id = tickets.get(route.ticket) || route.room;
+              const byTicket = tickets.has(route.ticket);
+              id = byTicket ? tickets.get(route.ticket) : route.room;
               room = rooms.get(id);
               if (!room?.host) { ws.close(1008); return; }
+              // Only a paired phone holds the ticket. After one routes by it, the QR room
+              // id no longer lets anyone take the phone slot while the host keeps that ticket.
+              if (byTicket) room.claimedBy = route.ticket;
+              else if (room.claimedBy && room.claimedBy === room.ticket) { ws.close(1008); return; }
             } else {
               id = route.room; room = rooms.get(id);
               if (!room || !equal(req.headers.authorization, `Bearer ${room.hostToken}`)) { ws.close(1008); return; }
