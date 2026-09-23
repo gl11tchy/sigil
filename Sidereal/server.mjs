@@ -141,9 +141,14 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
               ws.close(1008); return;
             }
             if (role === 'phone') {
-              id = tickets.get(route.ticket) || route.room;
+              const byTicket = tickets.has(route.ticket);
+              id = byTicket ? tickets.get(route.ticket) : route.room;
               room = rooms.get(id);
               if (!room?.host) { ws.close(1008); return; }
+              // Only a paired phone holds the ticket. After one routes by it, the QR room
+              // id no longer lets anyone take the phone slot while the host keeps that ticket.
+              if (byTicket) room.claimedBy = route.ticket;
+              else if (room.claimedBy && room.claimedBy === room.ticket) { ws.close(1008); return; }
             } else {
               id = route.room; room = rooms.get(id);
               if (!room || !equal(req.headers.authorization, `Bearer ${room.hostToken}`)) { ws.close(1008); return; }
