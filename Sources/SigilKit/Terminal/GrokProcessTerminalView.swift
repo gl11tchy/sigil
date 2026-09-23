@@ -171,7 +171,10 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
 /// host over ssh gets the user's last copy) or replace it silently.
 /// `LocalProcessTerminalView` implements both calls as `public`, not `open`, so
 /// a subclass cannot override them. Everything else goes to the view.
-private final class ClipboardGuard: TerminalViewDelegate {
+/// SwiftTerm is built in Swift 5 mode, so its delegate protocol is nonisolated;
+/// the view only calls it on the main thread.
+@MainActor
+private final class ClipboardGuard: @preconcurrency TerminalViewDelegate {
     unowned let view: GrokProcessTerminalView
 
     init(view: GrokProcessTerminalView) {
