@@ -51,6 +51,20 @@ struct ScrollbackSearchTests {
         #expect(search.findNext() == first)
     }
 
+    @Test func queryStartsAtTheLastHitOnOrAboveTheGivenLine() {
+        let lines = ["one", "x", "one", "x", "one"]
+        var search = ScrollbackSearch()
+
+        search.setQuery("one", in: lines.map { ScrollbackSearch.Row(text: $0) }, startingAtOrAbove: 3)
+        #expect(search.currentMatch?.line == 2)
+
+        search.setQuery("one", in: lines.map { ScrollbackSearch.Row(text: $0) }, startingAtOrAbove: 4)
+        #expect(search.currentMatch?.line == 4)
+
+        search.setQuery("x", in: lines.map { ScrollbackSearch.Row(text: $0) }, startingAtOrAbove: 0)
+        #expect(search.currentMatch?.line == 1)
+    }
+
     @Test func emptyQueryClearsHitsAndCurrent() {
         var search = ScrollbackSearch()
         search.setQuery("keep", in: ["keep this", "and that"])
