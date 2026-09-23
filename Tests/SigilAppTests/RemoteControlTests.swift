@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import SigilKit
 import Testing
 
@@ -155,6 +156,46 @@ struct RemoteControlTests {
         #expect(!RemoteReconnectPolicy.shouldGiveUp(failures: 100))
     }
 
+    @Test func keepAliveCancelsASocketWhosePingsGoUnanswered() async throws {
+        let server = try LocalWebSocketServer(answersPings: false)
+        defer { server.stop() }
+        let socket = URLSession(configuration: .ephemeral)
+            .webSocketTask(with: URL(string: "ws://127.0.0.1:\(try await server.port())/")!)
+        socket.resume()
+        let keepAlive = Task {
+            await RemoteControl.keepAlive(socket, interval: .milliseconds(100), timeout: .milliseconds(300))
+        }
+        let fallback = Task {
+            try await Task.sleep(for: .seconds(10))
+            socket.cancel()
+        }
+        defer {
+            keepAlive.cancel()
+            fallback.cancel()
+        }
+        let started = ContinuousClock.now
+        await #expect(throws: (any Error).self) { _ = try await socket.receive() }
+        #expect(ContinuousClock.now - started < .seconds(5))
+    }
+
+    @Test func keepAliveLeavesAnAnsweringSocketOpen() async throws {
+        let server = try LocalWebSocketServer(answersPings: true)
+        defer { server.stop() }
+        let socket = URLSession(configuration: .ephemeral)
+            .webSocketTask(with: URL(string: "ws://127.0.0.1:\(try await server.port())/")!)
+        socket.resume()
+        // URLSession reads pongs only while a receive is pending, as in the host loop.
+        let receiving = Task { try? await socket.receive() }
+        let keepAlive = Task {
+            await RemoteControl.keepAlive(socket, interval: .milliseconds(100), timeout: .milliseconds(300))
+        }
+        try await Task.sleep(for: .seconds(1.5))
+        #expect(socket.state == .running)
+        keepAlive.cancel()
+        socket.cancel()
+        _ = await receiving.value
+    }
+
     @Test func remoteReplyCarriesAnOptionalTicket() throws {
         var reply = RemoteReply(challenge: "c", sequence: 1)
         reply.ticket = String(repeating: "ab", count: 32)
@@ -172,4 +213,58 @@ private final class FailingClearStore: RemotePairingStore {
     func load() -> RemotePairing? { pairing }
     func save(_ pairing: RemotePairing) { self.pairing = pairing }
     func clear() -> Bool { false }
+}
+
+/// A WebSocket server on loopback that can ignore pings, like a relay that
+/// dropped this Mac while it slept.
+private final class LocalWebSocketServer: @unchecked Sendable {
+    private let listener: NWListener
+    private let queue = DispatchQueue(label: "sigil.test.websocket")
+    private var connections: [NWConnection] = []
+
+    init(answersPings: Bool) throws {
+        let websocket = NWProtocolWebSocket.Options()
+        websocket.autoReplyPing = answersPings
+        let parameters = NWParameters.tcp
+        parameters.defaultProtocolStack.applicationProtocols.insert(websocket, at: 0)
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+        listener = try NWListener(using: parameters)
+        listener.newConnectionHandler = { [weak self] connection in
+            guard let self else { return }
+            self.connections.append(connection)
+            connection.start(queue: self.queue)
+            Self.drain(connection)
+        }
+    }
+
+    func port() async throws -> UInt16 {
+        try await withCheckedThrowingContinuation { continuation in
+            listener.stateUpdateHandler = { [listener] state in
+                switch state {
+                case .ready:
+                    listener.stateUpdateHandler = nil
+                    continuation.resume(returning: listener.port?.rawValue ?? 0)
+                case .failed(let error):
+                    listener.stateUpdateHandler = nil
+                    continuation.resume(throwing: error)
+                default: break
+                }
+            }
+            listener.start(queue: queue)
+        }
+    }
+
+    func stop() {
+        queue.sync {
+            for connection in connections { connection.cancel() }
+            connections = []
+        }
+        listener.cancel()
+    }
+
+    private static func drain(_ connection: NWConnection) {
+        connection.receiveMessage { _, _, _, error in
+            if error == nil { drain(connection) }
+        }
+    }
 }
