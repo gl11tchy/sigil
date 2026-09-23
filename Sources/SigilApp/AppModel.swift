@@ -36,7 +36,7 @@ final class AppModel {
     var isFindBarVisible = false
     /// True when a tab was selected while the main window could not take focus.
     var needsTerminalFocus = false
-    /// Grok tabs that kept the old theme because they were busy.
+    /// Grok tabs that kept the old theme because they were busy or held messages.
     @ObservationIgnored private var themeRestartsWhenSettled: Set<TerminalTab.ID> = []
     var findQuery = ""
     var findMatchIndex = 0
@@ -1895,7 +1895,8 @@ final class AppModel {
         let vars = settings.theme.grokThemeEnvironment
         for tab in tabs where tab.spec.provider == .grokBuild {
             if tab.spec.themeName == name, tab.spec.themeVariables == vars { continue }
-            if tab.shouldWarnBeforeStopping {
+            // A relaunch would drop queued messages and fail pending questions.
+            if tab.shouldWarnBeforeStopping || !tab.bridgeInbox.isEmpty {
                 themeRestartsWhenSettled.insert(tab.id)
                 continue
             }
@@ -1909,7 +1910,7 @@ final class AppModel {
         guard themeRestartsWhenSettled.contains(tab.id) else { return }
         DispatchQueue.main.async { [weak self, weak tab] in
             guard let self, let tab, self.tabs.contains(where: { $0 === tab }),
-                !tab.shouldWarnBeforeStopping
+                !tab.shouldWarnBeforeStopping, tab.bridgeInbox.isEmpty
             else { return }
             self.themeRestartsWhenSettled.remove(tab.id)
             let theme = self.settings.theme
