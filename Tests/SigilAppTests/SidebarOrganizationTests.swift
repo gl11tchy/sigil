@@ -273,6 +273,20 @@ struct SidebarOrganizationTests {
         #expect(SidebarOrganization.reanchor(selection: [], in: rows) == nil)
     }
 
+    /// ⌘⌫ trashes what the user marked: the multi-selection first, else the
+    /// highlighted row, and only rows the list shows.
+    @Test func commandDeleteTargetsTheSelectionElseTheKeyboardRow() {
+        let rows = ["a", "b", "c", "d"]
+        #expect(
+            SidebarOrganization.trashTargets(keyboardRowID: "b", selection: [], in: rows) == ["b"])
+        #expect(
+            SidebarOrganization.trashTargets(keyboardRowID: "a", selection: ["d", "b"], in: rows)
+                == ["b", "d"])
+        #expect(
+            SidebarOrganization.trashTargets(keyboardRowID: "gone", selection: [], in: rows) == [])
+        #expect(SidebarOrganization.trashTargets(keyboardRowID: nil, selection: [], in: rows) == [])
+    }
+
     /// A focused list always shows where the keys are.
     @Test func focusedListAlwaysHasAHighlightedRow() {
         let rows = ["a", "b", "c"]

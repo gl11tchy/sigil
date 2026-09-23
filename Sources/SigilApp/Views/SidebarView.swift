@@ -289,6 +289,10 @@ struct SidebarView: View {
                 return activateKeyboardSelection()
             }
             .onKeyPress(Self.f2) { renameKeyboardSelection() }
+            .onKeyPress(.delete, phases: .down) { press in
+                guard press.modifiers.contains(.command) else { return .ignored }
+                return trashKeyboardSelection()
+            }
             .onKeyPress(.escape) { handleEscape() }
             .onChange(of: keyboardSelectionID) { _, id in
                 // No anchor: scroll only as far as needed to reveal the row, so a
@@ -908,6 +912,23 @@ struct SidebarView: View {
             return .ignored
         }
         beginInlineRename(session)
+        return .handled
+    }
+
+    /// ⌘⌫, as in Finder: the row's X for one chat, the bulk trash alert for a
+    /// multi-selection.
+    private func trashKeyboardSelection() -> KeyPress.Result {
+        guard model.renamingSessionKey == nil else { return .ignored }
+        let sessions = SidebarOrganization.trashTargets(
+            keyboardRowID: keyboardSelectionID, selection: multiSelection, in: visibleRowIDs()
+        ).compactMap { sessionAnywhere(for: $0) }
+        if sessions.count > 1 {
+            pendingBulkDelete = sessions
+        } else if let session = sessions.first {
+            dismissSession(session)
+        } else {
+            return .ignored
+        }
         return .handled
     }
 

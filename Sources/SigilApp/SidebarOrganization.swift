@@ -134,6 +134,16 @@ enum SidebarOrganization {
         rowIDs.first(where: selection.contains)
     }
 
+    /// Rows ⌘⌫ acts on, in visible order: the ⌘/⇧ selection when there is one,
+    /// else the arrow-key row. Never a row the user just deselected.
+    static func trashTargets(keyboardRowID: String?, selection: Set<String>, in rowIDs: [String])
+        -> [String]
+    {
+        if !selection.isEmpty { return rowIDs.filter(selection.contains) }
+        guard let keyboardRowID, rowIDs.contains(keyboardRowID) else { return [] }
+        return [keyboardRowID]
+    }
+
     /// Recents and Archived are destinations, not folders.
     static func destinationRowIDs(recentsCount: Int, archivedCount: Int) -> [String] {
         var ids: [String] = []
