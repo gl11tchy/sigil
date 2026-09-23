@@ -150,6 +150,8 @@ struct SidebarView: View {
                         model.searchText = ""
                     } label: {
                         Image(systemName: "xmark.circle.fill").font(.system(size: 10))
+                            .frame(width: 20, height: 20)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(palette.textFaint)
