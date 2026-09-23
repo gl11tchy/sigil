@@ -709,6 +709,26 @@ struct AppModelTests {
         #expect(!model.consumeSearchFocusRequest())
     }
 
+    /// The Archived row counts only chats the Archived list will show.
+    @Test @MainActor
+    func archivedCountSkipsChatsTheArchivedListHides() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = "/Users/someone/Documents/peptide"
+        try fixture.writeListedSession(id: "kept", cwd: cwd)
+        try fixture.writeListedSession(id: "child", cwd: cwd, sessionKind: "subagent")
+        try fixture.writeListedSession(id: "empty", cwd: cwd, summary: "", messages: 1)
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        for session in fixture.store.sessions { model.archive(session) }
+
+        model.openArchived()
+
+        #expect(model.sidebarSessions.map(\.id) == ["kept"])
+        #expect(model.archivedCount == 1)
+    }
+
     @Test @MainActor
     func sidebarHidesSubagentSessionsUntilEnabled() async throws {
         let fixture = try ModelFixture()
