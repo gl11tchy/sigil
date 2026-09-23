@@ -22,7 +22,7 @@ struct TerminalScreen: View {
 
     /// Unselected screens stay in the tree at opacity 0, so only the selected one
     /// runs the repeating pulse.
-    static func pulses(isWorking: Bool, isSelected: Bool, reduceMotion: Bool) -> Bool {
+    nonisolated static func pulses(isWorking: Bool, isSelected: Bool, reduceMotion: Bool) -> Bool {
         isWorking && isSelected && !reduceMotion
     }
 
