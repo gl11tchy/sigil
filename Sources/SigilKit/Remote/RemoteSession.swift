@@ -4,6 +4,8 @@ import Foundation
 public enum RemoteError: Error, Equatable {
     case invalidMessage
     case pairingExpired
+    /// The paired phone sent an authentic request with a field over its limit.
+    case outOfBounds(sequence: Int)
 }
 
 public struct RemoteRequest: Codable, Sendable {
@@ -63,21 +65,27 @@ public struct RemoteSession: Sendable {
 
     public mutating func accept(_ frame: String, now: Date = Date()) throws -> RemoteRequest {
         let request: RemoteRequest = try RemoteCrypto.open(frame, key: deviceKey ?? pairingKey, direction: "phone")
-        let textLimit = request.action == "file" ? 48_000 : 8_192
         guard request.challenge == challenge, request.sequence > lastSequence,
-            request.sequence <= 9_007_199_254_740_991,
-            request.action.utf8.count <= 32, (request.text?.utf8.count ?? 0) <= textLimit,
-            (request.tabID?.utf8.count ?? 0) <= 64, (request.name?.utf8.count ?? 0) <= 80,
-            (request.transfer?.utf8.count ?? 0) <= 64
+            request.sequence <= 9_007_199_254_740_991
         else { throw RemoteError.invalidMessage }
+        let textLimit = request.action == "file" ? 48_000 : 8_192
+        let inBounds =
+            request.action.utf8.count <= 32 && (request.text?.utf8.count ?? 0) <= textLimit
+            && (request.tabID?.utf8.count ?? 0) <= 64 && (request.name?.utf8.count ?? 0) <= 80
+            && (request.transfer?.utf8.count ?? 0) <= 64
         if deviceKey == nil {
+            guard inBounds else { throw RemoteError.invalidMessage }
             guard now < expiresAt else { throw RemoteError.pairingExpired }
             guard request.action == "pair", let key = request.text, key != pairingKey,
                 RemoteCrypto.isValidKey(key)
             else { throw RemoteError.invalidMessage }
             deviceKey = key
-        } else if request.action == "pair" {
-            throw RemoteError.invalidMessage
+        } else {
+            guard request.action != "pair" else { throw RemoteError.invalidMessage }
+            guard inBounds else {
+                lastSequence = request.sequence
+                throw RemoteError.outOfBounds(sequence: request.sequence)
+            }
         }
         lastSequence = request.sequence
         return request
