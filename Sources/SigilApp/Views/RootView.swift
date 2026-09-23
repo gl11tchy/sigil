@@ -59,7 +59,29 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             model.windowDidBecomeKey()
         }
+        .onChange(of: announcementSnapshot) { old, new in
+            if let text = ScreenAnnouncement.change(from: old, to: new) {
+                AccessibilityNotification.Announcement(text).post()
+            }
+        }
+        .onChange(of: findAnnouncement) { _, text in
+            if let text { AccessibilityNotification.Announcement(text).post() }
+        }
         .ignoresSafeArea(.container, edges: .top)
+    }
+
+    private var announcementSnapshot: ScreenAnnouncement.Snapshot {
+        let tab = model.selectedTab
+        return ScreenAnnouncement.Snapshot(
+            tabID: tab?.id,
+            title: tab?.title ?? "",
+            activity: tab?.activity ?? .starting,
+            inboxCount: tab?.bridgeInbox.count ?? 0
+        )
+    }
+
+    private var findAnnouncement: String? {
+        ScreenAnnouncement.findMatches(query: model.findQuery, count: model.findMatchCount)
     }
 
     // MARK: - Detail column
@@ -145,6 +167,39 @@ enum SelectedSessionFolder {
 
     static func breadcrumb(of directory: URL) -> String {
         directory.breadcrumbPath
+    }
+}
+
+/// What VoiceOver speaks for changes the detail column shows only visually.
+enum ScreenAnnouncement {
+    /// The parts of the selected tab that can need an announcement.
+    struct Snapshot: Equatable {
+        var tabID: UUID?
+        var title: String
+        var activity: TerminalTab.Activity
+        var inboxCount: Int
+    }
+
+    /// A new tab message or a finished turn on the tab the user is on. A tab
+    /// switch also changes the snapshot, and it speaks nothing.
+    static func change(from old: Snapshot, to new: Snapshot) -> String? {
+        guard new.tabID != nil, old.tabID == new.tabID else { return nil }
+        if new.inboxCount > old.inboxCount {
+            return "Incoming tab message. Deliver or Dismiss."
+        }
+        if old.activity == .working, new.activity == .idle {
+            return "\(new.title): turn finished"
+        }
+        return nil
+    }
+
+    static func findMatches(query: String, count: Int) -> String? {
+        guard !query.isEmpty else { return nil }
+        switch count {
+        case 0: return "No matches"
+        case 1: return "1 match"
+        default: return "\(count) matches"
+        }
     }
 }
 
