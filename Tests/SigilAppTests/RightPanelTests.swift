@@ -221,4 +221,32 @@ struct RightPanelTests {
         defaults.set(10.0, forKey: "panel.width")
         #expect(RightPanel(defaults: defaults).width == RightPanel.minWidth)
     }
+
+    @Test @MainActor func notesTellOtherProvidersThatNotesAreForGrokBuild() {
+        let suite = "RightPanelTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        func tab(_ provider: CLIProvider) -> TerminalTab {
+            TerminalTab(
+                spec: GrokLaunchSpec(
+                    executable: URL(fileURLWithPath: "/usr/bin/true"),
+                    workingDirectory: FileManager.default.temporaryDirectory,
+                    mode: .continueLatest,
+                    provider: provider
+                ),
+                settings: settings
+            )
+        }
+
+        #expect(
+            RightPanelView.notesPlaceholder(for: tab(.claudeCode))
+                == "Notes are available for Grok Build sessions.")
+        #expect(
+            RightPanelView.notesPlaceholder(for: tab(.grokBuild))
+                == "Open a conversation to keep notes on it.")
+        #expect(
+            RightPanelView.notesPlaceholder(for: nil)
+                == "Open a conversation to keep notes on it.")
+    }
 }
