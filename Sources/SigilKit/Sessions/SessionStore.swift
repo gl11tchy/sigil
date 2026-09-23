@@ -27,7 +27,7 @@ public final class SessionStore {
     /// Set when the sessions directory or one or more session summaries could not be read.
     public private(set) var loadError: String?
 
-    private let root: URL
+    public let root: URL
     @ObservationIgnored private var cache: [String: SessionCacheEntry] = [:]
     @ObservationIgnored private var isStarted = false
     @ObservationIgnored private var scanSequence = 0

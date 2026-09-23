@@ -164,13 +164,14 @@ struct SessionStoreTests {
         )
     }
 
-    @Test func missingRootSetsLoadErrorAndLeavesSessionsEmpty() async {
+    @Test func aMissingRootBeforeTheFirstSessionIsAnEmptyListNotAnError() async {
+        // A fresh Grok install has no sessions folder until the first chat.
         let missing = FileManager.default.temporaryDirectory
             .appendingPathComponent("Sigil-missing-\(UUID().uuidString)", isDirectory: true)
         let store = SessionStore(root: missing)
         await store.scan(ignoringCache: false)
         #expect(store.sessions.isEmpty)
-        #expect(store.loadError != nil)
+        #expect(store.loadError == nil)
         #expect(!store.isLoading)
     }
 
@@ -210,7 +211,8 @@ struct SessionStoreTests {
 
         harness.store.start()
         await harness.store.reload()
-        #expect(harness.store.loadError != nil)
+        #expect(harness.store.sessions.isEmpty)
+        #expect(harness.store.loadError == nil)
 
         try harness.write(
             fixture: "minimal.json",

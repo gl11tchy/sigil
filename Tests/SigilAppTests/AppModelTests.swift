@@ -985,6 +985,39 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func pinsSurviveWhileTheSessionsFolderIsMissing() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(id: "kept", cwd: "/Users/someone/Documents/project")
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(fixture.store.sessions.first)
+        model.pin(session)
+
+        // A fresh store, as at launch, finds the folder gone: an unmounted
+        // volume or a changed GROK_HOME must not erase the sidebar lists.
+        let root = fixture.grokHome.appendingPathComponent("sessions")
+        try FileManager.default.removeItem(at: root)
+        let relaunched = AppModel(
+            settings: fixture.settings,
+            store: SessionStore(root: root),
+            trashConversation: { _ in },
+            presentError: { _ in },
+            panel: RightPanel(
+                defaults: fixture.defaults,
+                notesStore: ConversationNotesStore(root: fixture.notesRoot)
+            ),
+            pairingStore: InMemoryRemotePairingStore()
+        )
+        defer { relaunched.closeAllTabsAndWait() }
+        await relaunched.store.reload()
+        relaunched.pruneMissingPins()
+
+        #expect(fixture.settings.pinnedConversations.map(\.sessionID) == ["kept"])
+    }
+
+    @Test @MainActor
     func deletingOneChatKeepsTheProjectPin() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }

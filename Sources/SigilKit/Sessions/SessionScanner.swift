@@ -56,10 +56,12 @@ enum SessionScanner: Sendable {
         let fm = FileManager()
         var isDirectory: ObjCBool = false
         guard fm.fileExists(atPath: root.path, isDirectory: &isDirectory) else {
+            // The CLI creates the folder with its first session, so a missing
+            // root is only an error once it held sessions.
             return Result(
                 sessions: cachedSessions(cache),
                 cache: cache,
-                loadError: "Sessions directory does not exist: \(root.path)"
+                loadError: cache.isEmpty ? nil : "Sessions directory does not exist: \(root.path)"
             )
         }
         guard isDirectory.boolValue else {

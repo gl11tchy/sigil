@@ -554,6 +554,9 @@ final class AppModel {
     /// Drops pins, archives, and names whose conversations are gone, after a successful scan.
     func pruneMissingPins() {
         guard !store.isLoading, store.loadError == nil else { return }
+        // A missing folder lists nothing without an error; that is no proof
+        // the pinned chats are gone.
+        guard FileManager.default.fileExists(atPath: store.root.path) else { return }
         let remainingPins = pruningMissing(settings.pinnedConversations)
         if remainingPins != settings.pinnedConversations {
             settings.pinnedConversations = remainingPins
