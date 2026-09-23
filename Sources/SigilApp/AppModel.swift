@@ -52,6 +52,8 @@ final class AppModel {
     /// Bumped by Find Conversations so the search field takes focus even when
     /// the sidebar just became visible, or already had it.
     private(set) var searchFocusToken = 0
+    /// The last token the sidebar acted on, so a remount does not replay it.
+    @ObservationIgnored private var consumedSearchFocusToken = 0
 
     /// True while this process owns the tab-messaging socket.
     private(set) var isTabMessagingAvailable = false
@@ -1856,6 +1858,14 @@ final class AppModel {
     func focusSidebarSearch() {
         if !isSidebarVisible { isSidebarVisible = true }
         searchFocusToken += 1
+    }
+
+    /// True once per Find Conversations request. The sidebar asks on mount and
+    /// on each new token; only a request it has not acted on moves focus.
+    func consumeSearchFocusRequest() -> Bool {
+        guard searchFocusToken > consumedSearchFocusToken else { return false }
+        consumedSearchFocusToken = searchFocusToken
+        return true
     }
 
     // MARK: - Find

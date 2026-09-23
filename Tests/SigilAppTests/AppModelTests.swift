@@ -694,6 +694,21 @@ struct AppModelTests {
         #expect(!model.sidebarSessions.contains { $0.id == "closed-wt" })
     }
 
+    /// A remount of the sidebar (⌘B) must not refocus Search for an old ⌘⇧F.
+    @Test @MainActor
+    func searchFocusRequestIsConsumedOnce() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        #expect(!model.consumeSearchFocusRequest())
+
+        model.focusSidebarSearch()
+
+        #expect(model.consumeSearchFocusRequest())
+        #expect(!model.consumeSearchFocusRequest())
+    }
+
     @Test @MainActor
     func sidebarHidesSubagentSessionsUntilEnabled() async throws {
         let fixture = try ModelFixture()

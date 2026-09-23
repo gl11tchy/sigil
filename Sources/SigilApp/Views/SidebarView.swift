@@ -85,8 +85,8 @@ struct SidebarView: View {
             Button("Cancel", role: .cancel) {}
         }
         .task(id: model.searchFocusToken) {
-            guard model.searchFocusToken > 0 else { return }
             await Task.yield()
+            guard !Task.isCancelled, model.consumeSearchFocusRequest() else { return }
             focus = .search
         }
         .task(id: model.renamePrepareTaskID) {
