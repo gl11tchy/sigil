@@ -12,6 +12,12 @@ if [[ -n "${SIGIL_APP:-}" ]]; then
 else
   FINAL_APP="$ROOT/dist/Sigil.app"
 fi
+# The old output is deleted wholesale below, so SIGIL_APP=~/Desktop would
+# empty the Desktop. Only ever replace a .app bundle.
+if [[ "$(basename "$FINAL_APP")" != *.app ]]; then
+  echo "error: SIGIL_APP must name a .app bundle: $FINAL_APP" >&2
+  exit 1
+fi
 CONFIG="${SIGIL_CONFIG:-release}"
 ALLOW_THIN="${SIGIL_ALLOW_THIN:-0}"
 DISTRIBUTION="${SIGIL_DISTRIBUTION:-0}"
@@ -124,7 +130,13 @@ if [[ "$IDENTITY" != "-" ]]; then
 fi
 
 # A failed build must not leave an older bundle looking like its output.
-rm -rf "$FINAL_APP"
+if [[ -e "$FINAL_APP" || -L "$FINAL_APP" ]]; then
+  if [[ ! -e "$FINAL_APP/Contents/MacOS/Sigil" ]]; then
+    echo "error: $FINAL_APP exists but is not a Sigil app; move it away first" >&2
+    exit 1
+  fi
+  rm -rf "$FINAL_APP"
+fi
 
 if [[ "$CONFIG" == "release" ]]; then
   if ! xcrun --sdk macosx metal --version >/dev/null 2>&1; then
