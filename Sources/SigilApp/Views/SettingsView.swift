@@ -212,7 +212,11 @@ struct SettingsView: View {
     }
 
     private func applyExecutablePath() {
-        switch pathDraft.commit(stored: model.settings.executablePath) {
+        apply(pathDraft.commit(stored: model.settings.executablePath))
+    }
+
+    private func apply(_ outcome: ExecutablePathDraft.Outcome) {
+        switch outcome {
         case .rejected:
             settingsError = "Choose an executable file."
         case .unchanged:
@@ -232,8 +236,7 @@ struct SettingsView: View {
             .deletingLastPathComponent()
         panel.prompt = "Choose"
         if panel.runModal() == .OK, let url = panel.url {
-            pathDraft.text = url.path
-            applyExecutablePath()
+            apply(pathDraft.pick(url, stored: model.settings.executablePath))
         }
     }
 }
@@ -340,5 +343,15 @@ struct ExecutablePathDraft: Equatable {
             return .rejected
         }
         return .applied(path)
+    }
+
+    /// A file picked in the open panel is a choice even when it is already the
+    /// stored path, so that path stays after the default changes.
+    @MainActor
+    mutating func pick(_ url: URL, stored: String) -> Outcome {
+        text = url.path
+        let outcome = commit(stored: stored)
+        guard outcome == .unchanged, AppSettings.isExecutableFile(at: url) else { return outcome }
+        return .applied(AppSettings.normalizedExecutablePath(text))
     }
 }
