@@ -65,17 +65,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         MainActor.assumeIsolated {
-            guard let model else { return .terminateNow }
-            let working = model.tabs.filter(\.shouldWarnBeforeStopping).count
-            guard working > 0 else { return .terminateNow }
-            let alert = NSAlert()
-            alert.messageText =
-                working == 1
-                ? "A session is still working. Quit anyway?"
-                : "\(working) sessions are still working. Quit anyway?"
-            alert.addButton(withTitle: "Quit")
-            alert.addButton(withTitle: "Cancel")
-            return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+            guard let model, let prompt = StopWorkingPrompt(action: .quit, stopping: model.tabs)
+            else { return .terminateNow }
+            return prompt.runModal() ? .terminateNow : .terminateCancel
         }
     }
 

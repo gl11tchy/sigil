@@ -1,50 +1,72 @@
 import AppKit
+import SigilKit
 
-/// The question asked before a close or archive stops sessions that are still
-/// working. Its words follow the action and the number of sessions.
+/// The question asked before a close, archive or quit stops sessions that are
+/// still running. Its words follow the action, the number of sessions, and
+/// whether they are mid-turn or only running.
 struct StopWorkingPrompt: Equatable {
     enum Action: Equatable {
         case closeTab
         case archive
+        case quit
     }
 
     let action: Action
-    /// How many of the tabs the action closes are still working.
-    let count: Int
+    /// Tabs the action stops mid-turn.
+    let working: Int
+    /// Providers of the other tabs it stops: their CLI runs but shows no turn.
+    let running: [CLIProvider]
 
-    /// Nil when none of `tabs` would be stopped mid-turn.
+    var count: Int { working + running.count }
+
+    /// Nil when the action stops none of `tabs`.
     @MainActor
     init?(action: Action, stopping tabs: [TerminalTab]) {
-        let count = tabs.filter(\.shouldWarnBeforeStopping).count
-        guard count > 0 else { return nil }
-        self.init(action: action, count: count)
+        let stopping = tabs.filter(\.shouldWarnBeforeStopping)
+        guard !stopping.isEmpty else { return nil }
+        let running = stopping.filter { $0.spec.provider != .grokBuild && $0.activity != .working }
+        self.init(
+            action: action, working: stopping.count - running.count,
+            running: running.map(\.spec.provider))
     }
 
-    init(action: Action, count: Int) {
+    init(action: Action, working: Int, running: [CLIProvider]) {
         self.action = action
-        self.count = count
+        self.working = working
+        self.running = running
     }
 
     var messageText: String {
+        let subject: String
+        if count > 1 {
+            subject = "\(count) sessions are"
+        } else if let provider = running.first {
+            subject = "\(provider.name) is"
+        } else {
+            subject = action == .closeTab ? "This session is" : "A session is"
+        }
+        let statement = "\(subject) still \(running.isEmpty ? "working" : "running")."
         switch action {
-        case .closeTab:
-            return "This session is still working."
-        case .archive:
-            let subject = count == 1 ? "A session is" : "\(count) sessions are"
-            return "\(subject) still working. Archive anyway?"
+        case .closeTab: return statement
+        case .archive: return "\(statement) Archive anyway?"
+        case .quit: return "\(statement) Quit anyway?"
         }
     }
 
     var informativeText: String {
-        count == 1
-            ? "The response in progress will stop."
-            : "The responses in progress will stop."
+        switch (working, running.first) {
+        case (0, let provider?) where count == 1: return "\(provider.name) will stop."
+        case (0, _): return "Their processes will stop."
+        case (1, _): return "The response in progress will stop."
+        default: return "The responses in progress will stop."
+        }
     }
 
     var buttonTitle: String {
         switch action {
         case .closeTab: return "Close Tab"
         case .archive: return "Archive"
+        case .quit: return "Quit"
         }
     }
 

@@ -3268,6 +3268,21 @@ struct AppModelTests {
         #expect(model.tabs.count == 2)
     }
 
+    @Test
+    func quittingNamesRunningSessionsApartFromWorkingOnes() {
+        let working = StopWorkingPrompt(action: .quit, working: 2, running: [])
+        #expect(working.messageText == "2 sessions are still working. Quit anyway?")
+        #expect(working.informativeText == "The responses in progress will stop.")
+
+        let mixed = StopWorkingPrompt(action: .quit, working: 1, running: [.claudeCode, .codex])
+        #expect(mixed.messageText == "3 sessions are still running. Quit anyway?")
+        #expect(mixed.informativeText == "The response in progress will stop.")
+
+        let idle = StopWorkingPrompt(action: .quit, working: 0, running: [.claudeCode, .codex])
+        #expect(idle.messageText == "2 sessions are still running. Quit anyway?")
+        #expect(idle.informativeText == "Their processes will stop.")
+    }
+
     @Test @MainActor
     func archivingASelectionArchivesEveryChat() throws {
         let fixture = try ModelFixture()
