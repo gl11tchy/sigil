@@ -30,8 +30,10 @@ public final class SessionStore {
     private let root: URL
     @ObservationIgnored private var cache: [String: SessionCacheEntry] = [:]
     @ObservationIgnored private var isStarted = false
-    @ObservationIgnored private var scanSequence = 0
-    @ObservationIgnored private var appliedScanSequence = 0
+    /// How many scans have started, and which of them produced `sessions`.
+    /// A scan numbered above a moment's `scanSequence` began after it.
+    @ObservationIgnored public private(set) var scanSequence = 0
+    @ObservationIgnored public private(set) var appliedScanSequence = 0
     @ObservationIgnored private var forceEpoch = 0
     @ObservationIgnored private var forcedScansInFlight = 0
     @ObservationIgnored private var cachedScanPending = false

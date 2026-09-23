@@ -212,6 +212,23 @@ final class AppSettings {
         effort = Self.effortOptions.contains(storedEffort) ? storedEffort : ""
     }
 
+    /// Re-reads the pin, archive and name lists, which another running copy
+    /// of the app may have changed since launch. Call it before a change, so
+    /// the write keeps that copy's edits instead of replacing them.
+    func reloadSharedLists() {
+        func stored<Value: Decodable>(_ key: String) -> [Value] {
+            defaults.data(forKey: key).flatMap { try? JSONDecoder().decode([Value].self, from: $0) } ?? []
+        }
+        let pins: [OpenTabsSnapshot.Entry] = stored(Key.pinnedConversations)
+        if pins != pinnedConversations { pinnedConversations = pins }
+        let projects: [String] = stored(Key.pinnedProjects)
+        if projects != pinnedProjects { pinnedProjects = projects }
+        let archives: [OpenTabsSnapshot.Entry] = stored(Key.archivedConversations)
+        if archives != archivedConversations { archivedConversations = archives }
+        let names: [ConversationName] = stored(Key.conversationNames)
+        if names != conversationNames { conversationNames = names }
+    }
+
     var theme: TerminalTheme {
         TerminalTheme.all.first { $0.name == themeName } ?? .sigilNeon
     }
