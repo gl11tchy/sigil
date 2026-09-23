@@ -47,6 +47,7 @@ final class AppModel {
             ) {
                 clearRenameSelectAllPending()
             }
+            if oldValue, !isSidebarVisible { refocusTerminalAfterHiding(.sidebar) }
         }
     }
     /// Bumped by Find Conversations so the search field takes focus even when
@@ -1480,6 +1481,16 @@ final class AppModel {
             self.needsTerminalFocus = false
             tab.controller.focus()
         }
+    }
+
+    /// Hiding a column removes its views. When one of them had focus, the
+    /// window would be left with no first responder and every key would beep.
+    private func refocusTerminalAfterHiding(_ column: KeyboardFocus.Column) {
+        guard let view = selectedTab?.controller.view, let window = view.window else { return }
+        let focus = KeyboardFocus.classify(
+            window.firstResponder, in: window, sessionView: view,
+            panelShellView: panel.shell?.view)
+        if focus.needsTerminalAfterHiding(column) { focusSelectedTerminal() }
     }
 
     func select(index: Int) {

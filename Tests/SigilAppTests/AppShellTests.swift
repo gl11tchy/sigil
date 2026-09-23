@@ -68,6 +68,82 @@ struct AppShellTests {
         #expect(closes.value == 1)
     }
 
+    @Test func keyboardFocusKnowsTheTerminalThePanelAndNowhere() {
+        let window = makeClosableWindow()
+        let session = NSView()
+        let shell = NSView()
+        let shellChild = NSView()
+        shell.addSubview(shellChild)
+        let notes = NSTextView()
+        let search = NSTextView()
+        search.isFieldEditor = true
+        func focus(_ responder: NSResponder?) -> KeyboardFocus {
+            KeyboardFocus.classify(
+                responder, in: window, sessionView: session, panelShellView: shell)
+        }
+
+        #expect(focus(session) == .sessionTerminal)
+        #expect(focus(shellChild) == .panel)
+        #expect(focus(notes) == .panel)
+        #expect(focus(search) == .elsewhere)
+        #expect(focus(nil) == .lost)
+        #expect(focus(window) == .lost)
+        #expect(focus(window.contentView) == .lost)
+    }
+
+    @Test func hidingAColumnRefocusesTheTerminalOnlyWhenFocusLeftWithIt() {
+        #expect(KeyboardFocus.elsewhere.needsTerminalAfterHiding(.sidebar))
+        #expect(KeyboardFocus.lost.needsTerminalAfterHiding(.sidebar))
+        #expect(!KeyboardFocus.panel.needsTerminalAfterHiding(.sidebar))
+        #expect(!KeyboardFocus.sessionTerminal.needsTerminalAfterHiding(.sidebar))
+        #expect(KeyboardFocus.panel.needsTerminalAfterHiding(.panel))
+        #expect(KeyboardFocus.lost.needsTerminalAfterHiding(.panel))
+        #expect(!KeyboardFocus.elsewhere.needsTerminalAfterHiding(.panel))
+        #expect(!KeyboardFocus.sessionTerminal.needsTerminalAfterHiding(.panel))
+    }
+
+    @Test func hidingTheFocusedSidebarGivesFocusBackToTheTerminal() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        let tab = try #require(model.newTab(in: try fixture.directory("project")))
+        defer { model.closeAllTabsAndWait() }
+        let window = makeClosableWindow()
+        let sidebarList = FocusableView()
+        try #require(window.contentView).addSubview(sidebarList)
+        try #require(window.contentView).addSubview(tab.controller.view)
+        defer { tab.controller.view.removeFromSuperview() }
+        #expect(window.makeFirstResponder(sidebarList))
+        await flushMainAsync()
+        model.needsTerminalFocus = false
+
+        model.isSidebarVisible = false
+        await flushMainAsync()
+
+        #expect(model.needsTerminalFocus)
+    }
+
+    @Test func hidingTheSidebarLeavesFocusInTheNotes() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        let tab = try #require(model.newTab(in: try fixture.directory("project")))
+        defer { model.closeAllTabsAndWait() }
+        let window = makeClosableWindow()
+        let notes = NSTextView()
+        try #require(window.contentView).addSubview(notes)
+        try #require(window.contentView).addSubview(tab.controller.view)
+        defer { tab.controller.view.removeFromSuperview() }
+        #expect(window.makeFirstResponder(notes))
+        await flushMainAsync()
+        model.needsTerminalFocus = false
+
+        model.isSidebarVisible = false
+        await flushMainAsync()
+
+        #expect(!model.needsTerminalFocus)
+    }
+
     private func makeClosableWindow() -> NSWindow {
         _ = NSApplication.shared
         let window = NSWindow(
@@ -78,6 +154,16 @@ struct AppShellTests {
         )
         window.isReleasedWhenClosed = false
         return window
+    }
+}
+
+private final class FocusableView: NSView {
+    override var acceptsFirstResponder: Bool { true }
+}
+
+private func flushMainAsync() async {
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        DispatchQueue.main.async { continuation.resume() }
     }
 }
 
