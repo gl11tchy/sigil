@@ -59,7 +59,27 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             model.windowDidBecomeKey()
         }
+        .onChange(of: announcementSnapshot) { old, new in
+            announce(ScreenAnnouncement.change(from: old, to: new))
+        }
         .ignoresSafeArea(.container, edges: .top)
+    }
+
+    private var announcementSnapshot: ScreenAnnouncement.Snapshot {
+        let tab = model.selectedTab
+        return ScreenAnnouncement.Snapshot(
+            tabID: tab?.id,
+            title: tab?.title ?? "",
+            activity: tab?.activity ?? .starting,
+            inboxCount: tab?.bridgeInbox.count ?? 0
+        )
+    }
+
+    /// Speaks only while Sigil is the active app, so VoiceOver is not cut off
+    /// in another app. Unseen activity still shows on the tab.
+    private func announce(_ text: String?) {
+        guard let text, NSApp.isActive else { return }
+        AccessibilityNotification.Announcement(text).post()
     }
 
     // MARK: - Detail column
@@ -110,8 +130,9 @@ struct RootView: View {
                     reduceMotion ? .easeOut(duration: 0.1) : .easeOut(duration: 0.16),
                     value: model.isFindBarVisible
                 )
-                .onChange(of: model.findQuery) { _, _ in
+                .onChange(of: model.findQuery) { _, query in
                     model.applyFindQuery()
+                    announce(ScreenAnnouncement.findMatches(query: query, count: model.findMatchCount))
                 }
                 if let tab = model.selectedTab, let item = tab.bridgeInbox.first {
                     BridgeInboxBanner(
@@ -146,6 +167,42 @@ enum SelectedSessionFolder {
 
     static func breadcrumb(of directory: URL) -> String {
         directory.breadcrumbPath
+    }
+}
+
+/// What VoiceOver speaks for changes the detail column shows only visually.
+enum ScreenAnnouncement {
+    /// The parts of the selected tab that can need an announcement.
+    struct Snapshot: Equatable {
+        var tabID: UUID?
+        var title: String
+        var activity: TerminalTab.Activity
+        var inboxCount: Int
+    }
+
+    /// A new tab message, or a turn that finished or ended with its session, on
+    /// the tab the user is on. A tab switch also changes the snapshot, and it
+    /// speaks nothing.
+    static func change(from old: Snapshot, to new: Snapshot) -> String? {
+        guard new.tabID != nil, old.tabID == new.tabID else { return nil }
+        if new.inboxCount > old.inboxCount {
+            return "Incoming tab message. Deliver or Dismiss."
+        }
+        guard old.activity == .working else { return nil }
+        switch new.activity {
+        case .idle: return "\(new.title): turn finished"
+        case .exited: return "\(new.title): session ended"
+        case .starting, .working: return nil
+        }
+    }
+
+    static func findMatches(query: String, count: Int) -> String? {
+        guard !query.isEmpty else { return nil }
+        switch count {
+        case 0: return "No matches"
+        case 1: return "1 match"
+        default: return "\(count) matches"
+        }
     }
 }
 
@@ -321,7 +378,7 @@ private struct SplitDivider: View {
                             .onEnded { _ in widthAtDragStart = nil }
                     )
             }
-            .focusable()
+            .focusable(interactions: .activate)
             .focused($isFocused)
             .onKeyPress(.leftArrow) {
                 width = max(200, width - 20)
@@ -341,6 +398,39 @@ private struct SplitDivider: View {
                 @unknown default: break
                 }
             }
+    }
+}
+
+/// The inbox and ended-session banner actions for the selected tab, so the
+/// File menu can run them from the keyboard.
+extension AppModel {
+    var canDeliverSelectedTabMessage: Bool {
+        guard let tab = selectedTab else { return false }
+        return !tab.bridgeInbox.isEmpty && tab.canDeliverBridgePrompt
+    }
+
+    func deliverSelectedTabMessage() {
+        guard let tab = selectedTab, canDeliverSelectedTabMessage else { return }
+        tab.deliverNextBridgePrompt()
+        tab.controller.focus()
+    }
+
+    var canDismissSelectedTabMessage: Bool {
+        !(selectedTab?.bridgeInbox.isEmpty ?? true)
+    }
+
+    func dismissSelectedTabMessage() {
+        selectedTab?.dismissNextBridgePrompt()
+    }
+
+    var canRestartSelectedTab: Bool {
+        guard let tab = selectedTab, case .exited = tab.activity else { return false }
+        return true
+    }
+
+    func restartSelectedTab() {
+        guard let tab = selectedTab, canRestartSelectedTab else { return }
+        restartTab(id: tab.id)
     }
 }
 

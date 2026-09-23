@@ -138,7 +138,7 @@ private struct TabChip: View {
     @State private var isCloseHovering = false
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 0) {
             Button(action: select) {
                 HStack(spacing: 6) {
                     StatusDot(activity: tab.activity)
@@ -149,6 +149,10 @@ private struct TabChip: View {
                         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                         .foregroundStyle(isSelected ? palette.text : palette.textDim)
                 }
+                .padding(.leading, 8)
+                .padding(.trailing, 2)
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel(label)
@@ -169,7 +173,7 @@ private struct TabChip: View {
             .onHover { isCloseHovering = $0 }
             .accessibilityLabel("Close \(label)")
         }
-        .padding(.horizontal, 8)
+        .padding(.trailing, 8)
         .frame(maxWidth: .infinity, minHeight: 24, maxHeight: 24)
         .background(
             RoundedRectangle(cornerRadius: 6)
