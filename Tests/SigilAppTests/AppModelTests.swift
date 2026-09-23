@@ -1820,7 +1820,6 @@ struct AppModelTests {
                     fieldEditorExists: true, fieldEditorIsFirstResponder: true,
                     isEditingRenameField: true),
                 selectAllPending: true))
-        #expect(!AppModel.shouldSuppressBlurCommitDuringRenameSelectAllWait())
         #expect(AppModel.renameSelectAllRetryInterval == .milliseconds(16))
         #expect(AppModel.renameSelectAllRetryTimeout == .milliseconds(400))
         #expect(AppModel.shouldContinueRenameSelectAllRetry(elapsed: .zero))

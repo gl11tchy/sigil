@@ -295,10 +295,6 @@ final class AppModel {
         entryKey(.init(sessionID: session.id, cwd: session.cwd))
     }
 
-    func isCurrentFolder(_ cwd: String) -> Bool {
-        samePath(cwd, currentDirectory.path)
-    }
-
     func activity(of session: GrokSession) -> TerminalTab.Activity? {
         tabs.first { tabMatches($0, sessionID: session.id, cwd: session.cwd) }?.activity
     }
@@ -1094,11 +1090,6 @@ final class AppModel {
         !isFreshKey && !showRenameAlert && preparedSurface == .prompt
     }
 
-    /// Focus steal may suppress blur-commit; the select-all wait must not.
-    static func shouldSuppressBlurCommitDuringRenameSelectAllWait() -> Bool {
-        false
-    }
-
     /// One frame between retries. The first ready check is immediate.
     static let renameSelectAllRetryInterval: Duration = .milliseconds(16)
 
@@ -1492,19 +1483,6 @@ final class AppModel {
         let current = tabs.firstIndex { $0.id == selectedTabID } ?? 0
         let next = (current + offset + tabs.count) % tabs.count
         select(tabs[next].id)
-    }
-
-    func closeAllTabs() {
-        for tab in tabs {
-            tabBridge?.noteTabClosed(id: tab.id)
-            tab.terminateAndWait()
-        }
-        tabs.removeAll()
-        selectedTabID = nil
-        deferredOpenTabs.removeAll()
-        clearDeferredSelection()
-        refreshDockIndicator()
-        persistOpenTabs()
     }
 
     /// Quit path: no `grok` process may outlive the app, and there is no run loop
