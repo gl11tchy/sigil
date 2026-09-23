@@ -28,6 +28,8 @@ function remoteFileName(name) {
 }
 let tabsSignature = '';
 let sessionTabs = [], canRestart = false;
+// Set by each Mac handshake; only the first state after one can show a restarted Mac.
+let freshHandshake = false;
 const histories = new Map();
 let pendingEarlier = null, earlierFlight = false, searchToken = 0;
 let findIndex = 0, findMatches = [], displayedOutput = null;
@@ -237,7 +239,8 @@ function render(state) {
   if (nextSelected !== null && (typeof nextSelected !== 'string' || !ids.has(nextSelected))) {
     throw new Error('Invalid Mac response');
   }
-  const allTabsNew = sessionTabs.length > 0 && !sessionTabs.some(tab => ids.has(tab.id));
+  const allTabsNew = freshHandshake && sessionTabs.length > 0 && !sessionTabs.some(tab => ids.has(tab.id));
+  freshHandshake = false;
   sessionTabs = state.tabs;
   canRestart = Array.isArray(state.capabilities) && state.capabilities.includes('restart');
   const bucket = nextSelected ? historyFor(nextSelected) : null;
@@ -617,6 +620,7 @@ function connect() {
         pending.clear();
         challenge = frame.hello;
         sequence = 0;
+        freshHandshake = true;
         const authorization = bootstrap ? request('pair', newDeviceKey, undefined, true) : request('state');
         authorization.then(() => {
           if (current !== generation) return;
