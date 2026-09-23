@@ -589,6 +589,33 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func aLoopingSenderCannotFloodAnotherTabsInbox() throws {
+        _ = NSApplication.shared
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let sender = try #require(model.newTab(in: cwd))
+        let target = try #require(model.newTab(in: cwd))
+        let bridge = TabBridge(model: model, socketURL: fixture.socketURL)
+        let peer = BridgePeer(tabID: sender.id.uuidString)
+
+        let responses = (0..<100).map { index in
+            bridge.bridgeSend(from: peer, to: target.id.uuidString, message: "spam \(index)")
+        }
+
+        #expect(responses.first?.ok == true)
+        #expect(target.bridgeInbox.count < 100)
+        #expect(responses.filter(\.ok).count == target.bridgeInbox.count)
+        #expect(responses.last?.ok == false)
+        #expect(responses.last?.error?.contains("unread") == true)
+
+        target.dismissNextBridgePrompt()
+        #expect(bridge.bridgeSend(from: peer, to: target.id.uuidString, message: "after").ok)
+    }
+
+    @Test @MainActor
     func registrationCommandsRunOffTheCooperativePool() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }

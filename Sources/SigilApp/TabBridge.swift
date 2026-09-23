@@ -8,6 +8,9 @@ final class TabBridge: BridgeServerDelegate {
     private weak var model: AppModel?
     private let server: BridgeServer
     let asks = PendingAskRegistry()
+    /// Unread prompts one tab may hold. A looping agent past this gets an
+    /// error back instead of burying the tab's inbox.
+    static let maxUnreadPrompts = 20
 
     init(model: AppModel, socketURL: URL = BridgePaths.configuredSocket) {
         self.model = model
@@ -184,6 +187,11 @@ final class TabBridge: BridgeServerDelegate {
         // Never inject unsolicited keystrokes. The tab shows a small inbox and
         // the user chooses when to submit the prompt.
         guard !prompt.isEmpty else { return .failure("message is empty") }
+        guard tab.bridgeInbox.count < Self.maxUnreadPrompts else {
+            return .failure(
+                "tab \"\(dest.title)\" already has \(Self.maxUnreadPrompts) unread messages; try again after the user reads them"
+            )
+        }
         tab.enqueueBridgePrompt(
             prompt,
             requestID: requestID,
