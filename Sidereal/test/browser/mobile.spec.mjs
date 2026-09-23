@@ -152,6 +152,33 @@ test('scan falls back to paste when the camera is missing', async ({ page, baseU
   await expect(page.locator('#scanner')).toBeHidden();
 });
 
+test('a rejected code shows its reason on the scanner, above the camera', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {
+      getUserMedia: async () => {
+        const canvas = Object.assign(document.createElement('canvas'), { width: 64, height: 64 });
+        const context = canvas.getContext('2d');
+        setInterval(() => { context.fillStyle = '#fff'; context.fillRect(0, 0, 64, 64); }, 50);
+        return canvas.captureStream(10);
+      },
+    } });
+    // Every frame reads as a code from another Sidereal address.
+    globalThis.jsQR = () => ({ data: `https://evil.example/#room=${'ab'.repeat(16)}&key=${'cd'.repeat(32)}` });
+  });
+  await page.goto(baseURL);
+  await page.getByRole('button', { name: 'Scan code' }).click();
+  const reason = page.locator('#scanner').getByRole('alert');
+  await expect(reason).toHaveText('This code is for a different Sidereal address.');
+  expect(await reason.evaluate(element => {
+    const box = element.getBoundingClientRect();
+    return document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2) === element;
+  })).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('scanner-error.png') });
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.locator('#scanner')).toBeHidden();
+});
+
 test('a stored ticket reconnects without a QR fragment or URL ticket', async ({ page, baseURL }) => {
   const urls = [];
   page.on('websocket', socket => urls.push(new URL(socket.url())));

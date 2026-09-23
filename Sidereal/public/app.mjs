@@ -1006,6 +1006,8 @@ async function startScan() {
     return;
   }
   showError('');
+  $('scanner-error').hidden = true;
+  $('scanner-error').textContent = '';
   const run = ++scanRun;
   let stream;
   try {
@@ -1056,7 +1058,12 @@ async function startScan() {
           beginPair(result).catch(error => showError(error.message));
           return;
         }
-        if (result?.error) showError(result.error);
+        if (result?.error) {
+          showError(result.error);
+          // #error sits under the full-screen scanner. Show the reason on the scanner too.
+          if ($('scanner-error').textContent !== result.error) $('scanner-error').textContent = result.error;
+          $('scanner-error').hidden = false;
+        }
       }
     }
     requestAnimationFrame(tick);

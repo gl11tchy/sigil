@@ -105,6 +105,7 @@ main, #controls { display: flex; flex-direction: column; flex: 1; min-height: 0;
   background: linear-gradient(transparent, var(--ground) 28%);
 }
 #scanner .scanner-bar p { margin: 0; color: #fff; }
+#scanner .scanner-bar #scanner-error { color: var(--amber); text-align: center; }
 #scanner-cancel { min-width: 120px; }
 #error {
   flex-shrink: 0; max-height: 88px; overflow: auto; color: var(--amber); background: var(--raised);
