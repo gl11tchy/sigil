@@ -33,6 +33,18 @@ struct CLIProviderTests {
         #expect(command.arguments.last == provider.command)
     }
 
+    @Test func claudeCodesLocalInstallFolderIsOnTheFallbackPath() {
+        // The local installer puts the binary there and adds only a shell
+        // alias, which `exec "$@"` does not see.
+        let spec = GrokLaunchSpec(
+            workingDirectory: URL(fileURLWithPath: "/tmp"), mode: .new(sessionID: UUID()),
+            provider: .claudeCode)
+        let command = spec.hostCommand(processEnvironment: ["SHELL": "/bin/zsh"])
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        #expect(command.arguments.count > 3)
+        #expect(command.arguments.dropFirst(3).first?.split(separator: ":").contains("\(home)/.claude/local") == true)
+    }
+
     @Test func cursorUsesItsUnambiguousCLIName() {
         // Grok also installs an `agent` binary. Never use that ambiguous alias.
         #expect(CLIProvider.cursor.command == "cursor-agent")
