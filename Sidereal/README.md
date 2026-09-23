@@ -102,8 +102,11 @@ that credential. Use Disconnect on the Mac to revoke authorization.
 The QR carries a one-use bootstrap secret in its fragment. The phone replaces it
 with a different key during pairing. The relay sees room identifiers, timing and
 ciphertext sizes and routing tickets, but not session contents or device keys. AES-256-GCM binds
-message direction; Mac-generated connection challenges and sequences reject replay.
-The web host remains trusted to deliver the correct client JavaScript.
+message direction; Mac-generated connection challenges and sequences stop the Mac from
+accepting replayed phone requests. The Mac's challenge reaches the phone unsealed, so a
+relay that replays an earlier challenge can also replay the Mac's earlier replies to the
+phone. The web host, on the same origin as the relay, remains trusted to deliver the
+correct client JavaScript.
 
 Neither tickets nor room IDs enter WebSocket URLs. The relay sends a fresh per-connection routing
 key over WSS. The first client message is `{route: ciphertext}`: AES-256-GCM with
