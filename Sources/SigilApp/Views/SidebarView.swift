@@ -783,10 +783,15 @@ struct SidebarView: View {
         } else if listKind == .archived {
             Text("Archive a chat or a project from its row to send it here.")
         } else {
-            HStack(spacing: 4) {
-                Text("Press")
-                KbdChip(label: "⌘T", palette: palette)
-                Text("to start one. It shows up here as soon as it has a name.")
+            // The key cap sits on one short line so the explanation below wraps
+            // across the full width instead of in a narrow column beside it.
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text("Press")
+                    KbdChip(label: "⌘T", palette: palette)
+                    Text("to start one.")
+                }
+                Text("It shows up here as soon as it has a name.")
             }
         }
     }
