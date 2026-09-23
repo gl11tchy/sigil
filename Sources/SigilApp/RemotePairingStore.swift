@@ -12,7 +12,8 @@ protocol RemotePairingStore: AnyObject {
     /// Returns nil only when no pairing is stored. Throws when a stored
     /// pairing exists but cannot be read.
     func load() throws -> RemotePairing?
-    func save(_ pairing: RemotePairing)
+    /// Returns false when the pairing was not stored.
+    func save(_ pairing: RemotePairing) -> Bool
     func clear() -> Bool
     /// True while a Disconnect could not delete the stored pairing. That
     /// pairing must not be used again, in this run or after a relaunch.
@@ -24,7 +25,10 @@ final class InMemoryRemotePairingStore: RemotePairingStore {
     var revokeFailed = false
 
     func load() -> RemotePairing? { pairing }
-    func save(_ pairing: RemotePairing) { self.pairing = pairing }
+    @discardableResult func save(_ pairing: RemotePairing) -> Bool {
+        self.pairing = pairing
+        return true
+    }
     @discardableResult func clear() -> Bool {
         pairing = nil
         return true
@@ -75,9 +79,9 @@ final class KeychainRemotePairingStore: RemotePairingStore {
         return pairing
     }
 
-    func save(_ pairing: RemotePairing) {
-        clear()
-        guard let data = try? JSONEncoder().encode(pairing) else { return }
+    /// Delete and add, so the new item's access list trusts this build.
+    @discardableResult func save(_ pairing: RemotePairing) -> Bool {
+        guard clear(), let data = try? JSONEncoder().encode(pairing) else { return false }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -85,7 +89,7 @@ final class KeychainRemotePairingStore: RemotePairingStore {
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
-        SecItemAdd(query as CFDictionary, nil)
+        return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
     }
 
     @discardableResult func clear() -> Bool {

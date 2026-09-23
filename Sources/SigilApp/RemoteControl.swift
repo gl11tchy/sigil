@@ -98,6 +98,7 @@ final class RemoteControl {
             guard let self, self.generation == current, !Task.isCancelled else { return }
             var session = restored
             var room: Room?
+            var unsaved: String?
             var pairingURL: URL?
             var retry = 1
             var failures = 0
@@ -153,7 +154,7 @@ final class RemoteControl {
                             failures = 0
                             self.status = session.isPaired ? "Phone disconnected" : "Scan to connect"
                             self.pairingURL = session.isPaired ? nil : pairingURL
-                            self.error = nil
+                            self.error = unsaved
                         } else if frame.type == "peer", let id = frame.peer, id.count <= 64 {
                             self.peer = id
                             session.resetConnection()
@@ -174,9 +175,18 @@ final class RemoteControl {
                                 self.expiresAt = nil
                                 self.status = "Phone connected"
                                 if firstPair, let key = session.deviceKey {
-                                    self.store.save(
+                                    if self.store.save(
                                         RemotePairing(
                                             origin: origin.absoluteString, deviceKey: key, ticket: session.ticket))
+                                    {
+                                        // Saving deleted the old item, so no unrevoked pairing is left.
+                                        self.store.revokeFailed = false
+                                        self.revokeFailed = false
+                                    } else {
+                                        unsaved =
+                                            "Sigil could not save this pairing in Keychain. It ends when Sigil quits."
+                                        self.error = unsaved
+                                    }
                                 }
                                 var reply = RemoteCommands.execute(command, model: model)
                                 reply.ticket = session.ticket

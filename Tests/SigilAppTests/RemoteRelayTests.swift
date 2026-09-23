@@ -19,6 +19,41 @@ struct RemoteRelayTests {
         let frame = try await paired.phone.receive()
         #expect(frame["error"] == "unauthorized")
     }
+
+    @Test @MainActor func pairingThatCannotBeSavedIsReported() async throws {
+        let relay = try await RelayFixture()
+        defer { relay.stop() }
+        let model = AppModel()
+        let remote = RemoteControl(store: UnsavableStore())
+        defer { remote.stop() }
+        remote.start(urlText: relay.origin, model: model)
+        let paired = try await relay.pair(remote)
+        defer { paired.phone.close() }
+        #expect(remote.isPaired)
+        #expect(remote.error == "Sigil could not save this pairing in Keychain. It ends when Sigil quits.")
+    }
+
+    @Test @MainActor func savedNewPairingEndsAnEarlierFailedRevoke() async throws {
+        let relay = try await RelayFixture()
+        defer { relay.stop() }
+        let model = AppModel()
+        let store = InMemoryRemotePairingStore()
+        store.revokeFailed = true
+        let remote = RemoteControl(store: store)
+        defer { remote.stop() }
+        remote.start(urlText: relay.origin, model: model)
+        let paired = try await relay.pair(remote)
+        defer { paired.phone.close() }
+        #expect(!store.revokeFailed)
+        #expect(!remote.revokeFailed)
+    }
+}
+
+private final class UnsavableStore: RemotePairingStore {
+    var revokeFailed = false
+    func load() -> RemotePairing? { nil }
+    func save(_: RemotePairing) -> Bool { false }
+    func clear() -> Bool { true }
 }
 
 /// Sidereal's loopback relay fixture, for one test.

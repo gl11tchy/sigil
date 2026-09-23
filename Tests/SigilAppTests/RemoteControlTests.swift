@@ -287,7 +287,10 @@ private final class FailingClearStore: RemotePairingStore {
     var revokeFailed = false
     init(pairing: RemotePairing) { self.pairing = pairing }
     func load() -> RemotePairing? { pairing }
-    func save(_ pairing: RemotePairing) { self.pairing = pairing }
+    @discardableResult func save(_ pairing: RemotePairing) -> Bool {
+        self.pairing = pairing
+        return true
+    }
     func clear() -> Bool {
         guard clearSucceeds else { return false }
         pairing = nil
@@ -304,14 +307,14 @@ private final class CountingStore: RemotePairingStore {
         loads += 1
         return pairing
     }
-    func save(_: RemotePairing) {}
+    func save(_: RemotePairing) -> Bool { true }
     func clear() -> Bool { true }
 }
 
 private final class UnreadableStore: RemotePairingStore {
     var revokeFailed = false
     func load() throws -> RemotePairing? { throw KeychainRemotePairingStore.ReadError(status: errSecAuthFailed) }
-    func save(_: RemotePairing) {}
+    func save(_: RemotePairing) -> Bool { true }
     func clear() -> Bool { true }
 }
 
