@@ -3284,6 +3284,21 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func quittingNamesACommandRunningInThePanelTerminal() {
+        #expect(StopWorkingPrompt(action: .quit, stopping: []) == nil)
+        let panelOnly = StopWorkingPrompt(action: .quit, stopping: [], panelJob: true)
+        #expect(
+            panelOnly?.messageText == "A command is still running in the panel terminal. Quit anyway?")
+        #expect(panelOnly?.informativeText == "The command will stop.")
+
+        let both = StopWorkingPrompt(action: .quit, working: 1, running: [], panelJob: true)
+        #expect(both.messageText == "A session is still working. Quit anyway?")
+        #expect(
+            both.informativeText
+                == "The response in progress will stop. The command in the panel terminal will stop too.")
+    }
+
+    @Test @MainActor
     func archivingASelectionArchivesEveryChat() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }

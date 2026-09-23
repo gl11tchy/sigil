@@ -18,7 +18,12 @@ struct SigilApp: App {
                     ),
                     minHeight: 460
                 )
-                .background(WindowCloseGuard { model.tabs.contains(where: \.shouldWarnBeforeStopping) })
+                .background(
+                    WindowCloseGuard {
+                        model.tabs.contains(where: \.shouldWarnBeforeStopping)
+                            || model.panel.shellHasForegroundJob
+                    }
+                )
                 .onAppear {
                     delegate.model = model
                     delegate.startRemoteIdleSleep(model)
@@ -65,7 +70,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         MainActor.assumeIsolated {
-            guard let model, let prompt = StopWorkingPrompt(action: .quit, stopping: model.tabs)
+            guard let model,
+                let prompt = StopWorkingPrompt(
+                    action: .quit, stopping: model.tabs,
+                    panelJob: model.panel.shellHasForegroundJob)
             else { return .terminateNow }
             return prompt.runModal() ? .terminateNow : .terminateCancel
         }
