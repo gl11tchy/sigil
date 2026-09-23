@@ -581,6 +581,44 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func quittingStopsARunningTranscriptExportAndRemovesItsPartialFile() async throws {
+        let fixture = try ModelFixture(
+            script: """
+                #!/bin/sh
+                printf partial > "$3"
+                echo $$ > "$(dirname "$3")/export.pid"
+                exec /bin/sleep 30
+                """
+        )
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let output = cwd.appendingPathComponent("Transcript.md")
+        let pidFile = cwd.appendingPathComponent("export.pid")
+        let model = fixture.model()
+        model.startTranscriptExport(sessionID: "s-1", output: output, workingDirectory: cwd)
+        let started = ContinuousClock.now + .seconds(3)
+        while !FileManager.default.fileExists(atPath: pidFile.path), ContinuousClock.now < started {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        let pid = try #require(
+            pid_t(
+                try String(contentsOf: pidFile, encoding: .utf8)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)))
+        defer { kill(pid, SIGKILL) }
+        #expect(try temporaryExports(nextTo: output).count == 1)
+
+        model.closeAllTabsAndWait()
+
+        #expect(try temporaryExports(nextTo: output).isEmpty)
+        let reaped = ContinuousClock.now + .seconds(2)
+        while kill(pid, 0) == 0, ContinuousClock.now < reaped {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(kill(pid, 0) != 0)
+    }
+
+    @Test @MainActor
     func alreadyInstalledRegistrationStillRunsMcpAddToRepairPath() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }

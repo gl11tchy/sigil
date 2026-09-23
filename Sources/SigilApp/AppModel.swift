@@ -36,6 +36,7 @@ final class AppModel {
     var isFindBarVisible = false
     /// True when a tab was selected while the main window could not take focus.
     var needsTerminalFocus = false
+    private let transcriptExports = TranscriptExports()
     /// Grok tabs that kept the old theme because they were busy or held messages.
     @ObservationIgnored private var themeRestartsWhenSettled: Set<TerminalTab.ID> = []
     var findQuery = ""
@@ -1542,6 +1543,7 @@ final class AppModel {
         stopTabMessaging()
         panel.closeShellAndWait()
         panel.flushNotes()
+        transcriptExports.stopAll()
         stopAndWait(tabs)
         tabs.removeAll()
         selectedTabID = nil
@@ -2129,14 +2131,22 @@ final class AppModel {
         panel.nameFieldStringValue = Self.transcriptFilename(for: title)
         panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        startTranscriptExport(sessionID: sessionID, output: url, workingDirectory: workingDirectory)
+    }
+
+    func startTranscriptExport(sessionID: String, output url: URL, workingDirectory: URL) {
         let executable = settings.executableURL
+        let exports = transcriptExports
+        let id = UUID()
         Task {
+            defer { exports.remove(id) }
             do {
                 try await Self.runTranscriptExport(
                     executable: executable,
                     sessionID: sessionID,
                     output: url,
-                    workingDirectory: workingDirectory
+                    workingDirectory: workingDirectory,
+                    onStart: { exports.add(id, process: $0, temporaryOutput: $1) }
                 )
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             } catch {
@@ -2150,7 +2160,8 @@ final class AppModel {
         sessionID: String,
         output: URL,
         workingDirectory: URL,
-        timeout: Duration = .seconds(300)
+        timeout: Duration = .seconds(300),
+        onStart: (@Sendable (Process, URL) -> Void)? = nil
     ) async throws {
         let task = Task.detached(priority: .userInitiated) {
             let temporaryOutput = output.deletingLastPathComponent().appendingPathComponent(
@@ -2185,6 +2196,7 @@ final class AppModel {
             }
             do {
                 try process.run()
+                onStart?(process, temporaryOutput)
                 try? pipe.fileHandleForWriting.close()
             } catch {
                 try? pipe.fileHandleForWriting.close()
