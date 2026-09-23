@@ -322,12 +322,14 @@ final class AppModel {
     }
 
     func pin(_ session: GrokSession) {
+        settings.reloadSharedLists()
         unarchive(session)
         settings.pinnedConversations = SidebarOrganization.inserting(
             session, onto: settings.pinnedConversations, samePath: samePath)
     }
 
     func unpin(_ session: GrokSession) {
+        settings.reloadSharedLists()
         settings.pinnedConversations = SidebarOrganization.removing(
             session, from: settings.pinnedConversations, samePath: samePath)
     }
@@ -341,11 +343,13 @@ final class AppModel {
     }
 
     func pin(_ project: SidebarProject) {
+        settings.reloadSharedLists()
         settings.pinnedProjects = SidebarOrganization.inserting(
             project.cwd, onto: settings.pinnedProjects, samePath: samePath)
     }
 
     func unpin(_ project: SidebarProject) {
+        settings.reloadSharedLists()
         settings.pinnedProjects = SidebarOrganization.removing(
             project.cwd, from: settings.pinnedProjects, samePath: samePath)
     }
@@ -371,6 +375,7 @@ final class AppModel {
             return
         }
         unpin(session)
+        settings.reloadSharedLists()
         settings.archivedConversations = SidebarOrganization.inserting(
             session, onto: settings.archivedConversations, samePath: samePath)
         for tab in matching { closeTab(tab.id) }
@@ -379,6 +384,7 @@ final class AppModel {
     }
 
     func unarchive(_ session: GrokSession) {
+        settings.reloadSharedLists()
         settings.archivedConversations = SidebarOrganization.removing(
             session, from: settings.archivedConversations, samePath: samePath)
     }
@@ -549,6 +555,7 @@ final class AppModel {
     /// Drops pins, archives, and names whose conversations are gone, after a successful scan.
     func pruneMissingPins() {
         guard !store.isLoading, store.loadError == nil else { return }
+        settings.reloadSharedLists()
         let remainingPins = pruningMissing(settings.pinnedConversations)
         if remainingPins != settings.pinnedConversations {
             settings.pinnedConversations = remainingPins
@@ -658,6 +665,7 @@ final class AppModel {
             store.sessions.contains { $0.id != session.id && samePath($0.cwd, session.cwd) }
             || tabs.contains { samePath($0.workingDirectory.path, session.cwd) }
         if !othersRemain {
+            settings.reloadSharedLists()
             settings.pinnedProjects = SidebarOrganization.removing(
                 session.cwd, from: settings.pinnedProjects, samePath: samePath)
         }
@@ -680,6 +688,7 @@ final class AppModel {
     /// Empty, whitespace, or a name equal to the CLI title clears the override
     /// (a matching submit with no overlay is a no-op). Otherwise stores the name.
     func rename(_ session: GrokSession, to raw: String) {
+        settings.reloadSharedLists()
         let next = ConversationNaming.setting(
             raw, on: session, onto: settings.conversationNames, samePath: samePath)
         guard
@@ -710,6 +719,7 @@ final class AppModel {
         if renamingSessionKey == sessionKey(live) {
             endRenameSession()
         }
+        settings.reloadSharedLists()
         let next = ConversationNaming.removing(
             live, from: settings.conversationNames, samePath: samePath)
         guard

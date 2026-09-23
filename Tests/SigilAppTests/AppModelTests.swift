@@ -3255,6 +3255,46 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func sidebarListChangesKeepAnotherRunningCopysEdits() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let elsewhere = try fixture.directory("elsewhere")
+        for id in ["mine", "theirs", "archive-me", "their-archive"] {
+            try fixture.writeListedSession(id: id, cwd: cwd.path, summary: id)
+        }
+        try fixture.writeListedSession(id: "far", cwd: elsewhere.path, summary: "Far")
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        func session(_ id: String) throws -> GrokSession {
+            try #require(fixture.store.sessions.first { $0.id == id })
+        }
+        // A second running copy of the app shares these defaults and changes
+        // every list after this copy loaded them.
+        let otherCopy = AppSettings(defaults: fixture.defaults)
+        otherCopy.pinnedConversations = [.init(sessionID: "theirs", cwd: cwd.path)]
+        otherCopy.pinnedProjects = [elsewhere.path]
+        otherCopy.archivedConversations = [.init(sessionID: "their-archive", cwd: cwd.path)]
+        otherCopy.conversationNames = [.init(sessionID: "theirs", cwd: cwd.path, name: "Theirs")]
+
+        model.pin(try session("mine"))
+        model.pin(
+            SidebarProject(
+                id: cwd.path, name: "project", displayPath: cwd.path, cwd: cwd.path, sessions: [],
+                updatedAt: Date()))
+        model.archive(try session("archive-me"))
+        model.rename(try session("mine"), to: "Mine")
+        model.pruneMissingPins()
+
+        let stored = AppSettings(defaults: fixture.defaults)
+        #expect(Set(stored.pinnedConversations.map(\.sessionID)) == ["mine", "theirs"])
+        #expect(Set(stored.pinnedProjects) == [cwd.path, elsewhere.path])
+        #expect(Set(stored.archivedConversations.map(\.sessionID)) == ["archive-me", "their-archive"])
+        #expect(Set(stored.conversationNames.map(\.name)) == ["Mine", "Theirs"])
+    }
+
+    @Test @MainActor
     func legacyFolderNotesSkipConversationsTheSidebarHides() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
