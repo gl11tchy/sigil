@@ -1554,21 +1554,9 @@ private struct ProjectListRow: View {
                     endPoint: .trailing
                 )
                 .frame(width: 14)
+                // The plus stays trailing-most so hover adds controls to its left
+                // and nothing moves under the pointer.
                 HStack(spacing: 0) {
-                    if canStart {
-                        Button(action: newChat) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 9, weight: .semibold))
-                                .frame(width: 22, height: 22)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(
-                            (isHovering || isKeyboardSelected) ? palette.textDim : palette.textFaint
-                        )
-                        .help("New Session")
-                        .accessibilityLabel("New Session")
-                    }
                     if isHovering || isKeyboardSelected {
                         if let archive {
                             Button(action: archive) {
@@ -1600,6 +1588,20 @@ private struct ProjectListRow: View {
                             .foregroundStyle(palette.accent.opacity(0.9))
                             .frame(width: 22, height: 22)
                             .accessibilityHidden(true)
+                    }
+                    if canStart {
+                        Button(action: newChat) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 9, weight: .semibold))
+                                .frame(width: 22, height: 22)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(
+                            (isHovering || isKeyboardSelected) ? palette.textDim : palette.textFaint
+                        )
+                        .help("New Session")
+                        .accessibilityLabel("New Session")
                     }
                 }
                 .padding(.trailing, 8)
