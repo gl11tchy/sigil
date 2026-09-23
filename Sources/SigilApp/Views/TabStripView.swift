@@ -150,7 +150,6 @@ private struct TabChip: View {
                         .foregroundStyle(isSelected ? palette.text : palette.textDim)
                 }
                 .padding(.leading, 8)
-                .padding(.trailing, 2)
                 .frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
             }
@@ -166,14 +165,15 @@ private struct TabChip: View {
                         RoundedRectangle(cornerRadius: 4)
                             .fill(isCloseHovering ? palette.selected : Color.clear)
                     )
+                    .frame(width: 20, height: 24)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(palette.textDim)
-            .opacity(isHovering || isSelected ? 1 : 0.45)
+            .foregroundStyle(isHovering || isSelected ? palette.textDim : palette.textFaint)
             .onHover { isCloseHovering = $0 }
             .accessibilityLabel("Close \(label)")
         }
-        .padding(.trailing, 8)
+        .padding(.trailing, 6)
         .frame(maxWidth: .infinity, minHeight: 24, maxHeight: 24)
         .background(
             RoundedRectangle(cornerRadius: 6)
