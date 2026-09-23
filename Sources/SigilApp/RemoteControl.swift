@@ -13,6 +13,8 @@ final class RemoteControl {
     private(set) var expiresAt: Date?
     private(set) var status = "Off"
     private(set) var error: String?
+    /// A Disconnect could not delete the pairing, so the view keeps offering it.
+    private(set) var revokeFailed: Bool
 
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var socket: URLSessionWebSocketTask?
@@ -23,6 +25,7 @@ final class RemoteControl {
 
     init(store: any RemotePairingStore = KeychainRemotePairingStore()) {
         self.store = store
+        revokeFailed = store.revokeFailed
     }
 
     static let productionOrigin = "https://remote.sigilapp.dev"
@@ -209,7 +212,10 @@ final class RemoteControl {
 
     func stop(revoke: Bool = false) {
         let forgotten = !revoke || store.clear()
-        if revoke { store.revokeFailed = !forgotten }
+        if revoke {
+            store.revokeFailed = !forgotten
+            revokeFailed = !forgotten
+        }
         generation = UUID()
         task?.cancel()
         task = nil

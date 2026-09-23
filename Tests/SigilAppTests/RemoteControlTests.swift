@@ -72,6 +72,22 @@ struct RemoteControlTests {
         relaunched.stop()
     }
 
+    @Test @MainActor func failedRevokeKeepsDisconnectAvailableUntilItSucceeds() {
+        let store = FailingClearStore(
+            pairing: RemotePairing(
+                origin: "http://127.0.0.1:9", deviceKey: RemoteCrypto.randomKey(), ticket: RemoteCrypto.randomKey()))
+        let remote = RemoteControl(store: store)
+        #expect(!remote.revokeFailed)
+        remote.start(urlText: "http://127.0.0.1:9", model: AppModel())
+        remote.stop(revoke: true)
+        #expect(remote.revokeFailed)
+        #expect(RemoteControl(store: store).revokeFailed)
+        store.clearSucceeds = true
+        remote.stop(revoke: true)
+        #expect(!remote.revokeFailed)
+        #expect(remote.error == nil)
+    }
+
     @Test @MainActor func launchReadsTheSavedPairingOnlyOnce() {
         let store = CountingStore(
             pairing: RemotePairing(
