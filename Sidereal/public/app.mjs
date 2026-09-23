@@ -215,6 +215,14 @@ function prependSlice(bucket, slice) {
 function takeChars(text, count) {
   return [...text].slice(0, count).join('');
 }
+function takeGraphemes(text, count) {
+  const out = [];
+  for (const { segment } of new Intl.Segmenter().segment(text)) {
+    if (out.length === count) break;
+    out.push(segment);
+  }
+  return out.join('');
+}
 function takeEnd(text, count) {
   const chars = [...text];
   return chars.slice(Math.max(0, chars.length - count)).join('');
@@ -382,7 +390,7 @@ function searchSaved() {
   if (!query || !$('sessions-dialog').open) { renderSaved([]); return; }
   renderSaved([], { pending: true });
   // The Mac reads 200 characters, and text over 8 KB drops the connection.
-  request('chats', takeChars(query, 200)).then(reply => {
+  request('chats', utf8Limited(takeGraphemes(query, 200), 8192)).then(reply => {
     if (token !== searchToken || $('session-search').value.trim() !== query) return;
     renderSaved(reply.chats, { truncated: reply.chatsTruncated === true });
   }).catch(error => { if (token === searchToken) showError(error.message); });

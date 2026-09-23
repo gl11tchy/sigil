@@ -882,6 +882,32 @@ test('a long chats search sends only the 200 characters the Mac reads', async ()
   assert.equal(socket.readyState, 1);
 });
 
+test('a chats search counts characters the way the Mac does', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('sessions-toggle').onclick();
+  // Each family emoji is five code points and one character to the Mac.
+  const query = `${'👨‍👩‍👧'.repeat(100)}needle`;
+  page.element('session-search').value = query;
+  page.element('session-search').oninput();
+  await settle();
+  assert.equal(socket.sent.at(-1).text, query);
+});
+
+test('a chats search of stacked accents stays under the 8 KB the Mac accepts', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('sessions-toggle').onclick();
+  page.element('session-search').value = `e${'\u0301'.repeat(100)}`.repeat(200);
+  page.element('session-search').oninput();
+  await settle();
+  const sent = socket.sent.at(-1);
+  assert.equal(sent.action, 'chats');
+  assert.ok(new TextEncoder().encode(sent.text).length <= 8192);
+  assert.ok(sent.text.startsWith(`e${'\u0301'.repeat(100)}`));
+  assert.equal(socket.readyState, 1);
+});
+
 test('a shortened chat list says it is partial', async () => {
   const page = await browser();
   const socket = await page.authorize();
