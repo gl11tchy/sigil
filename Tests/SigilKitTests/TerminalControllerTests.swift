@@ -173,6 +173,43 @@ struct TerminalControllerTests {
         #expect(await TerminalTestSupport.waitUntil { !controller.isRunning })
     }
 
+    @Test func optionTypesTheLayoutCharacterByDefault() async throws {
+        let controller = TerminalController()
+        let capture = try await TerminalTestSupport.startInputCapture(in: controller, bracketedPaste: false)
+        defer { controller.terminateAndWait() }
+        let view = try #require(controller.view as? GrokProcessTerminalView)
+        // Option-L on a German layout types "@".
+        let event = try #require(
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: .option, timestamp: 0,
+                windowNumber: 0, context: nil, characters: "@", charactersIgnoringModifiers: "l",
+                isARepeat: false, keyCode: 37))
+
+        view.keyDown(with: event)
+
+        let input = await TerminalTestSupport.capturedInput(capture, from: controller)
+        #expect(input == Array("@".utf8))
+        #expect(!controller.optionAsMetaKey)
+    }
+
+    @Test func optionAsMetaKeyStillSendsEscapePrefixedKeys() async throws {
+        let controller = TerminalController()
+        let capture = try await TerminalTestSupport.startInputCapture(in: controller, bracketedPaste: false)
+        defer { controller.terminateAndWait() }
+        let view = try #require(controller.view as? GrokProcessTerminalView)
+        controller.optionAsMetaKey = true
+        let event = try #require(
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: .option, timestamp: 0,
+                windowNumber: 0, context: nil, characters: "@", charactersIgnoringModifiers: "l",
+                isARepeat: false, keyCode: 37))
+
+        view.keyDown(with: event)
+
+        let input = await TerminalTestSupport.capturedInput(capture, from: controller)
+        #expect(input == Array("\u{1b}l".utf8))
+    }
+
     @Test func inputSubmissionIgnoresBracketedPasteNewlines() {
         let view = GrokProcessTerminalView(
             frame: NSRect(x: 0, y: 0, width: 200, height: 100),
