@@ -114,7 +114,6 @@ final class RemoteControl {
             // After the first pairing the QR's room ID must stop routing phones.
             var retireRoom = false
             var pairingURL: URL?
-            var retry = 1
             var failures = 0
             var ready = false
             while !Task.isCancelled, self.generation == current {
@@ -171,7 +170,6 @@ final class RemoteControl {
                             try await self.send(Frame(route: route), socket: socket)
                         } else if frame.type == "ready" {
                             ready = true
-                            retry = 1
                             failures = 0
                             self.status = session.isPaired ? "Phone disconnected" : "Scan to connect"
                             self.pairingURL = session.isPaired ? nil : pairingURL
@@ -240,21 +238,15 @@ final class RemoteControl {
                     self.socket?.cancel(with: .goingAway, reason: nil)
                     guard self.generation == current, !Task.isCancelled else { return }
                     failures += 1
-                    if RemoteReconnectPolicy.shouldGiveUp(failures: failures) {
-                        self.stop()
-                        self.error = "Remote session ended. Connect your phone again."
-                        return
-                    }
                     // A route refused before ready means the relay no longer has the room.
                     let refused = !ready && self.socket?.closeCode == .policyViolation
                     if refused || RemoteReconnectPolicy.shouldReallocate(failures: failures) { room = nil }
-                    retry = RemoteReconnectPolicy.retrySeconds(failures: failures)
                     self.status = "Reconnecting…"
                     if !session.isPaired {
                         self.pairingURL = nil
                         self.error = "Could not reach the companion. Retrying."
                     }
-                    try? await Task.sleep(for: .seconds(retry))
+                    try? await Task.sleep(for: .seconds(RemoteReconnectPolicy.retrySeconds(failures: failures)))
                 }
             }
         }

@@ -287,7 +287,6 @@ struct RemoteControlTests {
         #expect(!RemoteReconnectPolicy.shouldReallocate(failures: 1))
         #expect(RemoteReconnectPolicy.shouldReallocate(failures: 3))
         #expect(RemoteReconnectPolicy.shouldReallocate(failures: 6))
-        #expect(!RemoteReconnectPolicy.shouldGiveUp(failures: 100))
     }
 
     @Test func keepAliveCancelsASocketWhosePingsGoUnanswered() async throws {
