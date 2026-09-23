@@ -70,19 +70,24 @@ while a turn is running. Latest returns to the newest output.
 Drafts stay with each session until the page closes; a lost connection keeps them editable.
 Connection settings are under the dot in the top-right corner.
 The session title at the top switches between open sessions. Chats opens a
-searchable list of open and saved chats. Find searches the recent output with previous/next
+searchable list of open and saved chats; a saved chat opens on the Mac. Scroll to the
+top of the output to load earlier output. Find searches the recent output with previous/next
 matches. Connection settings also lets you copy the displayed output.
 Ended sessions offer Restart when the connected Mac supports it; drafts move to the
 restarted session. Older Macs still ask you to restart on the desktop.
 
-New starts a session in Sigil's current folder. Paste fills the prompt without
+New asks which project to use, then starts a session there. The project list,
+saved chats, and earlier output need Sigil from #54 or later. On an older Mac, New
+starts in Sigil's current folder and the other two show "Unknown action."
+
+Paste fills the prompt without
 submitting it. Send pastes, then presses Enter. Return in the phone message box
 adds a new line; Command/Ctrl+Return sends from a hardware keyboard.
 
 The terminal view is bounded plain text, not a pixel-perfect terminal emulator.
 It shows up to 100 open tabs and the latest 12 KB of readable output. Phone files
 are written into Sigil’s drop cache (4 MB each) and pasted as paths. It does not
-list closed conversations, resize the Mac terminal, or expose MCP.
+resize the Mac terminal or expose MCP.
 
 Sigil must be running to control sessions. Scan once; the phone reconnects after
 a Sigil restart, a Mac sleep, a relay restart, or a new room. Disconnect in Sigil
