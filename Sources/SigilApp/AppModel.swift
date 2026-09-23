@@ -366,11 +366,29 @@ final class AppModel {
         {
             return
         }
-        unpin(session)
-        settings.archivedConversations = SidebarOrganization.inserting(
-            session, onto: settings.archivedConversations, samePath: samePath)
-        for tab in matching { closeTab(tab.id) }
-        dropDeferred(matching: session)
+        archiveWithoutAsking([session])
+    }
+
+    /// Archives `sessions` and closes their tabs, writing each setting once
+    /// however many sessions there are.
+    private func archiveWithoutAsking(_ sessions: [GrokSession]) {
+        var pinned = settings.pinnedConversations
+        var archived = settings.archivedConversations
+        for session in sessions {
+            pinned = SidebarOrganization.removing(session, from: pinned, samePath: samePath)
+            archived = SidebarOrganization.inserting(session, onto: archived, samePath: samePath)
+        }
+        settings.pinnedConversations = pinned
+        settings.archivedConversations = archived
+        for session in sessions {
+            while let index = tabs.firstIndex(where: {
+                tabMatches($0, sessionID: session.id, cwd: session.cwd)
+            }) {
+                removeTab(at: index)
+            }
+            dropDeferred(matching: session)
+        }
+        refreshDockIndicator()
         persistOpenTabs()
     }
 
@@ -392,7 +410,7 @@ final class AppModel {
             }
         }
         if anyWorking && !confirmStopWorking() { return }
-        for session in sessions { archive(session, confirmIfWorking: false) }
+        archiveWithoutAsking(sessions)
     }
 
     func unarchive(_ sessions: [GrokSession]) {
@@ -407,11 +425,12 @@ final class AppModel {
             return
         }
         unpin(project)
-        for session in store.sessions where samePath(session.cwd, project.cwd) {
-            archive(session, confirmIfWorking: false)
+        archiveWithoutAsking(store.sessions.filter { samePath($0.cwd, project.cwd) })
+        for tab in projectTabs {
+            if let index = tabs.firstIndex(where: { $0.id == tab.id }) { removeTab(at: index) }
         }
-        for tab in projectTabs { closeTab(tab.id) }
         dropDeferred(inProjectPath: project.cwd)
+        refreshDockIndicator()
         persistOpenTabs()
         if focusedProject.map({ samePath($0.cwd, project.cwd) }) == true {
             leaveProject()
@@ -1412,6 +1431,14 @@ final class AppModel {
 
     func closeTab(_ id: TerminalTab.ID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        removeTab(at: index)
+        refreshDockIndicator()
+        persistOpenTabs()
+    }
+
+    /// Everything closing a tab does except writing the open-tab list.
+    private func removeTab(at index: Int) {
+        let id = tabs[index].id
         tabBridge?.noteTabClosed(id: id)
         // Do not let a quick reopen overlap two Grok processes on one session.
         tabs[index].terminateAndWait()
@@ -1425,8 +1452,6 @@ final class AppModel {
                 selectedTabID = nil
             }
         }
-        refreshDockIndicator()
-        persistOpenTabs()
     }
 
     /// User-facing close: warn when the agent is mid-turn so a click does not kill work.

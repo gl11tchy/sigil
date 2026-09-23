@@ -3257,6 +3257,31 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func archivingASelectionWritesSettingsOnceNotOncePerChat() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        final class Writes: @unchecked Sendable { var count = 0 }
+        func writes(archiving sessions: [GrokSession]) -> Int {
+            let writes = Writes()
+            let token = NotificationCenter.default.addObserver(
+                forName: UserDefaults.didChangeNotification, object: fixture.defaults, queue: nil
+            ) { _ in writes.count += 1 }
+            defer { NotificationCenter.default.removeObserver(token) }
+            model.archive(sessions)
+            return writes.count
+        }
+
+        let one = writes(archiving: [makeSession(id: "s-1", cwd: cwd)])
+        let five = writes(archiving: (2...6).map { makeSession(id: "s-\($0)", cwd: cwd) })
+
+        #expect(one > 0)
+        #expect(five == one)
+    }
+
+    @Test @MainActor
     func archivingASelectionWithAWorkingChatAsksOnce() throws {
         let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
         defer { fixture.cleanup() }
