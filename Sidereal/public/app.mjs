@@ -793,7 +793,9 @@ async function sendText(submit) {
   const text = $('message').value;
   const files = attachmentsFor().slice();
   if (!text.trim() && !files.length) return;
-  if (new TextEncoder().encode(text).length > 8192) { showError('Keep the message under 8 KB.'); return; }
+  // Check the text as sent: after attachments it gains a leading space.
+  const payload = files.length ? ` ${text}` : text;
+  if (new TextEncoder().encode(payload).length > 8192) { showError('Keep the message under 8 KB.'); return; }
   const target = selected, current = generation;
   // Size-check every file before the Mac pastes any of them into the prompt.
   const payloads = [];
@@ -807,7 +809,7 @@ async function sendText(submit) {
     if (selected === target) renderAttachments();
   }
   if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
-  if (text.trim()) await request('input', files.length ? ` ${text}` : text, target);
+  if (text.trim()) await request('input', payload, target);
   if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
   if (submit) {
     await new Promise(resolve => setTimeout(resolve, 100));

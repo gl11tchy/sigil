@@ -173,6 +173,18 @@ test('Send clears the draft only after the Enter acknowledgement', async () => {
   assert.equal(page.element('send').disabled, true); // Empty messages cannot be sent.
 });
 
+test('an 8 KB message with an attachment is refused before anything is sent', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('attach').files = [{ name: 'notes.txt', type: 'text/plain', size: 5 }];
+  page.element('attach').onchange();
+  page.element('message').value = 'a'.repeat(8192);
+  page.element('compose').onsubmit({ preventDefault() {} });
+  await settle();
+  assert.match(page.element('error').textContent, /under 8 KB/);
+  assert.deepEqual(socket.sent.map(request => request.action), ['state']);
+});
+
 test('a refused Enter keeps the sent draft and reports the failure', async () => {
   const page = await browser();
   const socket = await page.authorize();
