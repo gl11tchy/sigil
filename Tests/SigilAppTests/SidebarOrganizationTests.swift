@@ -247,6 +247,22 @@ struct SidebarOrganizationTests {
         let rows = SidebarOrganization.listedRows(in: project, from: [kept, other])
         #expect(rows.map(\.id) == ["kept"])
     }
+
+    /// Leaving a folder puts the keyboard back on that folder's home row, so
+    /// Return reopens it and ↓ moves to the next one.
+    @Test func leavingASurfaceReturnsToItsHomeRow() {
+        #expect(
+            SidebarOrganization.homeRowID(leaving: .project, projectID: "/tmp/acme")
+                == "/tmp/acme")
+        #expect(
+            SidebarOrganization.homeRowID(leaving: .recents, projectID: nil)
+                == SidebarOrganization.recentsID)
+        #expect(
+            SidebarOrganization.homeRowID(leaving: .archived, projectID: nil)
+                == SidebarOrganization.archivedID)
+        #expect(SidebarOrganization.homeRowID(leaving: .folders, projectID: nil) == nil)
+        #expect(SidebarOrganization.homeRowID(leaving: .project, projectID: nil) == nil)
+    }
 }
 
 private func session(

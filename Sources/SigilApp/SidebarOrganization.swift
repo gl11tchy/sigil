@@ -147,6 +147,17 @@ enum SidebarOrganization {
             + destinationRowIDs(recentsCount: recentsCount, archivedCount: archivedCount)
     }
 
+    /// The home row that stands for the surface being left, so the arrow-key
+    /// highlight lands back on the folder or destination the user opened.
+    static func homeRowID(leaving surface: SidebarSurface, projectID: String?) -> String? {
+        switch surface {
+        case .project: return projectID
+        case .recents: return recentsID
+        case .archived: return archivedID
+        case .folders: return nil
+        }
+    }
+
     /// Home lists every open tab above the folders, so the sessions in flight
     /// are one click away without opening a folder or reading the tab strip.
     static let openTabPrefix = "sigil:tab:"

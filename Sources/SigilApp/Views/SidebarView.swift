@@ -212,7 +212,7 @@ struct SidebarView: View {
                     showsPin: true,
                     showsArchive: true,
                     canStart: true,
-                    leave: { model.leaveProject() },
+                    leave: { leaveFolder() },
                     newChat: { model.requestNewSessionInProject(project) },
                     togglePin: { model.togglePin(project) },
                     toggleArchive: { model.archive(project) }
@@ -221,12 +221,12 @@ struct SidebarView: View {
         case .recents:
             DrillBar(
                 title: "Recents",
-                leave: { model.leaveProject() }
+                leave: { leaveFolder() }
             )
         case .archived:
             DrillBar(
                 title: "Archived",
-                leave: { model.leaveProject() }
+                leave: { leaveFolder() }
             )
         case .folders:
             EmptyView()
@@ -862,12 +862,23 @@ struct SidebarView: View {
                 focus = .list
             }
         case .leaveFolder:
-            model.leaveProject()
+            leaveFolder()
         case .leaveList:
             focus = nil
             model.focusSelectedTerminal()
         }
         return .handled
+    }
+
+    /// Opening a folder drops the highlight (its id is not a chat row), so put
+    /// it back on the folder being left.
+    private func leaveFolder() {
+        if let id = SidebarOrganization.homeRowID(
+            leaving: model.sidebarSurface, projectID: model.focusedProject?.id)
+        {
+            keyboardSelectionID = id
+        }
+        model.leaveProject()
     }
 
     private func activateSearchResult() {
