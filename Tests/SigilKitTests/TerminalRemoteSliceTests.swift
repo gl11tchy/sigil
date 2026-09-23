@@ -111,6 +111,20 @@ struct TerminalRemoteSliceTests {
         #expect(start == rendered.count - loaded.count - near.count)
     }
 
+    @Test func anchorsCutInsideAGraphemeAreStillFound() {
+        let tail = "log line \u{26A0}\u{FE0F} disk almost full\nLIVE TAIL"
+        let rendered = "older text\n" + tail
+        // The phone cuts anchors by code point, here on each side of U+FE0F.
+        let index = TerminalController.earlierAnchorStart(
+            "log line \u{26A0}",
+            endAnchor: "\u{FE0F} disk almost full\nLIVE TAIL",
+            loadedCharacters: tail.count,
+            in: rendered
+        )
+        let text = index.map { String(rendered[$0...]) }
+        #expect(text == tail)
+    }
+
     @Test func hugeLoadedCountDoesNotTrap() {
         let controller = TerminalController()
         let slice = controller.remoteEarlierSlice(
