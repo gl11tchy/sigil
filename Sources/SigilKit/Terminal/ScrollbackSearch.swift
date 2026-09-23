@@ -54,14 +54,21 @@ struct ScrollbackSearch: Equatable, Sendable {
         setQuery(query, in: lines.map { Row(text: $0) })
     }
 
-    mutating func setQuery(_ query: String, in rows: [Row]) {
+    /// Starts at the last hit on or above `line`, else the first hit below it.
+    mutating func setQuery(_ query: String, in rows: [Row], startingAtOrAbove line: Int? = nil) {
         if query.isEmpty {
             clear()
             return
         }
         self.query = query
         matches = Self.locate(query, in: rows)
-        current = matches.isEmpty ? nil : 0
+        if matches.isEmpty {
+            current = nil
+        } else if let line {
+            current = matches.lastIndex { $0.line <= line } ?? 0
+        } else {
+            current = 0
+        }
     }
 
     mutating func updateLines(_ lines: [String]) {
