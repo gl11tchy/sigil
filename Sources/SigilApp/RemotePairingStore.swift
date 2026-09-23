@@ -111,8 +111,4 @@ enum RemoteReconnectPolicy {
     static func shouldReallocate(failures: Int) -> Bool {
         failures > 0 && failures % 3 == 0
     }
-
-    static func shouldGiveUp(failures _: Int) -> Bool {
-        false
-    }
 }

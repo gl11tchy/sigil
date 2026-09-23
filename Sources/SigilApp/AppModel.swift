@@ -121,7 +121,8 @@ final class AppModel {
         } else if Self.isRunningAutomatedTests {
             self.remoteControl = RemoteControl(store: InMemoryRemotePairingStore())
         } else {
-            self.remoteControl = RemoteControl(store: KeychainRemotePairingStore())
+            self.remoteControl = RemoteControl(
+                store: KeychainRemotePairingStore(), notifications: DistributedNotificationCenter.default())
         }
         self.trashConversation = trashConversation
         self.presentError = presentError
