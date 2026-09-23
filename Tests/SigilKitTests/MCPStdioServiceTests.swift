@@ -301,6 +301,7 @@ struct MCPStdioServiceTests {
         #"{"jsonrpc":"1.0","id":1,"method":"ping"}"#,
         #"{"jsonrpc":2,"id":1,"method":"ping"}"#,
         #"{"jsonrpc":"2.0","id":1,"method":"ping","params":[]}"#,
+        #"{"jsonrpc":"2.0","id":1,"method":""}"#,
         #"[]"#,
     ])
     func invalidJSONRPCEnvelopeIsMinus32600(requestLine: String) throws {

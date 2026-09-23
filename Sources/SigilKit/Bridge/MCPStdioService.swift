@@ -64,7 +64,8 @@ private enum RPCParseResult {
 private struct ParsedRPC {
     var id: Any
     var hasID: Bool
-    var method: String?
+    /// Never empty: parse() refuses a request without one.
+    var method: String
     var params: Any?
     var requestKey: RPCRequestID?
 
@@ -106,12 +107,7 @@ private struct ParsedRPC {
 
 extension MCPStdioService {
     private func dispatch(_ parsed: ParsedRPC) -> String? {
-        guard let method = parsed.method, !method.isEmpty else {
-            guard parsed.hasID else { return nil }
-            return RPC.encodeError(id: parsed.id, code: -32600, message: "Invalid Request")
-        }
-
-        switch method {
+        switch parsed.method {
         case "notifications/initialized":
             guard !parsed.hasID else {
                 return RPC.encodeError(id: parsed.id, code: -32600, message: "Invalid Request")
