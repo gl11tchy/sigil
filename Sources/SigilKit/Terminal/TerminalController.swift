@@ -58,7 +58,7 @@ public final class TerminalController {
         }
         terminal.setAccessibilityElement(true)
         terminal.setAccessibilityRole(.textArea)
-        terminal.setAccessibilityLabel("Grok terminal")
+        terminal.setAccessibilityLabel("Terminal")
         terminal.accessibilityText = { [weak self] in self?.accessibilitySnapshot() ?? "" }
         apply(theme: theme)
     }
@@ -106,6 +106,7 @@ public final class TerminalController {
         lastActivityFire = nil
         activityFlushTask?.cancel()
         activityFlushTask = nil
+        terminalView.setAccessibilityLabel("Shell terminal")
 
         let environment = spec.environment().map { "\($0.key)=\($0.value)" }
         let command = spec.hostCommand()

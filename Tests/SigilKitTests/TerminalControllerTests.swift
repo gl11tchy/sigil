@@ -336,6 +336,27 @@ struct TerminalControllerTests {
         #expect(value?.contains("AX_ON_DEMAND") == true)
     }
 
+    @Test func scratchShellIsNotAnnouncedAsGrok() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let oldHome = ProcessInfo.processInfo.environment["HOME"]
+        let oldShell = ProcessInfo.processInfo.environment["SHELL"]
+        setenv("HOME", root.path, 1)
+        setenv("SHELL", "/bin/sh", 1)
+        defer {
+            if let oldHome { setenv("HOME", oldHome, 1) } else { unsetenv("HOME") }
+            if let oldShell { setenv("SHELL", oldShell, 1) } else { unsetenv("SHELL") }
+            try? FileManager.default.removeItem(at: root)
+        }
+        let controller = TerminalController()
+        #expect(controller.view.accessibilityLabel() == "Terminal")
+
+        controller.startShell(ShellLaunchSpec(workingDirectory: root))
+        defer { controller.terminateAndWait() }
+
+        #expect(controller.view.accessibilityLabel() == "Shell terminal")
+    }
+
     @Test func anAlreadyReapedChildIsGoneEvenIfItsPIDCouldBeReused() throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/true")
