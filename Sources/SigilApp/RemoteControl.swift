@@ -116,6 +116,7 @@ final class RemoteControl {
             var pairingURL: URL?
             var retry = 1
             var failures = 0
+            var ready = false
             while !Task.isCancelled, self.generation == current {
                 do {
                     if retireRoom {
@@ -146,6 +147,7 @@ final class RemoteControl {
                     let socket = network.webSocketTask(with: socketRequest)
                     socket.maximumMessageSize = 110_000
                     self.socket = socket
+                    ready = false
                     socket.resume()
                     let keepAlive = Task { await Self.keepAlive(socket) }
                     defer { keepAlive.cancel() }
@@ -168,6 +170,7 @@ final class RemoteControl {
                                 ["room": room.room, "ticket": session.ticket], key: key, direction: "relay-host")
                             try await self.send(Frame(route: route), socket: socket)
                         } else if frame.type == "ready" {
+                            ready = true
                             retry = 1
                             failures = 0
                             self.status = session.isPaired ? "Phone disconnected" : "Scan to connect"
@@ -242,7 +245,9 @@ final class RemoteControl {
                         self.error = "Remote session ended. Connect your phone again."
                         return
                     }
-                    if RemoteReconnectPolicy.shouldReallocate(failures: failures) { room = nil }
+                    // A route refused before ready means the relay no longer has the room.
+                    let refused = !ready && self.socket?.closeCode == .policyViolation
+                    if refused || RemoteReconnectPolicy.shouldReallocate(failures: failures) { room = nil }
                     retry = RemoteReconnectPolicy.retrySeconds(failures: failures)
                     self.status = "Reconnecting…"
                     if !session.isPaired {

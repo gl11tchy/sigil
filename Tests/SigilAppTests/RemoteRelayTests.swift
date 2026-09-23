@@ -117,8 +117,28 @@ struct RemoteRelayTests {
         #expect(intruder.closeCode == .policyViolation)
     }
 
-    @MainActor private func waitUntil(_ condition: () -> Bool) async throws {
-        for _ in 0..<250 where !condition() {
+    @Test @MainActor func deletedRoomIsReplacedOnTheFirstRefusedReconnect() async throws {
+        let relay = try await RelayFixture()
+        defer { relay.stop() }
+        let model = AppModel()
+        let store = InMemoryRemotePairingStore()
+        store.save(
+            RemotePairing(origin: relay.origin, deviceKey: RemoteCrypto.randomKey(), ticket: RemoteCrypto.randomKey()))
+        let remote = RemoteControl(store: store)
+        defer { remote.stop() }
+        remote.resumeIfPaired(model: model)
+        try await waitUntil { remote.status == "Phone disconnected" }
+        try await relay.restartWithoutRooms()
+        try await waitUntil { remote.status == "Reconnecting…" }
+        let dropped = ContinuousClock.now
+        try await waitUntil(for: .seconds(12)) { remote.status == "Phone disconnected" }
+        #expect(remote.status == "Phone disconnected")
+        #expect(ContinuousClock.now - dropped < .seconds(5))
+    }
+
+    @MainActor private func waitUntil(for timeout: Duration = .seconds(5), _ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while !condition(), ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
     }
@@ -136,17 +156,44 @@ private final class UnsavableStore: RemotePairingStore {
 final class RelayFixture {
     let origin: String
     let phoneOrigin = "http://localhost:3099"
-    private let process = Process()
+    private var process = Process()
     private let root: URL
+    private let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent()
 
     init() async throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent()
         let portFile = root.appendingPathComponent("port")
+        process = try await Self.launch(
+            [repo.appendingPathComponent("Sidereal/test/relay-fixture.mjs").path], portFile: portFile)
+        origin = "http://127.0.0.1:\(try String(contentsOf: portFile, encoding: .utf8))"
+    }
+
+    /// Replaces the relay on the same port. Every room is gone and the host is
+    /// dropped, as when the relay deletes a room at its 24 h limit.
+    func restartWithoutRooms() async throws {
+        process.terminate()
+        process.waitUntilExit()
+        let port = try #require(URLComponents(string: origin)?.port)
+        let server = repo.appendingPathComponent("Sidereal/server.mjs").absoluteString
+        let script = """
+            import { writeFileSync } from 'node:fs';
+            import { createRelay } from '\(server)';
+            const relay = createRelay({ publicOrigin: 'http://localhost:3099' });
+            relay.server.listen(\(port), '127.0.0.1', () => {
+              writeFileSync(process.env.SIGIL_TEST_PORT_FILE, '\(port)', { mode: 0o600 });
+            });
+            process.on('SIGTERM', () => relay.close());
+            """
+        process = try await Self.launch(
+            ["--input-type=module", "-e", script], portFile: root.appendingPathComponent("restarted"))
+    }
+
+    private static func launch(_ arguments: [String], portFile: URL) async throws -> Process {
+        let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["node", repo.appendingPathComponent("Sidereal/test/relay-fixture.mjs").path]
+        process.arguments = ["node"] + arguments
         process.environment = ProcessInfo.processInfo.environment.merging(["SIGIL_TEST_PORT_FILE": portFile.path]) {
             _, new in new
         }
@@ -157,7 +204,7 @@ final class RelayFixture {
             if FileManager.default.fileExists(atPath: portFile.path) { break }
             try await Task.sleep(for: .milliseconds(20))
         }
-        origin = "http://127.0.0.1:\(try String(contentsOf: portFile, encoding: .utf8))"
+        return process
     }
 
     func stop() {
