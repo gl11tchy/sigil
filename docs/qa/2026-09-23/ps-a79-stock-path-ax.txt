@@ -1,0 +1,19 @@
+## a79 setup: =/tmp/sigil-ux/home/.grok has bin/grok (fake stock CLI) and bin/grok-sigil (copy, stands in for the themed build).
+## defaults before first launch: grok.executablePath=/tmp/sigil-ux/home/.grok/bin/grok, grok.executablePath.chosen absent (an older default that was never chosen)
+
+## 1) first launch, Settings > General (18:09:53): the unchosen stock path still moves to the themed build
+AXTextField | Value=/tmp/sigil-ux/home/.grok/bin/grok-sigil | Focused=0 | Enabled=1 | Position=556,376 | Size=274x24
+
+## 2) user picks the stock CLI: Choose… > open panel > clicked 'grok' > Choose (18:11:11)
+AXTextField | Value=/private/tmp/sigil-ux/home/.grok/bin/grok | Focused=0 | Enabled=1 | Position=556,376 | Size=274x24
+AXStaticText | Value=Found | Focused=0 | Enabled=1 | Position=559,404 | Size=53x13
+## defaults after the pick:
+    "grok.executablePath" = "/private/tmp/sigil-ux/home/.grok/bin/grok";
+    "grok.executablePath.chosen" = 1;
+
+## 3) quit (pkill) and relaunch (18:12:03). The open panel returned the canonical /private/tmp path, so this launch sets
+##    GROK_HOME=/private/tmp/sigil-ux/home/.grok (same folder) to make the stored path equal GrokPaths.installerExecutable, the case the a79 test covers.
+## process env: GROK_HOME=/private/tmp/sigil-ux/home/.grok
+## Settings > General after relaunch: the chosen stock path survives (pre-fix code would reset it to bin/grok-sigil)
+AXTextField | Value=/private/tmp/sigil-ux/home/.grok/bin/grok | Focused=1 | Enabled=1 | Position=556,376 | Size=274x24
+AXStaticText | Value=Found | Focused=0 | Enabled=1 | Position=559,404 | Size=53x13
