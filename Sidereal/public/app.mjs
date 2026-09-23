@@ -826,7 +826,13 @@ $('compose').onsubmit = event => { event.preventDefault(); void perform(() => se
 $('paste').onclick = () => void perform(() => sendText(false));
 $('tabs').onchange = () => void perform(() => request('select', undefined, $('tabs').value));
 $('new').onclick = () => void perform(async () => {
-  const reply = await request('projects');
+  let reply;
+  try { reply = await request('projects'); } catch (error) {
+    // A Mac without the project list starts New in its current folder.
+    if (error.message !== 'Unknown action.') throw error;
+    await request('new');
+    return;
+  }
   renderProjects(reply.projects, 0, reply.projectsTruncated === true);
 });
 $('project-cancel').onclick = () => $('project-dialog').close();

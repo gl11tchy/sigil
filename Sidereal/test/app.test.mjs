@@ -274,6 +274,25 @@ test('an unanswered connection reports and closes after ten seconds', async () =
   assert.equal(page.element('status').textContent, 'Connected');
 });
 
+test('New falls back to a new session when the Mac has no project list', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('new').onclick();
+  await settle();
+  const projects = socket.sent.at(-1);
+  assert.equal(projects.action, 'projects');
+  socket.receive({ data: JSON.stringify({
+    challenge: projects.challenge, sequence: projects.sequence, ok: false, error: 'Unknown action.' }) });
+  await settle();
+  const created = socket.sent.at(-1);
+  assert.equal(created.action, 'new');
+  assert.equal(created.text, undefined);
+  socket.reply(created);
+  await settle();
+  assert.equal(page.element('error').hidden, true);
+  assert.equal(page.element('project-dialog').open, false);
+});
+
 test('a command that times out keeps the socket so later commands can use it', async () => {
   const page = await browser();
   const socket = await page.authorize();
