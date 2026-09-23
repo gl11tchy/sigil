@@ -83,8 +83,23 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete latest --yes --cleanup-tag || true
-          gh release create latest dist/Sigil.zip \
+          # A new release per run: gh uploads the zip to a draft and only then
+          # publishes it as Latest, so releases/latest/download/Sigil.zip never
+          # points at a release without the zip. Deleting first left it 404.
+          tag="build-${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          gh release create "$tag" dist/Sigil.zip \
             --title "Sigil ${GITHUB_SHA::7}" \
             --notes "Built from main (\`${GITHUB_SHA}\`). Unzip and replace /Applications/Sigil.app, or from a clone: \`Scripts/install.sh\`." \
             --latest
+          # Prune the builds this one replaced, the old rolling `latest`
+          # release, and drafts a cancelled run left behind.
+          old_tags="$(gh release list --limit 100 --json tagName --jq '.[].tagName')" \
+            || { echo "::warning::could not list releases to prune"; old_tags=""; }
+          for old in $old_tags; do
+            [[ "$old" =~ ^(latest|build-[0-9]+\.[0-9]+)$ && "$old" != "$tag" ]] || continue
+            # A draft has no tag yet, so the tag cleanup fails after the
+            # release itself is gone. Warn only when the release is left.
+            gh release delete "$old" --yes --cleanup-tag \
+              || ! gh release view "$old" >/dev/null 2>&1 \
+              || echo "::warning::could not delete release $old"
+          done
