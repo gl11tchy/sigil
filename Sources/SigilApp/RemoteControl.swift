@@ -99,11 +99,17 @@ final class RemoteControl {
             var session = restored
             var room: Room?
             var unsaved: String?
+            // After the first pairing the QR's room ID must stop routing phones.
+            var retireRoom = false
             var pairingURL: URL?
             var retry = 1
             var failures = 0
             while !Task.isCancelled, self.generation == current {
                 do {
+                    if retireRoom {
+                        room = nil
+                        retireRoom = false
+                    }
                     if room == nil {
                         let allocated = try await self.allocate(origin: origin, network: network)
                         guard self.generation == current, !Task.isCancelled else { return }
@@ -156,12 +162,16 @@ final class RemoteControl {
                             self.pairingURL = session.isPaired ? nil : pairingURL
                             self.error = unsaved
                         } else if frame.type == "peer", let id = frame.peer, id.count <= 64 {
+                            if retireRoom { break }
                             self.peer = id
                             session.resetConnection()
+                            // A new peer is not the phone until it authenticates.
+                            self.status = session.isPaired ? "Phone disconnected" : "Scan to connect"
                             try await self.send(Frame(peer: id, hello: session.challenge), socket: socket)
                         } else if frame.type == "left", frame.peer == self.peer {
                             self.peer = nil
                             self.status = session.isPaired ? "Phone disconnected" : "Scan to connect"
+                            if retireRoom { break }
                         } else if let id = frame.peer, id == self.peer, let ciphertext = frame.data {
                             do {
                                 let firstPair = !session.isPaired
@@ -175,6 +185,7 @@ final class RemoteControl {
                                 self.expiresAt = nil
                                 self.status = "Phone connected"
                                 if firstPair, let key = session.deviceKey {
+                                    retireRoom = true
                                     if self.store.save(
                                         RemotePairing(
                                             origin: origin.absoluteString, deviceKey: key, ticket: session.ticket))
@@ -206,6 +217,10 @@ final class RemoteControl {
                             }
                         }
                     }
+                    guard self.generation == current, !Task.isCancelled else { return }
+                    // Reached only to retire the room. The phone reconnects by ticket.
+                    socket.cancel(with: .goingAway, reason: nil)
+                    self.peer = nil
                 } catch {
                     self.socket?.cancel(with: .goingAway, reason: nil)
                     guard self.generation == current, !Task.isCancelled else { return }

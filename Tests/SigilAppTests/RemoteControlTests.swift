@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Network
 import Security
@@ -86,6 +87,15 @@ struct RemoteControlTests {
         remote.stop(revoke: true)
         #expect(!remote.revokeFailed)
         #expect(remote.error == nil)
+    }
+
+    @Test @MainActor func copiedPairingLinkIsConcealedFromClipboardHistory() throws {
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("sigil-test-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        let link = try #require(URL(string: "https://example.com/#room=abc&key=def"))
+        #expect(RemoteControlView.copy(link, to: pasteboard))
+        #expect(pasteboard.string(forType: .string) == link.absoluteString)
+        #expect(pasteboard.types?.contains(NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")) == true)
     }
 
     @Test @MainActor func launchReadsTheSavedPairingOnlyOnce() {

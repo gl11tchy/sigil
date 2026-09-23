@@ -67,6 +67,61 @@ struct RemoteRelayTests {
             RemoteRequest(challenge: paired.challenge, sequence: 3, action: "state"), key: paired.device)
         #expect(state.ok)
     }
+
+    @Test @MainActor func newPeerIsNotShownAsConnectedUntilItAuthenticates() async throws {
+        let relay = try await RelayFixture()
+        defer { relay.stop() }
+        let device = RemoteCrypto.randomKey()
+        let ticket = RemoteCrypto.randomKey()
+        let store = InMemoryRemotePairingStore()
+        store.save(RemotePairing(origin: relay.origin, deviceKey: device, ticket: ticket))
+        let model = AppModel()
+        let remote = RemoteControl(store: store)
+        defer { remote.stop() }
+        remote.resumeIfPaired(model: model)
+        try await waitUntil { remote.status == "Phone disconnected" }
+        let phone = try RelayPhone(relay: relay)
+        defer { phone.close() }
+        let challenge = try await phone.route(["ticket": ticket])
+        #expect(
+            try await phone.request(RemoteRequest(challenge: challenge, sequence: 1, action: "state"), key: device).ok)
+        #expect(remote.status == "Phone connected")
+        let silent = try RelayPhone(relay: relay)
+        defer { silent.close() }
+        _ = try await silent.route(["ticket": ticket])
+        try await waitUntil { remote.status != "Phone connected" }
+        #expect(remote.status == "Phone disconnected")
+    }
+
+    @Test @MainActor func pairingRoomStopsRoutingOnceThePairedPhoneLeaves() async throws {
+        let relay = try await RelayFixture()
+        defer { relay.stop() }
+        let model = AppModel()
+        let remote = RemoteControl(store: InMemoryRemotePairingStore())
+        defer { remote.stop() }
+        remote.start(urlText: relay.origin, model: model)
+        let paired = try await relay.pair(remote)
+        paired.phone.close()
+        var resumed = false
+        for _ in 0..<100 where !resumed {
+            let phone = try RelayPhone(relay: relay)
+            resumed = (try? await phone.route(["ticket": paired.ticket])) != nil
+            phone.close()
+            if !resumed { try await Task.sleep(for: .milliseconds(100)) }
+        }
+        #expect(resumed)
+        let intruder = try RelayPhone(relay: relay)
+        defer { intruder.close() }
+        let hello = try? await intruder.route(["room": paired.room])
+        #expect(hello == nil)
+        #expect(intruder.closeCode == .policyViolation)
+    }
+
+    @MainActor private func waitUntil(_ condition: () -> Bool) async throws {
+        for _ in 0..<250 where !condition() {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+    }
 }
 
 private final class UnsavableStore: RemotePairingStore {
