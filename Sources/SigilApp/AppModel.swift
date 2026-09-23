@@ -47,8 +47,13 @@ final class AppModel {
             ) {
                 clearRenameSelectAllPending()
             }
+            if oldValue, !isSidebarVisible { refocusTerminalAfterHiding(.sidebar) }
         }
     }
+    /// Set by the sidebar and its divider from their SwiftUI focus, so hiding
+    /// the sidebar moves focus only when it leaves with the column.
+    @ObservationIgnored var isSidebarFocused = false
+    @ObservationIgnored var isSidebarDividerFocused = false
     /// Bumped by Find Conversations so the search field takes focus even when
     /// the sidebar just became visible, or already had it.
     private(set) var searchFocusToken = 0
@@ -1482,6 +1487,17 @@ final class AppModel {
         }
     }
 
+    /// Hiding a column removes its views. When one of them had focus, the
+    /// window would be left with no first responder and every key would beep.
+    private func refocusTerminalAfterHiding(_ column: KeyboardFocus.Column) {
+        guard let view = selectedTab?.controller.view, let window = view.window else { return }
+        let focus = KeyboardFocus.classify(
+            window.firstResponder, in: window, sessionView: view,
+            panelShellView: panel.shell?.view,
+            sidebarHasFocus: isSidebarFocused || isSidebarDividerFocused)
+        if focus.needsTerminalAfterHiding(column) { focusSelectedTerminal() }
+    }
+
     func select(index: Int) {
         guard tabs.indices.contains(index) else { return }
         select(tabs[index].id)
@@ -2438,7 +2454,7 @@ private struct AppActionError: Error, LocalizedError {
     let message: String
 
     var errorDescription: String? { title }
-    var failureReason: String? { message }
+    var recoverySuggestion: String? { message }
 }
 
 private struct TranscriptExportError: Error, LocalizedError, Sendable {
