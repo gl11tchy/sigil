@@ -109,6 +109,7 @@ terminal itself.
 | `⌘W` | Close tab (warns while the agent is working) |
 | `⌘⇧]` / `⌘⇧[` | Next / previous tab |
 | `⌘1`…`⌘9` | Go to tab |
+| `⌃⌘T` | List open tabs and jump to one |
 | `⌘F` | Find in the terminal |
 | `⌘⇧F` | Find conversations |
 | `⌘B` | Hide or show the thread list |
