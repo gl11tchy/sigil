@@ -194,6 +194,20 @@ test('picking more than 16 files says the rest were not added', async () => {
   assert.match(page.element('error').textContent, /Up to 16 files per message/);
 });
 
+test('an oversized file keeps its own error and does not use a free slot', async () => {
+  const page = await browser();
+  await page.authorize();
+  page.element('attach').files = Array.from({ length: 15 }, (_, index) => ({ name: `note${index}.txt`, type: 'text/plain', size: 5 }));
+  page.element('attach').onchange();
+  page.element('attach').files = [
+    { name: 'big.zip', type: 'application/zip', size: 5 * 1024 * 1024 },
+    { name: 'last.txt', type: 'text/plain', size: 5 },
+  ];
+  page.element('attach').onchange();
+  assert.equal(page.app.attachmentsFor().length, 16);
+  assert.equal(page.element('error').textContent, 'Keep files under 4 MB.');
+});
+
 test('a sent attachment leaves the queue when the Mac switches tabs during the send', async () => {
   const page = await browser();
   page.app.btoa = btoa;
