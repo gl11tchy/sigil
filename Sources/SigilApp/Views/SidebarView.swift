@@ -1452,9 +1452,10 @@ private struct ProjectListRow: View {
             }
             Spacer(minLength: 8)
             if isWorking {
-                // Clear of the plus that sits in the trailing overlay.
+                // Clear of the plus, and of a pinned folder's pin glyph, in the
+                // trailing overlay.
                 StatusDot(activity: .working)
-                    .padding(.trailing, canStart ? 22 : 0)
+                    .padding(.trailing, (canStart ? 22 : 0) + (isPinned && showsPin ? 22 : 0))
             }
         }
         .padding(.leading, 8)
