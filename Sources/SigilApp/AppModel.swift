@@ -435,17 +435,12 @@ final class AppModel {
 
     /// Pinned conversations still in the current sidebar filter, in pin order.
     func pinnedSessions(in project: SidebarProject? = nil) -> [GrokSession] {
-        let pinned = SidebarOrganization.matching(
+        SidebarOrganization.pinned(
             sessions: sidebarSessions,
             entries: settings.pinnedConversations,
+            in: project,
             samePath: samePath
         )
-        guard let project else { return pinned }
-        return pinned.filter { session in
-            project.sessions.contains {
-                $0.id == session.id && samePath($0.cwd, session.cwd)
-            }
-        }
     }
 
     func unpinnedSessions(from sessions: [GrokSession]) -> [GrokSession] {
@@ -478,12 +473,19 @@ final class AppModel {
     }
 
     var focusedProject: SidebarProject? {
+        focusedProject(in: { sidebarProjects })
+    }
+
+    /// `projects` are the folders grouped from `sidebarSessions`. They are
+    /// only read when a folder is open.
+    private func focusedProject(in projects: () -> [SidebarProject]) -> SidebarProject? {
         let path = settings.focusedProjectPath
         guard !path.isEmpty,
             path != SidebarOrganization.recentsID,
             path != SidebarOrganization.archivedID
         else { return nil }
-        return project(at: path, from: sidebarSessions)
+        let focused = canonicalPath(path)
+        return projects().first { $0.id == focused || samePath($0.cwd, path) }
             ?? project(at: path, from: store.sessions)
     }
 
@@ -495,12 +497,36 @@ final class AppModel {
 
     /// Chats in the open project, or the full sidebar list.
     var focusedSidebarSessions: [GrokSession] {
-        guard let project = focusedProject else { return sidebarSessions }
-        return sidebarSessions.filter { samePath($0.cwd, project.cwd) }
+        SidebarOrganization.sessions(sidebarSessions, in: focusedProject, samePath: samePath)
+    }
+
+    /// Every list one sidebar render reads, from a single search and grouping.
+    func sidebarSnapshot() -> SidebarSnapshot {
+        let sessions = sidebarSessions
+        let projects = SidebarOrganization.projects(from: sessions, canonicalPath: canonicalPath)
+        return SidebarSnapshot(
+            listKind: SidebarOrganization.listKind(
+                surface: sidebarSurface,
+                isSearching: SidebarOrganization.isSearching(searchText)
+            ),
+            sessions: sessions,
+            projects: projects,
+            focusedProject: focusedProject(in: { projects }),
+            pinnedConversations: settings.pinnedConversations,
+            pinnedProjectPaths: settings.pinnedProjects,
+            openTabRowIDs: tabs.map { SidebarOrganization.openTabRowID($0.id) },
+            archivedCount: { archivedCount },
+            samePath: samePath,
+            sessionKey: sessionKey
+        )
     }
 
     /// Folder a new chat should start in: the open project, else the current tab.
     var newSessionDirectory: URL {
+        newSessionDirectory(focusedProject: focusedProject)
+    }
+
+    func newSessionDirectory(focusedProject: SidebarProject?) -> URL {
         if let project = focusedProject {
             return URL(fileURLWithPath: project.cwd)
         }

@@ -59,12 +59,13 @@ struct SidebarView: View {
     private static let f2 = KeyEquivalent(Character("\u{F705}"))
 
     var body: some View {
+        let snapshot = model.sidebarSnapshot()
         VStack(spacing: 0) {
             Color.clear.frame(height: 36)
-            searchRow
-            modeArea
-            list
-            if showsDestinations { destinations }
+            searchRow(newSessionDirectory: model.newSessionDirectory(focusedProject: snapshot.focusedProject))
+            modeArea(focusedProject: snapshot.focusedProject)
+            list(snapshot)
+            if let counts = snapshot.destinations, !counts.rowIDs.isEmpty { destinations(counts) }
         }
         .background(palette.sidebar)
         .overlay(alignment: .trailing) { Rectangle().fill(palette.hairline).frame(width: 1) }
@@ -109,7 +110,7 @@ struct SidebarView: View {
             await prepareRename(
                 forceReconfigure: model.renamingSessionKey != model.preparedRenameKey)
         }
-        .task(id: visibleRowIDs()) {
+        .task(id: snapshot.rowIDs) {
             clampKeyboardSelection()
             pruneMultiSelection()
             await prepareRename(forceReconfigure: false)
@@ -136,7 +137,7 @@ struct SidebarView: View {
 
     // MARK: - Search
 
-    private var searchRow: some View {
+    private func searchRow(newSessionDirectory: URL) -> some View {
         HStack(spacing: 6) {
             HStack(spacing: 5) {
                 Image(systemName: "magnifyingglass")
@@ -185,7 +186,7 @@ struct SidebarView: View {
             )
             IconButton(
                 systemImage: "plus",
-                help: "New Session in \(model.newSessionDirectory.abbreviatedPath) (⌘T)"
+                help: "New Session in \(newSessionDirectory.abbreviatedPath) (⌘T)"
             ) {
                 model.requestNewSession()
             }
@@ -199,10 +200,10 @@ struct SidebarView: View {
     // MARK: - Mode
 
     @ViewBuilder
-    private var modeArea: some View {
+    private func modeArea(focusedProject: SidebarProject?) -> some View {
         switch model.sidebarSurface {
         case .project:
-            if let project = model.focusedProject {
+            if let project = focusedProject {
                 DrillBar(
                     title: project.name,
                     isPinned: model.isPinned(project),
@@ -233,10 +234,10 @@ struct SidebarView: View {
     // MARK: - List
 
     @ViewBuilder
-    private var list: some View {
-        let pinned = visiblePinned
-        let projectIndex = SidebarOrganization.indexByDirectory(model.sidebarProjects)
-        let content = listContent(projectIndex: projectIndex)
+    private func list(_ snapshot: SidebarSnapshot) -> some View {
+        let pinned = snapshot.pinned
+        let projectIndex = SidebarOrganization.indexByDirectory(snapshot.projects)
+        let content = listContent(snapshot, projectIndex: projectIndex)
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
@@ -259,7 +260,7 @@ struct SidebarView: View {
                         }
                     }
                     content
-                    if (listKind == .projectList || pinned.isEmpty) && isListEmpty { emptyState }
+                    if (listKind == .projectList || pinned.isEmpty) && snapshot.isListEmpty { emptyState }
                 }
                 .padding(.bottom, 8)
             }
@@ -331,16 +332,15 @@ struct SidebarView: View {
     }
 
     @ViewBuilder
-    private func listContent(projectIndex: [URL: SidebarProject]) -> some View {
-        let unpinned = model.unpinnedSessions(from: listedSessions)
-        let afterPinned = listKind != .projectList && !visiblePinned.isEmpty
+    private func listContent(_ snapshot: SidebarSnapshot, projectIndex: [URL: SidebarProject]) -> some View {
+        let afterPinned = listKind != .projectList && !snapshot.pinned.isEmpty
         switch listKind {
         case .recents:
-            recentsSections(from: unpinned, afterPinned: afterPinned, projectIndex: projectIndex)
+            recentsSections(from: snapshot.unpinned, afterPinned: afterPinned, projectIndex: projectIndex)
         case .projectList:
-            projectList
+            projectList(snapshot)
         case .projectChats:
-            ForEach(unpinned, id: \.directory) { session in
+            ForEach(snapshot.unpinned, id: \.directory) { session in
                 sessionRow(
                     session,
                     showsProject: false,
@@ -348,7 +348,7 @@ struct SidebarView: View {
                 )
             }
         case .search:
-            ForEach(listedSessions, id: \.directory) { session in
+            ForEach(snapshot.listed, id: \.directory) { session in
                 sessionRow(
                     session,
                     showsProject: true,
@@ -356,7 +356,7 @@ struct SidebarView: View {
                 )
             }
         case .archived:
-            projectGroupedSections(from: unpinned, afterPinned: afterPinned)
+            projectGroupedSections(snapshot, afterPinned: afterPinned)
         }
     }
 
@@ -367,15 +367,11 @@ struct SidebarView: View {
         )
     }
 
-    private var listedSessions: [GrokSession] {
-        listKind == .projectChats ? model.focusedSidebarSessions : model.sidebarSessions
-    }
-
     @ViewBuilder
-    private var projectList: some View {
+    private func projectList(_ snapshot: SidebarSnapshot) -> some View {
         // Home folders are grouped from the listed sessions, so no row needs a filter.
-        let pinned = model.pinnedProjects().map { ProjectRows(project: $0, rows: $0.sessions) }
-        let rest = model.unpinnedProjects().map { ProjectRows(project: $0, rows: $0.sessions) }
+        let pinned = snapshot.pinnedProjects.map { ProjectRows(project: $0, rows: $0.sessions) }
+        let rest = snapshot.unpinnedProjects.map { ProjectRows(project: $0, rows: $0.sessions) }
         ForEach(pinned, id: \.id) { item in
             projectRow(item.project, rows: item.rows)
         }
@@ -384,37 +380,26 @@ struct SidebarView: View {
         }
     }
 
-    private var showsDestinations: Bool {
-        listKind == .projectList && !destinationIDs.isEmpty
-    }
-
-    private var destinationIDs: [String] {
-        SidebarOrganization.destinationRowIDs(
-            recentsCount: listedSessions.count,
-            archivedCount: model.archivedCount
-        )
-    }
-
     @ViewBuilder
-    private var destinations: some View {
+    private func destinations(_ counts: SidebarSnapshot.Destinations) -> some View {
         VStack(spacing: 0) {
             Rectangle().fill(palette.hairline).frame(height: 1)
-            if listedSessions.count > 0 {
+            if counts.recentsCount > 0 {
                 destinationRow(
                     id: SidebarOrganization.recentsID,
                     icon: "clock",
                     title: "Recents",
-                    count: listedSessions.count,
+                    count: counts.recentsCount,
                     help: "All conversations, newest first",
                     open: { model.openRecents() }
                 )
             }
-            if model.archivedCount > 0 {
+            if counts.archivedCount > 0 {
                 destinationRow(
                     id: SidebarOrganization.archivedID,
                     icon: "archivebox",
                     title: "Archived",
-                    count: model.archivedCount,
+                    count: counts.archivedCount,
                     help: "Archived conversations",
                     open: { model.openArchived() }
                 )
@@ -444,11 +429,11 @@ struct SidebarView: View {
     }
 
     @ViewBuilder
-    private func projectGroupedSections(from sessions: [GrokSession], afterPinned: Bool) -> some View {
+    private func projectGroupedSections(_ snapshot: SidebarSnapshot, afterPinned: Bool) -> some View {
         // Pinned folders first (pin order), then remaining folders in recency
         // order. Drop folders whose remaining rows are all pinned chats.
-        let pinned = visibleProjects(model.pinnedProjects(), from: sessions)
-        let rest = visibleProjects(model.unpinnedProjects(), from: sessions)
+        let pinned = visibleProjects(snapshot.pinnedProjects, from: snapshot.unpinned)
+        let rest = visibleProjects(snapshot.unpinnedProjects, from: snapshot.unpinned)
         ForEach(Array(pinned.enumerated()), id: \.element.id) { index, item in
             projectSection(item.project, rows: item.rows, isFirst: !afterPinned && index == 0)
         }
@@ -505,18 +490,6 @@ struct SidebarView: View {
                 unarchive: listKind == .archived ? { model.unarchive(project) } : nil
             )
         }
-    }
-
-    private var visiblePinned: [GrokSession] {
-        if listKind == .projectChats {
-            return model.pinnedSessions(in: model.focusedProject)
-        }
-        return model.pinnedSessions()
-    }
-
-    private var isListEmpty: Bool {
-        if listKind == .projectList { return model.sidebarProjects.isEmpty }
-        return listedSessions.isEmpty
     }
 
     private func destinationRow(
@@ -616,6 +589,7 @@ struct SidebarView: View {
         let isPinned = model.isPinned(session)
         let isArchived = model.isArchived(session)
         let hasCustomName = model.hasCustomName(session)
+        let key = model.sessionKey(session)
         return SessionRow(
             session: session,
             title: model.title(for: session),
@@ -625,15 +599,15 @@ struct SidebarView: View {
             hasUnseenActivity: model.hasUnseenActivity(of: session),
             isPinned: isPinned,
             isArchived: isArchived,
-            isKeyboardSelected: model.sessionKey(session) == keyboardSelectionID,
-            isMultiSelected: multiSelection.contains(model.sessionKey(session)),
-            isRenaming: model.renamingSessionKey == model.sessionKey(session),
+            isKeyboardSelected: key == keyboardSelectionID,
+            isMultiSelected: multiSelection.contains(key),
+            isRenaming: model.renamingSessionKey == key,
             hasCustomName: hasCustomName,
             showsProject: showsProject,
             headerCoversQuery: headerCoversQuery,
             now: now,
             open: {
-                keyboardSelectionID = model.sessionKey(session)
+                keyboardSelectionID = key
                 clearMultiSelection()
                 model.open(session)
             },
@@ -647,13 +621,13 @@ struct SidebarView: View {
             resetName: { model.resetName(session) },
             dismissHelp: model.isOpen(session) ? "Close Tab" : "Delete Conversation",
             dismiss: { dismissSession(session) },
-            noteMounted: { model.noteRenameFieldMounted($0, key: model.sessionKey(session)) },
+            noteMounted: { model.noteRenameFieldMounted($0, key: key) },
             mountGeneration: { model.renameFieldMountGeneration },
             consumeSelectAll: { model.consumeRenameSelectAll() },
             model: model,
             focus: $focus
         )
-        .id(model.sessionKey(session))
+        .id(key)
         .contextMenu {
             let selection = bulkSelection(containing: session)
             if selection.count > 1 {
@@ -798,40 +772,9 @@ struct SidebarView: View {
 
     // MARK: - Keyboard
 
+    /// Event-time row order. A render reads `SidebarSnapshot.rowIDs` instead.
     private func visibleRowIDs() -> [String] {
-        switch listKind {
-        case .projectList:
-            return SidebarOrganization.homeRowIDs(
-                recentsCount: listedSessions.count,
-                archivedCount: model.archivedCount,
-                pinnedIDs: model.pinnedProjects().map(\.id),
-                restIDs: model.unpinnedProjects().map(\.id),
-                openTabIDs: model.tabs.map { SidebarOrganization.openTabRowID($0.id) }
-            )
-        case .search:
-            return listedSessions.map { model.sessionKey($0) }
-        case .recents, .projectChats, .archived:
-            return visiblePinned.map { model.sessionKey($0) }
-                + groupedUnpinnedSessions().map { model.sessionKey($0) }
-        }
-    }
-
-    /// Unpinned chats in the order the current sort draws them.
-    private func groupedUnpinnedSessions() -> [GrokSession] {
-        let unpinned = model.unpinnedSessions(from: listedSessions)
-        switch listKind {
-        case .recents, .projectChats:
-            return unpinned
-        case .search:
-            return []
-        case .archived:
-            let listed = Set(unpinned.map(\.directory))
-            return (model.pinnedProjects() + model.unpinnedProjects()).flatMap { project in
-                SidebarOrganization.listedRows(in: project, listed: listed)
-            }
-        case .projectList:
-            return []
-        }
+        model.sidebarSnapshot().rowIDs
     }
 
     private func dismissSession(_ session: GrokSession) {
@@ -1112,7 +1055,7 @@ struct SidebarView: View {
     }
 
     private func session(for id: String) -> GrokSession? {
-        listedSessions.first { model.sessionKey($0) == id }
+        model.sidebarSnapshot().listed.first { model.sessionKey($0) == id }
     }
 
     private func project(for id: String) -> SidebarProject? {
@@ -1159,9 +1102,10 @@ struct SidebarView: View {
     private func bulkSelection(containing session: GrokSession) -> [GrokSession] {
         let key = model.sessionKey(session)
         guard multiSelection.count > 1, multiSelection.contains(key) else { return [session] }
-        let order = visibleRowIDs()
+        let snapshot = model.sidebarSnapshot()
+        let order = snapshot.rowIDs
         return
-            listedSessions
+            snapshot.listed
             .filter { multiSelection.contains(model.sessionKey($0)) }
             .sorted {
                 (order.firstIndex(of: model.sessionKey($0)) ?? .max)

@@ -36,6 +36,103 @@ struct SidebarProject: Identifiable, Equatable, Sendable {
     var count: Int { sessions.count }
 }
 
+/// Every list one sidebar render reads, built once per body pass so the search
+/// and the folder grouping run once instead of once per read.
+struct SidebarSnapshot: Equatable, Sendable {
+    /// Row counts for Recents and Archived under the home list.
+    struct Destinations: Equatable, Sendable {
+        var recentsCount: Int
+        var archivedCount: Int
+
+        var rowIDs: [String] {
+            SidebarOrganization.destinationRowIDs(recentsCount: recentsCount, archivedCount: archivedCount)
+        }
+    }
+
+    var listKind: SidebarListKind
+    /// The searched and filtered conversations (`AppModel.sidebarSessions`).
+    var sessions: [GrokSession]
+    /// Folders grouped from `sessions`.
+    var projects: [SidebarProject]
+    var focusedProject: SidebarProject?
+    /// The open folder's chats in `.projectChats`, else `sessions`.
+    var listed: [GrokSession]
+    /// Pinned chats in pin order; only the open folder's in `.projectChats`.
+    var pinned: [GrokSession]
+    /// `listed` without the pinned chats.
+    var unpinned: [GrokSession]
+    var pinnedProjects: [SidebarProject]
+    var unpinnedProjects: [SidebarProject]
+    /// Nil off the home list, the only list that shows them.
+    var destinations: Destinations?
+    /// Every row, in keyboard order.
+    var rowIDs: [String]
+
+    var isListEmpty: Bool {
+        listKind == .projectList ? projects.isEmpty : listed.isEmpty
+    }
+
+    /// `sessions` is already searched and filtered, and `projects` is grouped
+    /// from it, so a snapshot never runs the search or the grouping again.
+    /// `archivedCount` runs only for the home list.
+    init(
+        listKind: SidebarListKind,
+        sessions: [GrokSession],
+        projects: [SidebarProject],
+        focusedProject: SidebarProject?,
+        pinnedConversations: [OpenTabsSnapshot.Entry],
+        pinnedProjectPaths: [String],
+        openTabRowIDs: [String],
+        archivedCount: () -> Int,
+        samePath: (String, String) -> Bool,
+        sessionKey: (GrokSession) -> String
+    ) {
+        self.listKind = listKind
+        self.sessions = sessions
+        self.projects = projects
+        self.focusedProject = focusedProject
+        let inFolder = listKind == .projectChats
+        listed = SidebarOrganization.sessions(sessions, in: inFolder ? focusedProject : nil, samePath: samePath)
+        pinned = SidebarOrganization.pinned(
+            sessions: sessions,
+            entries: pinnedConversations,
+            in: inFolder ? focusedProject : nil,
+            samePath: samePath
+        )
+        unpinned = SidebarOrganization.without(sessions: listed, entries: pinnedConversations, samePath: samePath)
+        pinnedProjects = SidebarOrganization.matching(
+            projects: projects, paths: pinnedProjectPaths, samePath: samePath)
+        unpinnedProjects = SidebarOrganization.without(
+            projects: projects, paths: pinnedProjectPaths, samePath: samePath)
+        switch listKind {
+        case .projectList:
+            let destinations = Destinations(recentsCount: listed.count, archivedCount: archivedCount())
+            self.destinations = destinations
+            rowIDs = SidebarOrganization.homeRowIDs(
+                recentsCount: destinations.recentsCount,
+                archivedCount: destinations.archivedCount,
+                pinnedIDs: pinnedProjects.map(\.id),
+                restIDs: unpinnedProjects.map(\.id),
+                openTabIDs: openTabRowIDs
+            )
+        case .search:
+            destinations = nil
+            rowIDs = listed.map(sessionKey)
+        case .recents, .projectChats:
+            destinations = nil
+            rowIDs = (pinned + unpinned).map(sessionKey)
+        case .archived:
+            // Unpinned chats in the order the folder sections draw them.
+            destinations = nil
+            let listedDirectories = Set(unpinned.map(\.directory))
+            let grouped = (pinnedProjects + unpinnedProjects).flatMap { project in
+                SidebarOrganization.listedRows(in: project, listed: listedDirectories)
+            }
+            rowIDs = (pinned + grouped).map(sessionKey)
+        }
+    }
+}
+
 /// Pure grouping for the sidebar. Path identity is injected so tests do not
 /// need POSIX `realpath`. Pins and archives share the same identity list.
 enum SidebarOrganization {
@@ -181,6 +278,32 @@ enum SidebarOrganization {
     ) -> [GrokSession] {
         entries.compactMap { entry in
             sessions.first { $0.id == entry.sessionID && samePath($0.cwd, entry.cwd) }
+        }
+    }
+
+    /// `sessions` in `project`'s folder, or all of them without a project.
+    static func sessions(
+        _ sessions: [GrokSession],
+        in project: SidebarProject?,
+        samePath: (String, String) -> Bool
+    ) -> [GrokSession] {
+        guard let project else { return sessions }
+        return sessions.filter { samePath($0.cwd, project.cwd) }
+    }
+
+    /// Pinned chats still in `sessions`, in pin order, limited to `project`'s chats.
+    static func pinned(
+        sessions: [GrokSession],
+        entries: [OpenTabsSnapshot.Entry],
+        in project: SidebarProject?,
+        samePath: (String, String) -> Bool
+    ) -> [GrokSession] {
+        let pinned = matching(sessions: sessions, entries: entries, samePath: samePath)
+        guard let project else { return pinned }
+        return pinned.filter { session in
+            project.sessions.contains {
+                $0.id == session.id && samePath($0.cwd, session.cwd)
+            }
         }
     }
 
