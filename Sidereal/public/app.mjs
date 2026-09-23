@@ -510,7 +510,9 @@ $('sessions-toggle').onclick = () => {
   $('session-search').value = '';
   searchToken++;
   renderSaved([]);
-  renderSessionList(); $('sessions-dialog').showModal(); $('session-search').focus();
+  renderSessionList(); $('sessions-dialog').showModal();
+  // On a touch screen, focus would raise the keyboard over the list.
+  if (hasFinePointer()) $('session-search').focus();
 };
 $('sessions-close').onclick = () => $('sessions-dialog').close();
 $('sessions-dialog').addEventListener('close', () => { if (!$('sessions-toggle').hidden) $('sessions-toggle').focus(); });

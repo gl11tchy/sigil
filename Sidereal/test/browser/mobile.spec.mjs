@@ -664,6 +664,21 @@ test('an error from a chats search shows inside the open Chats sheet', async ({ 
   } finally { mac.close(); }
 });
 
+test('opening Chats on a touch screen does not raise the keyboard', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    const original = window.matchMedia.bind(window);
+    window.matchMedia = query => /pointer:\s*fine/.test(query)
+      ? { ...original(query), matches: false, media: query } : original(query);
+  });
+  const mac = await pair(page, baseURL);
+  try {
+    await page.locator('#sessions-toggle').click();
+    await expect(page.locator('#sessions-dialog')).toBeVisible();
+    await expect(page.locator('#session-search')).not.toBeFocused();
+  } finally { mac.close(); }
+});
+
 test('session search switches conversations and keeps each draft', async ({ page, baseURL }) => {
   const mac = await pair(page, baseURL);
   try {
