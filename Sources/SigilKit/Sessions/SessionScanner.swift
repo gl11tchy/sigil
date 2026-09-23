@@ -249,20 +249,6 @@ enum SessionScanner: Sendable {
         return nil
     }
 
-    static func grouped(_ sessions: [GrokSession]) -> [(cwd: String, sessions: [GrokSession])] {
-        var groups: [String: [GrokSession]] = [:]
-        var order: [String] = []
-        for session in sessions {
-            if groups[session.cwd] == nil {
-                order.append(session.cwd)
-                groups[session.cwd] = [session]
-            } else {
-                groups[session.cwd]?.append(session)
-            }
-        }
-        return order.map { (cwd: $0, sessions: groups[$0] ?? []) }
-    }
-
     private static func isDir(_ url: URL) -> Bool {
         (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
     }

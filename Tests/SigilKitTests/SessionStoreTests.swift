@@ -295,7 +295,7 @@ struct SessionStoreTests {
     }
 
     @Test(arguments: SessionQueryCase.all)
-    func searchAndGrouping(_ queryCase: SessionQueryCase) async throws {
+    func searchFindsAndOrdersSessions(_ queryCase: SessionQueryCase) async throws {
         let harness = try FixtureHarness()
         defer { harness.tearDown() }
         try harness.installOrderingFixtures()
@@ -304,9 +304,6 @@ struct SessionStoreTests {
 
         #expect(harness.store.sessions.map(\.id) == ["a1", "b1", "g1", "a2", "b2"])
         #expect(harness.store.search(queryCase.query).map(\.id) == queryCase.expectedIDs)
-        let groups = harness.store.groupedByProject(matching: queryCase.query)
-        #expect(groups.map(\.cwd) == queryCase.expectedGroupOrder)
-        #expect(groups.map { $0.sessions.map(\.id) } == queryCase.expectedGroupedIDs)
     }
 
     @Test func emptySearchDoesNotComputeDisplayedTitle() async throws {
@@ -579,8 +576,6 @@ struct SessionStoreTests {
 struct SessionQueryCase: Sendable, CustomTestStringConvertible {
     var query: String
     var expectedIDs: [String]
-    var expectedGroupOrder: [String]
-    var expectedGroupedIDs: [[String]]
 
     var testDescription: String {
         query.isEmpty ? "empty" : query
@@ -589,45 +584,31 @@ struct SessionQueryCase: Sendable, CustomTestStringConvertible {
     static let all: [SessionQueryCase] = [
         SessionQueryCase(
             query: "",
-            expectedIDs: ["a1", "b1", "g1", "a2", "b2"],
-            expectedGroupOrder: ["/proj/Alpha", "/proj/Beta", "/proj/Gamma"],
-            expectedGroupedIDs: [["a1", "a2"], ["b1", "b2"], ["g1"]]
+            expectedIDs: ["a1", "b1", "g1", "a2", "b2"]
         ),
         SessionQueryCase(
             query: "   \t",
-            expectedIDs: ["a1", "b1", "g1", "a2", "b2"],
-            expectedGroupOrder: ["/proj/Alpha", "/proj/Beta", "/proj/Gamma"],
-            expectedGroupedIDs: [["a1", "a2"], ["b1", "b2"], ["g1"]]
+            expectedIDs: ["a1", "b1", "g1", "a2", "b2"]
         ),
         SessionQueryCase(
             query: "alpha",
-            expectedIDs: ["a2", "a1"],
-            expectedGroupOrder: ["/proj/Alpha"],
-            expectedGroupedIDs: [["a2", "a1"]]
+            expectedIDs: ["a2", "a1"]
         ),
         SessionQueryCase(
             query: "cafe",
-            expectedIDs: ["b1"],
-            expectedGroupOrder: ["/proj/Beta"],
-            expectedGroupedIDs: [["b1"]]
+            expectedIDs: ["b1"]
         ),
         SessionQueryCase(
             query: "BETA",
-            expectedIDs: ["b2", "b1"],
-            expectedGroupOrder: ["/proj/Beta"],
-            expectedGroupedIDs: [["b2", "b1"]]
+            expectedIDs: ["b2", "b1"]
         ),
         SessionQueryCase(
             query: "Zebra",
-            expectedIDs: ["a1"],
-            expectedGroupOrder: ["/proj/Alpha"],
-            expectedGroupedIDs: [["a1"]]
+            expectedIDs: ["a1"]
         ),
         SessionQueryCase(
             query: "zzz",
-            expectedIDs: [],
-            expectedGroupOrder: [],
-            expectedGroupedIDs: []
+            expectedIDs: []
         ),
     ]
 }

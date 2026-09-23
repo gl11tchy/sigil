@@ -172,13 +172,6 @@ public final class SessionStore {
         .map(\.0)
     }
 
-    /// Groups `search` results by working directory, in that same order.
-    public func groupedByProject(matching query: String = "") -> [(
-        cwd: String, sessions: [GrokSession]
-    )] {
-        SessionScanner.grouped(search(query))
-    }
-
     /// Walks `root` off the main actor. Cache hits skip JSON decoding.
     func scan(ignoringCache: Bool) async {
         if !ignoringCache, forcedScansInFlight > 0 {
