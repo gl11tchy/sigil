@@ -12,8 +12,9 @@ const assets = new Map([
 ]);
 
 export function createSite({ publicOrigin } = {}) {
-  const origin = new URL(publicOrigin);
-  if (origin.origin !== publicOrigin || !(origin.protocol === 'https:' ||
+  let origin;
+  try { origin = new URL(publicOrigin); } catch { origin = null; }
+  if (!origin || origin.origin !== publicOrigin || !(origin.protocol === 'https:' ||
       (origin.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(origin.hostname)))) {
     throw new Error('PUBLIC_ORIGIN must be an HTTPS origin (HTTP is allowed only on loopback).');
   }

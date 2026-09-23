@@ -68,6 +68,12 @@ test('PUBLIC_ORIGIN must be HTTPS except on loopback', () => {
   assert.doesNotThrow(() => createSite({ publicOrigin: 'https://sigilapp.dev' }).close());
 });
 
+test('a missing or unparsable PUBLIC_ORIGIN names the variable', () => {
+  assert.throws(() => createSite({ publicOrigin: undefined }), /PUBLIC_ORIGIN must be an HTTPS origin/);
+  assert.throws(() => createSite({ publicOrigin: '' }), /PUBLIC_ORIGIN must be an HTTPS origin/);
+  assert.throws(() => createSite({ publicOrigin: 'sigilapp.dev' }), /PUBLIC_ORIGIN must be an HTTPS origin/);
+});
+
 test('GET /health returns ok', async t => {
   const { base } = await setup(t);
   const { res, body } = await text(base, '/health');
