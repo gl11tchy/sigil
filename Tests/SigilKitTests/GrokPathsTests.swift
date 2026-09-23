@@ -83,7 +83,8 @@ func sessionFolderNameMatchesTheCLI(cwd: String, expected: String) {
     #expect(
         folder.lastPathComponent
             == GrokPaths.sessionFolderName(forCanonicalPath: GrokPaths.canonicalPath(cwd.path)))
-    #expect(folder.deletingLastPathComponent() == GrokPaths.sessionsRoot)
+    // Compare paths: a URL for a folder that exists gains a trailing slash.
+    #expect(folder.deletingLastPathComponent().path == GrokPaths.sessionsRoot.path)
 }
 
 @Test(arguments: [
