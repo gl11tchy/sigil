@@ -143,8 +143,13 @@ function applyTail(bucket, next) {
     bucket.tail = next;
     return;
   }
+  // A sliding window under a fixed footer has no suffix/prefix overlap.
+  // Keep only the old text that scrolled out above the new snapshot's start.
+  const start = next.slice(0, 200);
+  const at = start.trim() ? bucket.tail.indexOf(start) : -1;
+  const scrolled = at > 0 ? bucket.tail.slice(0, at) : bucket.tail;
   const room = 400_000 - bucket.history.length;
-  if (room > 0) bucket.history += bucket.tail.slice(0, room);
+  if (room > 0) bucket.history += scrolled.slice(0, room);
   bucket.tail = next;
 }
 function commonPrefixLength(left, right) {
