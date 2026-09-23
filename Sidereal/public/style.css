@@ -154,7 +154,7 @@ mark[data-current="true"] { background: var(--accent); outline: 2px solid var(--
 .attachments img { width: 36px; height: 36px; object-fit: cover; border-radius: 4px; background: #111; }
 .attachments span { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }
 .attachments button { min-width: 44px; min-height: 44px; padding: 0; background: transparent; border-color: transparent; color: var(--muted); }
-.entry { display: flex; align-items: flex-end; gap: 2px; padding: 6px; background: var(--raised); border: 1px solid var(--line); border-radius: 12px; }
+.entry { display: flex; align-items: flex-end; gap: 2px; padding: 6px; background: var(--raised); border: 1px solid var(--line); border-radius: 6px; }
 .entry:focus-within { border-color: var(--accent); }
 #attach-toggle, #keys-toggle { display: grid; place-items: center; flex: 0 0 44px; min-height: 44px; padding: 0; background: transparent; border-color: transparent; color: var(--muted); }
 #keys-toggle[aria-expanded="true"] { color: var(--accent); background: var(--selected); }
@@ -163,7 +163,7 @@ textarea {
   border: 0; background: transparent; border-radius: 4px; min-height: 44px; line-height: 22px; overflow-y: auto;
   max-height: min(100px, calc(var(--viewport-height, 100dvh) * .2));
 }
-#send { flex: 0 0 44px; min-height: 44px; font-size: 24px; line-height: 1; border-radius: 8px; background: var(--accent); color: var(--ground); border-color: var(--accent); font-weight: 600; }
+#send { flex: 0 0 44px; min-height: 44px; font-size: 24px; line-height: 1; border-radius: 5px; background: var(--accent); color: var(--ground); border-color: var(--accent); font-weight: 600; }
 #send:focus-visible { outline-color: var(--ground); outline-offset: -4px; }
 #send:disabled { background: #303b38; color: #a6c7bd; border-color: transparent; opacity: 1; }
 .compose-tools { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 4px 6px 0; }
@@ -178,7 +178,7 @@ textarea {
 @media (max-width: 429px) { .keys { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 
 /* Sheets. */
-dialog { color: inherit; background: #111214; border: 1px solid var(--line); border-radius: 12px; width: min(480px, calc(100vw - 24px)); max-height: calc(var(--viewport-height, 100dvh) - 40px); padding: 16px; overflow: auto; }
+dialog { color: inherit; background: #111214; border: 1px solid var(--line); border-radius: 6px; width: min(480px, calc(100vw - 24px)); max-height: calc(var(--viewport-height, 100dvh) - 40px); padding: 16px; overflow: auto; }
 dialog::backdrop { background: #000a; }
 .sheet-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .sheet-heading h2 { margin: 0; font-size: 20px; font-weight: 600; }
