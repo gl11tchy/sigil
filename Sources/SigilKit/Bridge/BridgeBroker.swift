@@ -151,13 +151,18 @@ public enum BridgePrompt {
             }
             scalars.append(scalar)
         }
-        return String(String.UnicodeScalarView(scalars))
+        var flattened = String(String.UnicodeScalarView(scalars))
             .split(separator: "\n", omittingEmptySubsequences: true)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
             .joined(separator: " ")
-            .replacingOccurrences(
+        // Repeat until none is left: removing the inner marker of "[[Sigil]]"
+        // leaves a new one. Each pass drops two characters, so this ends.
+        while flattened.range(of: marker, options: .caseInsensitive) != nil {
+            flattened = flattened.replacingOccurrences(
                 of: marker, with: "Sigil", options: .caseInsensitive)
+        }
+        return flattened
     }
 
     /// A zero-width joiner is kept only between emoji, where it builds one
