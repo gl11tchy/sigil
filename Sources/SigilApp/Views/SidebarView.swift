@@ -849,6 +849,7 @@ struct SidebarView: View {
         }
         switch SidebarOrganization.escapeAction(
             isRenaming: model.renamingSessionKey != nil,
+            isSearching: listKind == .search,
             surface: model.sidebarSurface
         ) {
         case .cancelRename:

@@ -70,15 +70,34 @@ struct SidebarSearchTests {
 
     @Test func escapeLeavesTheQueryInPlace() {
         #expect(
-            SidebarOrganization.escapeAction(isRenaming: true, surface: .project) == .cancelRename)
+            SidebarOrganization.escapeAction(isRenaming: true, isSearching: false, surface: .project)
+                == .cancelRename)
         #expect(
-            SidebarOrganization.escapeAction(isRenaming: false, surface: .project) == .leaveFolder)
+            SidebarOrganization.escapeAction(isRenaming: false, isSearching: false, surface: .project)
+                == .leaveFolder)
         #expect(
-            SidebarOrganization.escapeAction(isRenaming: false, surface: .recents) == .leaveFolder)
+            SidebarOrganization.escapeAction(isRenaming: false, isSearching: false, surface: .recents)
+                == .leaveFolder)
         #expect(
-            SidebarOrganization.escapeAction(isRenaming: false, surface: .archived) == .leaveFolder)
+            SidebarOrganization.escapeAction(
+                isRenaming: false, isSearching: false, surface: .archived) == .leaveFolder)
         #expect(
-            SidebarOrganization.escapeAction(isRenaming: false, surface: .folders) == .leaveList)
+            SidebarOrganization.escapeAction(isRenaming: false, isSearching: false, surface: .folders)
+                == .leaveList)
+    }
+
+    /// Search results are global, so leaving the folder behind them changes
+    /// nothing on screen and loses where the user was. Escape leaves the list.
+    @Test func escapeWhileSearchingInsideAFolderLeavesTheList() {
+        #expect(
+            SidebarOrganization.escapeAction(isRenaming: false, isSearching: true, surface: .project)
+                == .leaveList)
+        #expect(
+            SidebarOrganization.escapeAction(isRenaming: false, isSearching: true, surface: .recents)
+                == .leaveList)
+        #expect(
+            SidebarOrganization.escapeAction(isRenaming: true, isSearching: true, surface: .project)
+                == .cancelRename)
     }
 
     @Test func queryChangeSelectsTheTopRankedRow() {

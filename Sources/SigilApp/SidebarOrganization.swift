@@ -92,8 +92,13 @@ enum SidebarOrganization {
         case leaveList
     }
 
-    static func escapeAction(isRenaming: Bool, surface: SidebarSurface) -> EscapeAction {
+    static func escapeAction(isRenaming: Bool, isSearching: Bool, surface: SidebarSurface)
+        -> EscapeAction
+    {
         if isRenaming { return .cancelRename }
+        // Results are global while searching; leaving the folder behind them
+        // would change nothing on screen and lose where the user was.
+        if isSearching { return .leaveList }
         if surface != .folders { return .leaveFolder }
         return .leaveList
     }
