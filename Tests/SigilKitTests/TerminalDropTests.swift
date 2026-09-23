@@ -143,4 +143,35 @@ struct TerminalDropTests {
         let left = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
         #expect(left.count == TerminalDrop.cacheKeepCount)
     }
+
+    @Test func aFullPhoneMessageOfImagesSurvivesUntilSubmit() throws {
+        let png = try #require(
+            Data(
+                base64Encoded:
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+            ))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "sigil-remote-images-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let photos = try (0..<TerminalDrop.maxFiles).map { index in
+            try TerminalDrop.writeRemoteFile(png, name: "photo-\(index).jpg", to: root)
+        }
+        #expect(photos.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
+    }
+
+    @Test func aLocalImagePasteKeepsAFullPhoneMessageOfFiles() throws {
+        let png = try #require(
+            Data(
+                base64Encoded:
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+            ))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "sigil-remote-mixed-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let notes = try (0..<TerminalDrop.maxFiles).map { index in
+            try TerminalDrop.writeRemoteFile(Data("note \(index)".utf8), name: "note-\(index).md", to: root)
+        }
+        _ = try TerminalDrop.writeImage(png, to: root)
+        #expect(notes.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
+    }
 }

@@ -96,7 +96,8 @@ public enum TerminalDrop {
         return nil
     }
 
-    public static let cacheKeepCount = 8
+    /// One policy for every writer: room for two full phone messages of attachments.
+    public static let cacheKeepCount = 2 * maxFiles
 
     public static func sanitizedFileName(_ name: String) -> String {
         let base = URL(fileURLWithPath: name).lastPathComponent
@@ -120,7 +121,7 @@ public enum TerminalDrop {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("drop-\(UUID().uuidString)-\(sanitizedFileName(name))")
         try data.write(to: url, options: .withoutOverwriting)
-        pruneCache(in: directory, keeping: max(cacheKeepCount, maxFiles), protecting: url)
+        pruneCache(in: directory, keeping: cacheKeepCount, protecting: url)
         return url
     }
 
