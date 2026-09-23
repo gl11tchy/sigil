@@ -33,16 +33,28 @@ fi
 
 cd "$REPO"
 if ! git cat-file -e "$UPSTREAM_REV^{commit}" 2>/dev/null; then
-  git fetch --depth 50 origin
+  git fetch origin "$UPSTREAM_REV"
+fi
+git cat-file -e "$UPSTREAM_REV^{commit}" || {
+  echo "error: upstream revision $UPSTREAM_REV is not available in $REPO" >&2
+  exit 1
+}
+
+# Read the log once: `git log | grep -q` can die of SIGPIPE under pipefail.
+recent="$(git log --oneline -20)"
+# The patches are written against UPSTREAM_REV, not whatever HEAD the clone has.
+if [[ "$recent" != *"Sigil Neon"* && "$recent" != *"GROK_THEME_*"* ]]; then
+  echo "==> checking out $UPSTREAM_REV"
+  git checkout --detach "$UPSTREAM_REV"
 fi
 
-if git log --oneline -20 | grep -q "Sigil Neon"; then
+if [[ "$recent" == *"Sigil Neon"* ]]; then
   echo "==> neon patch already applied"
 else
   echo "==> applying $PATCH"
   git am --keep-cr <"$PATCH"
 fi
-if git log --oneline -20 | grep -q "GROK_THEME_\\*"; then
+if [[ "$recent" == *"GROK_THEME_*"* ]]; then
   echo "==> host patch already applied"
 else
   echo "==> applying $HOST_PATCH"
