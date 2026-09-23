@@ -69,6 +69,13 @@ public final class ConversationNotesStore {
         scheduleFlush()
     }
 
+    /// True when nothing for this note waits to be written. After `flushNow()`
+    /// a false means its write failed and is queued for a retry.
+    public func isSaved(for sessionID: String, cwd: String) -> Bool {
+        guard let url = fileURL(for: sessionID, cwd: cwd) else { return false }
+        return dirty[url.path] == nil
+    }
+
     /// Removes the flat-layout file the first notes build wrote. Only the
     /// caller can know no other folder still has a conversation with this
     /// session ID waiting to adopt it, so this stays a separate decision.

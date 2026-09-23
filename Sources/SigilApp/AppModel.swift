@@ -600,12 +600,13 @@ final class AppModel {
     /// One-time move of UserDefaults folder notes onto per-conversation files.
     /// Each folder note lands on the newest conversation in that folder; when
     /// that conversation already has a note the legacy text is appended, not
-    /// dropped. Folders with no conversation yet keep their entry for a later
-    /// launch.
+    /// dropped. Folders with no conversation yet, or whose note file could not
+    /// be written, keep their entry for a later launch.
     func migrateLegacyPanelNotes() {
         let legacy = panel.legacyFolderNotes
         guard !legacy.isEmpty else { return }
         var remaining = legacy
+        var moved: [String: GrokSession] = [:]
         for (folder, text) in legacy {
             guard !text.isEmpty,
                 let session = store.sessions
@@ -621,13 +622,19 @@ final class AppModel {
             } else if existing != text && !existing.hasSuffix(section) {
                 panel.setNotes(existing + section, forSessionID: session.id, cwd: session.cwd)
             }
-            remaining.removeValue(forKey: folder)
+            moved[folder] = session
         }
-        if remaining.count != legacy.count {
+        if !moved.isEmpty {
             // Persist before the legacy source goes away: a crash between a
             // debounced write and clearing UserDefaults would lose the note.
             panel.flushNotes()
-            panel.setLegacyFolderNotes(remaining)
+            for (folder, session) in moved
+            where panel.notesStore.isSaved(for: session.id, cwd: session.cwd) {
+                remaining.removeValue(forKey: folder)
+            }
+            if remaining.count != legacy.count {
+                panel.setLegacyFolderNotes(remaining)
+            }
         }
     }
 
