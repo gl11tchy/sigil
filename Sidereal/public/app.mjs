@@ -79,9 +79,11 @@ function updateControls() {
     if (element.id === 'restart') { element.disabled = disabled || !ended; return; }
     if (element.id === 'new') { element.disabled = disabled; return; }
     if (element.id === 'tabs') { element.disabled = disabled || tabCount === 0; return; }
-    if (element.id === 'stop' || element.id === 'interrupt' || element.dataset.key) {
+    if (element.id === 'stop' || element.id === 'interrupt') {
       element.disabled = !connected || !selected || ended; return;
     }
+    // Keys queue behind each other, but never land between a send's files and its Enter.
+    if (element.dataset.key) { element.disabled = disabled || !selected || ended; return; }
     element.disabled = disabled || !selected || ended;
   });
   $('send').disabled = disabled || !selected || ended || !($('message').value.trim() || attachmentsFor().length);

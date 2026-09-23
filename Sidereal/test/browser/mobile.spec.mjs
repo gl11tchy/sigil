@@ -471,6 +471,25 @@ test('quick taps on the terminal keys are all sent in order', async ({ page, bas
   } finally { mac.close(); }
 });
 
+test('a terminal key tapped during an attachment send does not land inside it', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mac = await pair(page, baseURL);
+  try {
+    await page.locator('#keys-toggle').click();
+    await page.locator('#attach').setInputFiles({
+      name: 'data.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(256 * 1024, 7) });
+    await page.locator('#message').fill('read this');
+    await page.locator('#send').click();
+    await expect.poll(() => mac.actions.filter(a => a.action === 'file').length).toBeGreaterThan(0);
+    await page.evaluate(() => document.querySelector('[data-key="enter"]').click());
+    await expect.poll(() => mac.actions.filter(a => a.action === 'key').length, { timeout: 15000 }).toBeGreaterThan(0);
+    await page.waitForTimeout(300);
+    const order = mac.actions.filter(a => ['file', 'input', 'key'].includes(a.action)).map(a => a.action);
+    expect(order).toEqual([...Array(8).fill('file'), 'input', 'key']);
+    await expect(page.locator('[data-key="enter"]')).toBeEnabled();
+  } finally { mac.close(); }
+});
+
 test('the live Grok composer becomes readable status on a phone', async ({ page, baseURL }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const raw = Array.from({ length: 18 }, () => ' '.repeat(120)).join('\n') + '\n'
