@@ -319,6 +319,40 @@ struct RemoteCommandsTests {
         #expect(fixture.settings.defaultDirectory == remembered)
     }
 
+    @Test @MainActor func phoneOpenAndNewFailWithoutAlertWhenFolderOrCLIIsGone() async throws {
+        let fixture = try PhoneCommandFixture()
+        defer { fixture.cleanup() }
+        let gone = try fixture.directory("gone-folder")
+        let kept = try fixture.directory("kept-folder")
+        fixture.settings.showWorktreeSessions = true
+        try fixture.writeSession(
+            id: "gone-session", cwd: gone.path, summary: "Deleted worktree",
+            updatedAt: "2026-08-03T00:00:00Z", secret: "x")
+        try fixture.writeSession(
+            id: "kept-session", cwd: kept.path, summary: "Still here",
+            updatedAt: "2026-08-02T00:00:00Z", secret: "x")
+        await fixture.store.reload()
+        try FileManager.default.removeItem(at: gone)
+
+        let open = fixture.command("open", text: gone.path, name: "gone-session")
+        #expect(!open.ok)
+        #expect(open.error == "Restore the folder on your Mac, then try again.")
+        let new = fixture.command("new", text: gone.path)
+        #expect(!new.ok)
+        #expect(new.error == "Restore the folder on your Mac, then try again.")
+        fixture.settings.focusedProjectPath = gone.path
+        #expect(!fixture.command("new").ok)
+        fixture.settings.focusedProjectPath = ""
+
+        fixture.settings.executablePath = fixture.root.appendingPathComponent("missing-grok").path
+        let noCLI = fixture.command("open", text: kept.path, name: "kept-session")
+        #expect(!noCLI.ok)
+        #expect(noCLI.error == "Restore the Grok CLI on your Mac, then try again.")
+
+        #expect(fixture.model.tabs.isEmpty)
+        #expect(fixture.alerts.count == 0)
+    }
+
     @Test @MainActor func phoneChatPagesStayWithinOneSlice() async throws {
         let fixture = try PhoneCommandFixture()
         defer { fixture.cleanup() }
@@ -480,6 +514,8 @@ private final class PhoneCommandFixture {
     let settings: AppSettings
     let store: SessionStore
     let model: AppModel
+    /// Alerts AppModel tried to show. A modal alert would block the remote loop.
+    let alerts: AlertLog
     private let defaultsName: String
 
     init() throws {
@@ -496,8 +532,10 @@ private final class PhoneCommandFixture {
         settings.executablePath = executable.path
         settings.defaultDirectory = root.path
         store = SessionStore(root: root.appendingPathComponent("sessions"))
+        let alerts = AlertLog()
+        self.alerts = alerts
         model = AppModel(
-            settings: settings, store: store, presentError: { _ in },
+            settings: settings, store: store, presentError: { _ in alerts.count += 1 },
             pairingStore: InMemoryRemotePairingStore())
     }
 
@@ -545,6 +583,11 @@ private final class PhoneCommandFixture {
     }
 
     private var storeRoot: URL { root.appendingPathComponent("sessions") }
+}
+
+@MainActor
+private final class AlertLog {
+    var count = 0
 }
 
 private func encoded(_ reply: RemoteReply) throws -> String {
