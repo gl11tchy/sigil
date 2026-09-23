@@ -3281,6 +3281,45 @@ struct AppModelTests {
         #expect(five == one)
     }
 
+    /// A child that ignores SIGTERM costs one full wait. Several of them must
+    /// share that wait, not queue behind each other on the main thread.
+    @Test @MainActor
+    func quittingWithSeveralStuckTabsWaitsAboutOnce() async throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\ntrap '' TERM\nexec /bin/sleep 30\n")
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        let tabs = try (0..<4).map { _ in try #require(model.newTab(in: cwd)) }
+        let pids = tabs.map(\.controller.processID)
+        #expect(pids.allSatisfy { $0 > 0 })
+        try await Task.sleep(for: .milliseconds(400))
+
+        let elapsed = ContinuousClock().measure { model.closeAllTabsAndWait() }
+
+        #expect(elapsed < .milliseconds(2200))
+        #expect(pids.allSatisfy { kill($0, 0) != 0 })
+    }
+
+    @Test @MainActor
+    func archivingSeveralStuckTabsWaitsAboutOnce() async throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\ntrap '' TERM\nexec /bin/sleep 30\n")
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let tabs = try (0..<4).map { _ in try #require(model.newTab(in: cwd)) }
+        let pids = tabs.map(\.controller.processID)
+        let sessions = try tabs.map { makeSession(id: try #require($0.sessionID), cwd: cwd) }
+        model.confirmStopWorking = { true }
+        try await Task.sleep(for: .milliseconds(400))
+
+        let elapsed = ContinuousClock().measure { model.archive(sessions) }
+
+        #expect(model.tabs.isEmpty)
+        #expect(elapsed < .milliseconds(2200))
+        #expect(pids.allSatisfy { kill($0, 0) != 0 })
+    }
+
     @Test @MainActor
     func archivingASelectionWithAWorkingChatAsksOnce() throws {
         let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")

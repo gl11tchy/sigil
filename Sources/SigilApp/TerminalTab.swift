@@ -459,9 +459,9 @@ final class TerminalTab: Identifiable {
     }
 
     /// Used when the app is quitting: returns only once the child is gone.
-    func terminateAndWait() {
+    func terminateAndWait(timeout: Duration = .milliseconds(1500)) {
         stopTurnTracking()
-        controller.terminateAndWait()
+        controller.terminateAndWait(timeout: timeout)
     }
 
 }

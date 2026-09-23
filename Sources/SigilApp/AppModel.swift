@@ -380,6 +380,10 @@ final class AppModel {
         }
         settings.pinnedConversations = pinned
         settings.archivedConversations = archived
+        stopAndWait(
+            tabs.filter { tab in
+                sessions.contains { tabMatches(tab, sessionID: $0.id, cwd: $0.cwd) }
+            })
         for session in sessions {
             while let index = tabs.firstIndex(where: {
                 tabMatches($0, sessionID: session.id, cwd: session.cwd)
@@ -425,6 +429,7 @@ final class AppModel {
             return
         }
         unpin(project)
+        stopAndWait(projectTabs)
         archiveWithoutAsking(store.sessions.filter { samePath($0.cwd, project.cwd) })
         for tab in projectTabs {
             if let index = tabs.firstIndex(where: { $0.id == tab.id }) { removeTab(at: index) }
@@ -1454,6 +1459,17 @@ final class AppModel {
         }
     }
 
+    /// Stops several tabs against one shared deadline. Every child gets SIGTERM
+    /// first, so a child that ignores it does not make the next one wait.
+    private func stopAndWait(_ stopping: [TerminalTab]) {
+        for tab in stopping { tab.terminate() }
+        let deadline = ContinuousClock.now + .milliseconds(1500)
+        for tab in stopping {
+            // A short floor still reaps a child killed after the deadline.
+            tab.terminateAndWait(timeout: max(deadline - .now, .milliseconds(100)))
+        }
+    }
+
     /// User-facing close: warn when the agent is mid-turn so a click does not kill work.
     func requestCloseTab(_ id: TerminalTab.ID) {
         guard let tab = tabs.first(where: { $0.id == id }) else { return }
@@ -1518,7 +1534,7 @@ final class AppModel {
         stopTabMessaging()
         panel.closeShellAndWait()
         panel.flushNotes()
-        for tab in tabs { tab.terminateAndWait() }
+        stopAndWait(tabs)
         tabs.removeAll()
         selectedTabID = nil
         refreshDockIndicator()
