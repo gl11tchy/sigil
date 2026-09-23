@@ -32,3 +32,10 @@ relay through a Chromium page at 390 × 844. No personal sessions were touched.
 Every send in these screenshots left the phone and landed in the Mac's PTY; the
 Mac's working state showed on both surfaces within the next poll, and a session
 started from the phone's New sheet opened as a tab on the Mac.
+
+## Production (2026-09-23)
+
+Sidereal deployment `c8b32797` serves revision `199cc86`. The same test build
+paired through `https://remote.sigilapp.dev`, started a session from the phone's
+New sheet, and sent a message:
+[phone](phone-production-working.png) · [Mac](mac-production-working.png).
