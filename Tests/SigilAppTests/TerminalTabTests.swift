@@ -68,6 +68,32 @@ struct TerminalTabTests {
         #expect(markerChanges == 1)
     }
 
+    @Test func aReplacementKeepsQueuedMessagesButNotQuestions() {
+        let previous = makeTab()
+        previous.enqueueBridgePrompt("plain")
+        previous.enqueueBridgePrompt("question", requestID: "ask-1")
+        let replacement = makeTab()
+
+        replacement.restoreUnseenActivity(from: previous)
+        replacement.restoreUnseenActivity(from: previous)
+
+        #expect(replacement.bridgeInbox.map(\.prompt) == ["plain"])
+        #expect(replacement.hasUnseenActivity)
+        replacement.dismissNextBridgePrompt()
+        #expect(!replacement.hasUnseenActivity)
+    }
+
+    @Test func aReplacementShowsNoUnreadDotForAnAnsweredQuestion() {
+        let previous = makeTab()
+        previous.enqueueBridgePrompt("question", requestID: "ask-1")
+        let replacement = makeTab()
+
+        replacement.restoreUnseenActivity(from: previous)
+
+        #expect(replacement.bridgeInbox.isEmpty)
+        #expect(!replacement.hasUnseenActivity)
+    }
+
     @Test func recognizesOnlyGrokBusySpinnerTitles() {
         #expect(TerminalTab.isBusyTerminalTitle("⠼ - Waiting for response… - grok"))
         #expect(TerminalTab.isBusyTerminalTitle("⠹ - Thinking - grok"))
@@ -346,6 +372,30 @@ struct TerminalTabTests {
                 : .new(sessionID: UUID())
             return (makeTab(mode: mode, completionEventsURL: journal), directory)
         }
+    }
+
+    @Test func otherProviderTabsInDifferentFoldersHaveDifferentTitles() {
+        let suite = "TerminalTabTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let settings = AppSettings(defaults: defaults)
+        func claudeTab(in folder: String) -> TerminalTab {
+            TerminalTab(
+                spec: GrokLaunchSpec(
+                    executable: URL(fileURLWithPath: "/usr/bin/true"),
+                    workingDirectory: URL(fileURLWithPath: "/tmp/\(folder)"),
+                    mode: .continueLatest,
+                    provider: .claudeCode
+                ),
+                settings: settings
+            )
+        }
+
+        let api = claudeTab(in: "api")
+        let web = claudeTab(in: "web")
+
+        #expect(api.title == "Claude Code · api")
+        #expect(web.title == "Claude Code · web")
     }
 
     private func makeTab(

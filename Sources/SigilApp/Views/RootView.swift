@@ -23,7 +23,8 @@ struct RootView: View {
                         width: Binding(
                             get: { columns.sidebar },
                             set: { sidebarWidth = $0 }
-                        )
+                        ),
+                        onFocusChange: { model.isSidebarDividerFocused = $0 }
                     )
                 }
                 detail
@@ -349,6 +350,7 @@ struct IconButton: View {
 /// The draggable seam between the two columns.
 private struct SplitDivider: View {
     @Binding var width: Double
+    let onFocusChange: (Bool) -> Void
     @Environment(\.palette) private var palette
     @State private var widthAtDragStart: Double?
     @FocusState private var isFocused: Bool
@@ -384,6 +386,8 @@ private struct SplitDivider: View {
             }
             .focusable(interactions: .activate)
             .focused($isFocused)
+            .onChange(of: isFocused) { _, focused in onFocusChange(focused) }
+            .onDisappear { onFocusChange(false) }
             .onKeyPress(.leftArrow) {
                 width = max(200, width - 20)
                 return .handled
