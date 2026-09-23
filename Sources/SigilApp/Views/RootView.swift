@@ -398,6 +398,39 @@ private struct SplitDivider: View {
     }
 }
 
+/// The inbox and ended-session banner actions for the selected tab, so the
+/// File menu can run them from the keyboard.
+extension AppModel {
+    var canDeliverSelectedTabMessage: Bool {
+        guard let tab = selectedTab else { return false }
+        return !tab.bridgeInbox.isEmpty && tab.canDeliverBridgePrompt
+    }
+
+    func deliverSelectedTabMessage() {
+        guard let tab = selectedTab, canDeliverSelectedTabMessage else { return }
+        tab.deliverNextBridgePrompt()
+        tab.controller.focus()
+    }
+
+    var canDismissSelectedTabMessage: Bool {
+        !(selectedTab?.bridgeInbox.isEmpty ?? true)
+    }
+
+    func dismissSelectedTabMessage() {
+        selectedTab?.dismissNextBridgePrompt()
+    }
+
+    var canRestartSelectedTab: Bool {
+        guard let tab = selectedTab, case .exited = tab.activity else { return false }
+        return true
+    }
+
+    func restartSelectedTab() {
+        guard let tab = selectedTab, canRestartSelectedTab else { return }
+        restartTab(id: tab.id)
+    }
+}
+
 private struct BridgeInboxBanner: View {
     let prompt: String
     let pendingCount: Int

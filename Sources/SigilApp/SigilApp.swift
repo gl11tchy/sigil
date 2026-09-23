@@ -133,6 +133,14 @@ struct GrokCommands: Commands {
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])
             .disabled(model.sessionForSelectedTab() == nil)
+            Divider()
+            Button("Deliver Tab Message") { model.deliverSelectedTabMessage() }
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(!model.canDeliverSelectedTabMessage)
+            Button("Dismiss Tab Message") { model.dismissSelectedTabMessage() }
+                .disabled(!model.canDismissSelectedTabMessage)
+            Button("Restart Session") { model.restartSelectedTab() }
+                .disabled(!model.canRestartSelectedTab)
         }
 
         CommandGroup(replacing: .pasteboard) {
