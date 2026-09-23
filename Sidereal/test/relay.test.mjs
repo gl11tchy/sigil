@@ -127,6 +127,23 @@ test('rejecting an unauthorized phone closes it and releases the slot', async t 
   assert.equal((await nextNotice).type, 'peer');
 });
 
+test('a host that rejects a phone and closes at once still reaches the phone', { timeout: 5000 }, async t => {
+  const { base, room, hostToken } = await setup(t);
+  const host = connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` } });
+  await message(host);
+  const notice = message(host);
+  const phone = connect(base, room, 'phone', { origin: 'http://localhost:3099' });
+  const { peer } = await notice;
+  const rejected = message(phone);
+  // One write carries the rejection and the close frame, as when the Mac
+  // revokes a pairing and cancels its socket straight away.
+  host._socket.cork();
+  host.send(JSON.stringify({ peer, error: 'unauthorized' }));
+  host.close();
+  host._socket.uncork();
+  assert.equal((await rejected).error, 'unauthorized');
+});
+
 test('a client that resets a rejected upgrade does not crash the relay', { timeout: 5000 }, async t => {
   const { base, relay } = await setup(t);
   const closed = new Promise(resolve => relay.server.once('upgrade', (req, socket) => socket.once('close', resolve)));
