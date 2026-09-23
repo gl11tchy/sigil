@@ -65,7 +65,12 @@ struct RightPanelView: View {
         switch panel.mode {
         case .shell:
             if let shell = panel.shell {
-                TerminalPane(controller: shell, background: palette.groundNSColor)
+                VStack(spacing: 0) {
+                    TerminalPane(controller: shell, background: palette.groundNSColor)
+                    if panel.shellExited {
+                        ShellEndedRow(restart: { model.restartPanelShell() })
+                    }
+                }
             } else {
                 PanelPlaceholder(text: "Starting a shell…")
             }
@@ -163,6 +168,30 @@ private struct PanelPlaceholder: View {
             .font(.system(size: 11))
             .foregroundStyle(palette.textFaint)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Shown under a panel shell that has exited, like a tab's ended banner.
+private struct ShellEndedRow: View {
+    let restart: () -> Void
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Circle()
+                .fill(palette.textFaint)
+                .frame(width: 6, height: 6)
+            Text("Shell ended.")
+                .font(.system(size: 11))
+                .foregroundStyle(palette.textDim)
+            Spacer()
+            Button("Restart", action: restart)
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 30)
+        .background(palette.sidebar)
+        .overlay(alignment: .top) { Rectangle().fill(palette.hairline).frame(height: 1) }
     }
 }
 
