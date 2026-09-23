@@ -180,17 +180,20 @@ enum ScreenAnnouncement {
         var inboxCount: Int
     }
 
-    /// A new tab message or a finished turn on the tab the user is on. A tab
-    /// switch also changes the snapshot, and it speaks nothing.
+    /// A new tab message, or a turn that finished or ended with its session, on
+    /// the tab the user is on. A tab switch also changes the snapshot, and it
+    /// speaks nothing.
     static func change(from old: Snapshot, to new: Snapshot) -> String? {
         guard new.tabID != nil, old.tabID == new.tabID else { return nil }
         if new.inboxCount > old.inboxCount {
             return "Incoming tab message. Deliver or Dismiss."
         }
-        if old.activity == .working, new.activity == .idle {
-            return "\(new.title): turn finished"
+        guard old.activity == .working else { return nil }
+        switch new.activity {
+        case .idle: return "\(new.title): turn finished"
+        case .exited: return "\(new.title): session ended"
+        case .starting, .working: return nil
         }
-        return nil
     }
 
     static func findMatches(query: String, count: Int) -> String? {

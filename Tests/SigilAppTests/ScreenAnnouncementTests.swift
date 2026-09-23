@@ -43,6 +43,22 @@ struct ScreenAnnouncementTests {
         #expect(text == "sigil: turn finished")
     }
 
+    @Test func sessionThatEndsMidTurnIsSpoken() {
+        let text = ScreenAnnouncement.change(
+            from: snapshot(tabID: tabID, activity: .working),
+            to: snapshot(tabID: tabID, activity: .exited(code: 0))
+        )
+        #expect(text == "sigil: session ended")
+    }
+
+    @Test func sessionThatEndsWhileIdleSaysNothing() {
+        let text = ScreenAnnouncement.change(
+            from: snapshot(tabID: tabID, activity: .idle),
+            to: snapshot(tabID: tabID, activity: .exited(code: 0))
+        )
+        #expect(text == nil)
+    }
+
     @Test func startingTurnSaysNothing() {
         let text = ScreenAnnouncement.change(
             from: snapshot(tabID: tabID, activity: .idle),
