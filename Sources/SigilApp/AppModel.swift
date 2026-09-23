@@ -91,6 +91,9 @@ final class AppModel {
     /// Refreshes what a crash report would say Sigil was doing. Observation
     /// ignores it: nothing in the UI reads it.
     @ObservationIgnored private var crashStateTask: Task<Void, Never>?
+    /// Shared-list entries another running copy added, with the store's scan
+    /// count when this copy first read them. See `awaitsScan`.
+    @ObservationIgnored private var sharedArrivals: [String: Int] = [:]
 
     init(
         settings: AppSettings = AppSettings(),
@@ -118,7 +121,8 @@ final class AppModel {
         } else if Self.isRunningAutomatedTests {
             self.remoteControl = RemoteControl(store: InMemoryRemotePairingStore())
         } else {
-            self.remoteControl = RemoteControl(store: KeychainRemotePairingStore())
+            self.remoteControl = RemoteControl(
+                store: KeychainRemotePairingStore(), notifications: DistributedNotificationCenter.default())
         }
         self.trashConversation = trashConversation
         self.presentError = presentError
@@ -327,12 +331,14 @@ final class AppModel {
     }
 
     func pin(_ session: GrokSession) {
+        settings.reloadSharedLists()
         unarchive(session)
         settings.pinnedConversations = SidebarOrganization.inserting(
             session, onto: settings.pinnedConversations, samePath: samePath)
     }
 
     func unpin(_ session: GrokSession) {
+        settings.reloadSharedLists()
         settings.pinnedConversations = SidebarOrganization.removing(
             session, from: settings.pinnedConversations, samePath: samePath)
     }
@@ -346,11 +352,13 @@ final class AppModel {
     }
 
     func pin(_ project: SidebarProject) {
+        settings.reloadSharedLists()
         settings.pinnedProjects = SidebarOrganization.inserting(
             project.cwd, onto: settings.pinnedProjects, samePath: samePath)
     }
 
     func unpin(_ project: SidebarProject) {
+        settings.reloadSharedLists()
         settings.pinnedProjects = SidebarOrganization.removing(
             project.cwd, from: settings.pinnedProjects, samePath: samePath)
     }
@@ -376,6 +384,7 @@ final class AppModel {
             return
         }
         unpin(session)
+        settings.reloadSharedLists()
         settings.archivedConversations = SidebarOrganization.inserting(
             session, onto: settings.archivedConversations, samePath: samePath)
         for tab in matching { closeTab(tab.id) }
@@ -384,6 +393,7 @@ final class AppModel {
     }
 
     func unarchive(_ session: GrokSession) {
+        settings.reloadSharedLists()
         settings.archivedConversations = SidebarOrganization.removing(
             session, from: settings.archivedConversations, samePath: samePath)
     }
@@ -557,7 +567,12 @@ final class AppModel {
         // A missing folder lists nothing without an error; that is no proof
         // the pinned chats are gone.
         guard FileManager.default.fileExists(atPath: store.root.path) else { return }
-        let remainingPins = pruningMissing(settings.pinnedConversations)
+        let held = sharedListKeys()
+        settings.reloadSharedLists()
+        for key in sharedListKeys().subtracting(held) where sharedArrivals[key] == nil {
+            sharedArrivals[key] = store.scanSequence
+        }
+        let remainingPins = pruningMissing(settings.pinnedConversations, list: "pin")
         if remainingPins != settings.pinnedConversations {
             settings.pinnedConversations = remainingPins
         }
@@ -565,7 +580,7 @@ final class AppModel {
         if remainingProjectPins != settings.pinnedProjects {
             settings.pinnedProjects = remainingProjectPins
         }
-        let remainingArchives = pruningMissing(settings.archivedConversations)
+        let remainingArchives = pruningMissing(settings.archivedConversations, list: "archive")
         if remainingArchives != settings.archivedConversations {
             settings.archivedConversations = remainingArchives
         }
@@ -580,7 +595,28 @@ final class AppModel {
         {
             settings.focusedProjectPath = ""
         }
+        sharedArrivals = sharedArrivals.filter { $0.value >= store.appliedScanSequence }
         migrateLegacyPanelNotes()
+    }
+
+    /// One key per entry in the lists running copies share, tagged by list.
+    private func sharedListKeys() -> Set<String> {
+        Set(settings.pinnedConversations.map { sharedKey("pin", $0.sessionID, $0.cwd) })
+            .union(settings.pinnedProjects.map { sharedKey("project", $0) })
+            .union(settings.archivedConversations.map { sharedKey("archive", $0.sessionID, $0.cwd) })
+            .union(settings.conversationNames.map { sharedKey("name", $0.sessionID, $0.cwd) })
+    }
+
+    private func sharedKey(_ parts: String...) -> String {
+        parts.joined(separator: "\u{0}")
+    }
+
+    /// True while the shown scan began before this copy read the entry from
+    /// another copy. That copy may have created the conversation after the
+    /// scan started, so a missing match is not yet proof the entry is stale.
+    private func awaitsScan(_ key: String) -> Bool {
+        guard let seen = sharedArrivals[key] else { return false }
+        return store.appliedScanSequence <= seen
     }
 
     /// Pruning and legacy-note migration follow the store's own loading, not a
@@ -601,19 +637,23 @@ final class AppModel {
     }
 
     /// One-time move of UserDefaults folder notes onto per-conversation files.
-    /// Each folder note lands on the newest conversation in that folder; when
-    /// that conversation already has a note the legacy text is appended, not
-    /// dropped. Folders with no conversation yet keep their entry for a later
-    /// launch.
+    /// Each folder note lands on the newest conversation the sidebar lists in
+    /// that folder (an open one first); when that conversation already has a
+    /// note the legacy text is appended, not dropped. Folders with no listed
+    /// conversation yet keep their entry for a later launch.
     func migrateLegacyPanelNotes() {
         let legacy = panel.legacyFolderNotes
         guard !legacy.isEmpty else { return }
         var remaining = legacy
         for (folder, text) in legacy {
+            let listed = store.sessions.filter {
+                samePath($0.cwd, folder) && !isArchived($0) && passesSidebarFilters($0)
+            }
+            let newest = { (sessions: [GrokSession]) in
+                sessions.max(by: { $0.updatedAt < $1.updatedAt })
+            }
             guard !text.isEmpty,
-                let session = store.sessions
-                    .filter({ samePath($0.cwd, folder) })
-                    .max(by: { $0.updatedAt < $1.updatedAt })
+                let session = newest(listed.filter { isOpen($0) }) ?? newest(listed)
             else { continue }
             let existing = panel.notes(forSessionID: session.id, cwd: session.cwd)
             let section = "\n\n---\n\n" + text
@@ -634,10 +674,13 @@ final class AppModel {
         }
     }
 
-    private func pruningMissing(_ entries: [OpenTabsSnapshot.Entry]) -> [OpenTabsSnapshot.Entry] {
+    private func pruningMissing(
+        _ entries: [OpenTabsSnapshot.Entry], list: String
+    ) -> [OpenTabsSnapshot.Entry] {
         entries.filter { entry in
             store.sessions.contains { $0.id == entry.sessionID && samePath($0.cwd, entry.cwd) }
                 || tabs.contains { tabMatches($0, sessionID: entry.sessionID, cwd: entry.cwd) }
+                || awaitsScan(sharedKey(list, entry.sessionID, entry.cwd))
         }
     }
 
@@ -645,6 +688,7 @@ final class AppModel {
         paths.filter { path in
             store.sessions.contains { samePath($0.cwd, path) }
                 || tabs.contains { samePath($0.workingDirectory.path, path) }
+                || awaitsScan(sharedKey("project", path))
         }
     }
 
@@ -652,6 +696,7 @@ final class AppModel {
         names.filter { record in
             store.sessions.contains { $0.id == record.sessionID && samePath($0.cwd, record.cwd) }
                 || tabs.contains { tabMatches($0, sessionID: record.sessionID, cwd: record.cwd) }
+                || awaitsScan(sharedKey("name", record.sessionID, record.cwd))
         }
     }
 
@@ -661,6 +706,7 @@ final class AppModel {
             store.sessions.contains { $0.id != session.id && samePath($0.cwd, session.cwd) }
             || tabs.contains { samePath($0.workingDirectory.path, session.cwd) }
         if !othersRemain {
+            settings.reloadSharedLists()
             settings.pinnedProjects = SidebarOrganization.removing(
                 session.cwd, from: settings.pinnedProjects, samePath: samePath)
         }
@@ -683,6 +729,7 @@ final class AppModel {
     /// Empty, whitespace, or a name equal to the CLI title clears the override
     /// (a matching submit with no overlay is a no-op). Otherwise stores the name.
     func rename(_ session: GrokSession, to raw: String) {
+        settings.reloadSharedLists()
         let next = ConversationNaming.setting(
             raw, on: session, onto: settings.conversationNames, samePath: samePath)
         guard
@@ -713,6 +760,7 @@ final class AppModel {
         if renamingSessionKey == sessionKey(live) {
             endRenameSession()
         }
+        settings.reloadSharedLists()
         let next = ConversationNaming.removing(
             live, from: settings.conversationNames, samePath: samePath)
         guard
@@ -2289,8 +2337,8 @@ final class AppModel {
                 executable: settings.executableURL,
                 workingDirectory: workingDirectory,
                 mode: .resume(sessionID: entry.sessionID),
-                model: settings.model.nilIfEmpty,
-                reasoningEffort: settings.effort.nilIfEmpty,
+                model: entry.model.map(\.nilIfEmpty) ?? settings.model.nilIfEmpty,
+                reasoningEffort: entry.effort.map(\.nilIfEmpty) ?? settings.effort.nilIfEmpty,
                 themeName: settings.theme.grokThemeName,
                 themeVariables: settings.theme.grokThemeEnvironment
             )
@@ -2312,7 +2360,9 @@ final class AppModel {
         guard !isRestoringTabs else { return }
         var entries = tabs.compactMap { tab -> OpenTabsSnapshot.Entry? in
             guard let sessionID = tab.sessionID else { return nil }
-            return OpenTabsSnapshot.Entry(sessionID: sessionID, cwd: tab.workingDirectory.path)
+            return OpenTabsSnapshot.Entry(
+                sessionID: sessionID, cwd: tab.workingDirectory.path,
+                model: tab.spec.model ?? "", effort: tab.spec.reasoningEffort ?? "")
         }
         let liveKeys = Set(entries.map { entryKey($0) })
         entries.append(
