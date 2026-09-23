@@ -145,9 +145,6 @@ public final class TerminalController {
         terminalView.terminateHosted()
         isRunning = false
 
-        // Only replace a running escalation when there is a new child to chase;
-        // a second terminate() must not cancel the first one's escalation.
-        escalationTask?.cancel()
         escalationTask = Task { [weak self] in
             for delay in Self.escalationDelays {
                 try? await Task.sleep(for: delay)
