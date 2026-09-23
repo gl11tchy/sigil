@@ -51,8 +51,13 @@ struct SessionBucket: Identifiable {
         {
             return ("3-month", "Previous 30 days")
         }
-        let month = date.formatted(.dateTime.year().month(.wide))
-        return ("4-\(date.formatted(.iso8601.year().month()))", month)
+        // Key and title both come from the caller's calendar, so a local evening on
+        // the last day of a month never lands in the next month's bucket.
+        let parts = calendar.dateComponents([.year, .month], from: date)
+        let key = String(format: "4-%04d-%02d", parts.year ?? 0, parts.month ?? 0)
+        let style = Date.FormatStyle(
+            locale: calendar.locale ?? .current, calendar: calendar, timeZone: calendar.timeZone)
+        return (key, date.formatted(style.year().month(.wide)))
     }
 }
 
