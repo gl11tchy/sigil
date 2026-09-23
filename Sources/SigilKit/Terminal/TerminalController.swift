@@ -31,6 +31,12 @@ public final class TerminalController {
     private var reportsActivity = true
     private var didReportExit = false
 
+    /// Off by default, as in Terminal.app, so Option types the layout's characters.
+    public var optionAsMetaKey: Bool {
+        get { terminalView.optionAsMetaKey }
+        set { terminalView.optionAsMetaKey = newValue }
+    }
+
     public init(theme: TerminalTheme = .grokNight, fontSize: CGFloat = 13) {
         var options = TerminalOptions.default
         options.scrollback = 10_000
@@ -42,6 +48,7 @@ public final class TerminalController {
         )
         self.terminalView = terminal
         self.view = terminal
+        terminal.optionAsMetaKey = false
         terminal.processDelegate = self
         terminal.onChildOutput = { [weak self] in
             self?.noteActivity()

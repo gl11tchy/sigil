@@ -25,6 +25,7 @@ final class AppSettings {
         static let openTabs = "session.openTabs"
         static let model = "session.model"
         static let effort = "session.effort"
+        static let optionAsMeta = "terminal.optionAsMetaKey"
     }
 
     private let defaults: UserDefaults
@@ -132,6 +133,10 @@ final class AppSettings {
     var effort: String {
         didSet { defaults.set(effort, forKey: Key.effort) }
     }
+    /// Off by default, as in Terminal.app, so Option types the layout's characters.
+    var optionAsMetaKey: Bool {
+        didSet { defaults.set(optionAsMetaKey, forKey: Key.optionAsMeta) }
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -154,6 +159,7 @@ final class AppSettings {
         showEmptySessions = defaults.bool(forKey: Key.showEmptySessions)
         showWorktreeSessions = defaults.bool(forKey: Key.showWorktreeSessions)
         showSubagentSessions = defaults.bool(forKey: Key.showSubagentSessions)
+        optionAsMetaKey = defaults.bool(forKey: Key.optionAsMeta)
         if let raw = defaults.string(forKey: Key.sidebarMode),
             let mode = SidebarMode(rawValue: raw)
         {

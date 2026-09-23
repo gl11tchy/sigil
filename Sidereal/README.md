@@ -70,19 +70,24 @@ while a turn is running. Latest returns to the newest output.
 Drafts stay with each session until the page closes; a lost connection keeps them editable.
 Connection settings are under the dot in the top-right corner.
 The session title at the top switches between open sessions. Chats opens a
-searchable list of open and saved chats. Find searches the recent output with previous/next
+searchable list of open and saved chats; a saved chat opens on the Mac. Scroll to the
+top of the output to load earlier output. Find searches the recent output with previous/next
 matches. Connection settings also lets you copy the displayed output.
 Ended sessions offer Restart when the connected Mac supports it; drafts move to the
 restarted session. Older Macs still ask you to restart on the desktop.
 
-New starts a session in Sigil's current folder. Paste fills the prompt without
+New asks which project to use, then starts a session there. The project list,
+saved chats, and earlier output need Sigil from #54 or later. On an older Mac, New
+starts in Sigil's current folder and the other two show "Unknown action."
+
+Paste fills the prompt without
 submitting it. Send pastes, then presses Enter. Return in the phone message box
 adds a new line; Command/Ctrl+Return sends from a hardware keyboard.
 
 The terminal view is bounded plain text, not a pixel-perfect terminal emulator.
 It shows up to 100 open tabs and the latest 12 KB of readable output. Phone files
 are written into Sigil’s drop cache (4 MB each) and pasted as paths. It does not
-list closed conversations, resize the Mac terminal, or expose MCP.
+resize the Mac terminal or expose MCP.
 
 Sigil must be running to control sessions. Scan once; the phone reconnects after
 a Sigil restart, a Mac sleep, a relay restart, or a new room. Disconnect in Sigil
@@ -97,8 +102,11 @@ that credential. Use Disconnect on the Mac to revoke authorization.
 The QR carries a one-use bootstrap secret in its fragment. The phone replaces it
 with a different key during pairing. The relay sees room identifiers, timing and
 ciphertext sizes and routing tickets, but not session contents or device keys. AES-256-GCM binds
-message direction; Mac-generated connection challenges and sequences reject replay.
-The web host remains trusted to deliver the correct client JavaScript.
+message direction; Mac-generated connection challenges and sequences stop the Mac from
+accepting replayed phone requests. The Mac's challenge reaches the phone unsealed, so a
+relay that replays an earlier challenge can also replay the Mac's earlier replies to the
+phone. The web host, on the same origin as the relay, remains trusted to deliver the
+correct client JavaScript.
 
 Neither tickets nor room IDs enter WebSocket URLs. The relay sends a fresh per-connection routing
 key over WSS. The first client message is `{route: ciphertext}`: AES-256-GCM with

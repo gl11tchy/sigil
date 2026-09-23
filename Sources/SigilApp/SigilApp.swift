@@ -155,9 +155,15 @@ struct GrokCommands: Commands {
         }
 
         CommandGroup(after: .pasteboard) {
-            Button("Find") { model.toggleFindBar() }
+            Button("Find") { model.showFindBar() }
                 .keyboardShortcut("f", modifiers: .command)
                 .disabled(model.selectedTab == nil)
+            Button("Find Next") { model.findNextInTerminal() }
+                .keyboardShortcut("g", modifiers: .command)
+                .disabled(model.findMatchCount == 0)
+            Button("Find Previous") { model.findPreviousInTerminal() }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+                .disabled(model.findMatchCount == 0)
             Button("Find Conversations") { model.focusSidebarSearch() }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
         }

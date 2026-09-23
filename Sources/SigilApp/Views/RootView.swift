@@ -112,6 +112,7 @@ struct RootView: View {
                             query: Bindable(model).findQuery,
                             matchIndex: model.findMatchIndex,
                             matchCount: model.findMatchCount,
+                            focusToken: model.findFocusToken,
                             findNext: { model.findNextInTerminal() },
                             findPrevious: { model.findPreviousInTerminal() },
                             dismiss: { model.dismissFindBar() }
