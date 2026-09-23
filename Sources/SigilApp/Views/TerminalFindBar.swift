@@ -8,6 +8,8 @@ struct TerminalFindBar: View {
     /// One-based index of the current hit, or `0` when there are none.
     let matchIndex: Int
     let matchCount: Int
+    /// Changes when Cmd-F asks an open bar to take focus again.
+    let focusToken: Int
     let findNext: () -> Void
     let findPrevious: () -> Void
     let dismiss: () -> Void
@@ -56,12 +58,18 @@ struct TerminalFindBar: View {
                 )
         )
         .onExitCommand(perform: dismiss)
-        .task {
+        .task(id: focusToken) {
             // Focus set in the same transaction that inserts the bar loses to
             // whichever field already had it (the sidebar search). Yield once
             // so the bar exists before it asks.
             await Task.yield()
             isFieldFocused = true
+            await Task.yield()
+            // Select the query, as Cmd-F does in Safari and Xcode.
+            guard isFieldFocused, let editor = NSApp.keyWindow?.firstResponder as? NSTextView,
+                editor.isFieldEditor
+            else { return }
+            editor.selectAll(nil)
         }
     }
 

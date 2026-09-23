@@ -193,6 +193,14 @@ final class RemoteControl {
                                 let encrypted = try RemoteCrypto.seal(
                                     reply, key: session.deviceKey!, direction: "mac")
                                 try await self.send(Frame(peer: id, data: encrypted), socket: socket)
+                            } catch RemoteError.outOfBounds(let sequence) {
+                                // The pairing is fine; only this request was too large.
+                                let reply = RemoteReply(
+                                    challenge: session.challenge, sequence: sequence, ok: false,
+                                    error: "Too long to send. Shorten it and try again.")
+                                let encrypted = try RemoteCrypto.seal(
+                                    reply, key: session.deviceKey!, direction: "mac")
+                                try await self.send(Frame(peer: id, data: encrypted), socket: socket)
                             } catch {
                                 try await self.send(Frame(peer: id, error: "unauthorized"), socket: socket)
                             }

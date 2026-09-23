@@ -91,6 +91,32 @@ struct RemoteCommandsTests {
         #expect(model.selectedTabID == other.id)
     }
 
+    @Test @MainActor func restartAcceptsAWorkingDirectoryThatIsASymlinkToAFolder() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let folder = root.appendingPathComponent("folder")
+        let link = root.appendingPathComponent("link")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: folder)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executable = root.appendingPathComponent("fake-grok")
+        try Data("#!/bin/sh\nprintf 'REMOTE_READY\\n'\nsleep 60\n".utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let suite = "sigil-remote-test-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        settings.executablePath = executable.path
+        settings.defaultDirectory = root.path
+        let model = AppModel(settings: settings, presentError: { _ in })
+        defer { model.closeAllTabsAndWait() }
+        let tab = try #require(model.newTab(in: link))
+        tab.terminateAndWait()
+        let reply = RemoteCommands.execute(
+            RemoteRequest(challenge: "test", sequence: 1, action: "restart", tabID: tab.id.uuidString), model: model)
+        #expect(reply.error == nil)
+        #expect(reply.ok)
+    }
+
     @Test @MainActor func fileChunksWriteToTheDropCacheAndPasteThePath() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
