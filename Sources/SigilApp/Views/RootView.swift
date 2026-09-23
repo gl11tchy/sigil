@@ -222,7 +222,8 @@ private struct TopBar: View {
 
             IconButton(
                 systemImage: "sidebar.leading",
-                help: model.isSidebarVisible ? "Hide Sidebar (⌘B)" : "Show Sidebar (⌘B)"
+                help: model.isSidebarVisible ? "Hide Sidebar (⌘B)" : "Show Sidebar (⌘B)",
+                isOn: model.isSidebarVisible
             ) {
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
                     model.isSidebarVisible.toggle()
@@ -243,7 +244,8 @@ private struct TopBar: View {
 
             IconButton(
                 systemImage: "sidebar.trailing",
-                help: model.panel.isVisible ? "Hide Panel (⌥⌘B)" : "Show Panel (⌥⌘B)"
+                help: model.panel.isVisible ? "Hide Panel (⌥⌘B)" : "Show Panel (⌥⌘B)",
+                isOn: model.panel.isVisible
             ) {
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) { model.togglePanel() }
             }
@@ -318,6 +320,7 @@ private struct TopBar: View {
 struct IconButton: View {
     let systemImage: String
     var help: String = ""
+    var isOn = false
     let action: () -> Void
 
     @Environment(\.palette) private var palette
@@ -330,15 +333,16 @@ struct IconButton: View {
                 .frame(width: 22, height: 22)
                 .background(
                     RoundedRectangle(cornerRadius: 5)
-                        .fill(isHovering ? palette.raised : Color.clear)
+                        .fill(isOn ? palette.selected : (isHovering ? palette.raised : Color.clear))
                 )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(isHovering ? palette.text : palette.textDim)
+        .foregroundStyle(isOn || isHovering ? palette.text : palette.textDim)
         .onHover { isHovering = $0 }
         .help(help)
         .accessibilityLabel(help)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }
 
