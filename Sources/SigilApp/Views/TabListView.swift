@@ -228,6 +228,13 @@ private struct TabListRow: View {
             .background(
                 RoundedRectangle(cornerRadius: 6)
                     .fill(fill)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(
+                                isHighlighted ? palette.hairline : Color.clear,
+                                lineWidth: 1
+                            )
+                    )
             )
         }
         .buttonStyle(.plain)
