@@ -610,8 +610,7 @@ final class AppModel {
         var remaining = legacy
         for (folder, text) in legacy {
             let listed = store.sessions.filter {
-                samePath($0.cwd, folder) && !isArchived($0) && !$0.isSubagent
-                    && (isReal($0) || isOpen($0))
+                samePath($0.cwd, folder) && !isArchived($0) && passesSidebarFilters($0)
             }
             let newest = { (sessions: [GrokSession]) in
                 sessions.max(by: { $0.updatedAt < $1.updatedAt })

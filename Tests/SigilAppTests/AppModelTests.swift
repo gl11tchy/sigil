@@ -3304,6 +3304,8 @@ struct AppModelTests {
         try fixture.writeListedSession(
             id: "new", cwd: cwd.path, summary: "New", updatedAt: "2026-08-01T00:00:00Z")
         await fixture.store.reload()
+        // Fixture folders are temporary, which the sidebar treats as worktrees.
+        fixture.settings.showWorktreeSessions = true
         let orphanPath = fixture.root.appendingPathComponent("nowhere").path
         let legacy = [cwd.path: "folder note", orphanPath: "orphan note"]
         fixture.defaults.set(try JSONEncoder().encode(legacy), forKey: "panel.notes")
@@ -3381,6 +3383,8 @@ struct AppModelTests {
         try fixture.writeListedSession(
             id: "closed-newer", cwd: withTab.path, summary: "Closed", updatedAt: "2026-08-01T00:00:00Z")
         await fixture.store.reload()
+        // Fixture folders are temporary, which the sidebar treats as worktrees.
+        fixture.settings.showWorktreeSessions = true
         fixture.settings.archivedConversations = [.init(sessionID: "archived", cwd: cwd.path)]
         let legacy = [cwd.path: "folder note", hiddenOnly.path: "kept note", withTab.path: "tab note"]
         fixture.defaults.set(try JSONEncoder().encode(legacy), forKey: "panel.notes")
@@ -3404,12 +3408,40 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func legacyFolderNotesFollowTheSidebarFilterSettings() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let children = try fixture.directory("children")
+        try fixture.writeListedSession(
+            id: "child", cwd: children.path, summary: "Child", sessionKind: "subagent")
+        await fixture.store.reload()
+        fixture.settings.showSubagentSessions = true
+        fixture.defaults.set(
+            try JSONEncoder().encode([children.path: "child note"]), forKey: "panel.notes")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        // Fixture folders are temporary, so a hidden worktree cannot take the note.
+        model.migrateLegacyPanelNotes()
+        #expect(model.panel.notes(forSessionID: "child", cwd: children.path) == "")
+        #expect(model.panel.legacyFolderNotes == [children.path: "child note"])
+
+        // Once the sidebar lists it, a subagent conversation takes the note.
+        fixture.settings.showWorktreeSessions = true
+        model.migrateLegacyPanelNotes()
+        #expect(model.panel.notes(forSessionID: "child", cwd: children.path) == "child note")
+        #expect(model.panel.legacyFolderNotes.isEmpty)
+    }
+
+    @Test @MainActor
     func legacyMigrationAppendsWhenTheTargetConversationAlreadyHasANote() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
         let cwd = try fixture.directory("project")
         try fixture.writeListedSession(id: "new", cwd: cwd.path, summary: "New")
         await fixture.store.reload()
+        // Fixture folders are temporary, which the sidebar treats as worktrees.
+        fixture.settings.showWorktreeSessions = true
         let model = fixture.model()
         defer { model.closeAllTabsAndWait() }
         // The user typed a note before the migration ran.
@@ -3432,6 +3464,8 @@ struct AppModelTests {
         let cwd = try fixture.directory("project")
         try fixture.writeListedSession(id: "new", cwd: cwd.path, summary: "New")
         await fixture.store.reload()
+        // Fixture folders are temporary, which the sidebar treats as worktrees.
+        fixture.settings.showWorktreeSessions = true
         let model = fixture.model()
         defer { model.closeAllTabsAndWait() }
         model.panel.setNotes("TODO later", forSessionID: "new", cwd: cwd.path)
@@ -3452,6 +3486,8 @@ struct AppModelTests {
         let cwd = try fixture.directory("project")
         try fixture.writeListedSession(id: "new", cwd: cwd.path, summary: "New")
         await fixture.store.reload()
+        // Fixture folders are temporary, which the sidebar treats as worktrees.
+        fixture.settings.showWorktreeSessions = true
         let model = fixture.model()
         defer { model.closeAllTabsAndWait() }
         model.panel.setNotes("mine\n\n---\n\nfolder note", forSessionID: "new", cwd: cwd.path)
