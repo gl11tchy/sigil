@@ -292,7 +292,7 @@ private struct TopBar: View {
             HStack(spacing: 6) {
                 StatusDot(activity: tab.activity)
                 Text(model.title(for: tab))
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(palette.text)
                     .lineLimit(1)
                 if let folder = SelectedSessionFolder.text(
@@ -505,7 +505,7 @@ private struct EmptyDetailView: View {
     var body: some View {
         VStack(spacing: 7) {
             Text("No open session")
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 12))
                 .foregroundStyle(palette.textDim)
             HStack(spacing: 5) {
                 Text("Press")

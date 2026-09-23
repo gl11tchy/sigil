@@ -9,7 +9,7 @@ struct KbdChip: View {
 
     var body: some View {
         Text(label)
-            .font(.system(size: 9, weight: .medium, design: .monospaced))
+            .font(.system(size: 9.5, weight: .medium, design: .monospaced))
             .foregroundStyle(palette.textDim)
             .padding(.horizontal, 4)
             .padding(.vertical, 2)
