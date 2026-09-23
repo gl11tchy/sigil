@@ -196,6 +196,56 @@ struct AppShellTests {
         #expect(!model.needsTerminalFocus)
     }
 
+    @Test func hidingThePanelGivesFocusBackToTheTerminal() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        let tab = try #require(model.newTab(in: try fixture.directory("project")))
+        defer { model.closeAllTabsAndWait() }
+        let window = makeClosableWindow()
+        let notes = NSTextView()
+        try #require(window.contentView).addSubview(notes)
+        try #require(window.contentView).addSubview(tab.controller.view)
+        defer { tab.controller.view.removeFromSuperview() }
+
+        for hide in [{ model.togglePanel() }, { model.showPanel(.notes) }] {
+            model.panel.mode = .notes
+            model.panel.isVisible = true
+            #expect(window.makeFirstResponder(notes))
+            await flushMainAsync()
+            model.needsTerminalFocus = false
+
+            hide()
+            await flushMainAsync()
+
+            #expect(!model.panel.isVisible)
+            #expect(model.needsTerminalFocus)
+        }
+    }
+
+    @Test func hidingThePanelLeavesFocusInTheSidebar() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        let tab = try #require(model.newTab(in: try fixture.directory("project")))
+        defer { model.closeAllTabsAndWait() }
+        let window = makeClosableWindow()
+        let sidebarList = FocusableView()
+        try #require(window.contentView).addSubview(sidebarList)
+        try #require(window.contentView).addSubview(tab.controller.view)
+        defer { tab.controller.view.removeFromSuperview() }
+        model.panel.mode = .notes
+        model.panel.isVisible = true
+        #expect(window.makeFirstResponder(sidebarList))
+        await flushMainAsync()
+        model.needsTerminalFocus = false
+
+        model.togglePanel()
+        await flushMainAsync()
+
+        #expect(!model.needsTerminalFocus)
+    }
+
     private func makeClosableWindow() -> NSWindow {
         _ = NSApplication.shared
         let window = NSWindow(

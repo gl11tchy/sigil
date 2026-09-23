@@ -1815,14 +1815,18 @@ final class AppModel {
 
     /// Shows `mode` in the panel, or hides the panel when that tool is already up.
     func showPanel(_ mode: RightPanelMode) {
+        let wasVisible = panel.isVisible
         panel.toggle(mode, in: currentDirectory)
         preparePanel()
+        if wasVisible, !panel.isVisible { refocusTerminalAfterHiding(.panel) }
     }
 
     /// Opens or closes the panel on whatever tool it last showed.
     func togglePanel() {
+        let wasVisible = panel.isVisible
         panel.toggle(nil, in: currentDirectory)
         preparePanel()
+        if wasVisible, !panel.isVisible { refocusTerminalAfterHiding(.panel) }
     }
 
     /// Kills the scratch shell and starts a new one in the current folder.

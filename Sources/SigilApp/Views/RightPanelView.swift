@@ -53,7 +53,7 @@ struct RightPanelView: View {
             EmptyView()
         }
         IconButton(systemImage: "xmark", help: "Close Panel (⌥⌘B)") {
-            panel.isVisible = false
+            model.togglePanel()
         }
         .padding(.trailing, 2)
     }
