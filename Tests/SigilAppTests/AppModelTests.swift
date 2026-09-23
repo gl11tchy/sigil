@@ -148,6 +148,31 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func restoreKeepsATabsChosenCLIDefault() throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
+        defer { fixture.cleanup() }
+        fixture.settings.model = "model-a"
+        fixture.settings.effort = "low"
+        let chosen = try fixture.directory("chosen")
+
+        let first = fixture.model()
+        // "CLI default" in the new-session sheet overrides the Settings default.
+        let tab = try #require(first.newTab(in: chosen, model: "", effort: ""))
+        let sessionID = try #require(tab.sessionID)
+        try fixture.createSession(id: sessionID, cwd: chosen)
+        let snapshot = fixture.settings.openTabs
+        first.closeAllTabsAndWait()
+        fixture.settings.openTabs = snapshot
+
+        let second = fixture.model()
+        defer { second.closeAllTabsAndWait() }
+        second.restoreOpenTabs()
+        let restored = try #require(second.tabs.first { $0.sessionID == sessionID })
+        #expect(restored.spec.model == nil)
+        #expect(restored.spec.reasoningEffort == nil)
+    }
+
+    @Test @MainActor
     func unavailableRestoredTabIsNotErased() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
@@ -304,7 +329,7 @@ struct AppModelTests {
 
         #expect(model.tabs.count == 1)
         #expect(model.tabs[0].workingDirectory.resolvingSymlinksInPath().path == cwdB.path)
-        #expect(fixture.settings.openTabs.tabs == [.init(sessionID: id, cwd: cwdB.path)])
+        #expect(fixture.settings.openTabs.tabs == [.init(sessionID: id, cwd: cwdB.path, model: "", effort: "")])
         #expect(fixture.settings.openTabs.selectedCWD == cwdB.path)
         model.closeAllTabsAndWait()
     }

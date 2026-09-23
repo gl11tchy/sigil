@@ -8,8 +8,8 @@ public struct OpenTabsSnapshot: Codable, Equatable, Sendable {
     public struct Entry: Codable, Equatable, Sendable {
         public var sessionID: String
         public var cwd: String
-        /// The tab's model and reasoning effort. Nil in older snapshots and
-        /// for tabs on the Settings default; restore then uses Settings.
+        /// The tab's model and reasoning effort. Empty means the CLI default.
+        /// Nil only in older snapshots; restore then uses Settings.
         public var model: String?
         public var effort: String?
 

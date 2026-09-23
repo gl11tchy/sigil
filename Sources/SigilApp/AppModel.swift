@@ -2268,8 +2268,8 @@ final class AppModel {
                 executable: settings.executableURL,
                 workingDirectory: workingDirectory,
                 mode: .resume(sessionID: entry.sessionID),
-                model: entry.model ?? settings.model.nilIfEmpty,
-                reasoningEffort: entry.effort ?? settings.effort.nilIfEmpty,
+                model: entry.model.map(\.nilIfEmpty) ?? settings.model.nilIfEmpty,
+                reasoningEffort: entry.effort.map(\.nilIfEmpty) ?? settings.effort.nilIfEmpty,
                 themeName: settings.theme.grokThemeName,
                 themeVariables: settings.theme.grokThemeEnvironment
             )
@@ -2293,7 +2293,7 @@ final class AppModel {
             guard let sessionID = tab.sessionID else { return nil }
             return OpenTabsSnapshot.Entry(
                 sessionID: sessionID, cwd: tab.workingDirectory.path,
-                model: tab.spec.model, effort: tab.spec.reasoningEffort)
+                model: tab.spec.model ?? "", effort: tab.spec.reasoningEffort ?? "")
         }
         let liveKeys = Set(entries.map { entryKey($0) })
         entries.append(
