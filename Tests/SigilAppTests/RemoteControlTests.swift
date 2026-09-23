@@ -98,6 +98,41 @@ struct RemoteControlTests {
         #expect(pasteboard.types?.contains(NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")) == true)
     }
 
+    @Test @MainActor func disconnectStopsAnotherCopyUsingTheSamePairing() async throws {
+        let origin = "http://127.0.0.1:9"
+        let store = InMemoryRemotePairingStore()
+        store.save(RemotePairing(origin: origin, deviceKey: RemoteCrypto.randomKey(), ticket: RemoteCrypto.randomKey()))
+        let center = NotificationCenter()
+        let model = AppModel()
+        let installed = RemoteControl(store: store, notifications: center)
+        let other = RemoteControl(store: store, notifications: center)
+        defer { other.stop() }
+        installed.resumeIfPaired(model: model)
+        other.resumeIfPaired(model: model)
+        #expect(other.isPaired)
+        installed.stop(revoke: true)
+        for _ in 0..<50 where other.isEnabled {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(!other.isEnabled)
+        #expect(!installed.revokeFailed)
+    }
+
+    @Test @MainActor func aRevokeNoticeIsIgnoredWhileThePairingIsStillSaved() async throws {
+        let store = InMemoryRemotePairingStore()
+        store.save(
+            RemotePairing(
+                origin: "http://127.0.0.1:9", deviceKey: RemoteCrypto.randomKey(), ticket: RemoteCrypto.randomKey()))
+        let center = NotificationCenter()
+        let remote = RemoteControl(store: store, notifications: center)
+        defer { remote.stop() }
+        remote.resumeIfPaired(model: AppModel())
+        center.post(name: RemoteControl.revokedNotification, object: nil)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(remote.isEnabled)
+        #expect(store.load() != nil)
+    }
+
     @Test @MainActor func launchReadsTheSavedPairingOnlyOnce() {
         let store = CountingStore(
             pairing: RemotePairing(

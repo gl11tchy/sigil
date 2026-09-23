@@ -22,10 +22,22 @@ final class RemoteControl {
     @ObservationIgnored private var generation = UUID()
     @ObservationIgnored private var network: URLSession?
     @ObservationIgnored private let store: any RemotePairingStore
+    @ObservationIgnored private let notifications: NotificationCenter
 
-    init(store: any RemotePairingStore = KeychainRemotePairingStore()) {
+    /// Posted after a revoke, so another running copy of Sigil stops using the pairing.
+    static let revokedNotification = Notification.Name("com.gl11tchy.sigil.remote.revoked")
+
+    /// Production passes DistributedNotificationCenter; the default stays in this process.
+    init(
+        store: any RemotePairingStore = KeychainRemotePairingStore(),
+        notifications: NotificationCenter = NotificationCenter()
+    ) {
         self.store = store
+        self.notifications = notifications
         revokeFailed = store.revokeFailed
+        notifications.addObserver(forName: Self.revokedNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.revokedElsewhere() }
+        }
     }
 
     static let productionOrigin = "https://remote.sigilapp.dev"
@@ -270,6 +282,18 @@ final class RemoteControl {
         expiresAt = nil
         status = "Off"
         error = forgotten ? nil : "Could not forget this phone. Try Disconnect again."
+        guard revoke, forgotten else { return }
+        if let distributed = notifications as? DistributedNotificationCenter {
+            distributed.postNotificationName(Self.revokedNotification, object: nil, deliverImmediately: true)
+        } else {
+            notifications.post(name: Self.revokedNotification, object: nil)
+        }
+    }
+
+    private func revokedElsewhere() {
+        // Any local process can post the notice, so act only once the saved pairing is gone.
+        guard isEnabled, isPaired, case .success(nil) = Result(catching: { try store.load() }) else { return }
+        stop(revoke: true)
     }
 
     /// The relay drops a silent host while this Mac sleeps, and the FIN can be
