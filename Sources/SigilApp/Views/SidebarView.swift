@@ -35,6 +35,19 @@ enum ProjectRowAccessibility {
     }
 }
 
+/// The outline on the arrow-key row, the only mark of where the keys are. The
+/// hairline reads about 1.25:1 on the raised fill; with Increase Contrast on it
+/// steps up to textFaint at 1.5pt, which clears 3:1 (WCAG 1.4.11).
+enum KeyboardRowOutline {
+    static func color(_ contrast: ColorSchemeContrast) -> KeyPath<Palette, Color> {
+        contrast == .increased ? \.textFaint : \.hairline
+    }
+
+    static func width(_ contrast: ColorSchemeContrast) -> CGFloat {
+        contrast == .increased ? 1.5 : 1
+    }
+}
+
 /// The thread viewer: every Grok Build conversation on this machine.
 ///
 /// Home is the project list. Recents and Archived sit under it as destinations
@@ -1274,6 +1287,7 @@ private struct DestinationRow: View {
     let open: () -> Void
 
     @Environment(\.palette) private var palette
+    @Environment(\.colorSchemeContrast) private var contrast
     @State private var isHovering = false
 
     var body: some View {
@@ -1322,8 +1336,9 @@ private struct DestinationRow: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
                     .strokeBorder(
-                        isKeyboardSelected ? palette.hairline : Color.clear,
-                        lineWidth: 1
+                        isKeyboardSelected
+                            ? palette[keyPath: KeyboardRowOutline.color(contrast)] : Color.clear,
+                        lineWidth: KeyboardRowOutline.width(contrast)
                     )
             )
     }
@@ -1343,6 +1358,7 @@ private struct OpenTabRow: View {
     let close: () -> Void
 
     @Environment(\.palette) private var palette
+    @Environment(\.colorSchemeContrast) private var contrast
     @State private var isHovering = false
 
     var body: some View {
@@ -1376,8 +1392,9 @@ private struct OpenTabRow: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
                         .strokeBorder(
-                            isKeyboardSelected && !isSelected ? palette.hairline : Color.clear,
-                            lineWidth: 1
+                            isKeyboardSelected && !isSelected
+                                ? palette[keyPath: KeyboardRowOutline.color(contrast)] : Color.clear,
+                            lineWidth: KeyboardRowOutline.width(contrast)
                         )
                 )
         )
@@ -1458,6 +1475,7 @@ private struct ProjectListRow: View {
     var archive: (() -> Void)? = nil
 
     @Environment(\.palette) private var palette
+    @Environment(\.colorSchemeContrast) private var contrast
     @State private var isHovering = false
 
     var body: some View {
@@ -1544,8 +1562,9 @@ private struct ProjectListRow: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
                     .strokeBorder(
-                        isKeyboardSelected ? palette.hairline : Color.clear,
-                        lineWidth: 1
+                        isKeyboardSelected
+                            ? palette[keyPath: KeyboardRowOutline.color(contrast)] : Color.clear,
+                        lineWidth: KeyboardRowOutline.width(contrast)
                     )
             )
     }
@@ -1748,6 +1767,7 @@ private struct SessionRow: View {
     @FocusState.Binding var focus: SidebarFocus?
 
     @Environment(\.palette) private var palette
+    @Environment(\.colorSchemeContrast) private var contrast
     @SwiftUI.State private var isHovering = false
     @SwiftUI.State private var suppressBlurCommit = false
     @SwiftUI.State private var blurCommitTask: Task<Void, Never>?
@@ -1855,7 +1875,8 @@ private struct SessionRow: View {
             .fill(fill)
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(stroke, lineWidth: 1)
+                    .strokeBorder(
+                        stroke, lineWidth: isMultiSelected ? 1 : KeyboardRowOutline.width(contrast))
             )
     }
 
@@ -1865,7 +1886,7 @@ private struct SessionRow: View {
     private var stroke: Color {
         if isMultiSelected { return palette.accent }
         if state == .active { return .clear }
-        if isKeyboardSelected { return palette.hairline }
+        if isKeyboardSelected { return palette[keyPath: KeyboardRowOutline.color(contrast)] }
         return .clear
     }
 
