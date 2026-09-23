@@ -2410,7 +2410,7 @@ private struct AppActionError: Error, LocalizedError {
     let message: String
 
     var errorDescription: String? { title }
-    var failureReason: String? { message }
+    var recoverySuggestion: String? { message }
 }
 
 private struct TranscriptExportError: Error, LocalizedError, Sendable {
