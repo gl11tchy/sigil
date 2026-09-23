@@ -50,12 +50,20 @@ struct NewSessionSheet: View {
         _provider = State(initialValue: provider)
     }
 
-    private var recents: [URL] {
+    private var recents: [URL] { Self.recentDirectories(in: model) }
+
+    /// Distinct folders of recent conversations, filtered like the sidebar so
+    /// agent worktrees, subagents and archived chats do not crowd out projects.
+    static func recentDirectories(in model: AppModel) -> [URL] {
         var seen = Set<String>()
+        let settings = model.settings
         return model.store.sessions.compactMap { session in
+            if !settings.showWorktreeSessions, isEphemeral(path: session.cwd) { return nil }
+            if !settings.showSubagentSessions, session.isSubagent { return nil }
+            if model.isArchived(session) { return nil }
             let url = URL(fileURLWithPath: GrokPaths.canonicalPath(session.cwd))
             guard seen.insert(url.path).inserted else { return nil }
-            return isDirectory(url) ? url : nil
+            return AppModel.isUsableDirectory(url) ? url : nil
         }
         .prefix(8)
         .map { $0 }

@@ -3342,6 +3342,32 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func newSessionRecentsSkipFoldersTheSidebarHides() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let project = try fixture.directory("project")
+        let archivedOnly = try fixture.directory("archived-only")
+        let subagentOnly = try fixture.directory("subagent-only")
+        try fixture.writeListedSession(id: "real", cwd: project.path, summary: "Real")
+        try fixture.writeListedSession(id: "old", cwd: archivedOnly.path, summary: "Old")
+        try fixture.writeListedSession(
+            id: "child", cwd: subagentOnly.path, summary: "Child", sessionKind: "subagent")
+        await fixture.store.reload()
+        fixture.settings.archivedConversations = [.init(sessionID: "old", cwd: archivedOnly.path)]
+        // Every test folder is under the temporary folder, which counts as scratch.
+        fixture.settings.showWorktreeSessions = true
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        func recents() -> Set<String> { Set(NewSessionSheet.recentDirectories(in: model).map(\.path)) }
+
+        #expect(recents() == [GrokPaths.canonicalPath(project.path)])
+        fixture.settings.showSubagentSessions = true
+        #expect(recents() == [GrokPaths.canonicalPath(project.path), GrokPaths.canonicalPath(subagentOnly.path)])
+        fixture.settings.showWorktreeSessions = false
+        #expect(recents().isEmpty)
+    }
+
+    @Test @MainActor
     func legacyMigrationAppendsWhenTheTargetConversationAlreadyHasANote() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
