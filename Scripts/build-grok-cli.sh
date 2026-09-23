@@ -40,9 +40,16 @@ git cat-file -e "$UPSTREAM_REV^{commit}" || {
   exit 1
 }
 
-# Read the log once: `git log | grep -q` can die of SIGPIPE under pipefail.
-recent="$(git log --oneline -20)"
 # The patches are written against UPSTREAM_REV, not whatever HEAD the clone has.
+# An applied patch counts only when it sits directly on that revision: patches
+# left on an older pin, or on a HEAD moved past it, start over from the pin.
+patch_commits="$(awk '/^From [0-9a-f]{40} /{n++} END{print n+0}' "$PATCH" "$HOST_PATCH")"
+recent=""
+if git merge-base --is-ancestor "$UPSTREAM_REV" HEAD &&
+  (($(git rev-list --count "$UPSTREAM_REV..HEAD") <= patch_commits)); then
+  # Read the log once: `git log | grep -q` can die of SIGPIPE under pipefail.
+  recent="$(git log --oneline -20)"
+fi
 if [[ "$recent" != *"Sigil Neon"* && "$recent" != *"GROK_THEME_*"* ]]; then
   echo "==> checking out $UPSTREAM_REV"
   git checkout --detach "$UPSTREAM_REV"
