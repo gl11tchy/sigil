@@ -1,0 +1,35 @@
+a195: sessions folder /tmp/sigil-ux/home/.grok/sessions renamed and restored; sidebar rows read through System Events on process SigilUX (Recents list).
+
+== Run 1: app running, 3 tabs open
+-- 1. before rename
+sidebar list: rows(AXButton)=13, headings=5
+-- 2. folder renamed to sessions.qa-renamed while running (read 5 s and 13 s later; SigilUX pid 92236 still alive)
+sidebar list: rows(AXButton)=13, headings=5
+   The list keeps its cached rows: SessionScanner returns cachedSessions(cache) when a root that held sessions disappears, and the new pruneMissingPins guard keeps pins. The terminal traceback in pst-a195-2 is the harness fake CLI losing its journal folder, not the app.
+-- 3. folder renamed back (pid 92236 still alive)
+sidebar list: rows(AXButton)=13, headings=5
+
+== Run 2: the commit's case, app launched with the folder missing (no tabs restored, so the fake CLI cannot recreate it)
+-- 4. launched without the folder
+sidebar list: rows(AXButton)=0, headings=0
+  text: No conversations yet
+  text: Press
+  text: ⌘T
+  text: to start one. It shows up here as soon as it has a name.
+
+   (no "Could not load conversations" error)
+-- 5. folder renamed back while running, 6 s later (pid 94611 still alive)
+sidebar list: rows(AXButton)=12, headings=5
+  row: Make the sidebar search rank folders too [Closed]
+  row: Summarise the acme-api service and its layout [Closed]
+  row: Explain how tab restore picks the selected tab [Closed]
+  row: Fix the 401 on expired refresh tokens [Closed]
+  row: Rate limit the token endpoint [Closed]
+  row: Dark mode for the settings panel [Closed]
+  row: Replace the date picker with a native one [Closed]
+  row: Why does the checkout page flash on load [Closed]
+  row: Add a keyboard shortcut for renaming [Closed]
+  row: Audit the remote relay for replay protection [Closed]
+  row: Rotate the staging database credentials [Closed]
+  row: Cut the NAT gateway bill in half [Closed]
+
