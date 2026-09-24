@@ -38,18 +38,15 @@ public enum GrokPaths {
     ) -> String? {
         let marker = "__SIGIL_GROK_HOME__="
         let requested = environment["SHELL"] ?? "/bin/zsh"
-        let shell = FileManager.default.isExecutableFile(atPath: requested) ? requested : "/bin/zsh"
-        let arguments: [String]
-        switch URL(fileURLWithPath: shell).lastPathComponent {
-        case "zsh", "bash", "sh":
-            arguments = ["-lic", "printf '\\n%s%s\\n' \"$1\" \"$GROK_HOME\"", "sigil-grok-home", marker]
-        case "fish":
-            arguments = ["-lic", "printf '\\n%s%s\\n' $argv[1] \"$GROK_HOME\"", marker]
-        default:
-            // Grok tabs run the CLI directly under other shells, so it sees
-            // the app's own environment.
-            return nil
+        var shell = FileManager.default.isExecutableFile(atPath: requested) ? requested : "/bin/zsh"
+        // Grok tabs fall back to zsh for any other shell.
+        if !["zsh", "bash", "sh", "fish"].contains(URL(fileURLWithPath: shell).lastPathComponent) {
+            shell = "/bin/zsh"
         }
+        let arguments =
+            URL(fileURLWithPath: shell).lastPathComponent == "fish"
+            ? ["-lic", "printf '\\n%s%s\\n' $argv[1] \"$GROK_HOME\"", marker]
+            : ["-lic", "printf '\\n%s%s\\n' \"$1\" \"$GROK_HOME\"", "sigil-grok-home", marker]
         let process = Process()
         process.executableURL = URL(fileURLWithPath: shell)
         process.arguments = arguments

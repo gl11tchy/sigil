@@ -328,6 +328,7 @@ final class AppModel {
 
     func isWorking(_ project: SidebarProject) -> Bool {
         project.sessions.contains { isWorking($0) }
+            || tabs.contains { $0.activity == .working && inProject($0.workingDirectory.path, project.cwd) }
     }
 
     func isPinned(_ session: GrokSession) -> Bool {
@@ -456,6 +457,7 @@ final class AppModel {
             return
         }
         unpin(project)
+        removeAddedProject(project.cwd)
         stopAndWait(projectTabs)
         archiveWithoutAsking(store.sessions.filter { inProject($0.cwd, project.cwd) })
         for tab in projectTabs {
@@ -521,7 +523,73 @@ final class AppModel {
     }
 
     var sidebarProjects: [SidebarProject] {
-        SidebarOrganization.projects(from: sidebarSessions, canonicalPath: canonicalPath)
+        let projects = SidebarOrganization.projects(from: sidebarSessions, canonicalPath: canonicalPath)
+        // A search ranks by match and Archived lists only archived chats.
+        guard !SidebarOrganization.isSearching(searchText), sidebarSurface != .archived else {
+            return projects
+        }
+        return SidebarOrganization.merging(
+            added: settings.addedProjects, into: projects, canonicalPath: canonicalPath)
+    }
+
+    /// Adds a folder to Projects before it has a chat.
+    func addProject(_ directory: URL) {
+        settings.reloadSharedLists()
+        var added = settings.addedProjects
+        added.removeAll { samePath($0.path, directory.path) }
+        added.insert(AddedProject(path: directory.path, addedAt: Date()), at: 0)
+        settings.addedProjects = added
+    }
+
+    func chooseProjectToAdd() {
+        if let directory = pickDirectory(prompt: "Add Project") { addProject(directory) }
+    }
+
+    private func removeAddedProject(_ path: String) {
+        settings.reloadSharedLists()
+        let added = settings.addedProjects.filter { !samePath($0.path, path) }
+        if added != settings.addedProjects { settings.addedProjects = added }
+    }
+
+    /// An added folder with no conversations at all, hidden ones included.
+    /// Removing it drops only the folder entry, never a chat.
+    func isRemovableOnly(_ project: SidebarProject) -> Bool {
+        isAddedProject(project.cwd) && !store.sessions.contains { inProject($0.cwd, project.cwd) }
+    }
+
+    /// The row's archive control: removal for a chatless added folder.
+    func archiveOrRemove(_ project: SidebarProject) {
+        if isRemovableOnly(project) { removeProject(project) } else { archive(project) }
+    }
+
+    /// Drops an added folder and closes every tab in it, whatever the CLI.
+    func removeProject(_ project: SidebarProject) {
+        let projectTabs = tabs.filter { inProject($0.workingDirectory.path, project.cwd) }
+        if let prompt = StopWorkingPrompt(action: .closeTab, stopping: projectTabs),
+            !confirmStop(prompt)
+        {
+            return
+        }
+        unpin(project)
+        removeAddedProject(project.cwd)
+        stopAndWait(projectTabs)
+        for tab in projectTabs {
+            if let index = tabs.firstIndex(where: { $0.id == tab.id }) { removeTab(at: index) }
+        }
+        refreshDockIndicator()
+        persistOpenTabs()
+        if focusedProject.map({ samePath($0.cwd, project.cwd) }) == true {
+            leaveProject()
+        }
+    }
+
+    /// The selected tab runs in this folder, whatever the CLI.
+    func hasSelectedTab(in project: SidebarProject) -> Bool {
+        selectedTab.map { inProject($0.workingDirectory.path, project.cwd) } ?? false
+    }
+
+    private func isAddedProject(_ path: String) -> Bool {
+        settings.addedProjects.contains { samePath($0.path, path) }
     }
 
     var focusedProject: SidebarProject? {
@@ -532,6 +600,10 @@ final class AppModel {
         else { return nil }
         return project(at: path, from: sidebarSessions)
             ?? project(at: path, from: store.sessions)
+            ?? SidebarOrganization.merging(
+                added: settings.addedProjects.filter { samePath($0.path, path) },
+                into: [], canonicalPath: canonicalPath
+            ).first
     }
 
     private func project(at path: String, from sessions: [GrokSession]) -> SidebarProject? {
@@ -617,6 +689,12 @@ final class AppModel {
         if remainingProjectPins != settings.pinnedProjects {
             settings.pinnedProjects = remainingProjectPins
         }
+        let remainingAdded = settings.addedProjects.filter {
+            Self.isUsableDirectory(URL(fileURLWithPath: $0.path))
+        }
+        if remainingAdded != settings.addedProjects {
+            settings.addedProjects = remainingAdded
+        }
         let remainingArchives = pruningMissing(settings.archivedConversations, list: "archive")
         if remainingArchives != settings.archivedConversations {
             settings.archivedConversations = remainingArchives
@@ -628,7 +706,8 @@ final class AppModel {
         let focused = settings.focusedProjectPath
         if !focused.isEmpty,
             !SidebarOrganization.isSentinel(focused),
-            !store.sessions.contains(where: { inProject($0.cwd, focused) })
+            !store.sessions.contains(where: { inProject($0.cwd, focused) }),
+            !isAddedProject(focused)
         {
             settings.focusedProjectPath = ""
         }
@@ -733,6 +812,7 @@ final class AppModel {
         paths.filter { path in
             store.sessions.contains { inProject($0.cwd, path) }
                 || tabs.contains { inProject($0.workingDirectory.path, path) }
+                || isAddedProject(path)
                 || awaitsScan(sharedKey("project", path))
         }
     }
@@ -1451,6 +1531,11 @@ final class AppModel {
         selectedTabID = tab.id
         if !isRestoringTabs { clearDeferredSelection() }
         if !isRestoringTabs { rememberDefaultDirectory(spec.workingDirectory) }
+        // Grok writes a session the sidebar finds. Other CLIs do not, so
+        // record their folder or it never shows up in Projects.
+        if !isRestoringTabs, spec.provider != .grokBuild, !isEphemeral(path: spec.workingDirectory.path) {
+            addProject(spec.workingDirectory)
+        }
         // Opened by hand now, so closing it must not bring the saved entry back.
         if !isRestoringTabs, let sessionID = tab.sessionID {
             deferredOpenTabs.removeAll {
@@ -2592,13 +2677,13 @@ final class AppModel {
         }
     }
 
-    func pickDirectory(startingAt directory: URL? = nil) -> URL? {
+    func pickDirectory(startingAt directory: URL? = nil, prompt: String = "Open Session Here") -> URL? {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.directoryURL = directory ?? currentDirectory
-        panel.prompt = "Open Session Here"
+        panel.prompt = prompt
         return panel.runModal() == .OK ? panel.url : nil
     }
 
