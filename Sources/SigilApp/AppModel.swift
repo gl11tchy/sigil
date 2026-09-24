@@ -13,7 +13,7 @@ final class AppModel {
 
     typealias TrashConversation = (URL) throws -> Void
     typealias ErrorPresenter = (Error) -> Void
-    typealias ConfirmStopWorking = () -> Bool
+    typealias ConfirmStopWorking = (StopWorkingPrompt) -> Bool
 
     let settings: AppSettings
     let store: SessionStore
@@ -37,6 +37,8 @@ final class AppModel {
     var isFindBarVisible = false
     /// True when a tab was selected while the main window could not take focus.
     var needsTerminalFocus = false
+    /// True when the panel shell was opened before its view reached the window.
+    @ObservationIgnored private var needsPanelShellFocus = false
     private let transcriptExports = TranscriptExports()
     /// Grok tabs that kept the old theme because they were busy or held messages.
     @ObservationIgnored private var themeRestartsWhenSettled: Set<TerminalTab.ID> = []
@@ -82,9 +84,9 @@ final class AppModel {
     private var deferredLegacySelectedSessionID: String?
     private let trashConversation: TrashConversation
     private let presentError: ErrorPresenter
-    /// Shown before a close or archive kills a tab that is mid-turn.
+    /// Shown before a close, archive or shell restart stops work still running.
     @ObservationIgnored
-    var confirmStopWorking: ConfirmStopWorking = { AppModel.promptToStopWorking() }
+    var confirmStopWorking: ConfirmStopWorking = { $0.runModal() }
     /// True while the stop prompt is up. Its modal loop still runs main-queue
     /// work, so a theme relaunch waits rather than replace the tab in question.
     @ObservationIgnored private var isAskingToStop = false
@@ -382,8 +384,8 @@ final class AppModel {
 
     private func archive(_ session: GrokSession, confirmIfWorking: Bool) {
         let matching = tabs.filter { tabMatches($0, sessionID: session.id, cwd: session.cwd) }
-        if confirmIfWorking, matching.contains(where: \.shouldWarnBeforeStopping),
-            !confirmStop()
+        if confirmIfWorking, let prompt = StopWorkingPrompt(action: .archive, stopping: matching),
+            !confirmStop(prompt)
         {
             return
         }
@@ -430,13 +432,14 @@ final class AppModel {
 
     /// Archives a multi-selection with at most one working-session prompt.
     func archive(_ sessions: [GrokSession]) {
-        let anyWorking = sessions.contains { session in
-            tabs.contains {
-                tabMatches($0, sessionID: session.id, cwd: session.cwd)
-                    && $0.shouldWarnBeforeStopping
-            }
+        let matching = tabs.filter { tab in
+            sessions.contains { tabMatches(tab, sessionID: $0.id, cwd: $0.cwd) }
         }
-        if anyWorking && !confirmStop() { return }
+        if let prompt = StopWorkingPrompt(action: .archive, stopping: matching),
+            !confirmStop(prompt)
+        {
+            return
+        }
         archiveWithoutAsking(sessions)
     }
 
@@ -448,7 +451,9 @@ final class AppModel {
         let projectTabs = tabs.filter {
             $0.spec.provider == .grokBuild && samePath($0.workingDirectory.path, project.cwd)
         }
-        if projectTabs.contains(where: \.shouldWarnBeforeStopping), !confirmStop() {
+        if let prompt = StopWorkingPrompt(action: .archive, stopping: projectTabs),
+            !confirmStop(prompt)
+        {
             return
         }
         unpin(project)
@@ -1639,16 +1644,12 @@ final class AppModel {
     /// User-facing close: warn when the agent is mid-turn so a click does not kill work.
     func requestCloseTab(_ id: TerminalTab.ID) {
         guard let tab = tabs.first(where: { $0.id == id }) else { return }
-        if tab.shouldWarnBeforeStopping, !confirmStop() { return }
+        if let prompt = StopWorkingPrompt(action: .closeTab, stopping: [tab]),
+            !confirmStop(prompt)
+        {
+            return
+        }
         closeTab(id)
-    }
-
-    private static func promptToStopWorking() -> Bool {
-        let alert = NSAlert()
-        alert.messageText = "This session is still working."
-        alert.addButton(withTitle: "Close Tab")
-        alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn
     }
 
     func closeSelectedTab() {
@@ -1971,8 +1972,13 @@ final class AppModel {
         retryPendingTerminalFocus()
     }
 
+    /// A panel shell opened while the sheet was up takes focus once it closes.
+    func newSessionSheetDidClose() {
+        if needsPanelShellFocus { focusPanelShell() } else { focusSelectedTerminal() }
+    }
+
     func windowDidBecomeKey() {
-        retryPendingTerminalFocus()
+        if needsPanelShellFocus { focusPanelShell() } else { retryPendingTerminalFocus() }
     }
 
     private func retryPendingTerminalFocus() {
@@ -1996,21 +2002,59 @@ final class AppModel {
 
     /// Shows `mode` in the panel, or hides the panel when that tool is already up.
     func showPanel(_ mode: RightPanelMode) {
+        let wasVisible = panel.isVisible
+        let wasShell = wasVisible && panel.mode == .shell
         panel.toggle(mode)
         preparePanel()
+        // Switching away from the shell removes its view, just as hiding does.
+        let isShell = panel.isVisible && panel.mode == .shell
+        if wasVisible, !panel.isVisible || (wasShell && !isShell) {
+            refocusTerminalAfterHiding(.panel)
+        }
+        requestPanelShellFocusIfShown()
     }
 
     /// Opens or closes the panel on whatever tool it last showed.
     func togglePanel() {
+        let wasVisible = panel.isVisible
         panel.toggle(nil)
         preparePanel()
+        if wasVisible, !panel.isVisible { refocusTerminalAfterHiding(.panel) }
+        requestPanelShellFocusIfShown()
     }
 
     /// Kills the scratch shell and starts a new one in the current folder.
     func restartPanelShell() {
+        if let prompt = StopWorkingPrompt(
+            action: .restartShell, stopping: [], panelJob: panel.shellHasForegroundJob),
+            !confirmStop(prompt)
+        {
+            return
+        }
         panel.restartShell(
             in: currentDirectory, theme: settings.theme, fontSize: settings.fontSize)
         panel.shell?.optionAsMetaKey = settings.optionAsMetaKey
+        requestPanelShellFocusIfShown()
+    }
+
+    /// Opening the shell means typing into it, not into the tab behind it.
+    private func requestPanelShellFocusIfShown() {
+        needsPanelShellFocus = panel.isVisible && panel.mode == .shell
+        focusPanelShell()
+    }
+
+    /// Moves focus into the panel shell once its view is in the window. The
+    /// panel calls this again when a new shell view appears.
+    func focusPanelShell() {
+        guard needsPanelShellFocus else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.needsPanelShellFocus, !self.isShowingNewSessionSheet,
+                self.panel.isVisible, self.panel.mode == .shell, let shell = self.panel.shell,
+                let window = shell.view.window, window.attachedSheet == nil
+            else { return }
+            self.needsPanelShellFocus = false
+            shell.focus()
+        }
     }
 
     /// Starts whatever the visible tool needs, with the app's own theme and size.
@@ -2072,7 +2116,7 @@ final class AppModel {
 
     /// Asks before stopping work, then lets any theme relaunch that came due
     /// during the prompt run against the answer.
-    private func confirmStop() -> Bool {
+    private func confirmStop(_ prompt: StopWorkingPrompt) -> Bool {
         isAskingToStop = true
         defer {
             isAskingToStop = false
@@ -2080,7 +2124,7 @@ final class AppModel {
                 restartForThemeWhenSettled(tab)
             }
         }
-        return confirmStopWorking()
+        return confirmStopWorking(prompt)
     }
 
     /// A tab that kept the old theme because it was busy relaunches on the new

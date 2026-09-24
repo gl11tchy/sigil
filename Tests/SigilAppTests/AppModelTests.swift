@@ -338,7 +338,7 @@ struct AppModelTests {
         model.applyTheme()
         // Like the alert's modal loop, this keeps running main-queue work, so
         // the turn can end, and its theme relaunch come due, while the user decides.
-        model.confirmStopWorking = {
+        model.confirmStopWorking = { _ in
             RunLoop.main.run(until: Date().addingTimeInterval(1.7))
             return true
         }
@@ -3483,7 +3483,7 @@ struct AppModelTests {
         tab.noteTurnStarted()
         #expect(tab.shouldWarnBeforeStopping)
         let session = makeSession(id: try #require(tab.sessionID), cwd: cwd)
-        model.confirmStopWorking = { false }
+        model.confirmStopWorking = { _ in false }
         model.archive(session)
 
         #expect(model.tabs.map(\.id) == [tab.id])
@@ -3503,12 +3503,121 @@ struct AppModelTests {
         tab.noteTurnStarted()
         #expect(tab.shouldWarnBeforeStopping)
         let session = makeSession(id: try #require(tab.sessionID), cwd: cwd)
-        model.confirmStopWorking = { true }
+        model.confirmStopWorking = { _ in true }
         model.archive(session)
 
         #expect(model.tabs.isEmpty)
         #expect(model.isArchived(session))
         #expect(!model.isOpen(session))
+    }
+
+    @Test @MainActor
+    func archivingAProjectWithTwoWorkingChatsAsksAboutArchivingBoth() throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        for _ in 0..<2 { try #require(model.newTab(in: cwd)).noteTurnStarted() }
+        var prompts: [StopWorkingPrompt] = []
+        model.confirmStopWorking = {
+            prompts.append($0)
+            return false
+        }
+
+        model.archive(
+            SidebarProject(
+                id: cwd.path, name: "project", displayPath: cwd.path,
+                cwd: cwd.path, sessions: [], updatedAt: .now))
+
+        #expect(prompts.count == 1)
+        let prompt = try #require(prompts.first)
+        #expect(prompt.messageText == "2 sessions are still working. Archive anyway?")
+        #expect(prompt.buttonTitle == "Archive")
+        #expect(prompt.informativeText == "The responses in progress will stop.")
+        #expect(model.tabs.count == 2)
+    }
+
+    @Test
+    func quittingNamesRunningSessionsApartFromWorkingOnes() {
+        let working = StopWorkingPrompt(action: .quit, working: 2, running: [])
+        #expect(working.messageText == "2 sessions are still working. Quit anyway?")
+        #expect(working.informativeText == "The responses in progress will stop.")
+
+        let mixed = StopWorkingPrompt(action: .quit, working: 1, running: [.claudeCode, .codex])
+        #expect(mixed.messageText == "3 sessions are still running. Quit anyway?")
+        #expect(mixed.informativeText == "The response in progress will stop.")
+
+        let idle = StopWorkingPrompt(action: .quit, working: 0, running: [.claudeCode, .codex])
+        #expect(idle.messageText == "2 sessions are still running. Quit anyway?")
+        #expect(idle.informativeText == "Their processes will stop.")
+    }
+
+    @Test @MainActor
+    func quittingNamesACommandRunningInThePanelTerminal() {
+        #expect(StopWorkingPrompt(action: .quit, stopping: []) == nil)
+        let panelOnly = StopWorkingPrompt(action: .quit, stopping: [], panelJob: true)
+        #expect(
+            panelOnly?.messageText == "A command is still running in the panel terminal. Quit anyway?")
+        #expect(panelOnly?.informativeText == "The command will stop.")
+
+        let both = StopWorkingPrompt(action: .quit, working: 1, running: [], panelJob: true)
+        #expect(both.messageText == "A session is still working. Quit anyway?")
+        #expect(
+            both.informativeText
+                == "The response in progress will stop. The command in the panel terminal will stop too.")
+    }
+
+    @Test @MainActor
+    func restartingThePanelShellAsksFirstWhileACommandRuns() async throws {
+        // An empty HOME and /bin/sh keep the user's startup files out of the panel shell.
+        let home = try makeTemporaryTestDirectory()
+        let previousHome = ProcessInfo.processInfo.environment["HOME"]
+        let previousShell = ProcessInfo.processInfo.environment["SHELL"]
+        setenv("HOME", home.path, 1)
+        setenv("SHELL", "/bin/sh", 1)
+        defer {
+            if let previousHome { setenv("HOME", previousHome, 1) } else { unsetenv("HOME") }
+            if let previousShell { setenv("SHELL", previousShell, 1) } else { unsetenv("SHELL") }
+            try? FileManager.default.removeItem(at: home)
+        }
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        var prompts: [StopWorkingPrompt] = []
+        var answer = false
+        model.confirmStopWorking = {
+            prompts.append($0)
+            return answer
+        }
+        model.panel.isVisible = false
+        model.showPanel(.shell)
+        await flushMainAsync()
+        let idle = try #require(model.panel.shell)
+
+        model.restartPanelShell()
+        #expect(prompts.isEmpty)
+        let busy = try #require(model.panel.shell)
+        #expect(busy !== idle)
+        busy.send(text: "/bin/sleep 5\r")
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !model.panel.shellHasForegroundJob, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(model.panel.shellHasForegroundJob)
+
+        model.restartPanelShell()
+        #expect(
+            prompts.map(\.messageText) == [
+                "A command is still running in the panel terminal. Restart anyway?"
+            ])
+        #expect(model.panel.shell === busy)
+
+        answer = true
+        model.restartPanelShell()
+        #expect(prompts.count == 2)
+        #expect(model.panel.shell !== busy)
     }
 
     @Test @MainActor
@@ -3581,7 +3690,7 @@ struct AppModelTests {
         let tabs = try (0..<4).map { _ in try #require(model.newTab(in: cwd)) }
         let pids = tabs.map(\.controller.processID)
         let sessions = try tabs.map { makeSession(id: try #require($0.sessionID), cwd: cwd) }
-        model.confirmStopWorking = { true }
+        model.confirmStopWorking = { _ in true }
         try await Task.sleep(for: .milliseconds(400))
 
         let elapsed = ContinuousClock().measure { model.archive(sessions) }
@@ -3605,7 +3714,7 @@ struct AppModelTests {
         let other = makeSession(id: "s-other", cwd: cwd)
 
         var asked = 0
-        model.confirmStopWorking = {
+        model.confirmStopWorking = { _ in
             asked += 1
             return false
         }
@@ -3615,7 +3724,7 @@ struct AppModelTests {
         #expect(!model.isArchived(other))
         #expect(model.isOpen(working))
 
-        model.confirmStopWorking = {
+        model.confirmStopWorking = { _ in
             asked += 1
             return true
         }

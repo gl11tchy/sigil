@@ -22,7 +22,7 @@ struct ProviderBoundaryTests {
         #expect(tab.shouldWarnBeforeStopping)
         #expect(!tab.hasUnseenActivity)
         var warnings = 0
-        fixture.model.confirmStopWorking = {
+        fixture.model.confirmStopWorking = { _ in
             warnings += 1
             return false
         }
@@ -32,6 +32,29 @@ struct ProviderBoundaryTests {
         #expect(tab.controller.isRunning)
         tab.terminateAndWait()
         #expect(!tab.shouldWarnBeforeStopping)
+    }
+
+    @Test(arguments: providers)
+    func closingAnIdleProviderTabSaysItIsRunningNotWorking(provider: CLIProvider) throws {
+        let fixture = try ProviderFixture()
+        defer { fixture.cleanup() }
+        let tab = try #require(fixture.model.newTab(in: fixture.root, provider: provider))
+        #expect(tab.activity != .working)
+        var prompts: [StopWorkingPrompt] = []
+        fixture.model.confirmStopWorking = {
+            prompts.append($0)
+            return false
+        }
+
+        fixture.model.requestCloseTab(tab.id)
+
+        let prompt = try #require(prompts.first)
+        #expect(prompt.messageText == "\(provider.name) is still running.")
+        #expect(prompt.informativeText == "\(provider.name) will stop.")
+        #expect(
+            StopWorkingPrompt(action: .quit, stopping: [tab])?.messageText
+                == "\(provider.name) is still running. Quit anyway?")
+        tab.terminateAndWait()
     }
 
     @Test(arguments: providers)
@@ -79,7 +102,7 @@ struct ProviderBoundaryTests {
         let other = try #require(fixture.model.newTab(in: fixture.root, provider: provider))
         other.noteTurnStarted()
         var warnings = 0
-        fixture.model.confirmStopWorking = {
+        fixture.model.confirmStopWorking = { _ in
             warnings += 1
             return false
         }
