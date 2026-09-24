@@ -1,0 +1,8 @@
+.DS_Store
+build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+.tmp-swift/
+.build/
+Sigil-DerivedData/
