@@ -1,0 +1,8 @@
+## empty state AX (18:04:51)
+  AXButton | Description=New Session in /Users/Shared/sigil-ux/projects/acme-api (⌘T) | Help=New Session in /Users/Shared/sigil-ux/projects/acme-api (⌘T) | Focused=0 | Enabled=1 | Identifier=plus | Position=546,301 | Size=22x22
+  AXButton | Description=New Session… (⌘T) | Help=New Session… (⌘T) | Focused=0 | Enabled=1 | Identifier=plus | Position=1154,269 | Size=22x22
+  AXStaticText | Value=No open session | Enabled=1 | Position=845,493 | Size=94x15
+  AXStaticText | Value=Press | Enabled=1 | Position=769,515 | Size=29x14
+  AXStaticText | Value=⌘T | Enabled=1 | Position=808,516 | Size=12x12
+  AXStaticText | Value=to start one, or pick a conversation. | Enabled=1 | Position=829,515 | Size=186x14
+  AXButton | Description=New Session | Focused=0 | Enabled=1 | Position=849,540 | Size=87x20

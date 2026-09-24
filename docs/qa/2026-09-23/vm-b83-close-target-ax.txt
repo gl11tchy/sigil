@@ -1,0 +1,31 @@
+## tab strip before the click (18:03:14)
+   AXButton | Description=Summarise the acme-api service and its layout | Help=/Users/Shared/sigil-ux/projects/acme-api | Value=background, working | Focused=0 | Enabled=1 | Position=615,268 | Size=112x24
+   AXButton | Description=Close Summarise the acme-api service and its layout | Help=/Users/Shared/sigil-ux/projects/acme-api | Focused=0 | Enabled=1 | Identifier=xmark | Position=727,268 | Size=20x24
+   AXButton | Description=Make the sidebar search rank folders too | Help=/Users/Shared/sigil-ux/projects/sigil | Value=background, working | Focused=0 | Enabled=1 | Position=755,268 | Size=112x24
+   AXButton | Description=Close Make the sidebar search rank folders too | Help=/Users/Shared/sigil-ux/projects/sigil | Focused=0 | Enabled=1 | Identifier=xmark | Position=867,268 | Size=20x24
+   AXButton | Description=acme-api | Help=/Users/Shared/sigil-ux/projects/acme-api | Value=selected, working | Selected=1 | Focused=0 | Enabled=1 | Position=895,268 | Size=71x24
+   AXButton | Description=Close acme-api | Help=/Users/Shared/sigil-ux/projects/acme-api | Focused=0 | Enabled=1 | Identifier=xmark | Position=966,268 | Size=20x24
+
+## target: close button frame origin 867,268 size 20x24; old inner glyph frame 16x20 = x 869..885, y 270..290
+## guarded click at 886,269 (1pt inside the right and top edges of the 20x24 target, outside the old 16x20 frame)
+clicked 886.0,269.0
+## windows after click
+AXWindow | Subrole=AXDialog | Description=alert | Focused=1 | Identifier=_NS:87 | Position=626,227 | Size=260x176
+AXWindow | Subrole=AXStandardWindow | Title=SigilUX | Focused=0 | Identifier=SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1 | Position=306,262 | Size=900x492
+## alert contents (the fake Grok CLI keeps every tab in the working state, so close asks first)
+AXWindow | Subrole=AXDialog | Description=alert | Focused=1 | Identifier=_NS:87 | Position=626,227 | Size=260x176
+ AXImage | Description=SigilUX alert | Focused=0 | Enabled=1 | Identifier=_NS:35 | Position=723,246 | Size=66x66
+ AXStaticText | Value=This session is still working. | Focused=0 | Enabled=1 | Identifier=_NS:74 | Position=647,326 | Size=218x18
+ AXStaticText | Focused=0 | Enabled=1 | Identifier=_NS:58 | Position=647,214 | Size=2x18
+ AXButton | Title=Cancel | Focused=0 | Enabled=1 | Identifier=action-button-2 | Position=641,358 | Size=112x30
+ AXButton | Title=Close Tab | Focused=0 | Enabled=1 | Identifier=action-button-1 | Position=759,358 | Size=112x30
+pressed [0] 
+
+## windows after Close Tab
+AXWindow | Subrole=AXStandardWindow | Title=SigilUX | Focused=0 | Identifier=SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1 | Position=306,262 | Size=900x492
+
+## tab strip after (18:03:23)
+   AXButton | Description=Summarise the acme-api service and its layout | Help=/Users/Shared/sigil-ux/projects/acme-api | Value=background, working | Focused=0 | Enabled=1 | Position=615,268 | Size=252x24
+   AXButton | Description=Close Summarise the acme-api service and its layout | Help=/Users/Shared/sigil-ux/projects/acme-api | Focused=0 | Enabled=1 | Identifier=xmark | Position=867,268 | Size=20x24
+   AXButton | Description=acme-api | Help=/Users/Shared/sigil-ux/projects/acme-api | Value=selected, working | Selected=1 | Focused=0 | Enabled=1 | Position=895,268 | Size=71x24
+   AXButton | Description=Close acme-api | Help=/Users/Shared/sigil-ux/projects/acme-api | Focused=0 | Enabled=1 | Identifier=xmark | Position=966,268 | Size=20x24
