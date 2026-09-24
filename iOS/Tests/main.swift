@@ -47,6 +47,17 @@ enum TestMain {
         run("file chunks") { try OutputTests.fileChunks() }
         run("safe file names") { try OutputTests.safeFileNames() }
 
+        run("screen model applies windows and diffs") { try ScreenTests.modelAppliesWindowsAndDiffs() }
+        run("screen model prepends older rows until exhausted") { try ScreenTests.modelPrependsOlderRowsUntilExhausted() }
+        run("screen model stays under cap") { try ScreenTests.modelStaysUnderCapAndForgetsOldestFirst() }
+        run("wrapped rows join without a break") { try ScreenTests.wrappedRowsJoinWithoutABreak() }
+        run("raw spans count UTF-16 units") { try ScreenTests.rawSpansCountUTF16Units() }
+        run("readable spans follow kept lines") { try ScreenTests.readableSpansFollowKeptLines() }
+        run("colours resolve through the palette") { try ScreenTests.coloursResolveThroughThePalette() }
+        run("decodes an event with a screen") { try ScreenTests.decodesAnEventWithAScreen() }
+        run("rejects a malformed screen") { try ScreenTests.rejectsAMalformedScreen() }
+        run("request carries worktree") { try ScreenTests.requestCarriesWorktree() }
+
         if let port = ProcessInfo.processInfo.environment["SIGIL_RELAY_PORT"] {
             do {
                 try await RelayTests.pairsAndReconnectsByTicket(port: port)

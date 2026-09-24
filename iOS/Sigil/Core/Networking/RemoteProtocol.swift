@@ -16,6 +16,8 @@ struct RemoteRequest: Encodable, Equatable {
     var provider: String?
     var model: String?
     var effort: String?
+    /// New sessions: start in a fresh worktree of the project.
+    var worktree: Bool?
 
     static let textLimit = 8_192
     static let fileTextLimit = 48_000
@@ -52,19 +54,43 @@ enum TabStatus: Equatable {
         case .unknown(let raw): return raw.capitalized
         }
     }
+
+    /// The wire value, for the on-disk cache.
+    var raw: String {
+        switch self {
+        case .starting: return "starting"
+        case .working: return "working"
+        case .idle: return "idle"
+        case .exited: return "exited"
+        case .unknown(let raw): return raw
+        }
+    }
 }
 
-struct RemoteTab: Decodable, Equatable, Identifiable {
+struct RemoteTab: Codable, Equatable, Identifiable {
     let id: String
     let title: String
     let status: TabStatus
+    /// The CLI's id and name, the folder label, and whether a saved chat backs this tab.
+    /// Absent from a Mac that predates session operations.
+    let provider: String?
+    let providerName: String?
+    let folder: String?
+    let canArchive: Bool?
 
-    private enum CodingKeys: String, CodingKey { case id, title, status }
+    private enum CodingKeys: String, CodingKey { case id, title, status, provider, providerName, folder, canArchive }
 
-    init(id: String, title: String, status: TabStatus) {
+    init(
+        id: String, title: String, status: TabStatus, provider: String? = nil, providerName: String? = nil,
+        folder: String? = nil, canArchive: Bool? = nil
+    ) {
         self.id = id
         self.title = title
         self.status = status
+        self.provider = provider
+        self.providerName = providerName
+        self.folder = folder
+        self.canArchive = canArchive
     }
 
     init(from decoder: Decoder) throws {
@@ -72,7 +98,47 @@ struct RemoteTab: Decodable, Equatable, Identifiable {
         id = try c.decode(String.self, forKey: .id)
         title = try c.decode(String.self, forKey: .title)
         status = TabStatus(raw: try c.decode(String.self, forKey: .status))
+        provider = try c.decodeIfPresent(String.self, forKey: .provider)
+        providerName = try c.decodeIfPresent(String.self, forKey: .providerName)
+        folder = try c.decodeIfPresent(String.self, forKey: .folder)
+        canArchive = try c.decodeIfPresent(Bool.self, forKey: .canArchive)
     }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(title, forKey: .title)
+        try c.encode(status.raw, forKey: .status)
+        try c.encodeIfPresent(provider, forKey: .provider)
+        try c.encodeIfPresent(providerName, forKey: .providerName)
+        try c.encodeIfPresent(folder, forKey: .folder)
+        try c.encodeIfPresent(canArchive, forKey: .canArchive)
+    }
+}
+
+/// One terminal row as the Mac sends it: buffer-absolute index, text, whether it
+/// continues the row before it, and style runs `[start, length, fg, bg, flags]`
+/// over Character offsets.
+struct RemoteScreenRow: Codable, Equatable {
+    let i: Int
+    let t: String
+    let w: Bool?
+    let s: [[Int]]?
+}
+
+/// A window of rows, or the rows that changed since the last one.
+struct RemoteScreen: Decodable, Equatable {
+    let gen: Int
+    let alt: Bool?
+    let first: Int
+    let end: Int
+    let rows: [RemoteScreenRow]
+    let palette: [String]?
+    let fg: String?
+    let bg: String?
+
+    static let defaultColor = -1
+    static let trueColorBase = 1 << 24
 }
 
 struct RemoteState: Decodable, Equatable {
@@ -81,8 +147,15 @@ struct RemoteState: Decodable, Equatable {
     let terminal: String
     let capabilities: [String]?
     let tabsTruncated: Bool?
+    /// Present on `watch`, `rows` and events from a Mac that streams rows.
+    let screen: RemoteScreen?
+    /// This Mac's name.
+    let mac: String?
 
     var canRestart: Bool { capabilities?.contains("restart") == true }
+    /// The Mac streams changed rows after `watch`; older Macs are polled for text.
+    var streamsScreen: Bool { capabilities?.contains("screen") == true }
+    var supportsSessionOps: Bool { capabilities?.contains("sessionOps") == true }
 
     /// Absence from a capped snapshot is not evidence that a tab closed.
     /// Older Macs omit the flag, so a full 100-row list counts as capped.
@@ -99,6 +172,11 @@ struct RemoteState: Decodable, Equatable {
             guard !tab.id.isEmpty, seen.insert(tab.id).inserted else { throw RemoteCryptoError.invalidMessage }
         }
         if let selectedTabID, !seen.contains(selectedTabID) { throw RemoteCryptoError.invalidMessage }
+        if let screen {
+            guard screen.rows.count <= 2_000, screen.end >= screen.first, (screen.palette ?? []).count <= 16,
+                screen.rows.allSatisfy({ $0.i < screen.end && ($0.s ?? []).allSatisfy { $0.count == 5 } })
+            else { throw RemoteCryptoError.invalidMessage }
+        }
     }
 }
 
@@ -111,7 +189,15 @@ struct RemoteChat: Decodable, Equatable, Identifiable {
 struct RemoteProject: Decodable, Equatable, Identifiable {
     let name: String
     let folder: String
+    /// True when a new session there can start in a worktree. Absent from older Macs.
+    let repository: Bool?
     var id: String { folder }
+
+    init(name: String, folder: String, repository: Bool? = nil) {
+        self.name = name
+        self.folder = folder
+        self.repository = repository
+    }
 }
 
 /// What a new session may use, from the Mac's New Session sheet. Macs from
@@ -183,6 +269,8 @@ struct RemoteReply: Decodable {
     let projectsTruncated: Bool?
     let options: NewSessionOptions?
     let project: RemoteProject?
+    /// True on a frame the Mac sent unasked; its sequence is 0.
+    let event: Bool?
 }
 
 /// The outer, unencrypted envelope the relay forwards.

@@ -30,6 +30,12 @@ enum RelayTests {
         try Expect.equal(reply.state?.terminal, "echo: hello", "command round trip")
         try Expect.equal(watcher.lastState?.selectedTabID, "T1", "delegate saw the snapshot")
 
+        // An unasked frame with sequence 0 is an event, not a stray reply.
+        try await mac.pushEvent(rows: ["from mac"])
+        try await until("event delivered") { watcher.events.count == 1 }
+        try Expect.equal(watcher.events[0].state?.screen?.rows.map(\.t), ["from mac"], "event rows")
+        try Expect.equal(phone.phase, .connected, "an event does not disturb the connection")
+
         do {
             _ = try await phone.request("select", tabID: "missing")
             throw TestFailure("a Mac error must throw")
@@ -74,11 +80,13 @@ enum RelayTests {
     final class Watcher: RemoteConnectionDelegate {
         var saved: PairingCredential?
         var lastState: RemoteState?
+        var events: [RemoteReply] = []
         var failure: String?
         func connection(_ connection: RemoteConnection, didChange phase: RemoteConnection.Phase) {}
         func connection(_ connection: RemoteConnection, didReceive reply: RemoteReply, for action: String, tabID: String?) {
             lastState = reply.state
         }
+        func connection(_ connection: RemoteConnection, didReceiveEvent reply: RemoteReply) { events.append(reply) }
         func connection(_ connection: RemoteConnection, didSave credential: PairingCredential) { saved = credential }
         func connection(_ connection: RemoteConnection, didFail message: String) { failure = message }
     }
@@ -106,12 +114,23 @@ final class FakeMac {
             let title: String
             let status: String
         }
+        struct Row: Encodable {
+            let i: Int
+            let t: String
+        }
+        struct Screen: Encodable {
+            let gen = 1
+            let first: Int
+            let end: Int
+            let rows: [Row]
+        }
         struct State: Encodable {
             let tabs: [Tab]
             let selectedTabID: String?
             let terminal: String
-            let capabilities = ["restart"]
+            let capabilities = ["restart", "screen"]
             let tabsTruncated = false
+            var screen: Screen?
         }
         let challenge: String
         let sequence: Int
@@ -119,6 +138,7 @@ final class FakeMac {
         var error: String?
         var state: State?
         var ticket: String?
+        var event: Bool?
     }
 
     let origin: URL
@@ -161,6 +181,18 @@ final class FakeMac {
 
     func stop() {
         socket?.cancel(with: .goingAway, reason: nil)
+    }
+
+    /// What Sigil sends after `watch`: a sealed frame nobody asked for.
+    func pushEvent(rows: [String]) async throws {
+        guard let socket, let peer, let deviceKey else { throw TestFailure("no phone to push to") }
+        var reply = Reply(challenge: challenge, sequence: 0, ticket: ticket, event: true)
+        var state = state("")
+        state.screen = Reply.Screen(
+            first: 0, end: rows.count, rows: rows.enumerated().map { Reply.Row(i: $0.offset, t: $0.element) })
+        reply.state = state
+        let sealed = try RemoteCrypto.seal(reply, key: deviceKey, direction: "mac")
+        try await send(["peer": peer, "data": sealed], on: socket)
     }
 
     private func connect(_ registered: Registered) {

@@ -23,6 +23,8 @@ protocol RemoteConnectionDelegate: AnyObject {
     func connection(_ connection: RemoteConnection, didChange phase: RemoteConnection.Phase)
     /// Every successful reply that carries a snapshot, in order.
     func connection(_ connection: RemoteConnection, didReceive reply: RemoteReply, for action: String, tabID: String?)
+    /// A frame the Mac sent unasked, after `watch`: changed rows, tabs, selection.
+    func connection(_ connection: RemoteConnection, didReceiveEvent reply: RemoteReply)
     /// The pairing to keep. Called when the Mac first accepts the phone and when it rotates the ticket.
     func connection(_ connection: RemoteConnection, didSave credential: PairingCredential)
     func connection(_ connection: RemoteConnection, didFail message: String)
@@ -119,7 +121,7 @@ final class RemoteConnection {
     func request(
         _ action: String, text: String? = nil, tabID: String? = nil, name: String? = nil,
         index: Int? = nil, count: Int? = nil, transfer: String? = nil, provider: String? = nil,
-        model: String? = nil, effort: String? = nil
+        model: String? = nil, effort: String? = nil, worktree: Bool? = nil
     ) async throws -> RemoteReply {
         let previous = queue
         let current = generation
@@ -130,7 +132,7 @@ final class RemoteConnection {
             return try await self.transmit(
                 RequestFields(
                     action: action, text: text, tabID: tabID, name: name, index: index, count: count,
-                    transfer: transfer, provider: provider, model: model, effort: effort),
+                    transfer: transfer, provider: provider, model: model, effort: effort, worktree: worktree),
                 pairing: false)
         }
         queue = Task { _ = try? await work.value }
@@ -148,6 +150,7 @@ final class RemoteConnection {
         var provider: String?
         var model: String?
         var effort: String?
+        var worktree: Bool?
     }
 
     private func transmit(_ fields: RequestFields, pairing: Bool) async throws -> RemoteReply {
@@ -160,7 +163,7 @@ final class RemoteConnection {
         let request = RemoteRequest(
             challenge: challenge, sequence: seq, action: fields.action, tabID: fields.tabID, text: fields.text,
             name: fields.name, index: fields.index, count: fields.count, transfer: fields.transfer,
-            provider: fields.provider, model: fields.model, effort: fields.effort)
+            provider: fields.provider, model: fields.model, effort: fields.effort, worktree: fields.worktree)
         let sealed = try RemoteCrypto.seal(request, key: key, direction: "phone")
         let frame = try Self.json(["data": sealed])
         return try await withCheckedThrowingContinuation { continuation in
@@ -266,9 +269,15 @@ final class RemoteConnection {
             }
         } else if let data = frame.data {
             let reply: RemoteReply = try RemoteCrypto.open(data, key: credential.deviceKey, direction: "mac")
-            guard let item = pending[reply.sequence] else { return }
             // A delayed reply from an earlier Mac epoch.
             guard reply.challenge == challenge else { return }
+            if reply.event == true, reply.sequence == 0 {
+                guard phase == .connected, let state = reply.state else { return }
+                try state.validate()
+                delegate?.connection(self, didReceiveEvent: reply)
+                return
+            }
+            guard let item = pending[reply.sequence] else { return }
             pending[reply.sequence] = nil
             item.timeout.cancel()
             guard reply.ok != false else {

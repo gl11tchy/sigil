@@ -6,6 +6,9 @@ struct SessionsSheet: View {
     @Environment(\.dismiss) private var dismiss
     let onNew: () -> Void
     @State private var query = ""
+    @State private var renaming: RemoteTab?
+    @State private var newName = ""
+    @State private var closing: RemoteTab?
 
     private var matches: [RemoteTab] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -28,14 +31,60 @@ struct SessionsSheet: View {
                             store.select(tab)
                             dismiss()
                         } label: {
-                            row(title: tab.title, detail: tab.status.label, status: tab.status,
+                            row(title: tab.title, detail: detail(for: tab), status: tab.status,
                                 selected: tab.id == store.selectedTabID)
                         }
                         .disabled(!store.isConnected || store.busy)
                         .accessibilityAddTraits(tab.id == store.selectedTabID ? .isSelected : [])
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            if store.supportsSessionOps {
+                                Button(role: .destructive) {
+                                    closing = tab
+                                } label: {
+                                    Label("Close", systemImage: "xmark")
+                                }
+                                if tab.canArchive == true {
+                                    Button {
+                                        store.archive(tab)
+                                    } label: {
+                                        Label("Archive", systemImage: "archivebox")
+                                    }
+                                    .tint(Theme.caution)
+                                }
+                                Button {
+                                    newName = tab.title
+                                    renaming = tab
+                                } label: {
+                                    Label("Rename", systemImage: "pencil")
+                                }
+                                .tint(Theme.accentDeep)
+                            }
+                        }
+                        .contextMenu {
+                            if store.supportsSessionOps {
+                                Button {
+                                    newName = tab.title
+                                    renaming = tab
+                                } label: {
+                                    Label("Rename", systemImage: "pencil")
+                                }
+                                if tab.canArchive == true {
+                                    Button {
+                                        store.archive(tab)
+                                    } label: {
+                                        Label("Archive", systemImage: "archivebox")
+                                    }
+                                }
+                                Button(role: .destructive) {
+                                    closing = tab
+                                } label: {
+                                    Label("Close", systemImage: "xmark")
+                                }
+                            }
+                        }
                     }
                 } header: {
-                    Text("Open on your Mac")
+                    Text(store.macName.map { "Open on \($0)" } ?? "Open on your Mac")
                 }
 
                 Section {
@@ -91,6 +140,27 @@ struct SessionsSheet: View {
             .onAppear { store.loadChats(query) }
             .navigationTitle("Sessions")
             .navigationBarTitleDisplayMode(.inline)
+            .alert("Rename session", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+                TextField("Name", text: $newName)
+                Button("Rename") {
+                    if let tab = renaming { store.rename(tab, to: newName) }
+                    renaming = nil
+                }
+                Button("Cancel", role: .cancel) { renaming = nil }
+            } message: {
+                Text("An empty name restores the Mac's own title.")
+            }
+            .confirmationDialog(
+                "Close this session?", isPresented: Binding(get: { closing != nil }, set: { if !$0 { closing = nil } }),
+                titleVisibility: .visible
+            ) {
+                Button("Close session", role: .destructive) {
+                    if let tab = closing { store.close(tab) }
+                    closing = nil
+                }
+            } message: {
+                Text(closing?.status == .working ? "It is still working. Closing stops it." : "This closes the tab on your Mac.")
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
@@ -107,6 +177,11 @@ struct SessionsSheet: View {
             .onDisappear { store.clearChats() }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    /// "Claude Code · Working · sigil/feature"; older Macs send status only.
+    private func detail(for tab: RemoteTab) -> String {
+        [tab.providerName, tab.status.label, tab.folder].compactMap { $0 }.joined(separator: " · ")
     }
 
     private func row(title: String, detail: String, status: TabStatus, selected: Bool) -> some View {
@@ -145,6 +220,7 @@ struct NewSessionSheet: View {
     @State private var model = ""
     @State private var effort = ""
     @State private var target: Target?
+    @State private var inWorktree = true
 
     enum Target: Hashable {
         case currentFolder
@@ -157,6 +233,12 @@ struct NewSessionSheet: View {
 
     private var canStart: Bool {
         store.isConnected && !store.busy && !loading && target != nil && provider?.problem == nil
+    }
+
+    /// The chosen project is a git repository on a Mac that can make worktrees.
+    private var canUseWorktree: Bool {
+        guard store.supportsSessionOps, case .project(let folder) = target else { return false }
+        return store.projects.first { $0.folder == folder }?.repository == true
     }
 
     var body: some View {
@@ -247,12 +329,18 @@ struct NewSessionSheet: View {
                 }
                 .disabled(!store.isConnected || store.busy)
             }
+            if canUseWorktree {
+                Toggle("Start in a new worktree", isOn: $inWorktree)
+                    .disabled(!store.isConnected || store.busy)
+            }
         } header: {
             Text("Project")
         } footer: {
             if let error = store.errorMessage {
                 Label(error, systemImage: Theme.cautionSymbol)
                     .foregroundStyle(Theme.caution)
+            } else if canUseWorktree, inWorktree {
+                Text("A fresh checkout on its own branch, under ~/.sigil/worktrees, as the Mac does.")
             }
         }
     }
@@ -314,7 +402,7 @@ struct NewSessionSheet: View {
         }
         store.newSession(
             in: folder, provider: options == nil ? nil : providerID, model: takesModel ? model : nil,
-            effort: takesModel ? effort : nil)
+            effort: takesModel ? effort : nil, worktree: canUseWorktree && inWorktree)
         dismiss()
     }
 
