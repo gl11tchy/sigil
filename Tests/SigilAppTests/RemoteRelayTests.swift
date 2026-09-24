@@ -161,12 +161,17 @@ final class RelayFixture {
     private let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         .deletingLastPathComponent()
 
-    init() async throws {
+    /// Pushes the relay would send to Apple, one JSON line each, when the fixture captures them.
+    var apnsCapture: URL { root.appendingPathComponent("apns.jsonl") }
+
+    init(captureAPNs: Bool = false) async throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let portFile = root.appendingPathComponent("port")
         process = try await Self.launch(
-            [repo.appendingPathComponent("Sidereal/test/relay-fixture.mjs").path], portFile: portFile)
+            [repo.appendingPathComponent("Sidereal/test/relay-fixture.mjs").path], portFile: portFile,
+            environment: captureAPNs ? ["SIGIL_TEST_APNS_CAPTURE": root.appendingPathComponent("apns.jsonl").path] : [:]
+        )
         origin = "http://127.0.0.1:\(try String(contentsOf: portFile, encoding: .utf8))"
     }
 
@@ -190,13 +195,15 @@ final class RelayFixture {
             ["--input-type=module", "-e", script], portFile: root.appendingPathComponent("restarted"))
     }
 
-    private static func launch(_ arguments: [String], portFile: URL) async throws -> Process {
+    private static func launch(_ arguments: [String], portFile: URL, environment: [String: String] = [:])
+        async throws -> Process
+    {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["node"] + arguments
-        process.environment = ProcessInfo.processInfo.environment.merging(["SIGIL_TEST_PORT_FILE": portFile.path]) {
-            _, new in new
-        }
+        process.environment = ProcessInfo.processInfo.environment.merging(
+            ["SIGIL_TEST_PORT_FILE": portFile.path].merging(environment) { _, new in new }
+        ) { _, new in new }
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()
@@ -369,6 +376,110 @@ struct RemoteEventStreamTests {
         try Data("AFTER\n".utf8).write(to: feed)
         try await Task.sleep(for: .milliseconds(300))
         #expect(remote.status == "Phone disconnected")
+    }
+}
+
+@Suite(.serialized)
+struct RemoteAlertDeliveryTests {
+    /// With the phone away, a question on screen and then the process ending
+    /// each reach the relay as a sealed alert, and the Live Activity gets its
+    /// status; the token registration itself is repeated on every host connect.
+    @Test @MainActor func alertsAndActivityUpdatesGoOutWhileThePhoneIsAway() async throws {
+        let relay = try await RelayFixture(captureAPNs: true)
+        defer { relay.stop() }
+        let fixture = try PhoneCommandFixture()
+        defer { fixture.cleanup() }
+        let folder = try fixture.directory("alert-folder")
+        let go = fixture.root.appendingPathComponent("go")
+        let script = """
+            #!/bin/sh
+            echo READY
+            while [ ! -f '\(go.path)' ]; do sleep 0.05; done
+            printf 'Do you want to proceed?\n1. Yes\n2. No\n'
+            sleep 1.2
+            exit 0
+            """
+        try Data(script.utf8).write(to: fixture.executable)
+        let tab = try #require(fixture.model.newTab(in: folder))
+        for _ in 0..<200 {
+            if tab.controller.remoteSnapshot().contains("READY") { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let remote = fixture.model.remoteControl
+        defer { remote.stop() }
+        remote.start(urlText: relay.origin, model: fixture.model)
+        let paired = try await relay.pair(remote)
+        let id = tab.id.uuidString
+        let token = String(repeating: "ab", count: 32)
+        let activityToken = String(repeating: "cd", count: 40)
+        let notified = try await paired.phone.request(
+            RemoteRequest(challenge: paired.challenge, sequence: 2, action: "notify", text: token, name: "development"),
+            key: paired.device)
+        #expect(notified.ok)
+        let bad = try await paired.phone.request(
+            RemoteRequest(challenge: paired.challenge, sequence: 3, action: "notify", text: "XYZ", name: "development"),
+            key: paired.device)
+        #expect(!bad.ok)
+        let activity = try await paired.phone.request(
+            RemoteRequest(challenge: paired.challenge, sequence: 4, action: "activity", tabID: id, text: activityToken),
+            key: paired.device)
+        #expect(activity.ok)
+        // The phone leaves; from now on the Mac has to push.
+        paired.phone.close()
+        for _ in 0..<100 {
+            if remote.status == "Phone disconnected" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try Data().write(to: go)
+        for _ in 0..<300 {
+            if let lines = try? String(contentsOf: relay.apnsCapture, encoding: .utf8),
+                lines.split(separator: "\n").count >= 4
+            {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let lines = try String(contentsOf: relay.apnsCapture, encoding: .utf8).split(separator: "\n").map(String.init)
+        struct Captured: Decodable {
+            struct Payload: Decodable {
+                struct APS: Decodable {
+                    let event: String?
+                    let contentState: RemoteActivityState?
+                    enum CodingKeys: String, CodingKey {
+                        case event
+                        case contentState = "content-state"
+                    }
+                }
+                struct Sigil: Decodable { let data: String }
+                let aps: APS
+                let sigil: Sigil?
+            }
+            let token: String
+            let environment: String
+            let pushType: String
+            let collapseId: String?
+            let payload: Payload
+        }
+        let captured = try lines.map { try JSONDecoder().decode(Captured.self, from: Data($0.utf8)) }
+        var alerts: [RemoteAlert] = []
+        for entry in captured where entry.pushType == "alert" {
+            #expect(entry.token == token && entry.environment == "development" && entry.collapseId == id)
+            alerts.append(
+                try RemoteCrypto.open(
+                    try #require(entry.payload.sigil?.data), key: paired.device, direction: RemoteAlert.direction))
+        }
+        #expect(alerts.map(\.kind) == [.asking, .ended])
+        #expect(alerts.first?.body == "Do you want to proceed?")
+        #expect(alerts.first?.tabID == id)
+        #expect(alerts.first?.title == "alert-folder")
+        let updates = captured.filter { $0.pushType == "liveactivity" }
+        #expect(updates.allSatisfy { $0.token == activityToken })
+        #expect(updates.first?.payload.aps.contentState?.asking == true)
+        #expect(updates.last?.payload.aps.event == "end")
+        #expect(updates.last?.payload.aps.contentState?.status == "exited")
+        // The relay never sees a title or a question in the clear.
+        let raw = try String(contentsOf: relay.apnsCapture, encoding: .utf8)
+        #expect(!raw.contains("alert-folder") && !raw.contains("proceed"))
     }
 }
 

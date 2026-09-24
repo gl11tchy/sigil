@@ -112,7 +112,12 @@ public enum RemoteCrypto {
     }
 
     public static func isValidKey(_ value: String) -> Bool {
-        value.utf8.count == 64 && value.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
+        value.utf8.count == 64 && isLowerHex(value)
+    }
+
+    /// Lower-case hex of any length, as device and activity tokens are sent.
+    public static func isLowerHex(_ value: String) -> Bool {
+        !value.isEmpty && value.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
     }
 
     private static func key(_ value: String) throws -> SymmetricKey {
