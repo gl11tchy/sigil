@@ -251,7 +251,9 @@ cp "$ROOT/LICENSE" "$CONTENTS/Resources/LICENSE.txt"
 mkdir -p "$CONTENTS/Resources/ThirdPartyLicenses"
 for license in \
   "$ROOT/Resources/ThirdPartyLicenses/SwiftTerm-LICENSE.txt" \
-  "$ROOT/Resources/ThirdPartyLicenses/swift-argument-parser-LICENSE.txt"; do
+  "$ROOT/Resources/ThirdPartyLicenses/swift-argument-parser-LICENSE.txt" \
+  "$ROOT/Resources/ThirdPartyLicenses/Inter-LICENSE.txt" \
+  "$ROOT/Resources/ThirdPartyLicenses/JetBrainsMono-LICENSE.txt"; do
   if [[ ! -f "$license" ]]; then
     echo "error: missing third-party license: $license" >&2
     exit 1
@@ -261,6 +263,13 @@ cp "$ROOT/Resources/ThirdPartyLicenses/SwiftTerm-LICENSE.txt" \
   "$CONTENTS/Resources/ThirdPartyLicenses/SwiftTerm-LICENSE.txt"
 cp "$ROOT/Resources/ThirdPartyLicenses/swift-argument-parser-LICENSE.txt" \
   "$CONTENTS/Resources/ThirdPartyLicenses/swift-argument-parser-LICENSE.txt"
+cp "$ROOT/Resources/ThirdPartyLicenses/Inter-LICENSE.txt" \
+  "$CONTENTS/Resources/ThirdPartyLicenses/Inter-LICENSE.txt"
+cp "$ROOT/Resources/ThirdPartyLicenses/JetBrainsMono-LICENSE.txt" \
+  "$CONTENTS/Resources/ThirdPartyLicenses/JetBrainsMono-LICENSE.txt"
+# Inter and JetBrains Mono, registered at launch by Typeface.registerBundledFonts.
+mkdir -p "$CONTENTS/Resources/Fonts"
+cp "$ROOT"/Resources/Fonts/*.ttf "$CONTENTS/Resources/Fonts/"
 printf 'APPL????' >"$CONTENTS/PkgInfo"
 
 cp "$PLIST_TEMPLATE" "$CONTENTS/Info.plist"

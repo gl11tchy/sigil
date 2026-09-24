@@ -11,6 +11,7 @@ final class AppSettings {
         static let fontSize = "terminal.fontSize"
         static let themeName = "terminal.theme"
         static let executablePath = "grok.executablePath"
+        static let executablePathChosen = "grok.executablePath.chosen"
         static let showEmptySessions = "sidebar.showEmptySessions"
         static let showWorktreeSessions = "sidebar.showWorktreeSessions"
         static let showSubagentSessions = "sidebar.showSubagentSessions"
@@ -49,7 +50,10 @@ final class AppSettings {
         didSet { defaults.set(themeName, forKey: Key.themeName) }
     }
     var executablePath: String {
-        didSet { defaults.set(executablePath, forKey: Key.executablePath) }
+        didSet {
+            defaults.set(executablePath, forKey: Key.executablePath)
+            defaults.set(true, forKey: Key.executablePathChosen)
+        }
     }
     /// Sessions the CLI created but never got a real conversation are hidden by default;
     /// hook-triggered one-shot runs otherwise drown the sidebar.
@@ -144,14 +148,17 @@ final class AppSettings {
             defaults.object(forKey: Key.fontSize) == nil
             ? 13
             : Self.normalizedFontSize(CGFloat(defaults.double(forKey: Key.fontSize)))
-        themeName = defaults.string(forKey: Key.themeName) ?? TerminalTheme.sigilNeon.name
+        themeName = defaults.string(forKey: Key.themeName) ?? TerminalTheme.sigilDark.name
         // A stored path is the user's choice and stays — except when it is the
         // installer's own binary and the themed build is now there. That path
         // was never chosen; it is what the default resolved to before the
         // themed build existed, and keeping it would leave the window themed
-        // and the program inside it not.
+        // and the program inside it not. A path set in Settings always stays.
         let stored = defaults.string(forKey: Key.executablePath)
-        if let stored, stored != GrokPaths.installerExecutable.path {
+        if let stored,
+            stored != GrokPaths.installerExecutable.path
+                || defaults.bool(forKey: Key.executablePathChosen)
+        {
             executablePath = stored
         } else {
             executablePath = GrokPaths.defaultExecutable.path
@@ -205,8 +212,25 @@ final class AppSettings {
         effort = Self.effortOptions.contains(storedEffort) ? storedEffort : ""
     }
 
+    /// Re-reads the pin, archive and name lists, which another running copy
+    /// of the app may have changed since launch. Call it before a change, so
+    /// the write keeps that copy's edits instead of replacing them.
+    func reloadSharedLists() {
+        func stored<Value: Decodable>(_ key: String) -> [Value] {
+            defaults.data(forKey: key).flatMap { try? JSONDecoder().decode([Value].self, from: $0) } ?? []
+        }
+        let pins: [OpenTabsSnapshot.Entry] = stored(Key.pinnedConversations)
+        if pins != pinnedConversations { pinnedConversations = pins }
+        let projects: [String] = stored(Key.pinnedProjects)
+        if projects != pinnedProjects { pinnedProjects = projects }
+        let archives: [OpenTabsSnapshot.Entry] = stored(Key.archivedConversations)
+        if archives != archivedConversations { archivedConversations = archives }
+        let names: [ConversationName] = stored(Key.conversationNames)
+        if names != conversationNames { conversationNames = names }
+    }
+
     var theme: TerminalTheme {
-        TerminalTheme.all.first { $0.name == themeName } ?? .sigilNeon
+        TerminalTheme.all.first { $0.name == themeName } ?? .sigilDark
     }
 
     var executableURL: URL {

@@ -96,6 +96,35 @@ struct SettingsViewTests {
     }
 
     @Test @MainActor
+    func pickingTheStoredPathInThePanelStillRecordsTheChoice() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let grok = try makeExecutable(in: root, name: "grok")
+        var session = PathFieldSession(stored: grok.path)
+        session.pick(grok)
+        #expect(session.stored == grok.path)
+        #expect(session.configurationChangeCount == 1)
+        #expect(session.lastError == nil)
+    }
+
+    @Test @MainActor
+    func leavingAnUntouchedMissingPathRaisesNoError() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // A user without Grok keeps the default path, which does not exist.
+        let missing = root.appendingPathComponent("bin/grok").path
+        var session = PathFieldSession(stored: missing)
+        session.pressReturn()
+        #expect(session.lastError == nil)
+        session.resignFocus()
+        #expect(session.lastError == nil)
+        #expect(session.stored == missing)
+        #expect(session.configurationChangeCount == 0)
+    }
+
+    @Test @MainActor
     func paddedValidPathCommitsTheNormalizedString() throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -107,6 +136,33 @@ struct SettingsViewTests {
         #expect(session.stored == grok.path)
         #expect(session.configurationChangeCount == 1)
         #expect(session.lastError == nil)
+    }
+
+    @Test func tabMessagingSwitchShowsTheRequestWhileTheChangeRuns() {
+        var toggle = TabMessagingSwitch()
+        let started = toggle.request(true, saved: false)
+        #expect(started)
+        #expect(toggle.isOn(saved: false))
+
+        toggle.finish()
+        #expect(toggle.isOn(saved: true))
+    }
+
+    @Test func failedTabMessagingChangeFallsBackToTheSavedValue() {
+        var toggle = TabMessagingSwitch()
+        let started = toggle.request(false, saved: true)
+        #expect(started)
+        #expect(!toggle.isOn(saved: true))
+
+        toggle.finish()
+        #expect(toggle.isOn(saved: true))
+    }
+
+    @Test func tabMessagingRequestForTheSavedValueStartsNothing() {
+        var toggle = TabMessagingSwitch()
+        let started = toggle.request(true, saved: true)
+        #expect(!started)
+        #expect(toggle.isOn(saved: true))
     }
 }
 
@@ -135,9 +191,17 @@ private struct PathFieldSession {
         applyCommit()
     }
 
+    mutating func pick(_ url: URL) {
+        apply(draft.pick(url, stored: stored))
+    }
+
     private mutating func applyCommit() {
+        apply(draft.commit(stored: stored))
+    }
+
+    private mutating func apply(_ outcome: ExecutablePathDraft.Outcome) {
         lastError = nil
-        switch draft.commit(stored: stored) {
+        switch outcome {
         case .applied(let path):
             stored = path
             configurationChangeCount += 1

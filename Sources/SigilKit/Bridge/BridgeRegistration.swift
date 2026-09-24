@@ -157,13 +157,16 @@ public struct BridgeRegistration: Sendable {
         guard code == 0 else { throw Error.failed(output: output) }
     }
 
-    /// Server names may contain hyphens, so a word-boundary match would treat
-    /// `my-sigil` as a hit. Tokens are letters, digits, hyphens, and underscores.
+    /// `grok mcp list` prints `  name: command` per server. Only the name
+    /// field counts, so `my-sigil` or a `/sigil/` folder in another server's
+    /// command is not a hit. A `| name | ... |` table row is read the same way.
     private static func listingContainsServer(_ listing: String) -> Bool {
-        let tokens = listing.split { character in
-            !(character.isLetter || character.isNumber || character == "-" || character == "_")
+        listing.split(whereSeparator: \.isNewline).contains { line in
+            var row = line.trimmingCharacters(in: .whitespaces)[...]
+            if row.hasPrefix("|") { row = row.dropFirst() }
+            let name = row.prefix { $0 != ":" && $0 != "|" }
+            return name.trimmingCharacters(in: .whitespaces) == serverName
         }
-        return tokens.contains { $0 == serverName[...] }
     }
 }
 

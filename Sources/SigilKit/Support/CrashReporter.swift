@@ -63,6 +63,7 @@ public enum CrashReporter {
     private nonisolated(unsafe) static var stateSlotA: UnsafeMutablePointer<UInt8>?
     private nonisolated(unsafe) static var stateSlotB: UnsafeMutablePointer<UInt8>?
     private nonisolated(unsafe) static var pathBuffer: UnsafeMutablePointer<CChar>?
+    private nonisolated(unsafe) static var directoryBuffer: UnsafeMutablePointer<CChar>?
     private nonisolated(unsafe) static var numberBuffer: UnsafeMutablePointer<UInt8>?
     private nonisolated(unsafe) static var reportURL: URL?
     private nonisolated(unsafe) static var didInstallHandlers = false
@@ -173,6 +174,7 @@ public enum CrashReporter {
         let pathPointer = UnsafeMutablePointer<CChar>.allocate(capacity: path.count)
         pathPointer.initialize(from: path, count: path.count)
         pathBuffer = pathPointer
+        directoryBuffer = strdup(directory.path)
 
         stateSlotA = makeStateSlot()
         stateSlotB = makeStateSlot()
@@ -204,6 +206,8 @@ public enum CrashReporter {
         sigil_reset_state()
         pathBuffer?.deallocate()
         pathBuffer = nil
+        free(directoryBuffer)
+        directoryBuffer = nil
         numberBuffer?.deallocate()
         numberBuffer = nil
         reportURL = nil
@@ -255,6 +259,9 @@ public enum CrashReporter {
     static func writeSignalReport(_ number: Int32) {
         sigil_set_crashing()
         guard let path = pathBuffer else { return }
+        // The folder may have been removed since launch. An existing one
+        // makes mkdir fail with EEXIST, which is fine.
+        if let directory = directoryBuffer { _ = mkdir(directory, 0o755) }
         let descriptor = open(path, O_WRONLY | O_CREAT | O_APPEND, 0o644)
         guard descriptor >= 0 else { return }
         emit(descriptor, signalBanner)

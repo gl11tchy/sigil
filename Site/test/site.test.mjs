@@ -141,6 +141,28 @@ test('GET /screenshot.png is the app window', async t => {
   assert.ok(bytes.byteLength > 1000);
 });
 
+test('the self-hosted fonts are served as WOFF2 with their licences', async t => {
+  const { base } = await setup(t);
+  const css = await text(base, '/style.css');
+  const urls = [...css.body.matchAll(/url\("?([^")]+)"?\)/g)].map(m => m[1]);
+  assert.ok(urls.length >= 5);
+  for (const url of urls) {
+    assert.match(url, /^\/fonts\/[\w-]+\.woff2$/);
+    const res = await fetch(`${base}${url}`);
+    assert.equal(res.status, 200, url);
+    assert.equal(res.headers.get('content-type'), 'font/woff2');
+    assertSecurityHeaders(res);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    assert.equal(String.fromCharCode(...bytes.subarray(0, 4)), 'wOF2', url);
+  }
+  for (const path of ['/fonts/Inter-OFL.txt', '/fonts/JetBrainsMono-OFL.txt']) {
+    const { res, body } = await text(base, path);
+    assert.equal(res.status, 200, path);
+    assert.match(res.headers.get('content-type'), /text\/plain/);
+    assert.match(body, /SIL Open Font License/);
+  }
+});
+
 test('a query string and HEAD reach the same page', async t => {
   const { base } = await setup(t);
   for (const path of ['/?fbclid=abc', '/docs?ref=x', '/docs/?utm_source=y']) {

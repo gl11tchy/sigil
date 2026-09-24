@@ -63,6 +63,38 @@ struct BridgeRegistrationTests {
             ])
     }
 
+    /// `grok mcp list` prints one `  name: command` line per server. Only the
+    /// name counts; a `sigil` folder in another server's command does not.
+    @Test(arguments: [
+        ListingCase(
+            output: "  sigil: /Applications/Sigil.app/Contents/MacOS/sigil-mcp\n",
+            code: 0,
+            expected: true
+        ),
+        ListingCase(output: "  sigil: /tmp/sigil-mcp (disabled)\n", code: 0, expected: true),
+        ListingCase(
+            output: "  other: /Users/me/sigil/bin/server\n  github: npx server-github\n",
+            code: 0,
+            expected: false
+        ),
+        ListingCase(output: "| other | stdio | /opt/sigil/server |", code: 0, expected: false),
+        ListingCase(
+            output: "No MCP servers configured. Run `grok mcp add --help` to get started.\n",
+            code: 0,
+            expected: false
+        ),
+    ])
+    func removeRunsOnlyWhenAServerIsNamedSigil(listing: ListingCase) throws {
+        let probe = RunnerProbe()
+        probe.responses = [(listing.code, listing.output), (0, "removed")]
+        let registration = BridgeRegistration(executable: grok, runner: probe.run)
+
+        try registration.remove()
+
+        let removed = probe.calls.contains(["mcp", "remove", "sigil", "-s", "user"])
+        #expect(removed == listing.expected)
+    }
+
     @Test(arguments: [
         ListingCase(
             output: """

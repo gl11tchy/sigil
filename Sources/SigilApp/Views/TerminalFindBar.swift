@@ -18,45 +18,46 @@ struct TerminalFindBar: View {
     @FocusState private var isFieldFocused: Bool
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(isFieldFocused ? palette.textDim : palette.textFaint)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(isFieldFocused ? palette.ink2 : palette.ink3)
+                .padding(.leading, 12)
 
-            TextField("Find", text: $query)
+            TextField("", text: $query, prompt: Text("Find").foregroundStyle(palette.ink2))
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
-                .foregroundStyle(palette.text)
+                .ui(13)
+                .foregroundStyle(palette.ink)
                 .focused($isFieldFocused)
-                .frame(width: 132)
+                .frame(width: 150)
+                .padding(.leading, 4)
                 .onSubmit(advance)
                 .accessibilityLabel("Find in terminal")
 
             Text(counter)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(palette.textFaint)
+                .mono(11.5)
+                .foregroundStyle(palette.ink2)
                 .monospacedDigit()
+                .frame(minWidth: 28, alignment: .trailing)
                 .accessibilityLabel(counterLabel)
+
+            Rectangle().fill(palette.line).frame(width: 1, height: 16).padding(.horizontal, 4)
 
             FindBarIconButton(systemName: "chevron.up", help: "Previous match (Shift+Return)", action: findPrevious)
                 .disabled(matchCount == 0)
             FindBarIconButton(systemName: "chevron.down", help: "Next match (Return)", action: findNext)
                 .disabled(matchCount == 0)
             FindBarIconButton(systemName: "xmark", help: "Close find (Escape)", action: dismiss)
+                .padding(.trailing, 6)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(palette.raised)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(
-                            isFieldFocused ? palette.accent : palette.hairline,
-                            lineWidth: 1
-                        )
-                )
+        .frame(height: 38)
+        .background(Capsule(style: .continuous).fill(palette.surface))
+        .overlay(
+            Capsule(style: .continuous)
+                .strokeBorder(isFieldFocused ? palette.accent : palette.ringOverlay, lineWidth: 1)
         )
+        .shadow(color: .black.opacity(palette.isDark ? 0.34 : 0.10), radius: 14, y: 8)
+        .animation(Motion.fade, value: isFieldFocused)
         .onExitCommand(perform: dismiss)
         .task(id: focusToken) {
             // Focus set in the same transaction that inserts the bar loses to
@@ -97,29 +98,7 @@ private struct FindBarIconButton: View {
     let help: String
     let action: () -> Void
 
-    @Environment(\.palette) private var palette
-    @Environment(\.isEnabled) private var isEnabled
-    @State private var isHovering = false
-
     var body: some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 10, weight: .medium))
-                .frame(width: 20, height: 20)
-                .background(
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(isHovering ? palette.selected : Color.clear)
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(
-            isEnabled
-                ? (isHovering ? palette.textDim : palette.textFaint)
-                : palette.textFaint.opacity(0.4)
-        )
-        .onHover { isHovering = $0 }
-        .help(help)
-        .accessibilityLabel(help)
+        IconButton(systemImage: systemName, help: help, action: action)
     }
 }
