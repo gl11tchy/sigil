@@ -139,10 +139,12 @@ struct GrokCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("New Session") { model.requestNewSession() }
+            Button("New Session…") { model.requestNewSession() }
                 .keyboardShortcut("t", modifiers: .command)
-            Button("New Session in Folder…") { model.requestNewSession() }
-                .keyboardShortcut("n", modifiers: [.command, .shift])
+            Button("New Session in Folder…") {
+                model.requestNewSessionInFolder { model.pickDirectory() }
+            }
+            .keyboardShortcut("n", modifiers: [.command, .shift])
         }
 
         CommandGroup(after: .newItem) {
@@ -198,11 +200,11 @@ struct GrokCommands: Commands {
 
         CommandGroup(after: .toolbar) {
             Button(model.isSidebarVisible ? "Hide Sidebar" : "Show Sidebar") {
-                model.isSidebarVisible.toggle()
+                Self.animateColumn { model.isSidebarVisible.toggle() }
             }
             .keyboardShortcut("b", modifiers: .command)
             Button(model.panel.isVisible ? "Hide Panel" : "Show Panel") {
-                model.togglePanel()
+                Self.animateColumn { model.togglePanel() }
             }
             .keyboardShortcut("b", modifiers: [.command, .option])
             Menu("Panel") {
@@ -214,10 +216,13 @@ struct GrokCommands: Commands {
             Divider()
             Button("Increase Font Size") { model.adjustFontSize(by: 1) }
                 .keyboardShortcut("+", modifiers: .command)
+                .disabled(!model.canIncreaseFontSize)
             Button("Decrease Font Size") { model.adjustFontSize(by: -1) }
                 .keyboardShortcut("-", modifiers: .command)
+                .disabled(!model.canDecreaseFontSize)
             Button("Actual Size") { model.resetFontSize() }
                 .keyboardShortcut("0", modifiers: .command)
+                .disabled(!model.canResetFontSize)
             Divider()
             Button("Reload Conversations") { Task { await model.store.reload() } }
                 .keyboardShortcut("r", modifiers: .command)
@@ -241,13 +246,23 @@ struct GrokCommands: Commands {
             }
         }
 
-        CommandGroup(after: .help) {
+        CommandGroup(after: .appInfo) {
             Button("Check for Updates…") {
                 NSWorkspace.shared.open(
                     URL(string: "https://github.com/gl11tchy/sigil/releases/latest")!)
             }
+        }
+
+        // Sigil has no help book, so the default Help item would only say so.
+        CommandGroup(replacing: .help) {
             Button("Reveal Crash Logs") { model.revealCrashLogs() }
         }
+    }
+
+    /// The same motion as the toolbar buttons, so ⌘B does not snap.
+    private static func animateColumn(_ change: () -> Void) {
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16), change)
     }
 
     /// ⌘W belongs to the window in front. Settings and About get the system

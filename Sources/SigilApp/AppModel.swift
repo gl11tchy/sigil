@@ -328,7 +328,7 @@ final class AppModel {
 
     func isWorking(_ project: SidebarProject) -> Bool {
         project.sessions.contains { isWorking($0) }
-            || tabs.contains { $0.activity == .working && samePath($0.workingDirectory.path, project.cwd) }
+            || tabs.contains { $0.activity == .working && inProject($0.workingDirectory.path, project.cwd) }
     }
 
     func isPinned(_ session: GrokSession) -> Bool {
@@ -449,7 +449,7 @@ final class AppModel {
 
     func archive(_ project: SidebarProject) {
         let projectTabs = tabs.filter {
-            $0.spec.provider == .grokBuild && samePath($0.workingDirectory.path, project.cwd)
+            $0.spec.provider == .grokBuild && inProject($0.workingDirectory.path, project.cwd)
         }
         if let prompt = StopWorkingPrompt(action: .archive, stopping: projectTabs),
             !confirmStop(prompt)
@@ -459,7 +459,7 @@ final class AppModel {
         unpin(project)
         removeAddedProject(project.cwd)
         stopAndWait(projectTabs)
-        archiveWithoutAsking(store.sessions.filter { samePath($0.cwd, project.cwd) })
+        archiveWithoutAsking(store.sessions.filter { inProject($0.cwd, project.cwd) })
         for tab in projectTabs {
             if let index = tabs.firstIndex(where: { $0.id == tab.id }) { removeTab(at: index) }
         }
@@ -472,7 +472,7 @@ final class AppModel {
     }
 
     func unarchive(_ project: SidebarProject) {
-        for session in store.sessions where samePath(session.cwd, project.cwd) {
+        for session in store.sessions where inProject(session.cwd, project.cwd) {
             unarchive(session)
         }
     }
@@ -554,7 +554,7 @@ final class AppModel {
     /// An added folder with no conversations at all, hidden ones included.
     /// Removing it drops only the folder entry, never a chat.
     func isRemovableOnly(_ project: SidebarProject) -> Bool {
-        isAddedProject(project.cwd) && !store.sessions.contains { samePath($0.cwd, project.cwd) }
+        isAddedProject(project.cwd) && !store.sessions.contains { inProject($0.cwd, project.cwd) }
     }
 
     /// The row's archive control: removal for a chatless added folder.
@@ -564,7 +564,7 @@ final class AppModel {
 
     /// Drops an added folder and closes every tab in it, whatever the CLI.
     func removeProject(_ project: SidebarProject) {
-        let projectTabs = tabs.filter { samePath($0.workingDirectory.path, project.cwd) }
+        let projectTabs = tabs.filter { inProject($0.workingDirectory.path, project.cwd) }
         if let prompt = StopWorkingPrompt(action: .closeTab, stopping: projectTabs),
             !confirmStop(prompt)
         {
@@ -585,7 +585,7 @@ final class AppModel {
 
     /// The selected tab runs in this folder, whatever the CLI.
     func hasSelectedTab(in project: SidebarProject) -> Bool {
-        selectedTab.map { samePath($0.workingDirectory.path, project.cwd) } ?? false
+        selectedTab.map { inProject($0.workingDirectory.path, project.cwd) } ?? false
     }
 
     private func isAddedProject(_ path: String) -> Bool {
@@ -649,6 +649,11 @@ final class AppModel {
     var newSessionDirectory: URL {
         if let project = focusedProject {
             return URL(fileURLWithPath: project.cwd)
+        }
+        if let project = SigilWorktree.projectPath(of: currentDirectory.path),
+            Self.isUsableDirectory(URL(fileURLWithPath: project))
+        {
+            return URL(fileURLWithPath: project)
         }
         return currentDirectory
     }
@@ -728,7 +733,7 @@ final class AppModel {
         let focused = settings.focusedProjectPath
         if !focused.isEmpty,
             !SidebarOrganization.isSentinel(focused),
-            !store.sessions.contains(where: { samePath($0.cwd, focused) }),
+            !store.sessions.contains(where: { inProject($0.cwd, focused) }),
             !isAddedProject(focused)
         {
             settings.focusedProjectPath = ""
@@ -832,8 +837,8 @@ final class AppModel {
 
     private func pruningMissingProjects(_ paths: [String]) -> [String] {
         paths.filter { path in
-            store.sessions.contains { samePath($0.cwd, path) }
-                || tabs.contains { samePath($0.workingDirectory.path, path) }
+            store.sessions.contains { inProject($0.cwd, path) }
+                || tabs.contains { inProject($0.workingDirectory.path, path) }
                 || isAddedProject(path)
                 || awaitsScan(sharedKey("project", path))
         }
@@ -850,12 +855,12 @@ final class AppModel {
     /// The deleted conversation still sits in `store` until the next scan.
     private func dropOrphanedProjectPin(for session: GrokSession) {
         let othersRemain =
-            store.sessions.contains { $0.id != session.id && samePath($0.cwd, session.cwd) }
-            || tabs.contains { samePath($0.workingDirectory.path, session.cwd) }
+            store.sessions.contains { $0.id != session.id && inProject($0.cwd, session.projectPath) }
+            || tabs.contains { inProject($0.workingDirectory.path, session.projectPath) }
         if !othersRemain {
             settings.reloadSharedLists()
             settings.pinnedProjects = SidebarOrganization.removing(
-                session.cwd, from: settings.pinnedProjects, samePath: samePath)
+                session.projectPath, from: settings.pinnedProjects, samePath: samePath)
         }
     }
 
@@ -1482,6 +1487,12 @@ final class AppModel {
         isShowingNewSessionSheet = true
     }
 
+    /// ⇧⌘N: choose the folder first, then open the new-session sheet on it.
+    func requestNewSessionInFolder(choose: () -> URL?) {
+        guard let folder = choose() else { return }
+        requestNewSession(in: folder)
+    }
+
     @discardableResult
     func newTab(
         in directory: URL, model: String? = nil, effort: String? = nil,
@@ -2106,6 +2117,11 @@ final class AppModel {
         applyAppearance()
     }
 
+    /// The View menu turns each font item off where it would do nothing.
+    var canIncreaseFontSize: Bool { settings.fontSize < 32 }
+    var canDecreaseFontSize: Bool { settings.fontSize > 8 }
+    var canResetFontSize: Bool { settings.fontSize != 13 }
+
     func applyAppearance() {
         // Sheets, alerts, menus, and the Settings window are system-rendered;
         // they follow the app appearance, so the shell picks it, not macOS.
@@ -2628,7 +2644,7 @@ final class AppModel {
 
     private func rememberDefaultDirectory(_ directory: URL) {
         if isEphemeral(path: directory.path) { return }
-        settings.defaultDirectory = directory.path
+        settings.defaultDirectory = SigilWorktree.projectPath(of: directory.path) ?? directory.path
     }
 
     private func tabMatches(_ tab: TerminalTab, sessionID: String, cwd: String) -> Bool {
@@ -2649,6 +2665,11 @@ final class AppModel {
 
     private func entryKey(_ entry: OpenTabsSnapshot.Entry) -> String {
         entry.sessionID + "\u{0}" + canonicalPath(entry.cwd)
+    }
+
+    /// True when `path` is `project` or a Sigil worktree made from it.
+    private func inProject(_ path: String, _ project: String) -> Bool {
+        samePath(SigilWorktree.projectPath(of: path) ?? path, project)
     }
 
     private func samePath(_ lhs: String, _ rhs: String) -> Bool {
@@ -2688,8 +2709,8 @@ final class AppModel {
     }
 
     private func dropDeferred(inProjectPath path: String) {
-        deferredOpenTabs.removeAll { samePath($0.cwd, path) }
-        if let deferredSelectedEntry, samePath(deferredSelectedEntry.cwd, path) {
+        deferredOpenTabs.removeAll { inProject($0.cwd, path) }
+        if let deferredSelectedEntry, inProject(deferredSelectedEntry.cwd, path) {
             clearDeferredSelection()
         }
     }
@@ -2722,7 +2743,7 @@ final class AppModel {
             && isDirectory.boolValue
     }
 
-    private func showError(title: String, message: String) {
+    func showError(title: String, message: String) {
         presentError(AppActionError(title: title, message: message))
     }
 }

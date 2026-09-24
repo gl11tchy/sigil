@@ -175,6 +175,50 @@ struct RightPanelTests {
     }
 
     @Test @MainActor
+    func aShellThatExitsIsMarkedEndedUntilItRestarts() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let oldHome = ProcessInfo.processInfo.environment["HOME"]
+        let oldShell = ProcessInfo.processInfo.environment["SHELL"]
+        setenv("HOME", root.path, 1)
+        setenv("SHELL", "/bin/sh", 1)
+        defer {
+            if let oldHome { setenv("HOME", oldHome, 1) } else { unsetenv("HOME") }
+            if let oldShell { setenv("SHELL", oldShell, 1) } else { unsetenv("SHELL") }
+            try? FileManager.default.removeItem(at: root)
+        }
+        let (panel, notesRoot) = makePanel()
+        defer { try? FileManager.default.removeItem(at: notesRoot) }
+        func waitFor(_ condition: () -> Bool) async throws {
+            let deadline = ContinuousClock.now + .seconds(5)
+            while !condition(), ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+        }
+
+        panel.startShellIfNeeded(in: root, theme: .grokNight, fontSize: 13)
+        #expect(!panel.shellExited)
+        try #require(panel.shell).send(text: "exit\r")
+        try await waitFor { panel.shellExited }
+        #expect(panel.shellExited)
+
+        panel.restartShell(in: root, theme: .grokNight, fontSize: 13)
+        #expect(!panel.shellExited)
+
+        // The replaced shell stops later. That must not mark the new one ended.
+        let replaced = try #require(panel.shell)
+        let replacedPID = try #require((replaced.view as? LocalProcessTerminalView)?.process.shellPid)
+        panel.restartShell(in: root, theme: .grokNight, fontSize: 13)
+        let current = try #require(panel.shell)
+        defer { current.terminateAndWait() }
+        try await waitFor { kill(replacedPID, 0) != 0 }
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(!replaced.isRunning)
+        #expect(!panel.shellExited)
+    }
+
+    @Test @MainActor
     func restartingThePanelShellDoesNotBlockOnTheOldShell() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)

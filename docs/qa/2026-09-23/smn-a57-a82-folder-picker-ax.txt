@@ -1,0 +1,31 @@
+a57/a82: File menu and the New Session in Folder… folder picker.
+File menu opened (AXPress on the menu bar item) with no panel open, enabled states:
+Menu (opened): File
+  New Session… | enabled=true
+  New Session in Folder… | enabled=true
+  Close Tab | enabled=true
+  ---- | enabled=false
+  Export Transcript… | enabled=true
+  Rename Conversation | enabled=true
+  ---- | enabled=false
+  Deliver Tab Message | enabled=false
+  Dismiss Tab Message | enabled=false
+  Restart Session | enabled=false
+  ---- | enabled=false
+  ---- | enabled=false
+  Close | enabled=true
+  Close All | enabled=true
+
+Shortcuts (AXMenuItemCmdModifiers: 0 = Command, 1 = Shift+Command):
+  New Session… | cmdChar=T | modifiers=0   (⌘T)
+  New Session in Folder… | cmdChar=N | modifiers=1   (⇧⌘N)
+
+AXPress on File > New Session in Folder…, then the SigilUX windows:
+  WINDOW 1 role=AXWindow | subrole=AXDialog | title=Open | modal=true | size=880x448
+  WINDOW 2 role=AXWindow | subrole=AXStandardWindow | title=SigilUX | modal=false | size=900x492
+
+Controls of the Open panel (buttons and pop-up buttons only; the Finder sidebar was not dumped):
+  AXPopUpButton | title=Where: | value=acme-api   (starts in the active tab folder)
+  AXButton | title=Cancel | enabled=true
+  AXButton | title=Open Session Here | enabled=true
+After AXPress on Cancel: SigilUX window count = 1 (the Open panel closed).

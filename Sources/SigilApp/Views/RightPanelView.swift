@@ -54,7 +54,7 @@ struct RightPanelView: View {
         case .notes:
             EmptyView()
         }
-        IconButton(systemImage: "xmark", help: "Close Panel (⌥⌘B)") {
+        IconButton(systemImage: "xmark", help: "Close Panel (⌥⌘B)", label: "Close Panel") {
             model.togglePanel()
         }
     }
@@ -66,12 +66,17 @@ struct RightPanelView: View {
         switch panel.mode {
         case .shell:
             if let shell = panel.shell {
-                TerminalPane(
-                    controller: shell,
-                    background: Palette.nsColor(model.settings.theme.backgroundHex),
-                    cornerRadius: Radius.window - 1,
-                    roundsTopCorners: false
-                )
+                VStack(spacing: 0) {
+                    TerminalPane(
+                        controller: shell,
+                        background: Palette.nsColor(model.settings.theme.backgroundHex),
+                        cornerRadius: Radius.window - 1,
+                        roundsTopCorners: false
+                    )
+                    if panel.shellExited {
+                        ShellEndedRow(restart: { model.restartPanelShell() })
+                    }
+                }
                 .padding([.leading, .trailing, .bottom], 1)
                 .task(id: ObjectIdentifier(shell)) {
                     await Task.yield()
@@ -155,6 +160,30 @@ private struct PanelPlaceholder: View {
             .multilineTextAlignment(.center)
             .padding(24)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Shown under a panel shell that has exited, like a tab's ended banner.
+private struct ShellEndedRow: View {
+    let restart: () -> Void
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(palette.ink3)
+                .frame(width: 6, height: 6)
+            Text("Shell ended.")
+                .ui(12)
+                .foregroundStyle(palette.ink2)
+            Spacer()
+            Button("Restart", action: restart)
+                .buttonStyle(SigilButtonStyle(kind: .secondary, height: 24))
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 36)
+        .background(palette.surface)
+        .overlay(alignment: .top) { Rectangle().fill(palette.line).frame(height: 1) }
     }
 }
 

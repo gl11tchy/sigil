@@ -173,6 +173,24 @@ struct AppSettingsTests {
     }
 }
 
+extension AppSettingsTests {
+    @Test @MainActor
+    func newSessionDefaultsPersist() {
+        let defaults = isolatedDefaults()
+        defer { defaults.reset() }
+
+        let fresh = AppSettings(defaults: defaults.value)
+        #expect(fresh.defaultProvider == .grokBuild)
+        #expect(fresh.startsInWorktree)
+
+        fresh.defaultProvider = .claudeCode
+        fresh.startsInWorktree = false
+        let reloaded = AppSettings(defaults: defaults.value)
+        #expect(reloaded.defaultProvider == .claudeCode)
+        #expect(!reloaded.startsInWorktree)
+    }
+}
+
 private func temporaryDirectory() throws -> URL {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

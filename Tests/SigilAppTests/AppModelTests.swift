@@ -3512,6 +3512,43 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func newSessionInFolderAsksForTheFolderFirst() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let chosen = try fixture.directory("chosen")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        model.requestNewSessionInFolder { nil }
+        #expect(!model.isShowingNewSessionSheet)
+
+        model.requestNewSessionInFolder { chosen }
+        #expect(model.isShowingNewSessionSheet)
+        #expect(model.pendingSessionDirectory == chosen)
+    }
+
+    @Test @MainActor
+    func fontSizeMenuItemsTurnOffAtTheirLimits() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        model.settings.fontSize = 13
+        #expect(model.canIncreaseFontSize)
+        #expect(model.canDecreaseFontSize)
+        #expect(!model.canResetFontSize)
+
+        model.settings.fontSize = 32
+        #expect(!model.canIncreaseFontSize)
+        #expect(model.canResetFontSize)
+
+        model.settings.fontSize = 8
+        #expect(!model.canDecreaseFontSize)
+        #expect(model.canIncreaseFontSize)
+    }
+
+    @Test @MainActor
     func archivingAProjectWithTwoWorkingChatsAsksAboutArchivingBoth() throws {
         let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
         defer { fixture.cleanup() }

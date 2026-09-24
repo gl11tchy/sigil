@@ -169,6 +169,8 @@ extension Color {
 struct IconButton: View {
     let systemImage: String
     var help: String = ""
+    /// What VoiceOver reads when `help` carries a shortcut or a path.
+    var label: String?
     var isOn: Bool = false
     var size: CGFloat = 24
     let action: () -> Void
@@ -194,7 +196,7 @@ struct IconButton: View {
         .animation(Motion.fade, value: isHovering)
         .onHover { isHovering = $0 && isEnabled }
         .help(help)
-        .accessibilityLabel(help)
+        .accessibilityLabel(label ?? help)
         .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 

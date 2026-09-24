@@ -252,7 +252,7 @@ private struct TopBar: View {
             if !model.isSidebarVisible {
                 // Room for the traffic lights, which now sit over the screen.
                 Color.clear.frame(width: 66)
-                IconButton(systemImage: "sidebar.leading", help: "Show Sidebar (⌘B)") {
+                IconButton(systemImage: "sidebar.leading", help: "Show Sidebar (⌘B)", label: "Show Sidebar") {
                     withAnimation(reduceMotion ? nil : Motion.slide) {
                         model.isSidebarVisible.toggle()
                     }
@@ -281,13 +281,14 @@ private struct TopBar: View {
             IconButton(
                 systemImage: "sidebar.trailing",
                 help: model.panel.isVisible ? "Hide Panel (⌥⌘B)" : "Show Panel (⌥⌘B)",
+                label: model.panel.isVisible ? "Hide Panel" : "Show Panel",
                 isOn: model.panel.isVisible
             ) {
                 withAnimation(reduceMotion ? nil : Motion.slide) { model.togglePanel() }
             }
 
             Menu {
-                Button("New Session in Folder…") { model.requestNewSession() }
+                Button("New Session in Folder…") { model.requestNewSessionInFolder { model.pickDirectory() } }
                 Divider()
                 SettingsLink { Text("Settings…") }
             } label: {
@@ -626,9 +627,20 @@ extension URL {
         path == FileManager.default.homeDirectoryForCurrentUser.path ? "~" : lastPathComponent
     }
 
+    /// `project/worktree` for a folder in a Sigil worktree, e.g. `app/9e27b2dd`.
+    var sigilWorktreeLabel: String? {
+        guard let project = SigilWorktree.projectPath(of: path) else { return nil }
+        let prefix = SigilWorktree.root.path + "/"
+        let rest = path.hasPrefix(prefix) ? path.dropFirst(prefix.count) : Substring(path)
+        let parts = rest.split(separator: "/")
+        let name = parts.count >= 2 ? String(parts[1]) : lastPathComponent
+        return "\(URL(fileURLWithPath: project).lastPathComponent)/\(name)"
+    }
+
     /// Last two path components, e.g. `scratchpad/wt-pr-a`. The home folder
     /// keeps its `~`, which is shorter than its own two components.
     var breadcrumbPath: String {
+        if let label = sigilWorktreeLabel { return label }
         if path == FileManager.default.homeDirectoryForCurrentUser.path { return "~" }
         let names = pathComponents.filter { $0 != "/" }
         guard names.count >= 2 else { return abbreviatedPath }

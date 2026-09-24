@@ -281,14 +281,15 @@ enum SidebarOrganization {
         }
     }
 
-    /// `sessions` in `project`'s folder, or all of them without a project.
+    /// `sessions` in `project`'s folder or its Sigil worktrees, or all of them
+    /// without a project.
     static func sessions(
         _ sessions: [GrokSession],
         in project: SidebarProject?,
         samePath: (String, String) -> Bool
     ) -> [GrokSession] {
         guard let project else { return sessions }
-        return sessions.filter { samePath($0.cwd, project.cwd) }
+        return sessions.filter { samePath($0.projectPath, project.cwd) }
     }
 
     /// Pinned chats still in `sessions`, in pin order, limited to `project`'s chats.
@@ -374,7 +375,7 @@ enum SidebarOrganization {
         var grouped: [String: [GrokSession]] = [:]
         var representative: [String: GrokSession] = [:]
         for session in sessions {
-            let key = canonicalPath(session.cwd)
+            let key = canonicalPath(session.projectPath)
             if grouped[key] == nil {
                 order.append(key)
                 grouped[key] = [session]
@@ -394,9 +395,9 @@ enum SidebarOrganization {
             return SidebarProject(
                 id: key,
                 name: duplicated.contains(sample.projectName)
-                    ? sample.displayPath : sample.projectName,
-                displayPath: sample.displayPath,
-                cwd: sample.cwd,
+                    ? sample.projectDisplayPath : sample.projectName,
+                displayPath: sample.projectDisplayPath,
+                cwd: sample.projectPath,
                 sessions: list,
                 updatedAt: list.first?.updatedAt ?? sample.updatedAt
             )
@@ -482,7 +483,7 @@ enum SidebarOrganization {
         add(cwd)
         for session in sessions {
             add(session.projectName)
-            add(session.displayPath)
+            add(session.projectDisplayPath)
             add(session.cwd)
         }
         return ordered
