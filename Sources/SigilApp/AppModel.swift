@@ -85,6 +85,9 @@ final class AppModel {
     /// Shown before a close or archive kills a tab that is mid-turn.
     @ObservationIgnored
     var confirmStopWorking: ConfirmStopWorking = { AppModel.promptToStopWorking() }
+    /// True while the stop prompt is up. Its modal loop still runs main-queue
+    /// work, so a theme relaunch waits rather than replace the tab in question.
+    @ObservationIgnored private var isAskingToStop = false
     @ObservationIgnored private let registrationRunner: BridgeRegistration.Runner
     @ObservationIgnored private let mcpBinaryOverride: URL?
     @ObservationIgnored private let tabMessagingSocketURL: URL
@@ -379,7 +382,7 @@ final class AppModel {
     private func archive(_ session: GrokSession, confirmIfWorking: Bool) {
         let matching = tabs.filter { tabMatches($0, sessionID: session.id, cwd: session.cwd) }
         if confirmIfWorking, matching.contains(where: \.shouldWarnBeforeStopping),
-            !confirmStopWorking()
+            !confirmStop()
         {
             return
         }
@@ -432,7 +435,7 @@ final class AppModel {
                     && $0.shouldWarnBeforeStopping
             }
         }
-        if anyWorking && !confirmStopWorking() { return }
+        if anyWorking && !confirmStop() { return }
         archiveWithoutAsking(sessions)
     }
 
@@ -444,7 +447,7 @@ final class AppModel {
         let projectTabs = tabs.filter {
             $0.spec.provider == .grokBuild && samePath($0.workingDirectory.path, project.cwd)
         }
-        if projectTabs.contains(where: \.shouldWarnBeforeStopping), !confirmStopWorking() {
+        if projectTabs.contains(where: \.shouldWarnBeforeStopping), !confirmStop() {
             return
         }
         unpin(project)
@@ -1542,7 +1545,7 @@ final class AppModel {
     /// User-facing close: warn when the agent is mid-turn so a click does not kill work.
     func requestCloseTab(_ id: TerminalTab.ID) {
         guard let tab = tabs.first(where: { $0.id == id }) else { return }
-        if tab.shouldWarnBeforeStopping, !confirmStopWorking() { return }
+        if tab.shouldWarnBeforeStopping, !confirmStop() { return }
         closeTab(id)
     }
 
@@ -1973,12 +1976,25 @@ final class AppModel {
         }
     }
 
+    /// Asks before stopping work, then lets any theme relaunch that came due
+    /// during the prompt run against the answer.
+    private func confirmStop() -> Bool {
+        isAskingToStop = true
+        defer {
+            isAskingToStop = false
+            for tab in tabs where themeRestartsWhenSettled.contains(tab.id) {
+                restartForThemeWhenSettled(tab)
+            }
+        }
+        return confirmStopWorking()
+    }
+
     /// A tab that kept the old theme because it was busy relaunches on the new
     /// one once it settles, unless the theme was changed back meanwhile.
     private func restartForThemeWhenSettled(_ tab: TerminalTab) {
         guard themeRestartsWhenSettled.contains(tab.id) else { return }
         DispatchQueue.main.async { [weak self, weak tab] in
-            guard let self, let tab, self.tabs.contains(where: { $0 === tab }),
+            guard let self, let tab, !self.isAskingToStop, self.tabs.contains(where: { $0 === tab }),
                 !tab.shouldWarnBeforeStopping, tab.bridgeInbox.isEmpty
             else { return }
             self.themeRestartsWhenSettled.remove(tab.id)

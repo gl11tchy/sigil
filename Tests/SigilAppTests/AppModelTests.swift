@@ -326,6 +326,37 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func aConfirmedCloseIsNotLostToAThemeRelaunchWhileTheAlertIsUp() async throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let original = try #require(model.newTab(in: cwd))
+        original.noteTurnStarted()
+        fixture.settings.themeName = TerminalTheme.twitch.name
+        model.applyTheme()
+        // Like the alert's modal loop, this keeps running main-queue work, so
+        // the turn can end, and its theme relaunch come due, while the user decides.
+        model.confirmStopWorking = {
+            RunLoop.main.run(until: Date().addingTimeInterval(1.7))
+            return true
+        }
+
+        // Press Close from a run-loop callout, as a key event does, so the
+        // nested loop can drain the main queue.
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue) {
+                MainActor.assumeIsolated { model.requestCloseTab(original.id) }
+                done.resume()
+            }
+            CFRunLoopWakeUp(CFRunLoopGetMain())
+        }
+
+        #expect(model.tabs.isEmpty)
+    }
+
+    @Test @MainActor
     func changingThemeKeepsAnIdleTabWithMessagesUntilTheyAreHandled() async throws {
         let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
         defer { fixture.cleanup() }
