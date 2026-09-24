@@ -217,7 +217,7 @@ struct NewSessionSheetTests {
 @MainActor
 private func png(of view: some View) throws -> Data {
     let renderer = ImageRenderer(
-        content: view.environment(\.palette, Palette(theme: .sigilNeon))
+        content: view.environment(\.palette, Palette(theme: .sigilDark))
     )
     renderer.scale = 2
     let image = try #require(renderer.nsImage)

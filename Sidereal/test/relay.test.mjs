@@ -102,6 +102,12 @@ test('HTTP has fixed asset routes and security headers', async t => {
   const scanner = await fetch(`${base}/jsqr.js`);
   assert.equal(scanner.status, 200);
   assert.match(scanner.headers.get('content-type'), /javascript/);
+  for (const name of ['Inter-Regular', 'Inter-Medium', 'Inter-SemiBold', 'JetBrainsMono-Regular', 'JetBrainsMono-Medium']) {
+    const font = await fetch(`${base}/fonts/${name}.woff2`);
+    assert.equal(font.status, 200);
+    assert.equal(font.headers.get('content-type'), 'font/woff2');
+    assert.equal(Buffer.from(await font.arrayBuffer()).subarray(0, 4).toString('latin1'), 'wOF2');
+  }
   const page = await (await fetch(`${base}/`)).text();
   assert.doesNotMatch(page, /apple-mobile-web-app-capable/);
   assert.doesNotMatch(page, /mobile-web-app-capable/);

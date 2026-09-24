@@ -74,7 +74,7 @@ struct ProviderLogo: View {
                     .interpolation(.high)
             } else {
                 ProviderMark(data: ProviderMarks.data(for: provider))
-                    .fill(palette.text, style: FillStyle(eoFill: true))
+                    .fill(palette.ink, style: FillStyle(eoFill: true))
                     .padding(provider == .grokBuild ? 1 : 4)
             }
         }

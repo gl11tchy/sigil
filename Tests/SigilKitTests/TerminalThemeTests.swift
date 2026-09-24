@@ -6,9 +6,11 @@ import Testing
 
 struct TerminalThemeTests {
 
-    @Test func allStartsWithSigilNeonAndHasAtLeastThreeThemes() {
+    @Test func allStartsWithTheAppsOwnPairAndHasAtLeastThreeThemes() {
         #expect(TerminalTheme.all.count >= 3)
-        #expect(TerminalTheme.all.first == .sigilNeon)
+        #expect(Array(TerminalTheme.all.prefix(2)) == [.sigilDark, .sigilLight])
+        #expect(TerminalTheme.sigilDark.isDark)
+        #expect(!TerminalTheme.sigilLight.isDark)
         #expect(TerminalTheme.all.contains(.grokNight))
         #expect(TerminalTheme.all.contains(.grokDay))
         #expect(TerminalTheme.all.contains(.grokEmber))
@@ -45,12 +47,31 @@ struct TerminalThemeTests {
 
     /// Every theme names a CLI theme, so the program and its window match.
     @Test func everyThemeNamesACLITheme() {
-        #expect(TerminalTheme.sigilNeon.grokThemeName == "sigil-neon")
+        #expect(TerminalTheme.sigilDark.grokThemeName == "sigil-host")
         #expect(TerminalTheme.grokDay.grokThemeName == "grokday")
         #expect(TerminalTheme.grokNight.grokThemeName == "groknight")
         #expect(TerminalTheme.grokEmber.grokThemeName == "sigil-host")
-        #expect(TerminalTheme.sigilNeon.grokThemeEnvironment.isEmpty)
+        #expect(TerminalTheme.grokNight.grokThemeEnvironment.isEmpty)
         #expect(TerminalTheme.githubDark.grokThemeEnvironment["GROK_THEME_BG"] == "0D1117")
+    }
+
+    /// The app's own themes paint the terminal in the window's tokens: the
+    /// ground is `page`, the cursor is the accent, and the TUI's human turn and
+    /// links use `ink2` and `accentInk` instead of the ANSI magenta and cyan.
+    @Test func sigilThemesUseTheWindowTokens() {
+        let dark = Palette(dark: true)
+        let light = Palette(dark: false)
+        #expect(TerminalTheme.sigilDark.backgroundHex == dark.pageHex)
+        #expect(TerminalTheme.sigilLight.backgroundHex == light.pageHex)
+        #expect(TerminalTheme.sigilDark.foregroundHex == dark.inkHex)
+        #expect(TerminalTheme.sigilLight.foregroundHex == light.inkHex)
+        #expect(TerminalTheme.sigilDark.cursorHex == dark.accentHex)
+        let env = TerminalTheme.sigilDark.grokThemeEnvironment
+        #expect(env["GROK_THEME_BG"] == "17181A")
+        #expect(env["GROK_THEME_USER"] == "A5A8AD")
+        #expect(env["GROK_THEME_LINK"] == "7EC0FF")
+        #expect(env["GROK_THEME_DARK"] == "1")
+        #expect(TerminalTheme.sigilLight.grokThemeEnvironment["GROK_THEME_DARK"] == "0")
     }
 
     private static let appDarkThemeNames = [

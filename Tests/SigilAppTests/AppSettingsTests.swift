@@ -105,6 +105,19 @@ struct AppSettingsTests {
         #expect(AppSettings(defaults: defaults.value).sidebarMode == .recents)
     }
 
+    /// The app ships as Sigil Dark. A stored "Sigil Neon" — the theme it
+    /// replaced — lands on Sigil Dark too, instead of an unrelated fallback.
+    @Test @MainActor
+    func themeDefaultsToSigilDarkAndTheRetiredNeonThemeMovesToIt() {
+        let defaults = isolatedDefaults()
+        defer { defaults.reset() }
+        #expect(AppSettings(defaults: defaults.value).theme == .sigilDark)
+        defaults.value.set("Sigil Neon", forKey: "terminal.theme")
+        #expect(AppSettings(defaults: defaults.value).theme == .sigilDark)
+        defaults.value.set("Sigil Light", forKey: "terminal.theme")
+        #expect(AppSettings(defaults: defaults.value).theme == .sigilLight)
+    }
+
     @Test @MainActor
     func worktreeSessionsAreHiddenByDefault() {
         let defaults = isolatedDefaults()
