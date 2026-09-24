@@ -97,6 +97,16 @@ must open in Safari so it uses that store. A standalone web app does not.
 Forget this Mac clears the phone's stored key; it does not revoke other copies of
 that credential. Use Disconnect on the Mac to revoke authorization.
 
+## Push alerts
+
+Set `APNS_KEY` (the contents of the `.p8`, PEM or base64), `APNS_KEY_ID`,
+`APNS_TEAM_ID` and `APNS_TOPIC` (the iPhone app's bundle id) and the relay
+forwards a host's `{pushToken, pushEnvironment}` and `{push: …}` frames to Apple
+over HTTP/2 with an ES256 token. Alert text stays sealed with the phone's device
+key; the relay adds a fixed fallback body. Live Activity updates carry only a
+status word, a timestamp and an asking flag. Without the four settings the relay
+answers `{type: "push", ok: false, reason: "off"}`.
+
 ## Security boundaries
 
 The QR carries a one-use bootstrap secret in its fragment. The phone replaces it
@@ -130,7 +140,8 @@ No commands are queued offline or automatically retried. After a lost response,
 check the terminal before manually resending.
 
 The relay limits itself to 100 rooms, 20 room allocations/minute, one phone per room,
-30 frames/second per socket, 110 KB frames, and bounded outgoing buffers. These are
+30 frames/second per socket, 110 KB frames, 60 pushes/minute per room, and bounded
+outgoing buffers. These are
 single-process limits, not a replacement for an internet-edge DoS/WAF policy.
 Pending rooms and disconnected hosts expire after five minutes. Host reconnection
 within that grace interval preserves the room. After that the Mac allocates a
