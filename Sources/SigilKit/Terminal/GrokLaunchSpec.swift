@@ -7,6 +7,11 @@ public struct GrokLaunchSpec: Sendable, Hashable {
     public struct HostCommand: Sendable, Equatable {
         public let executable: URL
         public let arguments: [String]
+
+        public init(executable: URL, arguments: [String]) {
+            self.executable = executable
+            self.arguments = arguments
+        }
     }
 
     /// Whether the tab opens a fresh conversation or reattaches to an existing one.

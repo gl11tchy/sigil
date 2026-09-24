@@ -188,7 +188,7 @@ struct NewSessionSheet: View {
             .padding(.top, 20)
         }
         .padding(20)
-        .frame(width: 560)
+        .frame(width: 600)
         .fixedSize(horizontal: false, vertical: true)
         .background(palette.surface)
         .environment(\.palette, Palette(theme: model.settings.theme))

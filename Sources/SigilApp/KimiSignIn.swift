@@ -130,6 +130,23 @@ final class KimiLogin {
     private(set) var isSignedIn = KimiCode.isSignedIn
     @ObservationIgnored private var process: Process?
     @ObservationIgnored private var output = ""
+    @ObservationIgnored private var run = 0
+    @ObservationIgnored private var exitStatus: Int32?
+    @ObservationIgnored private var outputEnded = false
+    @ObservationIgnored private var isCancelled = false
+    @ObservationIgnored private let command: () -> GrokLaunchSpec.HostCommand
+
+    init(command: @escaping () -> GrokLaunchSpec.HostCommand = KimiLogin.loginCommand) {
+        self.command = command
+    }
+
+    /// `kimi login` through the login shell a Kimi tab uses.
+    nonisolated static func loginCommand() -> GrokLaunchSpec.HostCommand {
+        GrokLaunchSpec(
+            workingDirectory: FileManager.default.homeDirectoryForCurrentUser, mode: .continueLatest,
+            extraArguments: ["login"], provider: .kimi
+        ).hostCommand()
+    }
 
     func refresh() {
         isSignedIn = KimiCode.isSignedIn
@@ -137,30 +154,38 @@ final class KimiLogin {
 
     func start() {
         guard process == nil else { return }
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let spec = GrokLaunchSpec(
-            workingDirectory: home, mode: .continueLatest, extraArguments: ["login"], provider: .kimi)
-        let command = spec.hostCommand()
+        let command = command()
         let process = Process()
         process.executableURL = command.executable
         process.arguments = command.arguments
-        process.environment = spec.environment()
-        process.currentDirectoryURL = home
+        process.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
         process.standardInput = FileHandle.nullDevice
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
+        run += 1
+        let current = run
+        // The main queue keeps output, its end, and the exit in arrival order.
         pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let text = String(decoding: handle.availableData, as: UTF8.self)
-            guard !text.isEmpty else { return }
-            Task { @MainActor in self?.append(text) }
+            let data = handle.availableData
+            if data.isEmpty { handle.readabilityHandler = nil }
+            let text = String(decoding: data, as: UTF8.self)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    if text.isEmpty { self?.endOutput(run: current) } else { self?.append(text, run: current) }
+                }
+            }
         }
         process.terminationHandler = { [weak self] finished in
-            pipe.fileHandleForReading.readabilityHandler = nil
             let status = finished.terminationStatus
-            Task { @MainActor in self?.finish(status: status) }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.exited(status: status, run: current) }
+            }
         }
         output = ""
+        exitStatus = nil
+        outputEnded = false
+        isCancelled = false
         do {
             try process.run()
         } catch {
@@ -173,22 +198,46 @@ final class KimiLogin {
     }
 
     func cancel() {
+        isCancelled = true
         process?.interrupt()
     }
 
-    private func append(_ text: String) {
-        guard case .waiting = state else { return }
+    private func append(_ text: String, run: Int) {
+        guard run == self.run, case .waiting = state else { return }
         output += text
         let parsed = Self.prompt(in: output)
         state = .waiting(code: parsed.code, page: parsed.page)
     }
 
-    private func finish(status: Int32) {
+    private func endOutput(run: Int) {
+        guard run == self.run else { return }
+        outputEnded = true
+        finish()
+    }
+
+    private func exited(status: Int32, run: Int) {
+        guard run == self.run else { return }
+        exitStatus = status
+        if outputEnded {
+            finish()
+            return
+        }
+        // A helper that inherited the pipe must not keep Settings waiting.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, run == self.run else { return }
+                self.finish()
+            }
+        }
+    }
+
+    private func finish() {
+        guard process != nil, let status = exitStatus else { return }
         process = nil
         refresh()
-        if status == 0, isSignedIn {
+        if status == 0 || isCancelled {
             state = .idle
-        } else if case .waiting = state {
+        } else {
             state = .failed(Self.failure(in: output, status: status))
         }
     }

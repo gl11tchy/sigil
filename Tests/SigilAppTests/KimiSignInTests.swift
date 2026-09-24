@@ -1,4 +1,5 @@
 import Foundation
+import SigilKit
 import Testing
 
 @testable import SigilApp
@@ -37,5 +38,39 @@ struct KimiSignInTests {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         #expect(
             KimiCode.accountCredentials(environment: [:]).path == "\(home)/.kimi-code/credentials/kimi-code.json")
+    }
+}
+
+@MainActor
+struct KimiLoginTests {
+    private func login(_ script: String) -> KimiLogin {
+        KimiLogin {
+            GrokLaunchSpec.HostCommand(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", script])
+        }
+    }
+
+    private func settle(_ login: KimiLogin, until done: (KimiLogin.State) -> Bool) async -> Bool {
+        for _ in 0..<100 {
+            if done(login.state) { return true }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return done(login.state)
+    }
+
+    @Test func cancellingTheBrowserStepReturnsQuietly() async {
+        let login = login(
+            "printf 'Opening browser: https://www.kimi.com/code/x\\nIf the browser did not open, enter code: AB12-CD34\\n'; exec sleep 30"
+        )
+        login.start()
+        let page = URL(string: "https://www.kimi.com/code/x")
+        #expect(await settle(login) { $0 == .waiting(code: "AB12-CD34", page: page) })
+        login.cancel()
+        #expect(await settle(login) { $0 == .idle })
+    }
+
+    @Test func aFailedLoginShowsItsLastLine() async {
+        let login = login("echo 'Waiting for authorization to complete...'; echo 'Network error'; exit 3")
+        login.start()
+        #expect(await settle(login) { $0 == .failed("Network error") })
     }
 }
