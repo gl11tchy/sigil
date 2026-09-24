@@ -3401,6 +3401,39 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func legacyFolderNotesStayWhenTheirFileCannotBeWritten() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let blocked = try fixture.directory("blocked")
+        let open = try fixture.directory("open")
+        try fixture.writeListedSession(id: "b-1", cwd: blocked.path, summary: "Blocked")
+        try fixture.writeListedSession(id: "o-1", cwd: open.path, summary: "Open")
+        await fixture.store.reload()
+        // Fixture folders are temporary, which the sidebar treats as worktrees.
+        fixture.settings.showWorktreeSessions = true
+        let legacy = [blocked.path: "blocked note", open.path: "open note"]
+        fixture.defaults.set(try JSONEncoder().encode(legacy), forKey: "panel.notes")
+        // A read-only notes folder for one project makes its write fail.
+        let blockedFolder = fixture.notesRoot.appendingPathComponent(
+            GrokPaths.encode(path: GrokPaths.canonicalPath(blocked.path)))
+        let fm = FileManager.default
+        try fm.createDirectory(at: blockedFolder, withIntermediateDirectories: true)
+        try fm.setAttributes([.posixPermissions: 0o500], ofItemAtPath: blockedFolder.path)
+        defer { try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: blockedFolder.path) }
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        model.migrateLegacyPanelNotes()
+
+        #expect(model.panel.legacyFolderNotes == [blocked.path: "blocked note"])
+        #expect(
+            fm.fileExists(
+                atPath: fixture.notesRoot.appendingPathComponent(
+                    GrokPaths.encode(path: GrokPaths.canonicalPath(open.path))
+                ).appendingPathComponent("o-1.md").path))
+    }
+
+    @Test @MainActor
     func sidebarListChangesKeepAnotherRunningCopysEdits() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }

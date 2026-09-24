@@ -41,6 +41,15 @@ struct SessionDirectoryWatcherTests {
         }
     }
 
+    @Test func aCoalescedMustScanSubDirsEventRefreshesWithoutARestart() {
+        let decision = SessionDirectoryWatcher.decision(
+            paths: ["/sessions/proj"],
+            flags: [FSEventStreamEventFlags(kFSEventStreamEventFlagMustScanSubDirs)]
+        )
+        #expect(decision.scan)
+        #expect(!decision.restart)
+    }
+
     @Test func aBatchWithOnlyJournalWritesDoesNotRefresh() {
         let decision = SessionDirectoryWatcher.decision(
             paths: [
