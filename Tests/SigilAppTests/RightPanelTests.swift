@@ -212,6 +212,40 @@ struct RightPanelTests {
     }
 
     @Test @MainActor
+    func restartingThePanelShellLetsTheOldShellCleanUp() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let oldHome = ProcessInfo.processInfo.environment["HOME"]
+        let oldShell = ProcessInfo.processInfo.environment["SHELL"]
+        setenv("HOME", root.path, 1)
+        setenv("SHELL", "/bin/zsh", 1)
+        defer {
+            if let oldHome { setenv("HOME", oldHome, 1) } else { unsetenv("HOME") }
+            if let oldShell { setenv("SHELL", oldShell, 1) } else { unsetenv("SHELL") }
+            try? FileManager.default.removeItem(at: root)
+        }
+        let (panel, notesRoot) = makePanel()
+        defer { try? FileManager.default.removeItem(at: notesRoot) }
+        let cleaned = root.appendingPathComponent("cleaned")
+
+        panel.startShellIfNeeded(in: root)
+        try await Task.sleep(for: .milliseconds(500))
+        // Like a command that finishes its write when asked to stop.
+        panel.shell?.send(text: "trap 'touch \(cleaned.path); exit' TERM\r")
+        try await Task.sleep(for: .milliseconds(300))
+
+        panel.restartShell(in: root)
+        defer { panel.shell?.terminateAndWait() }
+
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !FileManager.default.fileExists(atPath: cleaned.path), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(FileManager.default.fileExists(atPath: cleaned.path))
+    }
+
+    @Test @MainActor
     func aStoredWidthIsClampedToTheAllowedRange() {
         let name = "RightPanelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!

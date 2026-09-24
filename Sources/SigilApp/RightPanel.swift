@@ -60,6 +60,8 @@ final class RightPanel {
     /// The scratch shell, created on first use so a hidden panel costs nothing.
     private(set) var shell: TerminalController?
     private(set) var shellDirectory: URL?
+    /// Replaced shells that are still stopping.
+    @ObservationIgnored private var stoppingShells: [ObjectIdentifier: TerminalController] = [:]
 
     init(defaults: UserDefaults = .standard, notesStore: ConversationNotesStore? = nil) {
         self.defaults = defaults
@@ -108,7 +110,14 @@ final class RightPanel {
     /// stopped in the background: an interactive shell ignores SIGTERM, and
     /// waiting for the SIGKILL would freeze the window.
     func restartShell(in directory: URL, theme: TerminalTheme = .grokNight, fontSize: CGFloat = 13) {
-        shell?.terminate()
+        if let old = shell, old.isRunning {
+            // Freeing the controller kills its child at once, so hold it until
+            // the stop finishes and a command still gets its SIGTERM cleanup.
+            let id = ObjectIdentifier(old)
+            stoppingShells[id] = old
+            old.onTerminate = { [weak self] _ in self?.stoppingShells[id] = nil }
+            old.terminate()
+        }
         shell = TerminalController(theme: theme, fontSize: fontSize)
         shellDirectory = directory
         shell?.startShell(ShellLaunchSpec(workingDirectory: directory))
