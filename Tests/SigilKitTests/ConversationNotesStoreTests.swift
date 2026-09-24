@@ -150,6 +150,28 @@ struct ConversationNotesStoreTests {
     }
 
     @Test @MainActor
+    func aNoteForALongNonASCIIFolderIsSavedAndReadBack() throws {
+        let (store, root) = try makeStore()
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("notes-cwd-\(UUID().uuidString)")
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: base)
+        }
+        // Percent-encoded, this path is far over the 255-byte file name limit.
+        let cwd = base.appendingPathComponent("太郎/ドキュメント/開発プロジェクト/顧客向け在庫管理システム")
+        try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
+
+        store.setNote("deploy on friday", for: "a-1", cwd: cwd.path)
+        store.flushNow()
+
+        let reread = ConversationNotesStore(root: root)
+        #expect(reread.note(for: "a-1", cwd: cwd.path) == "deploy on friday")
+        let folder = GrokPaths.sessionFolderName(forCanonicalPath: GrokPaths.canonicalPath(cwd.path))
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(folder).path))
+    }
+
+    @Test @MainActor
     func defaultRootLivesUnderApplicationSupport() {
         let root = ConversationNotesStore.defaultRoot
         #expect(root.path.contains("Application Support/Sigil/notes"))

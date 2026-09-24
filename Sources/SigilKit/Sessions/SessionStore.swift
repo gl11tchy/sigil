@@ -272,13 +272,16 @@ public final class SessionStore {
         }
     }
 
+    /// Watches the root only. While it is missing, nothing is watched: its
+    /// nearest existing ancestor can be the home folder, whose churn would
+    /// rescan constantly. The retry loop starts the watcher once it appears.
     private func refreshWatcher() {
         guard isStarted else { return }
-        guard let desiredPath = nearestExistingDirectory(to: root) else {
-            if watchedPath != nil {
-                watcher.stop()
-                watchedPath = nil
-            }
+        guard let desiredPath = existingRootPath() else {
+            // Also ends a stream whose root was just deleted (a restart
+            // event clears `watchedPath` before this runs).
+            watcher.stop()
+            watchedPath = nil
             return
         }
         guard desiredPath != watchedPath else { return }
@@ -299,19 +302,12 @@ public final class SessionStore {
         }
     }
 
-    private func nearestExistingDirectory(to requestedRoot: URL) -> String? {
-        let fm = FileManager.default
-        var candidate = requestedRoot.standardizedFileURL
-        while true {
-            var isDirectory: ObjCBool = false
-            if fm.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
-                isDirectory.boolValue
-            {
-                return candidate.path
-            }
-            let parent = candidate.deletingLastPathComponent()
-            if parent.path == candidate.path { return nil }
-            candidate = parent
-        }
+    private func existingRootPath() -> String? {
+        let path = root.standardizedFileURL.path
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+            isDirectory.boolValue
+        else { return nil }
+        return path
     }
 }

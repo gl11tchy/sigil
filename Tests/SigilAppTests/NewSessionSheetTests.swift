@@ -69,6 +69,13 @@ struct NewSessionSheetTests {
         #expect(NewSessionLaunch.action(selected: .cursor, tapped: .cursor) == .start(.cursor))
     }
 
+    @Test func arrowKeysMoveAlongTheProviderRowAndStopAtItsEnds() {
+        #expect(NewSessionLaunch.provider(after: .claudeCode, movingBy: 1) == .codex)
+        #expect(NewSessionLaunch.provider(after: .grokBuild, movingBy: -1) == .cursor)
+        #expect(NewSessionLaunch.provider(after: .grokBuild, movingBy: 1) == .grokBuild)
+        #expect(NewSessionLaunch.provider(after: .claudeCode, movingBy: -1) == .claudeCode)
+    }
+
     @Test func pathDataKeepsImplicitCurvesAndArcs() {
         // The second cubic is relative, so it ends 10pt past the first.
         let curve = SVGPath.bounds(of: "M0 0 c0 0 0 0 10 0 0 0 0 0 10 10")
@@ -210,7 +217,7 @@ struct NewSessionSheetTests {
 @MainActor
 private func png(of view: some View) throws -> Data {
     let renderer = ImageRenderer(
-        content: view.environment(\.palette, Palette(theme: .sigilNeon))
+        content: view.environment(\.palette, Palette(theme: .sigilDark))
     )
     renderer.scale = 2
     let image = try #require(renderer.nsImage)
