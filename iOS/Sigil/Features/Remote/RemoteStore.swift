@@ -26,11 +26,11 @@ final class RemoteStore {
     var drafts: [String: String] = [:]
     private(set) var attachments: [String: [Attachment]] = [:]
 
-    private(set) var chats: [RemoteChat] = []
-    private(set) var chatsTruncated = false
-    private(set) var searchingChats = false
+    private(set) var chatList = ChatList()
+    private(set) var loadingChats = false
     private(set) var projects: [RemoteProject] = []
     private(set) var projectsTruncated = false
+    private(set) var sessionOptions: NewSessionOptions?
 
     /// Bumped whenever the visible output changes, so the output view can repaint.
     private(set) var outputRevision = 0
@@ -42,6 +42,7 @@ final class RemoteStore {
     @ObservationIgnored private let formatter = ReadableOutput.bundled()
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var searchToken = 0
+    @ObservationIgnored private var chatQuery = ""
     @ObservationIgnored private var lastChunkAt = Date.distantPast
     @ObservationIgnored private var freshHandshake = false
     @ObservationIgnored private var foreground = true
@@ -106,8 +107,9 @@ final class RemoteStore {
         histories = [:]
         drafts = [:]
         attachments = [:]
-        chats = []
+        clearChats()
         projects = []
+        sessionOptions = nil
         errorMessage = nil
         rawMode = false
         refreshOutput()
@@ -167,9 +169,58 @@ final class RemoteStore {
         perform { _ = try await $0.request("restart", tabID: id) }
     }
 
-    func newSession(in project: RemoteProject?) {
-        perform { _ = try await $0.request("new", text: project?.folder) }
+    /// A nil provider lets the Mac start its default CLI, as Macs before provider choice always do.
+    func newSession(in folder: String?, provider: String? = nil, model: String? = nil, effort: String? = nil) {
+        perform {
+            _ = try await $0.request("new", text: folder, provider: provider, model: model, effort: effort)
+        }
     }
+
+    /// Returns false when this Mac predates provider choice; New then starts its default CLI.
+    func loadSessionOptions() async -> Bool {
+        guard isConnected, !isDemo else { return sessionOptions != nil }
+        do {
+            sessionOptions = try await connection.request("options").options
+            return sessionOptions != nil
+        } catch RemoteConnectionError.mac("Unknown action.") {
+            sessionOptions = nil
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return sessionOptions != nil
+        }
+    }
+
+    /// Makes the folder on the Mac and adds it to Projects.
+    func createProject(named raw: String, in location: RemoteProject) async -> Result<RemoteProject, RemoteConnectionError> {
+        guard let name = ProjectName.validated(raw) else {
+            return .failure(.mac("Name the folder without slashes, colons or a leading dot."))
+        }
+        let project: RemoteProject
+        if isDemo {
+            project = RemoteProject(name: name, folder: "\(location.folder)/\(name)")
+        } else {
+            guard isConnected, !busy else { return .failure(.notConnected) }
+            busy = true
+            defer { busy = false }
+            do {
+                let reply = try await connection.request("createProject", text: location.folder, name: name)
+                guard let created = reply.project else { return .failure(.mac(Self.updateMac)) }
+                project = created
+            } catch RemoteConnectionError.mac("Unknown action.") {
+                return .failure(.mac(Self.updateMac))
+            } catch let error as RemoteConnectionError {
+                return .failure(error)
+            } catch {
+                return .failure(.lost)
+            }
+        }
+        projects.removeAll { $0.folder == project.folder }
+        projects.insert(project, at: 0)
+        return .success(project)
+    }
+
+    private static let updateMac = "Update Sigil on your Mac to create projects from your phone."
 
     /// Returns false when this Mac predates the project list; New then uses its current folder.
     func loadProjects(from offset: Int = 0) async -> Bool {
@@ -188,32 +239,57 @@ final class RemoteStore {
         }
     }
 
-    func searchChats(_ query: String) {
-        searchToken += 1
+    var chats: [RemoteChat] { chatList.chats }
+
+    /// Saved chats, newest first. An empty query lists every chat, a page at a time.
+    func loadChats(_ query: String) {
+        clearChats()
         let token = searchToken
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, isConnected else {
-            chats = []
-            chatsTruncated = false
-            searchingChats = false
+        // The Mac reads 200 characters, and text over 8 KB drops the connection.
+        let trimmed = Self.utf8Prefix(
+            String(query.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200)), bytes: RemoteRequest.textLimit)
+        chatQuery = trimmed
+        if isDemo {
+            let matches = DemoData.chats.filter {
+                trimmed.isEmpty || $0.title.localizedCaseInsensitiveContains(trimmed)
+                    || $0.folder.localizedCaseInsensitiveContains(trimmed)
+            }
+            chatList.apply(matches, from: 0, truncated: false)
             return
         }
-        searchingChats = true
-        // The Mac reads 200 characters, and text over 8 KB drops the connection.
-        let bounded = Self.utf8Prefix(String(trimmed.prefix(200)), bytes: RemoteRequest.textLimit)
+        guard isConnected else { return }
+        loadingChats = true
         Task {
-            do {
-                try await Task.sleep(for: .milliseconds(250))
-                guard token == searchToken else { return }
-                let reply = try await connection.request("chats", text: bounded)
-                guard token == searchToken else { return }
-                chats = Array((reply.chats ?? []).prefix(40))
-                chatsTruncated = reply.chatsTruncated == true
-            } catch is CancellationError {
-            } catch {
-                if token == searchToken { errorMessage = error.localizedDescription }
-            }
-            if token == searchToken { searchingChats = false }
+            // Typing waits for a pause; opening the list does not.
+            if !trimmed.isEmpty { try? await Task.sleep(for: .milliseconds(250)) }
+            await fetchChats(from: 0, token: token)
+        }
+    }
+
+    func loadMoreChats() {
+        guard isConnected, !loadingChats, chatList.hasMore else { return }
+        loadingChats = true
+        let token = searchToken
+        Task { await fetchChats(from: chatList.offset, token: token) }
+    }
+
+    func clearChats() {
+        searchToken += 1
+        chatList = ChatList()
+        loadingChats = false
+    }
+
+    private func fetchChats(from offset: Int, token: Int) async {
+        guard token == searchToken else { return }
+        defer { if token == searchToken { loadingChats = false } }
+        do {
+            let reply = try await connection.request("chats", text: chatQuery, index: offset == 0 ? nil : offset)
+            guard token == searchToken else { return }
+            chatList.apply(
+                Array((reply.chats ?? []).prefix(ChatList.pageSize)), from: offset,
+                truncated: reply.chatsTruncated == true)
+        } catch {
+            if token == searchToken { errorMessage = error.localizedDescription }
         }
     }
 
@@ -404,6 +480,7 @@ final class RemoteStore {
             RemoteProject(name: "site", folder: "~/Documents/sigil/Site"),
             RemoteProject(name: "relay", folder: "~/Documents/sigil/Sidereal"),
         ]
+        sessionOptions = DemoData.options
         refreshOutput()
     }
 }
@@ -479,6 +556,34 @@ enum DemoData {
             """
         store.seedDemo(tabs: tabs, selected: "demo-1", terminal: terminal)
     }
+
+    static let chats = [
+        RemoteChat(id: "chat-1", title: "Sessions list misses saved chats", folder: "~/Documents/sigil"),
+        RemoteChat(id: "chat-2", title: "Pricing page copy pass", folder: "~/Documents/sigil/Site"),
+        RemoteChat(id: "chat-3", title: "Relay load test at 500 phones", folder: "~/Documents/sigil/Sidereal"),
+        RemoteChat(id: "chat-4", title: "Keychain pairing survives relaunch", folder: "~/Documents/sigil"),
+    ]
+
+    static let options = NewSessionOptions(
+        providers: [
+            .init(id: "claudeCode", name: "Claude Code", takesModel: false, problem: nil),
+            .init(id: "codex", name: "Codex", takesModel: false, problem: nil),
+            .init(id: "devin", name: "Devin", takesModel: false, problem: nil),
+            .init(id: "cursor", name: "Cursor", takesModel: false, problem: nil),
+            .init(id: "kimi", name: "Kimi Code", takesModel: false, problem: nil),
+            .init(id: "grokBuild", name: "Grok Build", takesModel: true, problem: nil),
+        ],
+        provider: "grokBuild", models: ["grok-4.7", "grok-4.7-build-fast", "grok-4.6"], model: "",
+        efforts: [
+            .init(id: "", name: "CLI default"), .init(id: "low", name: "Low"), .init(id: "medium", name: "Medium"),
+            .init(id: "high", name: "High"), .init(id: "xhigh", name: "Extra high"),
+        ],
+        effort: "",
+        locations: [
+            RemoteProject(name: "~/Documents", folder: "~/Documents"),
+            RemoteProject(name: "~/Documents/sigil", folder: "~/Documents/sigil"),
+            RemoteProject(name: "~", folder: "~"),
+        ])
 }
 
 extension String {

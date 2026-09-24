@@ -12,6 +12,10 @@ struct RemoteRequest: Encodable, Equatable {
     var index: Int?
     var count: Int?
     var transfer: String?
+    /// New sessions: the CLI, and for Grok its model and effort.
+    var provider: String?
+    var model: String?
+    var effort: String?
 
     static let textLimit = 8_192
     static let fileTextLimit = 48_000
@@ -110,6 +114,60 @@ struct RemoteProject: Decodable, Equatable, Identifiable {
     var id: String { folder }
 }
 
+/// What a new session may use, from the Mac's New Session sheet. Macs from
+/// before provider choice do not know the `options` action.
+struct NewSessionOptions: Decodable, Equatable {
+    struct Provider: Decodable, Equatable, Identifiable {
+        let id: String
+        let name: String
+        let takesModel: Bool
+        /// Why the Mac cannot start it now, or nil.
+        let problem: String?
+    }
+    struct Choice: Decodable, Equatable, Identifiable {
+        let id: String
+        let name: String
+    }
+    let providers: [Provider]
+    let provider: String
+    let models: [String]
+    let model: String
+    let efforts: [Choice]
+    let effort: String
+    /// Folders a new project can go in.
+    let locations: [RemoteProject]
+}
+
+/// One page of saved chats, newest first. The Mac pages by offset and may
+/// trim a page to fit a frame, so the next offset counts what arrived.
+struct ChatList: Equatable {
+    private(set) var chats: [RemoteChat] = []
+    private(set) var offset = 0
+    private(set) var hasMore = false
+
+    static let pageSize = 40
+
+    mutating func apply(_ page: [RemoteChat], from start: Int, truncated: Bool) {
+        if start == 0 { chats = [] }
+        for chat in page where !chats.contains(where: { $0.id == chat.id && $0.folder == chat.folder }) {
+            chats.append(chat)
+        }
+        offset = start + page.count
+        hasMore = !page.isEmpty && (page.count >= Self.pageSize || truncated)
+    }
+}
+
+/// A folder name the Mac accepts for a new project. Returns the trimmed name, or nil.
+enum ProjectName {
+    static func validated(_ raw: String) -> String? {
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.utf8.count <= 80, !name.hasPrefix("."), !name.contains("/"), !name.contains(":"),
+            !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+        else { return nil }
+        return name
+    }
+}
+
 struct RemoteReply: Decodable {
     let challenge: String
     let sequence: Int
@@ -123,6 +181,8 @@ struct RemoteReply: Decodable {
     let earlier: String?
     let chatsTruncated: Bool?
     let projectsTruncated: Bool?
+    let options: NewSessionOptions?
+    let project: RemoteProject?
 }
 
 /// The outer, unencrypted envelope the relay forwards.

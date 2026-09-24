@@ -112,6 +112,55 @@ enum ProtocolTests {
         try Expect.true(state.tabListIsComplete, "complete list")
     }
 
+    /// New-session options exactly as the Mac's `RemoteNewSessionOptions` encodes them,
+    /// and a start request that names the choice.
+    static func newSessionOptionsRoundTrip() throws {
+        let json = #"""
+        {"challenge":"c","sequence":4,"ok":true,"chatsTruncated":false,"projectsTruncated":false,
+         "options":{"providers":[{"id":"claudeCode","name":"Claude Code","takesModel":false},
+           {"id":"grokBuild","name":"Grok Build","takesModel":true,"problem":"Restore the Grok CLI on your Mac, then try again."}],
+          "provider":"claudeCode","models":["grok-4.7","grok-4.6"],"model":"","efforts":[{"id":"","name":"CLI default"},
+          {"id":"high","name":"High"}],"effort":"high","locations":[{"name":"~/Documents","folder":"/Users/me/Documents"}]}}
+        """#
+        let reply = try JSONDecoder().decode(RemoteReply.self, from: Data(json.utf8))
+        let options = try Expect.notNil(reply.options, "options")
+        try Expect.equal(options.providers.map(\.id), ["claudeCode", "grokBuild"], "providers in Mac order")
+        try Expect.equal(options.providers[0].problem, nil, "ready provider")
+        try Expect.true(options.providers[1].takesModel && options.providers[1].problem != nil, "grok needs its CLI")
+        try Expect.equal(options.locations.first?.folder, "/Users/me/Documents", "location path")
+        let request = RemoteRequest(
+            challenge: "c", sequence: 5, action: "new", text: "/p", provider: "grokBuild", model: "grok-4.6", effort: "high")
+        let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any]
+        try Expect.equal(object?["provider"] as? String, "grokBuild", "provider sent")
+        try Expect.equal(object?["model"] as? String, "grok-4.6", "model sent")
+        try Expect.equal(object?["effort"] as? String, "high", "effort sent")
+    }
+
+    /// Browsing every saved chat: pages append in order, a trimmed page still offers more.
+    static func chatListPages() throws {
+        func chats(_ range: Range<Int>) -> [RemoteChat] { range.map { RemoteChat(id: "c\($0)", title: "t", folder: "/f") } }
+        var list = ChatList()
+        list.apply(chats(0..<40), from: 0, truncated: false)
+        try Expect.true(list.hasMore, "a full page has more")
+        try Expect.equal(list.offset, 40, "next offset")
+        list.apply(chats(39..<52), from: list.offset, truncated: true)
+        try Expect.equal(list.chats.count, 52, "overlap is not repeated")
+        try Expect.equal(list.offset, 53, "offset counts what arrived")
+        try Expect.true(list.hasMore, "a trimmed page has more")
+        list.apply(chats(60..<61), from: list.offset, truncated: false)
+        try Expect.true(!list.hasMore, "a short page is the end")
+        list.apply(chats(0..<2), from: 0, truncated: false)
+        try Expect.equal(list.chats.map(\.id), ["c0", "c1"], "a new query starts over")
+    }
+
+    static func projectNameRules() throws {
+        let cases: [(String, String?)] = [
+            ("  my-app ", "my-app"), ("Notes 2026", "Notes 2026"), ("", nil), ("   ", nil), (".env", nil),
+            ("..", nil), ("a/b", nil), ("a:b", nil), ("tab\tname", nil), (String(repeating: "x", count: 81), nil),
+        ]
+        for (raw, expected) in cases { try Expect.equal(ProjectName.validated(raw), expected, "name \(raw)") }
+    }
+
     static func stateValidation() throws {
         func state(_ ids: [String], selected: String?, truncated: Bool? = nil) -> RemoteState {
             RemoteState(
