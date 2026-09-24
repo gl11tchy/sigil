@@ -53,7 +53,7 @@ struct SearchMatchHighlightTests {
         for query in ["", "   ", "\t", "\n", " \t\n "] {
             #expect(SearchMatchHighlight.ranges(in: "Auth rewrite", query: query).isEmpty)
             #expect(
-                SearchMatchHighlight.runs(in: "Auth rewrite", query: query) == [
+                runs(in: "Auth rewrite", query: query) == [
                     .init(text: "Auth rewrite", isMatch: false)
                 ])
             #expect(!SearchMatchHighlight.contains("Auth rewrite", query: query))
@@ -64,8 +64,8 @@ struct SearchMatchHighlightTests {
 
     @Test func emptyHaystackYieldsNoRanges() {
         #expect(SearchMatchHighlight.ranges(in: "", query: "auth").isEmpty)
-        #expect(SearchMatchHighlight.runs(in: "", query: "auth").isEmpty)
-        #expect(SearchMatchHighlight.runs(in: "", query: "").isEmpty)
+        #expect(runs(in: "", query: "auth").isEmpty)
+        #expect(runs(in: "", query: "").isEmpty)
         #expect(!SearchMatchHighlight.contains("", query: "auth"))
     }
 
@@ -77,7 +77,7 @@ struct SearchMatchHighlightTests {
     @Test func wholeStringIsOneMatch() {
         #expect(slices("Auth", query: "Auth") == ["Auth"])
         #expect(
-            SearchMatchHighlight.runs(in: "Auth", query: "Auth") == [
+            runs(in: "Auth", query: "Auth") == [
                 .init(text: "Auth", isMatch: true)
             ])
     }
@@ -87,12 +87,12 @@ struct SearchMatchHighlightTests {
         #expect(slices("Auth rewrite", query: "re") == ["re"])
         #expect(slices("Auth rewrite", query: "write") == ["write"])
         #expect(
-            SearchMatchHighlight.runs(in: "Auth rewrite", query: "Auth") == [
+            runs(in: "Auth rewrite", query: "Auth") == [
                 .init(text: "Auth", isMatch: true),
                 .init(text: " rewrite", isMatch: false),
             ])
         #expect(
-            SearchMatchHighlight.runs(in: "Auth rewrite", query: "write") == [
+            runs(in: "Auth rewrite", query: "write") == [
                 .init(text: "Auth re", isMatch: false),
                 .init(text: "write", isMatch: true),
             ])
@@ -101,7 +101,7 @@ struct SearchMatchHighlightTests {
     @Test func multipleNonOverlappingHits() {
         #expect(slices("foo bar foo", query: "foo") == ["foo", "foo"])
         #expect(
-            SearchMatchHighlight.runs(in: "foo bar foo", query: "foo") == [
+            runs(in: "foo bar foo", query: "foo") == [
                 .init(text: "foo", isMatch: true),
                 .init(text: " bar ", isMatch: false),
                 .init(text: "foo", isMatch: true),
@@ -112,12 +112,12 @@ struct SearchMatchHighlightTests {
         // "aa" in "aaaa" is two adjacent hits, merged into one painted run.
         #expect(slices("aaaa", query: "aa") == ["aaaa"])
         #expect(
-            SearchMatchHighlight.runs(in: "aaaa", query: "aa") == [
+            runs(in: "aaaa", query: "aa") == [
                 .init(text: "aaaa", isMatch: true)
             ])
         #expect(slices("aaa", query: "aa") == ["aa"])
         #expect(
-            SearchMatchHighlight.runs(in: "aaa", query: "aa") == [
+            runs(in: "aaa", query: "aa") == [
                 .init(text: "aa", isMatch: true),
                 .init(text: "a", isMatch: false),
             ])
@@ -184,31 +184,6 @@ struct SearchMatchHighlightTests {
         #expect(slices("cost is $5", query: "$5") == ["$5"])
         #expect(slices("foo.bar", query: ".") == ["."])
         #expect(SearchMatchHighlight.ranges(in: "abc", query: "a.c").isEmpty)
-    }
-
-    @Test func asPrefixOfMapsOntoTheContainerAndIgnoresTheSuffix() {
-        let subtitle = "sigil · 14m"
-        let hits = SearchMatchHighlight.ranges(in: "sigil", query: "sig", asPrefixOf: subtitle)
-        #expect(hits.map { String(subtitle[$0]) } == ["sig"])
-        #expect(SearchMatchHighlight.ranges(in: "sigil", query: "m", asPrefixOf: subtitle).isEmpty)
-        #expect(SearchMatchHighlight.ranges(in: "sigil", query: "14", asPrefixOf: subtitle).isEmpty)
-        #expect(SearchMatchHighlight.ranges(in: "other", query: "o", asPrefixOf: subtitle).isEmpty)
-
-        let pathSubtitle = "~/repos/sigil · 3h"
-        let pathHits = SearchMatchHighlight.ranges(
-            in: "~/repos/sigil", query: "repos", asPrefixOf: pathSubtitle)
-        #expect(pathHits.map { String(pathSubtitle[$0]) } == ["repos"])
-
-        let doubled = "foo-foo · now"
-        let doubledHits = SearchMatchHighlight.ranges(
-            in: "foo-foo", query: "foo", asPrefixOf: doubled)
-        #expect(doubledHits.map { String(doubled[$0]) } == ["foo", "foo"])
-    }
-
-    @Test func asPrefixOfWhenContainerIsExactlyTheHaystack() {
-        let name = "sigil"
-        let hits = SearchMatchHighlight.ranges(in: name, query: "sig", asPrefixOf: name)
-        #expect(hits.map { String(name[$0]) } == ["sig"])
     }
 
     @Test func displayedTitleAndCLISummaryUseTheSameFold() {
@@ -317,18 +292,9 @@ struct SearchMatchHighlightTests {
 
     @Test func matchedRunsCoverTheWholeHaystack() {
         let hay = "Café and CAFE and cafe"
-        let runs = SearchMatchHighlight.runs(in: hay, query: "cafe")
+        let runs = runs(in: hay, query: "cafe")
         #expect(runs.map(\.text).joined() == hay)
         #expect(runs.filter(\.isMatch).map(\.text) == ["Café", "CAFE", "cafe"])
-    }
-
-    @Test func runsAsPrefixOfUsesTheSameSplitAsRanges() {
-        let subtitle = "sigil · 14m"
-        let runs = SearchMatchHighlight.runs(in: "sigil", query: "sig", asPrefixOf: subtitle)
-        #expect(runs.map(\.text).joined() == subtitle)
-        #expect(matched(runs) == ["sig"])
-        let miss = SearchMatchHighlight.runs(in: "sigil", query: "14", asPrefixOf: subtitle)
-        #expect(miss == [.init(text: subtitle, isMatch: false)])
     }
 
     @Test func emptyQueryRowKeepsDefaultSubtitleAndDoesNotPaint() {
@@ -404,8 +370,7 @@ struct SearchMatchHighlightTests {
 
         let header = SearchMatchHighlight.projectHeader(
             name: name,
-            displayPath: "~/\(name)",
-            cwd: "/tmp/\(name)",
+            paths: ["~/\(name)", "/tmp/\(name)"],
             count: 2,
             query: "handshake"
         )
@@ -429,8 +394,7 @@ struct SearchMatchHighlightTests {
         #expect(!row.paints)
         let header = SearchMatchHighlight.projectHeader(
             name: "project",
-            displayPath: "/tmp/project",
-            cwd: "/tmp/project",
+            paths: ["/tmp/project", "/tmp/project"],
             count: 3,
             query: "project"
         )
@@ -442,8 +406,7 @@ struct SearchMatchHighlightTests {
     @Test func projectsHeaderCwdOnlyHitShowsTheMatchingPath() {
         let header = SearchMatchHighlight.projectHeader(
             name: "sigil",
-            displayPath: "~/repos/sigil",
-            cwd: "/Users/me/repos/sigil",
+            paths: ["~/repos/sigil", "/Users/me/repos/sigil"],
             count: 4,
             query: "repos"
         )
@@ -463,8 +426,7 @@ struct SearchMatchHighlightTests {
     @Test func emptyQueryHeaderKeepsTheShortName() {
         let header = SearchMatchHighlight.projectHeader(
             name: "sigil",
-            displayPath: "~/repos/sigil",
-            cwd: "/Users/me/repos/sigil",
+            paths: ["~/repos/sigil", "/Users/me/repos/sigil"],
             count: 2,
             query: "  "
         )
@@ -491,7 +453,7 @@ struct SearchMatchHighlightTests {
         #expect(visible.count < long.count)
         #expect(SearchMatchHighlight.contains(visible, query: "DerivedData"))
         #expect(!visible.hasPrefix("/Users/me/Library"))
-        let runs = SearchMatchHighlight.runs(in: visible, query: "DerivedData")
+        let runs = runs(in: visible, query: "DerivedData")
         #expect(matched(runs) == ["DerivedData"])
     }
 
@@ -697,8 +659,7 @@ struct SearchMatchHighlightTests {
     @Test func pathSwappedHeaderSpeaksThePaintedPath() {
         let paint = SearchMatchHighlight.projectHeader(
             name: "sigil",
-            displayPath: "~/repos/sigil",
-            cwd: "/Users/me/repos/sigil",
+            paths: ["~/repos/sigil", "/Users/me/repos/sigil"],
             count: 4,
             query: "repos"
         )
@@ -714,8 +675,7 @@ struct SearchMatchHighlightTests {
     @Test func headerLabelKeepsConversationCountWhenTheQueryIsUnrelated() {
         let paint = SearchMatchHighlight.projectHeader(
             name: "sigil",
-            displayPath: "~/repos/sigil",
-            cwd: "/Users/me/repos/sigil",
+            paths: ["~/repos/sigil", "/Users/me/repos/sigil"],
             count: 4,
             query: "Auth"
         )
@@ -726,8 +686,7 @@ struct SearchMatchHighlightTests {
 
         let nameHit = SearchMatchHighlight.projectHeader(
             name: "sigil",
-            displayPath: "~/repos/sigil",
-            cwd: "/Users/me/repos/sigil",
+            paths: ["~/repos/sigil", "/Users/me/repos/sigil"],
             count: 4,
             query: "sigil"
         )
@@ -871,6 +830,12 @@ private func paintHaystacksContain(
         || SearchMatchHighlight.contains(session.projectName, query: query)
         || SearchMatchHighlight.contains(session.displayPath, query: query)
         || SearchMatchHighlight.contains(session.cwd, query: query)
+}
+
+/// Runs for the hits `ranges(in:query:)` finds, split out of `haystack`.
+private func runs(in haystack: String, query: String) -> [SearchMatchHighlight.Run] {
+    SearchMatchHighlight.runs(
+        in: haystack, matching: SearchMatchHighlight.ranges(in: haystack, query: query))
 }
 
 private func matched(_ runs: [SearchMatchHighlight.Run]) -> [String] {

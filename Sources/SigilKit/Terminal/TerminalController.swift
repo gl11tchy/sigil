@@ -210,7 +210,10 @@ public final class TerminalController {
             usleep(20_000)
         }
         Self.signal(SIGKILL, to: pid)
-        Self.reap(pid)
+        // SIGKILL cannot be ignored, but the child is not reapable the instant it
+        // is sent. Wait for it so a short timeout does not leave a zombie behind.
+        let killDeadline = ContinuousClock.now + Self.killGrace
+        while !Self.reap(pid), ContinuousClock.now < killDeadline { usleep(5_000) }
     }
 
     /// Bounded readable output for an explicitly paired remote controller.
