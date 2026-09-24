@@ -1,0 +1,9 @@
+b62: a Claude Code tab started from the New Session sheet (provider tile AXPress). The CLI is a local stand-in script (it prints one line and waits for input), put first on PATH for this launch only, so no real provider CLI ran. The tab shows Idle. Then File > Close Tab (AXPress).
+Alert window elements:
+WINDOW role=AXWindow | subrole=AXDialog
+  AXStaticText | title=missing value | value=Claude Code is still running.
+  AXStaticText | title=missing value | value=Claude Code will stop.
+  AXButton | title=Cancel | value=missing value
+  AXButton | title=Close Tab | value=missing value
+
+After AXPress on Cancel: SigilUX window count = 1 (alert closed).

@@ -23,16 +23,15 @@ struct RightPanelTests {
     func pickingTheShowingToolClosesThePanel() {
         let (panel, notesRoot) = makePanel()
         defer { try? FileManager.default.removeItem(at: notesRoot) }
-        let directory = FileManager.default.homeDirectoryForCurrentUser
-        panel.toggle(.notes, in: directory)
+        panel.toggle(.notes)
         #expect(panel.isVisible)
         #expect(panel.mode == .notes)
 
-        panel.toggle(.shell, in: directory)
+        panel.toggle(.shell)
         #expect(panel.isVisible)
         #expect(panel.mode == .shell)
 
-        panel.toggle(.shell, in: directory)
+        panel.toggle(.shell)
         #expect(!panel.isVisible)
     }
 
@@ -176,6 +175,76 @@ struct RightPanelTests {
     }
 
     @Test @MainActor
+    func restartingThePanelShellDoesNotBlockOnTheOldShell() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let oldHome = ProcessInfo.processInfo.environment["HOME"]
+        let oldShell = ProcessInfo.processInfo.environment["SHELL"]
+        setenv("HOME", root.path, 1)
+        setenv("SHELL", "/bin/zsh", 1)
+        defer {
+            if let oldHome { setenv("HOME", oldHome, 1) } else { unsetenv("HOME") }
+            if let oldShell { setenv("SHELL", oldShell, 1) } else { unsetenv("SHELL") }
+            try? FileManager.default.removeItem(at: root)
+        }
+        let (panel, notesRoot) = makePanel()
+        defer { try? FileManager.default.removeItem(at: notesRoot) }
+
+        panel.startShellIfNeeded(in: root, theme: .grokNight, fontSize: 13)
+        let first = try #require(panel.shell)
+        let oldPID = try #require((first.view as? LocalProcessTerminalView)?.process.shellPid)
+        // An interactive zsh at its prompt ignores SIGTERM.
+        try await Task.sleep(for: .milliseconds(500))
+
+        let elapsed = ContinuousClock().measure { panel.restartShell(in: root, theme: .grokNight, fontSize: 13) }
+        let second = try #require(panel.shell)
+        defer { second.terminateAndWait() }
+
+        #expect(second !== first)
+        #expect(elapsed < .milliseconds(300))
+        let deadline = ContinuousClock.now + .seconds(3)
+        while kill(oldPID, 0) == 0, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(kill(oldPID, 0) != 0)
+    }
+
+    @Test @MainActor
+    func restartingThePanelShellLetsTheOldShellCleanUp() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let oldHome = ProcessInfo.processInfo.environment["HOME"]
+        let oldShell = ProcessInfo.processInfo.environment["SHELL"]
+        setenv("HOME", root.path, 1)
+        setenv("SHELL", "/bin/zsh", 1)
+        defer {
+            if let oldHome { setenv("HOME", oldHome, 1) } else { unsetenv("HOME") }
+            if let oldShell { setenv("SHELL", oldShell, 1) } else { unsetenv("SHELL") }
+            try? FileManager.default.removeItem(at: root)
+        }
+        let (panel, notesRoot) = makePanel()
+        defer { try? FileManager.default.removeItem(at: notesRoot) }
+        let cleaned = root.appendingPathComponent("cleaned")
+
+        panel.startShellIfNeeded(in: root, theme: .grokNight, fontSize: 13)
+        try await Task.sleep(for: .milliseconds(500))
+        // Like a command that finishes its write when asked to stop.
+        panel.shell?.send(text: "trap 'touch \(cleaned.path); exit' TERM\r")
+        try await Task.sleep(for: .milliseconds(300))
+
+        panel.restartShell(in: root, theme: .grokNight, fontSize: 13)
+        defer { panel.shell?.terminateAndWait() }
+
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !FileManager.default.fileExists(atPath: cleaned.path), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(FileManager.default.fileExists(atPath: cleaned.path))
+    }
+
+    @Test @MainActor
     func aStoredWidthIsClampedToTheAllowedRange() {
         let name = "RightPanelTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!
@@ -184,5 +253,33 @@ struct RightPanelTests {
         #expect(RightPanel(defaults: defaults).width == RightPanel.maxWidth)
         defaults.set(10.0, forKey: "panel.width")
         #expect(RightPanel(defaults: defaults).width == RightPanel.minWidth)
+    }
+
+    @Test @MainActor func notesTellOtherProvidersThatNotesAreForGrokBuild() {
+        let suite = "RightPanelTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        func tab(_ provider: CLIProvider) -> TerminalTab {
+            TerminalTab(
+                spec: GrokLaunchSpec(
+                    executable: URL(fileURLWithPath: "/usr/bin/true"),
+                    workingDirectory: FileManager.default.temporaryDirectory,
+                    mode: .continueLatest,
+                    provider: provider
+                ),
+                settings: settings
+            )
+        }
+
+        #expect(
+            RightPanelView.notesPlaceholder(for: tab(.claudeCode))
+                == "Notes are available for Grok Build sessions.")
+        #expect(
+            RightPanelView.notesPlaceholder(for: tab(.grokBuild))
+                == "Open a conversation to keep notes on it.")
+        #expect(
+            RightPanelView.notesPlaceholder(for: nil)
+                == "Open a conversation to keep notes on it.")
     }
 }

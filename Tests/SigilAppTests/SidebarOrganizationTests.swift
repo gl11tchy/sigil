@@ -30,6 +30,23 @@ struct SidebarOrganizationTests {
         #expect(grouped.map(\.name) == ["unique", "/workspace/a/web", "/workspace/b/web"])
     }
 
+    @Test func addedFoldersJoinProjectsByDate() {
+        let web = session(id: "a", cwd: "/workspace/a/web", updated: 20)
+        let api = session(id: "b", cwd: "/workspace/api", updated: 10)
+        let projects = SidebarOrganization.projects(from: [web, api]) { $0 }
+        let merged = SidebarOrganization.merging(
+            added: [
+                AddedProject(path: "/workspace/api", addedAt: Date(timeIntervalSince1970: 30)),
+                AddedProject(path: "/workspace/new", addedAt: Date(timeIntervalSince1970: 15)),
+                AddedProject(path: "/workspace/b/web", addedAt: Date(timeIntervalSince1970: 5)),
+            ],
+            into: projects
+        ) { $0 }
+        #expect(merged.map(\.name) == ["api", "web", "new", "/workspace/b/web"])
+        #expect(merged.first?.sessions.map(\.id) == ["b"])
+        #expect(merged[2].sessions.isEmpty)
+    }
+
     @Test func pinningPrependsAndIsIdempotentOnIdentity() {
         let first = session(id: "a", cwd: "/tmp/one", updated: 2)
         let second = session(id: "b", cwd: "/tmp/two", updated: 1)

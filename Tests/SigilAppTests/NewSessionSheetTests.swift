@@ -106,9 +106,10 @@ struct NewSessionSheetTests {
                 "-lic", "exec \"$@\"", "sigil-grok-models", "/usr/local/bin/grok", "models",
             ]
         )
-        let direct = GrokModelCatalog.launch(executable: "/usr/local/bin/grok", shellPath: "/bin/echo")
-        #expect(direct.executable == "/usr/local/bin/grok")
-        #expect(direct.arguments == ["models"])
+        // Like a Grok tab, a shell without the -lic launch falls back to zsh.
+        let other = GrokModelCatalog.launch(executable: "/usr/local/bin/grok", shellPath: "/bin/tcsh")
+        #expect(other.executable == "/bin/zsh")
+        #expect(other.arguments == zsh.arguments)
     }
 
     @Test func aModelNameKeepsNoSurroundingSpace() {
@@ -124,6 +125,31 @@ struct NewSessionSheetTests {
         try process.run()
         GrokModelCatalog.stop(process)
         #expect(!process.isRunning)
+    }
+
+    @Test(arguments: [CLIProvider.claudeCode, .codex, .devin, .cursor])
+    func otherProvidersNeverAskGrokForModels(provider: CLIProvider) {
+        #expect(NewSessionLaunch.modelListPath(provider: provider, executablePath: "/opt/grok") == nil)
+        #expect(NewSessionLaunch.modelListPath(provider: .grokBuild, executablePath: "/opt/grok") == "/opt/grok")
+    }
+
+    @Test func aPathThatListsNoModelsShowsTheFallbackList() async {
+        // The menu must not keep the rows of the previous path.
+        let models = await GrokModelCatalog.menuModels(executable: URL(fileURLWithPath: "/opt/grok")) { _ in [] }
+        #expect(models == GrokModelCatalog.fallback)
+    }
+
+    @Test func aCancelledModelLoadChangesNothing() async {
+        // SwiftUI cancels the old path's load when the path changes; its late
+        // result must not replace the list for the new path.
+        let load = Task {
+            await GrokModelCatalog.menuModels(executable: URL(fileURLWithPath: "/opt/grok")) { _ in
+                try? await Task.sleep(for: .seconds(30))
+                return ["grok-old"]
+            }
+        }
+        load.cancel()
+        #expect(await load.value == nil)
     }
 
     /// A stand-in `zsh` that runs the command without reading any profile,

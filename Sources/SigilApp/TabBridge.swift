@@ -205,8 +205,7 @@ final class TabBridge: BridgeServerDelegate {
                 sessionID: tab.sessionID,
                 title: model.title(for: tab),
                 directory: tab.workingDirectory.path,
-                status: status(of: tab),
-                isRunning: tab.isRunning
+                status: status(of: tab)
             )
         }
     }

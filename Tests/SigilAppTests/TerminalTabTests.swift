@@ -106,6 +106,30 @@ struct TerminalTabTests {
         #expect(!TerminalTab.isBusyTerminalTitle("Request to Reply Only With OK - grok"))
     }
 
+    @Test func readsClaudeCodeAndCodexSpinnerTitles() {
+        #expect(TerminalTab.titleShowsWork("◐ Claude Code", provider: .claudeCode) == true)
+        #expect(TerminalTab.titleShowsWork("◓ Fix the sidebar", provider: .claudeCode) == true)
+        #expect(TerminalTab.titleShowsWork("✳ Claude Code", provider: .claudeCode) == false)
+        #expect(TerminalTab.titleShowsWork("Claude Code", provider: .claudeCode) == nil)
+        #expect(TerminalTab.titleShowsWork("⠙ Reply hi | sigil", provider: .codex) == true)
+        #expect(TerminalTab.titleShowsWork("Reply hi | sigil", provider: .codex) == false)
+        #expect(TerminalTab.titleShowsWork("", provider: .codex) == nil)
+        #expect(TerminalTab.titleShowsWork("Cursor Agent", provider: .cursor) == nil)
+        #expect(TerminalTab.titleShowsWork("⠙ busy", provider: .devin) == nil)
+    }
+
+    @Test func otherProviderActivityFollowsTheTitleNotTheReturnKey() {
+        let tab = makeTab(provider: .claudeCode)
+        tab.noteTerminalTitle("✳ Claude Code")
+        #expect(tab.activity != .working)
+        tab.noteTerminalTitle("◐ Claude Code")
+        #expect(tab.activity == .working)
+        tab.noteTerminalTitle("◑ Reply with hi")
+        #expect(tab.activity == .working)
+        tab.noteTerminalTitle("✳ Reply with hi")
+        #expect(tab.activity == .idle)
+    }
+
     @Test func journalUsesOnlyExactEventsAfterTheTurnStarts() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
             "TerminalTabTests.\(UUID().uuidString)", isDirectory: true)
@@ -400,6 +424,7 @@ struct TerminalTabTests {
 
     private func makeTab(
         mode: GrokLaunchSpec.Mode = .continueLatest,
+        provider: CLIProvider = .grokBuild,
         completionEventsURL: URL? = nil
     ) -> TerminalTab {
         let suite = "TerminalTabTests.\(UUID().uuidString)"
@@ -409,7 +434,8 @@ struct TerminalTabTests {
         let spec = GrokLaunchSpec(
             executable: URL(fileURLWithPath: "/usr/bin/true"),
             workingDirectory: FileManager.default.temporaryDirectory,
-            mode: mode
+            mode: mode,
+            provider: provider
         )
         return TerminalTab(
             spec: spec,

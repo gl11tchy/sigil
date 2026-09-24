@@ -137,6 +137,13 @@ private func loginShellEnvironment(zshrc: String) throws -> (home: URL, environm
     #expect(GrokPaths.loginShellGrokHome(environment: shell.environment) == "/chatty")
 }
 
+@Test func loginShellGrokHomeFallsBackToZshForAnUnsupportedShell() throws {
+    var shell = try loginShellEnvironment(zshrc: "export GROK_HOME=/from/zsh\n")
+    defer { try? FileManager.default.removeItem(at: shell.home) }
+    shell.environment["SHELL"] = "/bin/tcsh"
+    #expect(GrokPaths.loginShellGrokHome(environment: shell.environment) == "/from/zsh")
+}
+
 @Test func loginShellGrokHomeIsNilWhenTheProfileSetsNone() throws {
     let shell = try loginShellEnvironment(zshrc: "echo 'GROK_HOME is not here'\n")
     defer { try? FileManager.default.removeItem(at: shell.home) }
