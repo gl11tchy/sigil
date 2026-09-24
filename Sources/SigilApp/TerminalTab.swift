@@ -134,7 +134,9 @@ final class TerminalTab: Identifiable {
     func start(isSelected: @escaping () -> Bool) {
         self.isSelected = isSelected
         controller.onUserSubmit = { [weak self] in
-            self?.noteTurnStarted()
+            // Other providers report turns through their title instead.
+            guard let self, self.spec.provider == .grokBuild else { return }
+            self.noteTurnStarted()
         }
         controller.onActivity = { [weak self] in
             self?.noteTerminalOutput()
@@ -182,13 +184,46 @@ final class TerminalTab: Identifiable {
     /// Busy spinner titles can reveal work that did not start through this
     /// view's input path. Titles never mark a turn complete; they only start
     /// a turn or keep the silence fallback from firing during a wait.
-    private func noteTerminalTitle(_ title: String) {
+    func noteTerminalTitle(_ title: String) {
+        guard spec.provider == .grokBuild else {
+            noteProviderTitle(title)
+            return
+        }
         guard Self.isBusyTerminalTitle(title) else { return }
         if activity == .working {
             armIdleFallback()
             return
         }
         noteTurnStarted()
+    }
+
+    /// Claude Code and Codex have no journal, so their title is the only
+    /// turn signal: a spinner leads it while a turn runs and is gone once it
+    /// ends. Cursor and Devin never change it, so they never show Working.
+    private func noteProviderTitle(_ title: String) {
+        if case .exited = activity { return }
+        switch Self.titleShowsWork(title, provider: spec.provider) {
+        case true?: activity = .working
+        case false?: noteTurnCompleted()
+        case nil: break
+        }
+    }
+
+    /// `true` for a busy title, `false` for an idle one, `nil` when the
+    /// title says nothing. Claude Code idles on `✳` and spins `◐◓◑◒`; Codex
+    /// spins a braille glyph and drops it when idle.
+    static func titleShowsWork(_ title: String, provider: CLIProvider) -> Bool? {
+        guard let first = title.unicodeScalars.first else { return nil }
+        let braille = (0x2800...0x28FF).contains(first.value)
+        switch provider {
+        case .claudeCode:
+            if braille || "◐◑◒◓".unicodeScalars.contains(first) { return true }
+            return first == "✳" ? false : nil
+        case .codex:
+            return braille
+        case .cursor, .devin, .grokBuild:
+            return nil
+        }
     }
 
     static func isBusyTerminalTitle(_ title: String) -> Bool {
