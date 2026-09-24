@@ -1823,9 +1823,14 @@ final class AppModel {
     /// Shows `mode` in the panel, or hides the panel when that tool is already up.
     func showPanel(_ mode: RightPanelMode) {
         let wasVisible = panel.isVisible
+        let wasShell = wasVisible && panel.mode == .shell
         panel.toggle(mode, in: currentDirectory)
         preparePanel()
-        if wasVisible, !panel.isVisible { refocusTerminalAfterHiding(.panel) }
+        // Switching away from the shell removes its view, just as hiding does.
+        let isShell = panel.isVisible && panel.mode == .shell
+        if wasVisible, !panel.isVisible || (wasShell && !isShell) {
+            refocusTerminalAfterHiding(.panel)
+        }
         requestPanelShellFocusIfShown()
     }
 
