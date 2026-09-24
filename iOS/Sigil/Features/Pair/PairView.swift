@@ -58,6 +58,10 @@ struct PairView: View {
                 // The new Mac accepted the phone: the sheet's job is done.
                 if embedded, id != nil, store.isConnected || store.hasPairing { dismiss() }
             }
+            .onDisappear {
+                // A swipe down is a cancel too; the Mac that was on screen comes back.
+                if embedded, store.isPairingAnother { store.cancelPairing() }
+            }
             .sheet(isPresented: $scanning) {
                 ScannerSheet { code in
                     scanning = false

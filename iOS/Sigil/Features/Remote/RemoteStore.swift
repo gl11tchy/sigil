@@ -58,6 +58,8 @@ final class RemoteStore {
     @ObservationIgnored private var pushToken: String?
     /// A session a notification or widget chose before the socket was up.
     @ObservationIgnored private var pendingTabID: String?
+    /// The Mac on screen when Pair another Mac began, for Cancel.
+    @ObservationIgnored private var macBeforePairing: String?
     /// Live Activity push tokens by tab, replayed after every handshake: the Mac holds them in memory only.
     @ObservationIgnored private var activityTokens: [String: String] = [:]
     @ObservationIgnored private let liveActivity = LiveActivityController()
@@ -106,6 +108,12 @@ final class RemoteStore {
     /// Switches the screens to another paired Mac.
     func switchTo(macID: String) {
         guard macID != activeMacID, let next = macs.first(where: { $0.id == macID }) else { return }
+        if isDemo {
+            // The demo is offline: only the name changes, the seeded sessions stay.
+            activeMacID = macID
+            macName = next.label
+            return
+        }
         saveCacheNow()
         connection.stop()
         liveActivity.end()
@@ -160,8 +168,9 @@ final class RemoteStore {
         case .success(let link):
             if isDemo { return nil }
             errorMessage = nil
-            // Pairing another Mac: the one on screen keeps its place in the list.
+            // Pairing another Mac: the one on screen keeps its place in the list and comes back on Cancel.
             if hasPairing {
+                macBeforePairing = activeMacID
                 saveCacheNow()
                 connection.stop()
                 liveActivity.end()
@@ -178,12 +187,19 @@ final class RemoteStore {
     /// True while a new Mac is being paired from inside the app.
     var isPairingAnother: Bool { hasPairing && activeMacID == nil }
 
-    /// Goes back to a paired Mac after a pairing attempt that did not finish.
+    /// Goes back to the Mac that was on screen after a pairing attempt that did not finish.
     func cancelPairing() {
         guard isPairingAnother else { return }
         connection.stop(forget: true)
         errorMessage = nil
-        if let next = macs.first { activate(next) } else { hasPairing = false }
+        let previous = macs.first { $0.id == macBeforePairing } ?? macs.first
+        macBeforePairing = nil
+        if let previous {
+            CredentialStore.select(id: previous.id)
+            activate(previous)
+        } else {
+            hasPairing = false
+        }
     }
 
     func reconnect() {
