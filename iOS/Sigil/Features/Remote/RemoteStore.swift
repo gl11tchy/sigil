@@ -55,6 +55,8 @@ final class RemoteStore {
     @ObservationIgnored private var pushToken: String?
     /// A session a notification or widget chose before the socket was up.
     @ObservationIgnored private var pendingTabID: String?
+    /// Live Activity push tokens by tab, replayed after every handshake: the Mac holds them in memory only.
+    @ObservationIgnored private var activityTokens: [String: String] = [:]
     @ObservationIgnored private let liveActivity = LiveActivityController()
     /// Rows per tab from a Mac that streams them.
     @ObservationIgnored private var screens: [String: ScreenModel] = [:]
@@ -77,6 +79,7 @@ final class RemoteStore {
         self.isDemo = isDemo
         connection.delegate = self
         liveActivity.onToken = { [weak self] tabID, token in self?.sendActivityToken(token, for: tabID) }
+        liveActivity.onEnd = { [weak self] tabID in self?.forgetActivityToken(for: tabID) }
         if isDemo {
             DemoData.seed(self)
         } else if let saved = CredentialStore.load() {
@@ -191,6 +194,7 @@ final class RemoteStore {
         guard isConnected, foreground else { return }
         AlertsController.enable()
         await registerPush()
+        await replayActivityTokens()
         if let pending = pendingTabID { open(tabID: pending) }
         do {
             _ = try await connection.request("watch")
@@ -225,8 +229,24 @@ final class RemoteStore {
     }
 
     private func sendActivityToken(_ token: String, for tabID: String) {
+        activityTokens[tabID] = token
         guard isConnected, !isDemo else { return }
         Task { _ = try? await connection.request("activity", text: token, tabID: tabID) }
+    }
+
+    /// Tells the Mac every activity token again, dropping tabs it no longer has.
+    private func replayActivityTokens() async {
+        guard isConnected, !isDemo else { return }
+        activityTokens = activityTokens.filter { token in tabs.contains { $0.id == token.key } }
+        for (tabID, token) in activityTokens {
+            _ = try? await connection.request("activity", text: token, tabID: tabID)
+        }
+    }
+
+    /// The activity ended on the phone: the Mac should stop pushing to it.
+    private func forgetActivityToken(for tabID: String) {
+        guard activityTokens.removeValue(forKey: tabID) != nil, isConnected, !isDemo else { return }
+        Task { _ = try? await connection.request("activity", text: "", tabID: tabID) }
     }
 
     /// Opens the session a notification or a widget named, now or once connected.

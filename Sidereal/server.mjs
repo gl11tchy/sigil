@@ -137,7 +137,8 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
     if (!apns || !room.push) { send(ws, { type: 'push', ok: false, reason: apns ? 'token' : 'off' }); return true; }
     try {
       const { status } = await apns.send(request);
-      if (status === 410) room.push = undefined;
+      // Apple's 410 names the token it was sent: an ended activity's, not the phone's.
+      if (status === 410 && request.pushType === 'alert') room.push = undefined;
       send(ws, { type: 'push', ok: status === 200, status });
     } catch {
       send(ws, { type: 'push', ok: false, reason: 'unreachable' });

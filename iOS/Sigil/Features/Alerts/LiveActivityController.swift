@@ -11,6 +11,8 @@ final class LiveActivityController {
     private var endTask: Task<Void, Never>?
     /// Hands each activity's push token to the Mac through the store.
     var onToken: ((_ tabID: String, _ token: String) -> Void)?
+    /// Says which tab's activity ended here, so the Mac stops pushing to it.
+    var onEnd: ((_ tabID: String) -> Void)?
 
     var runningTabID: String? { activity?.attributes.tabID }
 
@@ -73,6 +75,7 @@ final class LiveActivityController {
         guard let activity else { return }
         self.activity = nil
         let final = activity.content.state
+        onEnd?(activity.attributes.tabID)
         Task { await activity.end(ActivityContent(state: final, staleDate: nil), dismissalPolicy: .default) }
     }
 }

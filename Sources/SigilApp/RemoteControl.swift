@@ -317,6 +317,9 @@ final class RemoteControl {
         if revoke {
             store.revokeFailed = !forgotten
             revokeFailed = !forgotten
+            // The next phone must not inherit this one's alerts or Lock Screen cards.
+            push = nil
+            activities = [:]
         }
         generation = UUID()
         task?.cancel()
@@ -445,10 +448,18 @@ final class RemoteControl {
 
     /// A closed tab neither alerts nor updates again.
     func forgetTab(_ id: TerminalTab.ID) {
-        planner.forget(tabID: id.uuidString)
-        activities[id.uuidString] = nil
-        alertTasks[id.uuidString]?.cancel()
-        alertTasks[id.uuidString] = nil
+        let key = id.uuidString
+        // Closed while the phone was away: its card ends now, or it would outlive the tab.
+        if let token = activities[key], peer == nil, let socket {
+            let state = RemoteActivityState(
+                status: "exited", since: Int(Date().timeIntervalSince1970), asking: false)
+            let frame = Frame(push: .init(activity: token, state: state, event: "end"))
+            Task { try? await self.send(frame, socket: socket) }
+        }
+        planner.forget(tabID: key)
+        activities[key] = nil
+        alertTasks[key]?.cancel()
+        alertTasks[key] = nil
     }
 
     // MARK: Events

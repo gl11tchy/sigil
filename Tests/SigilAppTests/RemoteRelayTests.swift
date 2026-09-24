@@ -480,6 +480,36 @@ struct RemoteAlertDeliveryTests {
         // The relay never sees a title or a question in the clear.
         let raw = try String(contentsOf: relay.apnsCapture, encoding: .utf8)
         #expect(!raw.contains("alert-folder") && !raw.contains("proceed"))
+
+        // A tab closed while the phone is away ends its card before the token goes.
+        let other = try #require(fixture.model.newTab(in: folder))
+        let otherToken = String(repeating: "ef", count: 40)
+        let phone2 = try RelayPhone(relay: relay)
+        defer { phone2.close() }
+        let challenge2 = try await phone2.route(["ticket": paired.ticket])
+        let registered = try await phone2.request(
+            RemoteRequest(
+                challenge: challenge2, sequence: 1, action: "activity", tabID: other.id.uuidString, text: otherToken),
+            key: paired.device)
+        #expect(registered.ok)
+        phone2.close()
+        for _ in 0..<100 {
+            if remote.status == "Phone disconnected" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let before = try String(contentsOf: relay.apnsCapture, encoding: .utf8).split(separator: "\n").count
+        fixture.model.closeTab(other.id)
+        for _ in 0..<100 {
+            if let text = try? String(contentsOf: relay.apnsCapture, encoding: .utf8),
+                text.split(separator: "\n").count > before
+            {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let ended = try String(contentsOf: relay.apnsCapture, encoding: .utf8).split(separator: "\n").dropFirst(before)
+            .map { try JSONDecoder().decode(Captured.self, from: Data($0.utf8)) }
+        #expect(ended.contains { $0.token == otherToken && $0.payload.aps.event == "end" })
     }
 }
 

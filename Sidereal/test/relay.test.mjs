@@ -553,7 +553,12 @@ test('a host registers the phone token and sends sealed alerts and activity upda
   assert.deepEqual(await message(host), { type: 'push', ok: true, status: 200 });
   assert.ok(apns.sent[2].payload.aps['dismissal-date'] > apns.sent[2].payload.aps.timestamp);
 
-  // A dead token is forgotten after Apple says so.
+  // An ended activity's 410 leaves the phone's alert token alone.
+  host.send(JSON.stringify({ push: { activity: 'dead' + 'cd'.repeat(38), event: 'update', state: { status: 'idle' } } }));
+  assert.deepEqual(await message(host), { type: 'push', ok: false, status: 410 });
+  host.send(JSON.stringify({ push: { data: 'c2VhbGVk' } }));
+  assert.deepEqual(await message(host), { type: 'push', ok: true, status: 200 });
+  // A dead alert token is forgotten after Apple says so.
   host.send(JSON.stringify({ pushToken: 'dead' + 'ab'.repeat(30), pushEnvironment: 'production' }));
   host.send(JSON.stringify({ push: { data: 'c2VhbGVk' } }));
   assert.deepEqual(await message(host), { type: 'push', ok: false, status: 410 });
