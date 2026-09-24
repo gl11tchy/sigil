@@ -8,7 +8,7 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct ProviderBoundaryTests {
-    nonisolated static let providers: [CLIProvider] = [.claudeCode, .codex, .devin, .cursor]
+    nonisolated static let providers: [CLIProvider] = [.claudeCode, .codex, .devin, .cursor, .kimi]
 
     @Test(arguments: providers)
     func silentProviderKeepsCloseWarningAndDoesNotClaimCompletion(provider: CLIProvider) async throws {

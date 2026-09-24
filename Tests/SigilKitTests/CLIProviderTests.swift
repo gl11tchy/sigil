@@ -4,7 +4,7 @@ import Testing
 @testable import SigilKit
 
 struct CLIProviderTests {
-    @Test(arguments: [CLIProvider.claudeCode, .codex, .devin, .cursor])
+    @Test(arguments: [CLIProvider.claudeCode, .codex, .devin, .cursor, .kimi])
     func otherProvidersDoNotReceiveGrokFlagsOrState(provider: CLIProvider) {
         let spec = GrokLaunchSpec(
             workingDirectory: URL(fileURLWithPath: "/tmp/project with spaces"),
@@ -43,6 +43,17 @@ struct CLIProviderTests {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         #expect(command.arguments.count > 3)
         #expect(command.arguments.dropFirst(3).first?.split(separator: ":").contains("\(home)/.claude/local") == true)
+    }
+
+    @Test func kimisInstallFolderIsOnTheFallbackPath() {
+        // Kimi Code's installer puts `kimi` in its own bin folder.
+        let spec = GrokLaunchSpec(
+            workingDirectory: URL(fileURLWithPath: "/tmp"), mode: .new(sessionID: UUID()),
+            provider: .kimi)
+        let command = spec.hostCommand(processEnvironment: ["SHELL": "/bin/zsh"])
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        #expect(command.arguments.dropFirst(3).first?.split(separator: ":").contains("\(home)/.kimi-code/bin") == true)
+        #expect(command.arguments.last == "kimi")
     }
 
     @Test func cursorUsesItsUnambiguousCLIName() {

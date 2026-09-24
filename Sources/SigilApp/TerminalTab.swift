@@ -202,7 +202,8 @@ final class TerminalTab: Identifiable {
 
     /// Claude Code and Codex have no journal, so their title is the only
     /// turn signal: a spinner leads it while a turn runs and is gone once it
-    /// ends. Cursor and Devin never change it, so they never show Working.
+    /// ends. Cursor, Devin and Kimi Code never show a spinner there, so they
+    /// never show Working.
     private func noteProviderTitle(_ title: String) {
         if case .exited = activity { return }
         switch Self.titleShowsWork(title, provider: spec.provider) {
@@ -224,7 +225,7 @@ final class TerminalTab: Identifiable {
             return first == "✳" ? false : nil
         case .codex:
             return braille
-        case .cursor, .devin, .grokBuild:
+        case .cursor, .devin, .kimi, .grokBuild:
             return nil
         }
     }

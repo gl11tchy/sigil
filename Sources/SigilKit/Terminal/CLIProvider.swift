@@ -5,6 +5,7 @@ public enum CLIProvider: String, CaseIterable, Identifiable, Sendable {
     case codex
     case devin
     case cursor
+    case kimi
     case grokBuild
 
     public var id: String { rawValue }
@@ -15,6 +16,7 @@ public enum CLIProvider: String, CaseIterable, Identifiable, Sendable {
         case .codex: "Codex"
         case .devin: "Devin"
         case .cursor: "Cursor"
+        case .kimi: "Kimi Code"
         case .grokBuild: "Grok Build"
         }
     }
@@ -26,6 +28,7 @@ public enum CLIProvider: String, CaseIterable, Identifiable, Sendable {
         case .devin: "devin"
         // `agent` is also installed by Grok. Use Cursor's distinct entry point.
         case .cursor: "cursor-agent"
+        case .kimi: "kimi"
         case .grokBuild: "grok"
         }
     }
@@ -35,8 +38,8 @@ public enum CLIProvider: String, CaseIterable, Identifiable, Sendable {
     static var fallbackPath: String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return [
-            "\(home)/.local/bin", "\(home)/.claude/local", "\(home)/.bun/bin", "/opt/homebrew/bin",
-            "/usr/local/bin",
+            "\(home)/.local/bin", "\(home)/.claude/local", "\(home)/.kimi-code/bin", "\(home)/.bun/bin",
+            "/opt/homebrew/bin", "/usr/local/bin",
         ]
         .joined(separator: ":")
     }
