@@ -245,7 +245,8 @@ struct AppModelTests {
 
         let original = try #require(model.newTab(in: cwd))
         let sessionID = try #require(original.sessionID)
-        #expect(original.spec.themeName == TerminalTheme.sigilNeon.grokThemeName)
+        #expect(original.spec.themeName == TerminalTheme.sigilDark.grokThemeName)
+        #expect(original.spec.themeVariables["GROK_THEME_BG"] == "17181A")
 
         fixture.settings.themeName = TerminalTheme.twitch.name
         model.applyTheme()
@@ -276,7 +277,7 @@ struct AppModelTests {
 
         let still = try #require(model.tabs.first)
         #expect(still.id == originalID)
-        #expect(still.spec.themeName == TerminalTheme.sigilNeon.grokThemeName)
+        #expect(still.spec.themeVariables == TerminalTheme.sigilDark.grokThemeEnvironment)
     }
 
     @Test @MainActor

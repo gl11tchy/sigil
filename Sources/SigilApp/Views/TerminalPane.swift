@@ -5,23 +5,41 @@ import SwiftUI
 /// Hosts one tab's live terminal view. The view is owned by the controller and
 /// stays alive across tab switches, so switching never restarts the process.
 struct TerminalPane: NSViewRepresentable {
-    /// Matches the sidebar's outer gutter, so both columns breathe the same.
-    static let gutter: CGFloat = 8
+    /// Matches the window inset, so glyphs sit off the screen's edge by the
+    /// same step the screen sits off the window's.
+    static let gutter: CGFloat = 10
 
     let controller: TerminalController
     /// Painted behind the terminal so the inset below blends into the window.
     let background: NSColor
     /// Rounds the screen to the frame it sits in. Zero leaves it square.
     var cornerRadius: CGFloat = 0
+    /// False rounds only the bottom corners, for a pane under a tab bar.
+    var roundsTopCorners = true
 
-    init(tab: TerminalTab, background: NSColor, cornerRadius: CGFloat = 0) {
-        self.init(controller: tab.controller, background: background, cornerRadius: cornerRadius)
+    init(
+        tab: TerminalTab, background: NSColor, cornerRadius: CGFloat = 0,
+        roundsTopCorners: Bool = true
+    ) {
+        self.init(
+            controller: tab.controller, background: background, cornerRadius: cornerRadius,
+            roundsTopCorners: roundsTopCorners)
     }
 
-    init(controller: TerminalController, background: NSColor, cornerRadius: CGFloat = 0) {
+    init(
+        controller: TerminalController, background: NSColor, cornerRadius: CGFloat = 0,
+        roundsTopCorners: Bool = true
+    ) {
         self.controller = controller
         self.background = background
         self.cornerRadius = cornerRadius
+        self.roundsTopCorners = roundsTopCorners
+    }
+
+    /// Layer corners are in unflipped coordinates: `MinY` is the bottom edge.
+    private var maskedCorners: CACornerMask {
+        let bottom: CACornerMask = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        return roundsTopCorners ? bottom.union([.layerMinXMaxYCorner, .layerMaxXMaxYCorner]) : bottom
     }
 
     func makeNSView(context: Context) -> ContainerView {
@@ -30,6 +48,7 @@ struct TerminalPane: NSViewRepresentable {
         container.layer?.backgroundColor = background.cgColor
         container.layer?.cornerRadius = cornerRadius
         container.layer?.cornerCurve = .continuous
+        container.layer?.maskedCorners = maskedCorners
         container.layer?.masksToBounds = cornerRadius > 0
         container.pasteDroppedContent = { [weak controller] pasteboard in
             controller?.pasteDroppedContent(from: pasteboard) ?? false
@@ -41,6 +60,7 @@ struct TerminalPane: NSViewRepresentable {
     func updateNSView(_ nsView: ContainerView, context: Context) {
         nsView.layer?.backgroundColor = background.cgColor
         nsView.layer?.cornerRadius = cornerRadius
+        nsView.layer?.maskedCorners = maskedCorners
         nsView.layer?.masksToBounds = cornerRadius > 0
         nsView.pasteDroppedContent = { [weak controller] pasteboard in
             controller?.pasteDroppedContent(from: pasteboard) ?? false

@@ -105,7 +105,7 @@ public enum GrokPaths {
     /// The CLI the app starts by default.
     ///
     /// `bin/grok-sigil` wins when it is there: it is the app's own build of the
-    /// open-source CLI, which carries the `sigil-neon` TUI theme and honours
+    /// open-source CLI, which carries the `sigil-host` TUI theme and honours
     /// `GROK_THEME`. Without it the app falls back to the installer's `bin/grok`,
     /// which runs exactly as before and ignores the theme variable.
     public static var defaultExecutable: URL {
@@ -115,7 +115,7 @@ public enum GrokPaths {
         return installerExecutable
     }
 
-    /// The app's own build of the CLI, which carries the `sigil-neon` theme.
+    /// The app's own build of the CLI, which carries the `sigil-host` theme.
     public static var themedExecutable: URL {
         home.appendingPathComponent("bin/grok-sigil")
     }
