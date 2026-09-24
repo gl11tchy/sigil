@@ -43,12 +43,21 @@ struct TerminalFindBar: View {
 
             Rectangle().fill(palette.line).frame(width: 1, height: 16).padding(.horizontal, 4)
 
-            FindBarIconButton(systemName: "chevron.up", help: "Previous match (Shift+Return)", label: "Previous Match", action: findPrevious)
-                .disabled(matchCount == 0)
-            FindBarIconButton(systemName: "chevron.down", help: "Next match (Return)", label: "Next Match", action: findNext)
-                .disabled(matchCount == 0)
-            FindBarIconButton(systemName: "xmark", help: "Close find (Escape)", label: "Close Find", action: dismiss)
-                .padding(.trailing, 6)
+            FindBarIconButton(
+                systemName: "chevron.up", help: "Previous match (Shift+Return)", label: "Previous Match",
+                action: findPrevious
+            )
+            .disabled(matchCount == 0)
+            FindBarIconButton(
+                systemName: "chevron.down", help: "Next match (Return)", label: "Next Match",
+                action: findNext
+            )
+            .disabled(matchCount == 0)
+            FindBarIconButton(
+                systemName: "xmark", help: "Close find (Escape)", label: "Close Find",
+                action: dismiss
+            )
+            .padding(.trailing, 6)
         }
         .frame(height: 38)
         .background(Capsule(style: .continuous).fill(palette.surface))
