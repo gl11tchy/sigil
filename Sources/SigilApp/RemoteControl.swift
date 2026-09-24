@@ -129,8 +129,7 @@ final class RemoteControl {
         } else {
             push = nil
         }
-        activities = [:]
-        planner = RemoteAlertPlanner()
+        // Tabs keep their alert baseline and activity tokens across relay connections.
         let network = URLSession(configuration: .ephemeral)
         self.network = network
         isEnabled = true
@@ -410,6 +409,8 @@ final class RemoteControl {
     /// of output is one look, and sends what the phone would otherwise miss.
     func noteTab(_ tab: TerminalTab, model: AppModel) {
         let id = tab.id.uuidString
+        // The first look sets the baseline at once, so the next change is a transition.
+        if !planner.knownTabs.contains(id) { evaluate(tab, model: model) }
         guard alertTasks[id] == nil else { return }
         alertTasks[id] = Task { @MainActor [weak self, weak tab, weak model] in
             try? await Task.sleep(for: .milliseconds(300))
