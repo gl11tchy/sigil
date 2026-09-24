@@ -1,29 +1,32 @@
+import SigilKit
 import SwiftUI
 
-/// Chips share leftover width. When their titles want more than the strip has,
-/// the widest chips give way first so every open session stays on screen with
-/// its title, dot, and close button. Only past `minimumChipWidth` does the
-/// strip scroll.
+/// Chips take their title's width, up to `maximumChipWidth`, as Beautiful
+/// UI's tabs do; they never stretch to fill the bar. When the titles want more
+/// than the strip has, the widest chips give way first so every open session
+/// stays on screen with its title, mark, and close button. Only past
+/// `minimumChipWidth` does the strip scroll.
 enum TabStripSizing {
     /// `nil` means a chip is not pinned to one width.
     static let fixedChipWidth: CGFloat? = nil
-    static let spacing: CGFloat = 2
+    static let spacing: CGFloat = 4
     static let showsScrollIndicators = true
-    /// Narrower than this and a chip cannot hold a dot, a few words, and its close button.
+    /// Narrower than this and a chip cannot hold a mark, a few words, and its close button.
     static let minimumChipWidth: CGFloat = 96
+    /// Wider than this and a chip reads as a title bar, not a tab.
+    static let maximumChipWidth: CGFloat = 200
 
     static func widths(available: CGFloat, ideals: [CGFloat]) -> [CGFloat] {
         guard !ideals.isEmpty else { return [] }
         if let fixedChipWidth {
             return Array(repeating: fixedChipWidth, count: ideals.count)
         }
-        let gaps = spacing * CGFloat(ideals.count - 1)
-        let idealTotal = ideals.reduce(0, +) + gaps
-        if idealTotal <= available {
-            let share = (available - idealTotal) / CGFloat(ideals.count)
-            return ideals.map { $0 + share }
+        let capped = ideals.map { min($0, maximumChipWidth) }
+        let gaps = spacing * CGFloat(capped.count - 1)
+        if capped.reduce(0, +) + gaps <= available {
+            return capped
         }
-        return ideals.map { min($0, max(minimumChipWidth, cap(room: max(0, available - gaps), ideals: ideals))) }
+        return capped.map { min($0, max(minimumChipWidth, cap(room: max(0, available - gaps), ideals: capped))) }
     }
 
     /// The width that, applied as a ceiling to every chip, makes the row fit
@@ -63,19 +66,27 @@ struct TabStripView: View {
         GeometryReader { geo in
             ScrollViewReader { proxy in
                 ScrollView(.horizontal) {
-                    TabChipRow(availableWidth: max(0, geo.size.width - 12)) {
-                        ForEach(model.tabs) { tab in
-                            TabChip(
-                                tab: tab,
-                                label: model.title(for: tab),
-                                isSelected: tab.id == model.selectedTab?.id,
-                                select: { model.select(tab.id) },
-                                close: { model.requestCloseTab(tab.id) }
-                            )
-                            .id(tab.id)
+                    HStack(spacing: TabStripSizing.spacing) {
+                        TabChipRow(availableWidth: max(0, geo.size.width - 40)) {
+                            ForEach(model.tabs) { tab in
+                                TabChip(
+                                    tab: tab,
+                                    label: model.title(for: tab),
+                                    isSelected: tab.id == model.selectedTab?.id,
+                                    select: { model.select(tab.id) },
+                                    close: { model.requestCloseTab(tab.id) }
+                                )
+                                .id(tab.id)
+                            }
+                        }
+                        IconButton(
+                            systemImage: "plus",
+                            help: "New Session… (⌘T)"
+                        ) {
+                            model.requestNewSession()
                         }
                     }
-                    .padding(.horizontal, 6)
+                    .padding(.horizontal, 2)
                     .frame(minHeight: geo.size.height)
                 }
                 .scrollIndicators(TabStripSizing.showsScrollIndicators ? .visible : .hidden)
@@ -83,7 +94,7 @@ struct TabStripView: View {
                     await Task.yield()
                     guard !Task.isCancelled else { return }
                     if let id = model.selectedTabID {
-                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.12)) {
                             proxy.scrollTo(id, anchor: .center)
                         }
                     }
@@ -126,6 +137,8 @@ private struct TabChipRow: Layout {
     }
 }
 
+/// One tab, as Beautiful UI's tab chip: 28pt, a 6pt radius, the title in
+/// Inter, and a fill only when selected or under the pointer.
 private struct TabChip: View {
     let tab: TerminalTab
     let label: String
@@ -140,16 +153,19 @@ private struct TabChip: View {
     var body: some View {
         HStack(spacing: 0) {
             Button(action: select) {
-                HStack(spacing: 6) {
-                    StatusDot(activity: tab.activity)
+                HStack(spacing: 7) {
+                    if showsMark {
+                        ActivityMark(activity: tab.activity, hasUnseenActivity: tab.hasUnseenActivity && !isSelected)
+                    }
                     Text(label)
-                        .font(.system(size: 11.5))
+                        .ui(12.5, .medium)
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                        .foregroundStyle(isSelected ? palette.text : palette.textDim)
+                        .foregroundStyle(isSelected ? palette.ink : palette.ink2)
                 }
-                .padding(.leading, 8)
+                .padding(.leading, 10)
+                .padding(.trailing, 2)
                 .frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
             }
@@ -158,38 +174,48 @@ private struct TabChip: View {
             .accessibilityValue(accessibilityState)
             .accessibilityAddTraits(isSelected ? [.isSelected] : [])
 
+            // Visible at rest in `ink3` (3:1), with a 20×24 target, so a
+            // background tab can be closed without hunting for it.
             Button(action: close) {
-                Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
-                    .frame(width: 16, height: 20)
+                Image(systemName: "xmark").font(.system(size: 8.5, weight: .bold))
+                    .frame(width: 18, height: 18)
                     .background(
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(isCloseHovering ? palette.selected : Color.clear)
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(isCloseHovering ? palette.hover2 : Color.clear)
                     )
                     .frame(width: 20, height: 24)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(isHovering || isSelected ? palette.textDim : palette.textFaint)
+            .foregroundStyle(isCloseHovering ? palette.ink : palette.ink3)
             .onHover { isCloseHovering = $0 }
             .accessibilityLabel("Close \(label)")
         }
-        .padding(.trailing, 6)
-        .frame(maxWidth: .infinity, minHeight: 24, maxHeight: 24)
+        .padding(.trailing, 4)
+        .frame(maxWidth: .infinity, minHeight: 28, maxHeight: 28)
         .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(
-                    isSelected
-                        ? palette.selected
-                        : (isHovering ? palette.raised.opacity(0.5) : Color.clear)
-                )
+            RoundedRectangle(cornerRadius: Radius.chip, style: .continuous)
+                .fill(fill)
         )
-        .overlay(alignment: .topTrailing) {
-            if tab.hasUnseenActivity && !isSelected {
-                Circle().fill(palette.accent).frame(width: 4, height: 4).offset(x: -3, y: 3)
-            }
-        }
+        .animation(Motion.fade, value: isHovering)
         .onHover { isHovering = $0 }
         .help(tab.workingDirectory.path)
+    }
+
+    /// Idle tabs carry no mark, so their titles line up with the chip edge.
+    private var showsMark: Bool {
+        switch tab.activity {
+        case .idle: return tab.hasUnseenActivity && !isSelected
+        case .starting, .working, .exited: return true
+        }
+    }
+
+    /// Dark: the selected chip is `hover`, as measured in Beautiful UI's harness.
+    /// Light: `hover` is nearly the page itself, so the chip steps to `hover2`.
+    private var fill: Color {
+        if isSelected { return palette.isDark ? palette.hover : palette.hover2 }
+        guard isHovering else { return .clear }
+        return palette.isDark ? palette.hover.opacity(0.5) : palette.hover
     }
 
     private var accessibilityState: String {
