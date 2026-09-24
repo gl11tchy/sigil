@@ -28,6 +28,8 @@ struct EphemeralPathTests {
         "/Users/someone/.bb/worktrees/env_abc",
         "/Users/someone/.bb/worktrees",
         "/Users/someone/.bb/plugins/environment-git-worktree/sigil",
+        "/Users/someone/.claude/skills/write-swift/.claude/worktrees/agent-1",
+        "/Users/someone/.bb/repos/app/.bb/plugins/environment-git-worktree/app",
     ])
     func treatsScratchLocationsAsEphemeral(path: String) {
         #expect(isEphemeral(path: path))

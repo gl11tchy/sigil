@@ -56,10 +56,12 @@ enum SessionScanner: Sendable {
         let fm = FileManager()
         var isDirectory: ObjCBool = false
         guard fm.fileExists(atPath: root.path, isDirectory: &isDirectory) else {
+            // The CLI creates the folder with its first session, so a missing
+            // root is only an error once it held sessions.
             return Result(
                 sessions: cachedSessions(cache),
                 cache: cache,
-                loadError: "Sessions directory does not exist: \(root.path)"
+                loadError: cache.isEmpty ? nil : "Sessions directory does not exist: \(root.path)"
             )
         }
         guard isDirectory.boolValue else {
@@ -189,13 +191,40 @@ enum SessionScanner: Sendable {
         query: String,
         displayedTitle: String? = nil
     ) -> Bool {
-        let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)
-        if terms.isEmpty { return true }
-        let fields = [
-            displayedTitle ?? session.title, session.title, session.projectName, session.displayPath, session.cwd,
-        ]
-        return terms.allSatisfy { term in
-            fields.contains { SearchMatchHighlight.contains($0, query: term) }
+        guard let query = SearchQuery(query) else { return true }
+        return matches(
+            SearchKey(session), query: query, foldedDisplayedTitle: displayedTitle.map(foldedTitle))
+    }
+
+    /// A session's search fields, folded once when the session list changes.
+    struct SearchKey: Sendable {
+        /// `session.title` as it is, to spot a displayed title that is not a rename.
+        let title: String
+        let foldedTitle: String
+        /// Folded project name, `~` path, and cwd.
+        let foldedPaths: [String]
+
+        init(_ session: GrokSession) {
+            title = session.title
+            foldedTitle = SessionScanner.foldedTitle(title)
+            foldedPaths = [session.projectName, session.displayPath, session.cwd]
+                .map(SearchMatchHighlight.fold)
+        }
+    }
+
+    /// A non-empty query, folded once per search.
+    struct SearchQuery: Sendable {
+        let folded: String
+        /// Folded words; each must occur in some field.
+        let terms: [String]
+
+        init?(_ query: String) {
+            let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { return nil }
+            folded = SearchMatchHighlight.fold(trimmed)
+            terms = trimmed.split(whereSeparator: \.isWhitespace).map {
+                SearchMatchHighlight.fold(String($0))
+            }
         }
     }
 
@@ -210,55 +239,48 @@ enum SessionScanner: Sendable {
     }
 
     static func searchRank(
-        _ session: GrokSession,
-        query: String,
+        _ key: SearchKey,
+        query: SearchQuery,
         displayedTitle: String? = nil
     ) -> SearchRank? {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return nil }
+        let displayed = displayedTitle.map { $0 == key.title ? key.foldedTitle : foldedTitle($0) }
         var best: SearchRank?
-        var seen = Set<String>()
-        for candidate in [displayedTitle, session.title] {
-            guard let candidate, seen.insert(candidate).inserted else { continue }
-            guard let rank = titleRank(candidate, query: trimmed) else { continue }
+        for candidate in [displayed, key.foldedTitle] {
+            guard let candidate, let rank = titleRank(candidate, query: query) else { continue }
             if let current = best, rank.rawValue >= current.rawValue { continue }
             best = rank
         }
         if let best { return best }
-        if matches(session, query: trimmed, displayedTitle: displayedTitle) {
-            return .folderOrPath
+        return matches(key, query: query, foldedDisplayedTitle: displayed) ? .folderOrPath : nil
+    }
+
+    private static func matches(
+        _ key: SearchKey,
+        query: SearchQuery,
+        foldedDisplayedTitle: String?
+    ) -> Bool {
+        query.terms.allSatisfy { term in
+            foldedDisplayedTitle.map { holds($0, term) } == true || holds(key.foldedTitle, term)
+                || key.foldedPaths.contains { holds($0, term) }
         }
+    }
+
+    private static func titleRank(_ title: String, query: SearchQuery) -> SearchRank? {
+        if title.isEmpty || query.folded.isEmpty { return nil }
+        if title == query.folded { return .exactTitle }
+        if title.hasPrefix(query.folded) { return .titlePrefix }
+        if title.contains(query.folded) { return .titleContains }
+        if query.terms.allSatisfy({ holds(title, $0) }) { return .titleContains }
         return nil
     }
 
-    private static func titleRank(_ title: String, query: String) -> SearchRank? {
-        let foldedTitle = SearchMatchHighlight.fold(
-            title.trimmingCharacters(in: .whitespacesAndNewlines))
-        let foldedQuery = SearchMatchHighlight.fold(
-            query.trimmingCharacters(in: .whitespacesAndNewlines))
-        if foldedTitle.isEmpty || foldedQuery.isEmpty { return nil }
-        if foldedTitle == foldedQuery { return .exactTitle }
-        if foldedTitle.hasPrefix(foldedQuery) { return .titlePrefix }
-        if foldedTitle.contains(foldedQuery) { return .titleContains }
-        let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)
-        if !terms.isEmpty, terms.allSatisfy({ SearchMatchHighlight.contains(title, query: $0) }) {
-            return .titleContains
-        }
-        return nil
+    private static func foldedTitle(_ title: String) -> String {
+        SearchMatchHighlight.fold(title.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
-    static func grouped(_ sessions: [GrokSession]) -> [(cwd: String, sessions: [GrokSession])] {
-        var groups: [String: [GrokSession]] = [:]
-        var order: [String] = []
-        for session in sessions {
-            if groups[session.cwd] == nil {
-                order.append(session.cwd)
-                groups[session.cwd] = [session]
-            } else {
-                groups[session.cwd]?.append(session)
-            }
-        }
-        return order.map { (cwd: $0, sessions: groups[$0] ?? []) }
+    /// Both sides already folded. An empty term is no hit, as in `SearchMatchHighlight.contains`.
+    private static func holds(_ folded: String, _ term: String) -> Bool {
+        !term.isEmpty && folded.contains(term)
     }
 
     private static func isDir(_ url: URL) -> Bool {

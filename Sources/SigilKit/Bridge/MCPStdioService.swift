@@ -64,7 +64,8 @@ private enum RPCParseResult {
 private struct ParsedRPC {
     var id: Any
     var hasID: Bool
-    var method: String?
+    /// Never empty: parse() refuses a request without one.
+    var method: String
     var params: Any?
     var requestKey: RPCRequestID?
 
@@ -106,12 +107,7 @@ private struct ParsedRPC {
 
 extension MCPStdioService {
     private func dispatch(_ parsed: ParsedRPC) -> String? {
-        guard let method = parsed.method, !method.isEmpty else {
-            guard parsed.hasID else { return nil }
-            return RPC.encodeError(id: parsed.id, code: -32600, message: "Invalid Request")
-        }
-
-        switch method {
+        switch parsed.method {
         case "notifications/initialized":
             guard !parsed.hasID else {
                 return RPC.encodeError(id: parsed.id, code: -32600, message: "Invalid Request")
@@ -192,7 +188,7 @@ extension MCPStdioService {
                         text: question,
                         timeoutSeconds: timeout
                     ),
-                    present: { response in Self.presentAsk(response, timeout: timeout) }
+                    present: { response in Self.presentAsk(response) }
                 )
             }
         case "reply_to":
@@ -256,15 +252,10 @@ extension MCPStdioService {
         (withNote(formatTabs(response.tabs), response), false)
     }
 
-    private static func presentAsk(_ response: BridgeResponse, timeout: Double) -> (String, Bool) {
-        if let answer = response.answer?.nilIfBlank {
-            return (withNote(answer, response), false)
-        }
-        let seconds = timeout.rounded() == timeout ? String(Int(timeout)) : String(timeout)
-        return (
-            withNote("The other tab did not answer within \(seconds) seconds.", response),
-            true
-        )
+    /// The app answers an ask with ok only when it carries the reply; a timeout
+    /// comes back as a failure and never reaches here.
+    private static func presentAsk(_ response: BridgeResponse) -> (String, Bool) {
+        (withNote(response.answer ?? "", response), false)
     }
 
     private static func formatTabs(_ tabs: [BridgeTab]?) -> String {
@@ -411,7 +402,7 @@ public final class MCPStdioSession: @unchecked Sendable {
 
         let task = Task.detached { [service, output, weak self, job] in
             defer { self?.finish(key, job: job) }
-            let response = service.handleLine(trimmed)
+            let response = await MCPRequestLane().handle(trimmed, with: service)
             guard !Task.isCancelled, let response else { return }
             output(response)
         }
@@ -443,6 +434,21 @@ public final class MCPStdioSession: @unchecked Sendable {
         lock.lock()
         if jobs[key] === job { jobs.removeValue(forKey: key) }
         lock.unlock()
+    }
+}
+
+/// Runs one request on its own dispatch thread. The transport blocks on a
+/// socket, and blocked cooperative threads starve every other task, pings
+/// included. The call stays in its task, so cancellation still reaches it.
+private actor MCPRequestLane {
+    private let queue = DispatchSerialQueue(label: "com.gl11tchy.sigil.mcp.request")
+
+    nonisolated var unownedExecutor: UnownedSerialExecutor {
+        queue.asUnownedSerialExecutor()
+    }
+
+    func handle(_ line: String, with service: MCPStdioService) -> String? {
+        service.handleLine(line)
     }
 }
 
