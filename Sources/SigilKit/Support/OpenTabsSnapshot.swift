@@ -2,16 +2,22 @@ import Foundation
 
 /// The open-tab list persisted across launches.
 ///
-/// Only the session identity is stored. Tabs are always reopened in `.resume`
+/// The session identity, model and effort are stored. Tabs are always reopened in `.resume`
 /// mode so a launch never creates a new conversation on disk.
 public struct OpenTabsSnapshot: Codable, Equatable, Sendable {
     public struct Entry: Codable, Equatable, Sendable {
         public var sessionID: String
         public var cwd: String
+        /// The tab's model and reasoning effort. Empty means the CLI default.
+        /// Nil only in older snapshots; restore then uses Settings.
+        public var model: String?
+        public var effort: String?
 
-        public init(sessionID: String, cwd: String) {
+        public init(sessionID: String, cwd: String, model: String? = nil, effort: String? = nil) {
             self.sessionID = sessionID
             self.cwd = cwd
+            self.model = model
+            self.effort = effort
         }
     }
 

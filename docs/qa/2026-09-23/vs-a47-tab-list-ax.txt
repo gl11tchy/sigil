@@ -1,0 +1,23 @@
+a47 (c2a324b): tab list scrolls the highlighted row into view on appear.
+Setup: 11 tabs open (10 opened by AXPress on sidebar rows); the last tab is selected.
+List height = min(11*44+8, 360) = 360, so about 8 rows fit and the last row starts out of view without the fix.
+
+tab strip:
+  tab 1 | folder=/Users/Shared/sigil-ux/projects/acme-api | state=background, working
+  tab 2 | folder=/Users/Shared/sigil-ux/projects/sigil | state=background, working
+  tab 3 | folder=/Users/Shared/sigil-ux/projects/acme-api | state=background, working
+  tab 4 | folder=/Users/Shared/sigil-ux/projects/sigil | state=background, working
+  tab 5 | folder=/Users/Shared/sigil-ux/projects/acme-api | state=background, working
+  tab 6 | folder=/Users/Shared/sigil-ux/projects/acme-api | state=background, working
+  tab 7 | folder=/Users/Shared/sigil-ux/projects/acme-web | state=background, working
+  tab 8 | folder=/Users/Shared/sigil-ux/projects/acme-web | state=background, working
+  tab 9 | folder=/Users/Shared/sigil-ux/projects/acme-web | state=background, working
+  tab 10 | folder=/Users/Shared/sigil-ux/projects/sigil | state=background, working
+  tab 11 | folder=/Users/Shared/sigil-ux/projects/sigil | state=selected, working
+  tab count=11
+
+Window > Show Tab List… (AXPress). SigilUX windows after the press:
+  SigilUX 24194 0 928 291 386 386
+  SigilUX 24003 0 306 262 900 492
+
+Result (vs-a47-tab-list-scrolled-to-selected.png): the list is scrolled down; the first row is cut off at the top and the selected last row "Audit the remote relay for replay protection" is highlighted and fully in view at the bottom.

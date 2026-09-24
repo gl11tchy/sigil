@@ -23,6 +23,13 @@ enum NewSessionLaunch: Equatable {
     static func action(selected: CLIProvider, tapped: CLIProvider) -> Action {
         selected == tapped ? .start(tapped) : .select(tapped)
     }
+
+    /// Left and right arrows walk the row in screen order and stop at its ends.
+    static func provider(after current: CLIProvider, movingBy offset: Int) -> CLIProvider {
+        let all = CLIProvider.allCases
+        guard let index = all.firstIndex(of: current) else { return current }
+        return all[min(max(index + offset, all.startIndex), all.index(before: all.endIndex))]
+    }
 }
 
 /// Chooses a provider and starts its CLI in the requested folder.
@@ -38,6 +45,7 @@ struct NewSessionSheet: View {
     @State private var effort = ""
     @State private var models = GrokModelCatalog.fallback
     @FocusState private var focusedProvider: CLIProvider?
+    @FocusState private var isProviderRowFocused: Bool
 
     init(model: AppModel, provider: CLIProvider = .grokBuild) {
         self.model = model
@@ -62,56 +70,84 @@ struct NewSessionSheet: View {
     private var directoryIsAvailable: Bool { isDirectory(directory) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("New Session")
-                .font(.headline)
-                .foregroundStyle(palette.text)
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("New session")
+                    .ui(15, .semibold)
+                    .foregroundStyle(palette.ink)
+                Text("Pick a CLI and a folder. Press a CLI twice to start it.")
+                    .ui(13)
+                    .foregroundStyle(palette.ink2)
+            }
+            .padding(.bottom, 16)
 
             providerRow
+                .padding(.bottom, 16)
 
-            Form {
+            VStack(spacing: 0) {
                 folderRow
                 if !recents.isEmpty {
-                    Picker("Recent", selection: $directory) {
-                        ForEach(recentChoices, id: \.self) { url in
-                            Text(url.abbreviatedPath).tag(url)
+                    divider
+                    SheetRow(label: "Recent") {
+                        Picker("Recent", selection: $directory) {
+                            ForEach(recentChoices, id: \.self) { url in
+                                Text(url.abbreviatedPath).tag(url)
+                            }
                         }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .fixedSize()
                     }
                 }
                 if NewSessionLaunch.showsModelAndEffort(provider) {
-                    Picker("Model", selection: $modelName) {
-                        Text("CLI default").tag("")
-                        ForEach(GrokModelCatalog.choices(listed: models, saved: modelName), id: \.self) {
-                            name in
-                            Text(name).monospaced().tag(name)
+                    divider
+                    SheetRow(label: "Model") {
+                        Picker("Model", selection: $modelName) {
+                            Text("CLI default").tag("")
+                            ForEach(GrokModelCatalog.choices(listed: models, saved: modelName), id: \.self) {
+                                name in
+                                Text(name).monospaced().tag(name)
+                            }
                         }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .fixedSize()
                     }
-                    .pickerStyle(.menu)
-                    Picker("Effort", selection: $effort) {
-                        ForEach(AppSettings.effortOptions, id: \.self) { option in
-                            Text(AppSettings.effortLabel(option)).tag(option)
+                    divider
+                    SheetRow(label: "Effort") {
+                        Picker("Effort", selection: $effort) {
+                            ForEach(AppSettings.effortOptions, id: \.self) { option in
+                                Text(AppSettings.effortLabel(option)).tag(option)
+                            }
                         }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .fixedSize()
                     }
-                    .pickerStyle(.menu)
                 }
             }
-            .formStyle(.grouped)
+            .surface(palette.isDark ? palette.inset : palette.surface, radius: Radius.card, elevation: .flat)
 
-            HStack {
+            HStack(spacing: 8) {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
+                    .buttonStyle(.secondary)
                     .keyboardShortcut(.cancelAction)
                 Button("Start") { start(provider) }
+                    .buttonStyle(.primary)
                     .keyboardShortcut(.defaultAction)
                     .disabled(!directoryIsAvailable)
             }
+            .padding(.top, 20)
         }
         .padding(20)
         .frame(width: 560)
         .fixedSize(horizontal: false, vertical: true)
+        .background(palette.surface)
         .environment(\.palette, Palette(theme: model.settings.theme))
         .tint(Palette(theme: model.settings.theme).accent)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: provider)
+        .animation(reduceMotion ? nil : Motion.slide, value: provider)
+        .defaultFocus($isProviderRowFocused, true)
         .onAppear {
             directory = model.pendingSessionDirectory ?? model.newSessionDirectory
             modelName = model.settings.model.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -123,8 +159,12 @@ struct NewSessionSheet: View {
         }
     }
 
+    private var divider: some View {
+        Rectangle().fill(palette.lineSoft).frame(height: 1).padding(.leading, 12)
+    }
+
     private var providerRow: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             ForEach(CLIProvider.allCases) { item in
                 ProviderChoice(
                     provider: item,
@@ -144,26 +184,39 @@ struct NewSessionSheet: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Provider")
+        .focusable()
+        .focusEffectDisabled()
+        .focused($isProviderRowFocused)
+        .onKeyPress(.leftArrow) { moveProvider(by: -1) }
+        .onKeyPress(.rightArrow) { moveProvider(by: 1) }
+    }
+
+    private func moveProvider(by offset: Int) -> KeyPress.Result {
+        provider = NewSessionLaunch.provider(after: provider, movingBy: offset)
+        return .handled
     }
 
     private var folderRow: some View {
-        LabeledContent("Folder") {
-            VStack(alignment: .leading, spacing: 4) {
+        SheetRow(label: "Folder") {
+            VStack(alignment: .trailing, spacing: 4) {
                 HStack(spacing: 8) {
                     Text(directory.abbreviatedPath)
+                        .mono(12)
+                        .foregroundStyle(palette.ink)
                         .lineLimit(1)
                         .truncationMode(.head)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .help(directory.path)
                     Button("Choose…") {
                         if let picked = model.pickDirectory(startingAt: directory) {
                             directory = picked
                         }
                     }
+                    .buttonStyle(SigilButtonStyle(kind: .secondary, height: 26))
                 }
                 if !directoryIsAvailable {
                     Text("Folder unavailable.")
-                        .font(.caption)
-                        .foregroundStyle(palette.error)
+                        .ui(12)
+                        .foregroundStyle(palette.redInk)
                 }
             }
         }
@@ -186,6 +239,27 @@ struct NewSessionSheet: View {
     }
 }
 
+/// One labelled line inside the sheet's card: the label in `ink2` on the
+/// leading side, its control on the trailing side.
+private struct SheetRow<Control: View>: View {
+    let label: String
+    @ViewBuilder var control: Control
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .ui(13)
+                .foregroundStyle(palette.ink2)
+            Spacer(minLength: 12)
+            control
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: 42)
+    }
+}
+
+/// A CLI as a large tile. Selected is `hover2`; the keyboard ring is `lineStrong`.
 private struct ProviderChoice: View {
     let provider: CLIProvider
     let isSelected: Bool
@@ -197,35 +271,38 @@ private struct ProviderChoice: View {
     @State private var isHovering = false
 
     private var fill: Color {
-        if isSelected { return palette.selected }
-        return (isHovering || isFocused) ? palette.raised : .clear
+        if isSelected { return palette.hover2 }
+        return (isHovering || isFocused) ? palette.hover : .clear
     }
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 8) {
                 ProviderLogo(provider: provider)
-                    .frame(width: 36, height: 36)
+                    .frame(width: 32, height: 32)
                 Text(provider.name)
-                    .font(.system(size: 11, weight: .medium))
+                    .ui(12.5, .medium)
                     .lineLimit(1)
-                    .foregroundStyle(isSelected ? palette.text : palette.textDim)
+                    .foregroundStyle(isSelected ? palette.ink : palette.ink2)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
+            .padding(.vertical, 12)
             .padding(.horizontal, 4)
             .background {
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
                     .fill(fill)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6)
+                        RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
                             .strokeBorder(
-                                isFocused && !isSelected ? palette.hairline : Color.clear,
+                                isSelected
+                                    ? palette.ringButton
+                                    : (isFocused ? palette.lineStrong : Color.clear),
                                 lineWidth: 1
                             )
                     )
             }
-            .contentShape(RoundedRectangle(cornerRadius: 6))
+            .contentShape(RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+            .animation(Motion.fade, value: isHovering)
         }
         .buttonStyle(.plain)
         .focused(focus, equals: provider)
