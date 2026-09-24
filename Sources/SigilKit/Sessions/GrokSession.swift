@@ -75,9 +75,11 @@ public struct GrokSession: Identifiable, Hashable, Sendable {
     public var projectDisplayPath: String { Self.abbreviated(projectPath) }
 
     private static func abbreviated(_ path: String) -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let home = homePath
         if path == home { return "~" }
         if path.hasPrefix(home + "/") { return "~" + path.dropFirst(home.count) }
         return path
     }
+
+    private static let homePath = FileManager.default.homeDirectoryForCurrentUser.path
 }

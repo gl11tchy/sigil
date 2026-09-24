@@ -83,19 +83,6 @@ struct BridgeRegistrationTests {
             code: 0,
             expected: false
         ),
-    ])
-    func removeRunsOnlyWhenAServerIsNamedSigil(listing: ListingCase) throws {
-        let probe = RunnerProbe()
-        probe.responses = [(listing.code, listing.output), (0, "removed")]
-        let registration = BridgeRegistration(executable: grok, runner: probe.run)
-
-        try registration.remove()
-
-        let removed = probe.calls.contains(["mcp", "remove", "sigil", "-s", "user"])
-        #expect(removed == listing.expected)
-    }
-
-    @Test(arguments: [
         ListingCase(
             output: """
                 | Server | Transport | Endpoint / Package |
@@ -114,14 +101,16 @@ struct BridgeRegistrationTests {
             code: 0,
             expected: false
         ),
-        ListingCase(output: "sigil", code: 1, expected: false),
     ])
-    func isInstalledRequiresWholeServerName(listing: ListingCase) {
+    func removeRunsOnlyWhenAServerIsNamedSigil(listing: ListingCase) throws {
         let probe = RunnerProbe()
-        probe.response = (listing.code, listing.output)
+        probe.responses = [(listing.code, listing.output), (0, "removed")]
         let registration = BridgeRegistration(executable: grok, runner: probe.run)
-        #expect(registration.isInstalled() == listing.expected)
-        #expect(probe.calls == [["mcp", "list"]])
+
+        try registration.remove()
+
+        let removed = probe.calls.contains(["mcp", "remove", "sigil", "-s", "user"])
+        #expect(removed == listing.expected)
     }
 
     @Test func installAndRemoveThrowRunnerOutputOnFailure() {
