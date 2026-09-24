@@ -546,6 +546,41 @@ final class AppModel {
         if added != settings.addedProjects { settings.addedProjects = added }
     }
 
+    /// An added folder with no conversations at all, hidden ones included.
+    /// Removing it drops only the folder entry, never a chat.
+    func isRemovableOnly(_ project: SidebarProject) -> Bool {
+        isAddedProject(project.cwd) && !store.sessions.contains { samePath($0.cwd, project.cwd) }
+    }
+
+    /// The row's archive control: removal for a chatless added folder.
+    func archiveOrRemove(_ project: SidebarProject) {
+        if isRemovableOnly(project) { removeProject(project) } else { archive(project) }
+    }
+
+    /// Drops an added folder and closes every tab in it, whatever the CLI.
+    func removeProject(_ project: SidebarProject) {
+        let projectTabs = tabs.filter { samePath($0.workingDirectory.path, project.cwd) }
+        if projectTabs.contains(where: \.shouldWarnBeforeStopping), !confirmStop() {
+            return
+        }
+        unpin(project)
+        removeAddedProject(project.cwd)
+        stopAndWait(projectTabs)
+        for tab in projectTabs {
+            if let index = tabs.firstIndex(where: { $0.id == tab.id }) { removeTab(at: index) }
+        }
+        refreshDockIndicator()
+        persistOpenTabs()
+        if focusedProject.map({ samePath($0.cwd, project.cwd) }) == true {
+            leaveProject()
+        }
+    }
+
+    /// The selected tab runs in this folder, whatever the CLI.
+    func hasSelectedTab(in project: SidebarProject) -> Bool {
+        selectedTab.map { samePath($0.workingDirectory.path, project.cwd) } ?? false
+    }
+
     private func isAddedProject(_ path: String) -> Bool {
         settings.addedProjects.contains { samePath($0.path, path) }
     }

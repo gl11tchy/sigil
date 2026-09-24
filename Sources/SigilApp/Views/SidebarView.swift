@@ -277,11 +277,12 @@ struct SidebarView: View {
                 isPinned: model.isPinned(project),
                 showsPin: true,
                 showsArchive: true,
+                archiveLabel: archiveLabel(for: project),
                 canStart: true,
                 leave: { model.leaveProject() },
                 newChat: { model.requestNewSessionInProject(project) },
                 togglePin: { model.togglePin(project) },
-                toggleArchive: { model.archive(project) }
+                toggleArchive: { model.archiveOrRemove(project) }
             )
         }
     }
@@ -616,7 +617,7 @@ struct SidebarView: View {
             longRelative: rows.first?.updatedAt.longRelative ?? "",
             isPinned: model.isPinned(project),
             isWorking: model.isWorking(project),
-            isActive: rows.contains { model.isActive($0) },
+            isActive: rows.contains { model.isActive($0) } || model.hasSelectedTab(in: project),
             isKeyboardSelected: project.id == keyboardSelectionID,
             canStart: true,
             open: {
@@ -625,7 +626,8 @@ struct SidebarView: View {
             },
             newChat: { model.requestNewSessionInProject(project) },
             togglePin: { model.togglePin(project) },
-            archive: { model.archive(project) }
+            archive: { model.archiveOrRemove(project) },
+            archiveLabel: archiveLabel(for: project)
         )
         .id(project.id)
         .contextMenu {
@@ -633,13 +635,15 @@ struct SidebarView: View {
             Button(model.isPinned(project) ? "Unpin Project" : "Pin Project") {
                 model.togglePin(project)
             }
-            Button(project.sessions.isEmpty ? "Remove Project" : "Archive Project") {
-                model.archive(project)
-            }
+            Button(archiveLabel(for: project)) { model.archiveOrRemove(project) }
             if let session = rows.first {
                 Button("Reveal Folder in Finder") { model.revealInFinder(session) }
             }
         }
+    }
+
+    private func archiveLabel(for project: SidebarProject) -> String {
+        model.isRemovableOnly(project) ? "Remove Project" : "Archive Project"
     }
 
     private func sessionRow(
@@ -1383,6 +1387,7 @@ private struct DrillBar: View {
     var isPinned: Bool = false
     var showsPin: Bool = false
     var showsArchive: Bool = false
+    var archiveLabel = "Archive Project"
     var canStart: Bool = false
     let leave: () -> Void
     var newChat: (() -> Void)? = nil
@@ -1419,7 +1424,7 @@ private struct DrillBar: View {
             .accessibilityLabel("Back to projects")
             Spacer(minLength: 4)
             if showsArchive, let toggleArchive {
-                IconButton(systemImage: "archivebox", help: "Archive Project") {
+                IconButton(systemImage: "archivebox", help: archiveLabel) {
                     toggleArchive()
                 }
             }
@@ -1613,6 +1618,7 @@ private struct ProjectListRow: View {
     let newChat: () -> Void
     let togglePin: () -> Void
     var archive: (() -> Void)? = nil
+    var archiveLabel = "Archive Project"
 
     @Environment(\.palette) private var palette
     @Environment(\.sidebarGlide) private var glide
@@ -1635,7 +1641,7 @@ private struct ProjectListRow: View {
             if showsControls {
                 HStack(spacing: 0) {
                     if let archive {
-                        RowAction(systemImage: "archivebox", help: "Archive Project", action: archive)
+                        RowAction(systemImage: "archivebox", help: archiveLabel, action: archive)
                     }
                     if showsPin {
                         RowAction(
@@ -1691,7 +1697,7 @@ private struct ProjectListRow: View {
                 action: togglePin
             )
         )
-        .modifier(ArchiveProjectAction(archive: archive))
+        .modifier(ArchiveProjectAction(name: archiveLabel, archive: archive))
     }
 
     private var showsControls: Bool { isHovering || isKeyboardSelected }
@@ -2396,12 +2402,13 @@ private struct NamedActionIf: ViewModifier {
 }
 
 private struct ArchiveProjectAction: ViewModifier {
+    let name: String
     let archive: (() -> Void)?
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if let archive {
-            content.accessibilityAction(named: "Archive Project", archive)
+            content.accessibilityAction(named: name, archive)
         } else {
             content
         }
