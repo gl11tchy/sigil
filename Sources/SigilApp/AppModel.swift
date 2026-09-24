@@ -532,12 +532,13 @@ final class AppModel {
             added: settings.addedProjects, into: projects, canonicalPath: canonicalPath)
     }
 
-    /// Adds a folder to Projects before it has a chat.
+    /// Adds a folder to Projects before it has a chat. A Sigil worktree adds its project.
     func addProject(_ directory: URL) {
+        let path = SigilWorktree.projectPath(of: directory.path) ?? directory.path
         settings.reloadSharedLists()
         var added = settings.addedProjects
-        added.removeAll { samePath($0.path, directory.path) }
-        added.insert(AddedProject(path: directory.path, addedAt: Date()), at: 0)
+        added.removeAll { samePath($0.path, path) }
+        added.insert(AddedProject(path: path, addedAt: Date()), at: 0)
         settings.addedProjects = added
     }
 
@@ -716,9 +717,10 @@ final class AppModel {
         if remainingProjectPins != settings.pinnedProjects {
             settings.pinnedProjects = remainingProjectPins
         }
-        let remainingAdded = settings.addedProjects.filter {
-            Self.isUsableDirectory(URL(fileURLWithPath: $0.path))
-        }
+        // Earlier builds added a Sigil worktree as its own project.
+        let remainingAdded = SidebarOrganization.foldingWorktrees(
+            settings.addedProjects, samePath: samePath
+        ).filter { Self.isUsableDirectory(URL(fileURLWithPath: $0.path)) }
         if remainingAdded != settings.addedProjects {
             settings.addedProjects = remainingAdded
         }
