@@ -53,8 +53,7 @@ struct RemoteControlView: View {
                             Text("Scan this code with your phone’s camera")
                             HStack(spacing: 10) {
                                 Button(copiedLink ? "Copied" : "Copy Pairing Link") {
-                                    NSPasteboard.general.clearContents()
-                                    copiedLink = NSPasteboard.general.setString(url.absoluteString, forType: .string)
+                                    copiedLink = Self.copy(url, to: .general)
                                 }
                                 .help("Paste this link into Sigil Remote on your phone")
                                 Text("Expires in \(max(0, Int(expiry.timeIntervalSince(context.date)))) s")
@@ -80,6 +79,15 @@ struct RemoteControlView: View {
         .frame(minHeight: model.remoteControl.pairingURL == nil ? 280 : 640)
         .onChange(of: model.remoteControl.pairingURL) { _, _ in copiedLink = false }
         .onAppear { serverURL = RemoteControl.preferredOrigin(serverURL) }
+    }
+
+    /// The link pairs a phone, so clipboard managers are asked not to keep it.
+    static func copy(_ link: URL, to pasteboard: NSPasteboard) -> Bool {
+        let concealed = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
+        pasteboard.clearContents()
+        pasteboard.declareTypes([.string, concealed], owner: nil)
+        return pasteboard.setString(link.absoluteString, forType: .string)
+            && pasteboard.setString("", forType: concealed)
     }
 
     static func qrImage(_ text: String) -> NSImage? {

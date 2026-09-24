@@ -213,7 +213,7 @@ public final class ConversationNotesStore {
         guard Self.isValidSessionID(sessionID), !cwd.isEmpty else { return nil }
         return
             root
-            .appendingPathComponent(GrokPaths.encode(path: GrokPaths.canonicalPath(cwd)))
+            .appendingPathComponent(GrokPaths.sessionFolderName(forCanonicalPath: GrokPaths.canonicalPath(cwd)))
             .appendingPathComponent(sessionID + ".md")
     }
 

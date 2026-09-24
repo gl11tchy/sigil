@@ -7,6 +7,7 @@ struct SettingsView: View {
     @State private var settingsError: String?
     @State private var pathDraft: ExecutablePathDraft
     @State private var listedModels = GrokModelCatalog.fallback
+    @State private var tabMessagingSwitch = TabMessagingSwitch()
     @FocusState private var isExecutablePathFocused: Bool
 
     init(model: AppModel) {
@@ -136,10 +137,14 @@ struct SettingsView: View {
                 .onChange(of: model.settings.optionAsMetaKey) { _, _ in model.applyOptionAsMetaKey() }
 
             Section {
-                Toggle(
-                    "Let tabs message each other",
-                    isOn: tabMessagingIsOn
-                )
+                Toggle(isOn: tabMessagingIsOn) {
+                    HStack(spacing: 6) {
+                        Text("Let tabs message each other")
+                        if model.isTabMessagingChangeInProgress {
+                            ProgressView().controlSize(.small)
+                        }
+                    }
+                }
                 .disabled(
                     (BridgeRegistration.bundledMCPBinary == nil
                         && !model.settings.isTabMessagingEnabled)
@@ -178,19 +183,22 @@ struct SettingsView: View {
 
     private var tabMessagingIsOn: Binding<Bool> {
         Binding(
-            get: { model.settings.isTabMessagingEnabled },
+            get: { tabMessagingSwitch.isOn(saved: model.settings.isTabMessagingEnabled) },
             set: { applyTabMessaging(enabled: $0) }
         )
     }
 
     private func applyTabMessaging(enabled: Bool) {
-        guard enabled != model.settings.isTabMessagingEnabled else { return }
+        guard tabMessagingSwitch.request(enabled, saved: model.settings.isTabMessagingEnabled) else {
+            return
+        }
         Task {
             do {
                 try await model.setTabMessaging(enabled: enabled)
             } catch {
                 settingsError = error.localizedDescription
             }
+            tabMessagingSwitch.finish()
         }
     }
 
@@ -212,7 +220,11 @@ struct SettingsView: View {
     }
 
     private func applyExecutablePath() {
-        switch pathDraft.commit(stored: model.settings.executablePath) {
+        apply(pathDraft.commit(stored: model.settings.executablePath))
+    }
+
+    private func apply(_ outcome: ExecutablePathDraft.Outcome) {
+        switch outcome {
         case .rejected:
             settingsError = "Choose an executable file."
         case .unchanged:
@@ -232,8 +244,7 @@ struct SettingsView: View {
             .deletingLastPathComponent()
         panel.prompt = "Choose"
         if panel.runModal() == .OK, let url = panel.url {
-            pathDraft.text = url.path
-            applyExecutablePath()
+            apply(pathDraft.pick(url, stored: model.settings.executablePath))
         }
     }
 }
@@ -322,6 +333,23 @@ private struct ThemeCard: View {
 }
 
 /// Local Grok CLI path text. Call `commit` from Return or focus loss only.
+/// The tab messaging switch shows what the user asked for while grok applies it,
+/// then the saved value again, which also moves it back after a failure.
+struct TabMessagingSwitch: Equatable {
+    private var requested: Bool?
+
+    func isOn(saved: Bool) -> Bool { requested ?? saved }
+
+    /// False when the request matches the saved value and no change should run.
+    mutating func request(_ enabled: Bool, saved: Bool) -> Bool {
+        guard enabled != saved else { return false }
+        requested = enabled
+        return true
+    }
+
+    mutating func finish() { requested = nil }
+}
+
 struct ExecutablePathDraft: Equatable {
     var text: String
 
@@ -334,10 +362,21 @@ struct ExecutablePathDraft: Equatable {
     @MainActor
     func commit(stored: String) -> Outcome {
         let path = AppSettings.normalizedExecutablePath(text)
+        // An untouched field is no change, even when that path is missing.
+        guard path != AppSettings.normalizedExecutablePath(stored) else { return .unchanged }
         guard AppSettings.isExecutableFile(at: URL(fileURLWithPath: path)) else {
             return .rejected
         }
-        guard path != stored else { return .unchanged }
         return .applied(path)
+    }
+
+    /// A file picked in the open panel is a choice even when it is already the
+    /// stored path, so that path stays after the default changes.
+    @MainActor
+    mutating func pick(_ url: URL, stored: String) -> Outcome {
+        text = url.path
+        let outcome = commit(stored: stored)
+        guard outcome == .unchanged, AppSettings.isExecutableFile(at: url) else { return outcome }
+        return .applied(AppSettings.normalizedExecutablePath(text))
     }
 }

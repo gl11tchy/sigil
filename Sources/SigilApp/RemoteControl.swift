@@ -22,10 +22,22 @@ final class RemoteControl {
     @ObservationIgnored private var generation = UUID()
     @ObservationIgnored private var network: URLSession?
     @ObservationIgnored private let store: any RemotePairingStore
+    @ObservationIgnored private let notifications: NotificationCenter
 
-    init(store: any RemotePairingStore = KeychainRemotePairingStore()) {
+    /// Posted after a revoke, so another running copy of Sigil stops using the pairing.
+    static let revokedNotification = Notification.Name("com.gl11tchy.sigil.remote.revoked")
+
+    /// Production passes DistributedNotificationCenter; the default stays in this process.
+    init(
+        store: any RemotePairingStore = KeychainRemotePairingStore(),
+        notifications: NotificationCenter = NotificationCenter()
+    ) {
         self.store = store
+        self.notifications = notifications
         revokeFailed = store.revokeFailed
+        notifications.addObserver(forName: Self.revokedNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.revokedElsewhere() }
+        }
     }
 
     static let productionOrigin = "https://remote.sigilapp.dev"
@@ -99,11 +111,17 @@ final class RemoteControl {
             var session = restored
             var room: Room?
             var unsaved: String?
+            // After the first pairing the QR's room ID must stop routing phones.
+            var retireRoom = false
             var pairingURL: URL?
-            var retry = 1
             var failures = 0
+            var ready = false
             while !Task.isCancelled, self.generation == current {
                 do {
+                    if retireRoom {
+                        room = nil
+                        retireRoom = false
+                    }
                     if room == nil {
                         let allocated = try await self.allocate(origin: origin, network: network)
                         guard self.generation == current, !Task.isCancelled else { return }
@@ -128,6 +146,7 @@ final class RemoteControl {
                     let socket = network.webSocketTask(with: socketRequest)
                     socket.maximumMessageSize = 110_000
                     self.socket = socket
+                    ready = false
                     socket.resume()
                     let keepAlive = Task { await Self.keepAlive(socket) }
                     defer { keepAlive.cancel() }
@@ -150,18 +169,22 @@ final class RemoteControl {
                                 ["room": room.room, "ticket": session.ticket], key: key, direction: "relay-host")
                             try await self.send(Frame(route: route), socket: socket)
                         } else if frame.type == "ready" {
-                            retry = 1
+                            ready = true
                             failures = 0
                             self.status = session.isPaired ? "Phone disconnected" : "Scan to connect"
                             self.pairingURL = session.isPaired ? nil : pairingURL
                             self.error = unsaved
                         } else if frame.type == "peer", let id = frame.peer, id.count <= 64 {
+                            if retireRoom { break }
                             self.peer = id
                             session.resetConnection()
+                            // A new peer is not the phone until it authenticates.
+                            self.status = session.isPaired ? "Phone disconnected" : "Scan to connect"
                             try await self.send(Frame(peer: id, hello: session.challenge), socket: socket)
                         } else if frame.type == "left", frame.peer == self.peer {
                             self.peer = nil
                             self.status = session.isPaired ? "Phone disconnected" : "Scan to connect"
+                            if retireRoom { break }
                         } else if let id = frame.peer, id == self.peer, let ciphertext = frame.data {
                             do {
                                 let firstPair = !session.isPaired
@@ -175,6 +198,7 @@ final class RemoteControl {
                                 self.expiresAt = nil
                                 self.status = "Phone connected"
                                 if firstPair, let key = session.deviceKey {
+                                    retireRoom = true
                                     if self.store.save(
                                         RemotePairing(
                                             origin: origin.absoluteString, deviceKey: key, ticket: session.ticket))
@@ -206,23 +230,23 @@ final class RemoteControl {
                             }
                         }
                     }
+                    guard self.generation == current, !Task.isCancelled else { return }
+                    // Reached only to retire the room. The phone reconnects by ticket.
+                    socket.cancel(with: .goingAway, reason: nil)
+                    self.peer = nil
                 } catch {
                     self.socket?.cancel(with: .goingAway, reason: nil)
                     guard self.generation == current, !Task.isCancelled else { return }
                     failures += 1
-                    if RemoteReconnectPolicy.shouldGiveUp(failures: failures) {
-                        self.stop()
-                        self.error = "Remote session ended. Connect your phone again."
-                        return
-                    }
-                    if RemoteReconnectPolicy.shouldReallocate(failures: failures) { room = nil }
-                    retry = RemoteReconnectPolicy.retrySeconds(failures: failures)
+                    // A route refused before ready means the relay no longer has the room.
+                    let refused = !ready && self.socket?.closeCode == .policyViolation
+                    if refused || RemoteReconnectPolicy.shouldReallocate(failures: failures) { room = nil }
                     self.status = "Reconnecting…"
                     if !session.isPaired {
                         self.pairingURL = nil
                         self.error = "Could not reach the companion. Retrying."
                     }
-                    try? await Task.sleep(for: .seconds(retry))
+                    try? await Task.sleep(for: .seconds(RemoteReconnectPolicy.retrySeconds(failures: failures)))
                 }
             }
         }
@@ -255,6 +279,18 @@ final class RemoteControl {
         expiresAt = nil
         status = "Off"
         error = forgotten ? nil : "Could not forget this phone. Try Disconnect again."
+        guard revoke, forgotten else { return }
+        if let distributed = notifications as? DistributedNotificationCenter {
+            distributed.postNotificationName(Self.revokedNotification, object: nil, deliverImmediately: true)
+        } else {
+            notifications.post(name: Self.revokedNotification, object: nil)
+        }
+    }
+
+    private func revokedElsewhere() {
+        // Any local process can post the notice, so act only once the saved pairing is gone.
+        guard isEnabled, isPaired, case .success(nil) = Result(catching: { try store.load() }) else { return }
+        stop(revoke: true)
     }
 
     /// The relay drops a silent host while this Mac sleeps, and the FIN can be
