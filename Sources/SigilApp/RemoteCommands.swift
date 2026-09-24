@@ -70,7 +70,10 @@ struct RemoteReply: Codable, Sendable {
 enum RemoteCommands {
     static var uploads = RemoteUpload.Inbox()
 
-    static func execute(_ request: RemoteRequest, model: AppModel) -> RemoteReply {
+    /// Where phone sessions make worktrees. Tests point it at a scratch folder.
+    static var worktreeRoot = SigilWorktree.root
+
+    static func execute(_ request: RemoteRequest, model: AppModel) async -> RemoteReply {
         uploads.prune()
         var reply = RemoteReply(challenge: request.challenge, sequence: request.sequence)
         let tab = model.tabs.first { $0.id.uuidString == request.tabID }
@@ -97,35 +100,41 @@ enum RemoteCommands {
             let chosenEffort = takesModel ? request.effort : ""
             guard chosenModel.map(isModelName) ?? true, chosenEffort.map(AppSettings.effortOptions.contains) ?? true
             else { return failure(request, "Choose a model and effort from the list.") }
-            if let folder = request.text?.trimmingCharacters(in: .whitespacesAndNewlines), !folder.isEmpty {
+            let named = request.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let project: URL
+            if named.isEmpty {
+                project = model.newSessionDirectory
+            } else {
                 guard
-                    let project = projectRecords(model).first(where: {
-                        GrokPaths.canonicalPath($0.folder) == GrokPaths.canonicalPath(folder)
+                    let record = projectRecords(model).first(where: {
+                        GrokPaths.canonicalPath($0.folder) == GrokPaths.canonicalPath(named)
                     })
                 else { return failure(request, "Choose a project folder.") }
-                guard AppModel.isUsableDirectory(URL(fileURLWithPath: project.folder))
-                else { return failure(request, "Restore the folder on your Mac, then try again.") }
-                let remembered = model.settings.defaultDirectory
-                let focused = model.settings.focusedProjectPath
-                guard
-                    model.newTab(
-                        in: URL(fileURLWithPath: project.folder), model: chosenModel, effort: chosenEffort,
-                        provider: provider) != nil
-                else {
-                    return failure(request, "Could not start a session. Check Sigil on your Mac.")
+                project = URL(fileURLWithPath: record.folder)
+            }
+            guard AppModel.isUsableDirectory(project)
+            else { return failure(request, "Restore the folder on your Mac, then try again.") }
+            // As the Mac's New Session sheet does: a git repository gets a new worktree when Settings says so.
+            var start = project
+            if model.settings.startsInWorktree, SigilWorktree.isInRepository(project) {
+                do {
+                    start = try await SigilWorktree.create(for: project, root: worktreeRoot) ?? project
+                } catch {
+                    let detail = error.localizedDescription.split(whereSeparator: \.isNewline).first ?? ""
+                    return failure(request, bounded("Could not create a worktree. \(detail)", bytes: 240))
                 }
+            }
+            let remembered = model.settings.defaultDirectory
+            let focused = model.settings.focusedProjectPath
+            guard model.newTab(in: start, model: chosenModel, effort: chosenEffort, provider: provider) != nil
+            else { return failure(request, "Could not start a session. Check Sigil on your Mac.") }
+            if !named.isEmpty {
                 if model.settings.defaultDirectory != remembered {
                     model.settings.defaultDirectory = remembered
                 }
                 if model.settings.focusedProjectPath != focused {
                     model.settings.focusedProjectPath = focused
                 }
-            } else if !AppModel.isUsableDirectory(model.newSessionDirectory) {
-                return failure(request, "Restore the folder on your Mac, then try again.")
-            } else if model.newTab(
-                in: model.newSessionDirectory, model: chosenModel, effort: chosenEffort, provider: provider) == nil
-            {
-                return failure(request, "Could not start a session. Check Sigil on your Mac.")
             }
         case "options":
             reply.options = newSessionOptions(model)
@@ -154,9 +163,13 @@ enum RemoteCommands {
             model.addProject(folder)
             reply.project = RemoteProject(name: bounded(name, bytes: 96), folder: folder.path)
         case "chats":
-            reply.chats = page(savedChats(model, query: request.text ?? ""), offset: request.index ?? 0).compactMap {
-                chatRecord($0, model: model)
+            let query = request.text ?? ""
+            var chats = savedChats(model, query: query)
+            // Recent chats leave out open tabs: the phone lists those above them.
+            if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                chats.removeAll { model.isOpen($0) }
             }
+            reply.chats = page(chats, offset: request.index ?? 0).compactMap { chatRecord($0, model: model) }
         case "projects":
             reply.projects = page(projectRecords(model), offset: request.index ?? 0)
         case "open":

@@ -39,40 +39,40 @@ struct RemoteCommandsTests {
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(tab.controller.remoteSnapshot().contains("REMOTE_READY"))
-        func command(_ action: String, text: String? = nil, tabID: String? = nil) -> RemoteReply {
-            RemoteCommands.execute(
+        func command(_ action: String, text: String? = nil, tabID: String? = nil) async -> RemoteReply {
+            await RemoteCommands.execute(
                 RemoteRequest(
                     challenge: "test", sequence: 1, action: action, tabID: tabID ?? tab.id.uuidString, text: text),
                 model: model)
         }
-        #expect(!command("input", text: "\u{1b}[201~injected\r").ok)
-        #expect(!command("input", text: "hello", tabID: UUID().uuidString).ok)
-        #expect(!command("key", text: "shell").ok)
-        #expect(!command("delete").ok)
-        #expect(!command("restart").ok)
-        #expect(!command("restart", tabID: UUID().uuidString).ok)
-        #expect(!command("input", text: "first\nsecond").ok)
-        #expect(command("input", text: "phone-test").ok)
-        #expect(command("key", text: "enter").ok)
+        #expect(await !command("input", text: "\u{1b}[201~injected\r").ok)
+        #expect(await !command("input", text: "hello", tabID: UUID().uuidString).ok)
+        #expect(await !command("key", text: "shell").ok)
+        #expect(await !command("delete").ok)
+        #expect(await !command("restart").ok)
+        #expect(await !command("restart", tabID: UUID().uuidString).ok)
+        #expect(await !command("input", text: "first\nsecond").ok)
+        #expect(await command("input", text: "phone-test").ok)
+        #expect(await command("key", text: "enter").ok)
         for _ in 0..<100 {
             if tab.controller.remoteSnapshot().contains("phone-test") { break }
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(tab.controller.remoteSnapshot().contains("phone-test"))
         #expect(try String(contentsOf: received, encoding: .utf8) == "phone-test")
-        let reply = command("state")
+        let reply = await command("state")
         #expect(reply.state?.tabs.first?.id == tab.id.uuidString)
         #expect(reply.state?.terminal.contains("phone-test") == true)
-        #expect(command("key", text: "up").ok)
-        #expect(command("key", text: "enter").ok)
+        #expect(await command("key", text: "up").ok)
+        #expect(await command("key", text: "enter").ok)
         for _ in 0..<100 {
             if (try? String(contentsOf: received, encoding: .utf8)) == "\u{1b}OA" { break }
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(try String(contentsOf: received, encoding: .utf8) == "\u{1b}OA")
         tab.terminateAndWait()
-        #expect(!command("input", text: "after exit").ok)
-        let restart = command("restart")
+        #expect(await !command("input", text: "after exit").ok)
+        let restart = await command("restart")
         #expect(restart.ok)
         let replacement = try #require(model.selectedTab)
         #expect(replacement.id != tab.id)
@@ -80,10 +80,10 @@ struct RemoteCommandsTests {
         #expect(replacement.sessionID == tab.sessionID)
         #expect(replacement.workingDirectory == tab.workingDirectory)
         #expect(model.tabs.count == 1)
-        #expect(!command("restart").ok)
+        #expect(await !command("restart").ok)
         let other = try #require(model.newTab(in: root))
         replacement.terminateAndWait()
-        let backgroundRestart = command("restart", tabID: replacement.id.uuidString)
+        let backgroundRestart = await command("restart", tabID: replacement.id.uuidString)
         #expect(backgroundRestart.ok)
         #expect(backgroundRestart.restartedTabID == model.tabs[0].id.uuidString)
         #expect(backgroundRestart.restartedTabID != other.id.uuidString)
@@ -111,7 +111,7 @@ struct RemoteCommandsTests {
         defer { model.closeAllTabsAndWait() }
         let tab = try #require(model.newTab(in: link))
         tab.terminateAndWait()
-        let reply = RemoteCommands.execute(
+        let reply = await RemoteCommands.execute(
             RemoteRequest(challenge: "test", sequence: 1, action: "restart", tabID: tab.id.uuidString), model: model)
         #expect(reply.error == nil)
         #expect(reply.ok)
@@ -154,7 +154,7 @@ struct RemoteCommandsTests {
                 base64Encoded:
                     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
             ))
-        let reply = RemoteCommands.execute(
+        let reply = await RemoteCommands.execute(
             RemoteRequest(
                 challenge: "test", sequence: 1, action: "file", tabID: tab.id.uuidString,
                 text: png.base64EncodedString(), name: "shot.png", index: 0, count: 1,
@@ -162,7 +162,7 @@ struct RemoteCommandsTests {
             model: model)
         #expect(reply.ok)
         #expect(
-            RemoteCommands.execute(
+            await RemoteCommands.execute(
                 RemoteRequest(challenge: "test", sequence: 2, action: "key", tabID: tab.id.uuidString, text: "enter"),
                 model: model
             ).ok)
@@ -280,7 +280,7 @@ struct RemoteCommandsTests {
         await fixture.store.reload()
         #expect(fixture.model.store.sessions.count == 3)
 
-        let byTitle = fixture.command("chats", text: "widget")
+        let byTitle = await fixture.command("chats", text: "widget")
         #expect(byTitle.ok)
         let titleHits = try #require(byTitle.chats)
         #expect(titleHits.count == 1)
@@ -291,13 +291,13 @@ struct RemoteCommandsTests {
         #expect(!titleJSON.contains("SECRET_TRANSCRIPT"))
         #expect(!titleJSON.contains("transcript"))
 
-        let byFolder = fixture.command("chats", text: "other-folder")
+        let byFolder = await fixture.command("chats", text: "other-folder")
         #expect(byFolder.chats?.map(\.id) == [otherID])
 
-        let archived = fixture.command("chats", text: "router")
+        let archived = await fixture.command("chats", text: "router")
         #expect(archived.chats?.map(\.id) == [archivedID])
 
-        let projects = fixture.command("projects")
+        let projects = await fixture.command("projects")
         #expect(projects.ok)
         let folders = try #require(projects.projects)
         #expect(folders.contains { $0.name == "widget-folder" && $0.folder == widget.path })
@@ -314,33 +314,33 @@ struct RemoteCommandsTests {
             secret: "SECRET_TRANSCRIPT_SCRATCH")
         await fixture.store.reload()
         fixture.settings.showWorktreeSessions = false
-        #expect(fixture.command("chats", text: "Hidden scratch").chats?.isEmpty == true)
+        #expect(await fixture.command("chats", text: "Hidden scratch").chats?.isEmpty == true)
         fixture.settings.showWorktreeSessions = true
-        #expect(fixture.command("chats", text: "Hidden scratch").chats?.map(\.id) == ["scratch-session"])
+        #expect(await fixture.command("chats", text: "Hidden scratch").chats?.map(\.id) == ["scratch-session"])
         fixture.settings.showWorktreeSessions = false
 
         let beforeOpen = fixture.model.tabs.count
-        let opened = fixture.command("open", text: widget.path, name: widgetID)
+        let opened = await fixture.command("open", text: widget.path, name: widgetID)
         #expect(opened.ok)
         #expect(fixture.model.tabs.count == beforeOpen + 1)
         let tab = try #require(fixture.model.tabs.first { $0.sessionID == widgetID })
         #expect(GrokPaths.canonicalPath(tab.workingDirectory.path) == GrokPaths.canonicalPath(widget.path))
-        let again = fixture.command("open", text: widget.path, name: widgetID)
+        let again = await fixture.command("open", text: widget.path, name: widgetID)
         #expect(again.ok)
         #expect(fixture.model.tabs.count == beforeOpen + 1)
-        #expect(!fixture.command("open", text: widget.path, name: "missing-session").ok)
+        #expect(await !fixture.command("open", text: widget.path, name: "missing-session").ok)
         #expect(fixture.model.tabs.count == beforeOpen + 1)
 
         let remembered = fixture.settings.defaultDirectory
         let focused = fixture.settings.focusedProjectPath
-        let started = fixture.command("new", text: other.path)
+        let started = await fixture.command("new", text: other.path)
         #expect(started.ok)
         let created = try #require(fixture.model.selectedTab)
         #expect(GrokPaths.canonicalPath(created.workingDirectory.path) == GrokPaths.canonicalPath(other.path))
         #expect(fixture.settings.defaultDirectory == remembered)
         #expect(fixture.settings.focusedProjectPath == focused)
         let count = fixture.model.tabs.count
-        #expect(!fixture.command("new", text: "/no/such/sigil-project").ok)
+        #expect(await !fixture.command("new", text: "/no/such/sigil-project").ok)
         #expect(fixture.model.tabs.count == count)
         #expect(fixture.settings.defaultDirectory == remembered)
     }
@@ -360,18 +360,18 @@ struct RemoteCommandsTests {
         await fixture.store.reload()
         try FileManager.default.removeItem(at: gone)
 
-        let open = fixture.command("open", text: gone.path, name: "gone-session")
+        let open = await fixture.command("open", text: gone.path, name: "gone-session")
         #expect(!open.ok)
         #expect(open.error == "Restore the folder on your Mac, then try again.")
-        let new = fixture.command("new", text: gone.path)
+        let new = await fixture.command("new", text: gone.path)
         #expect(!new.ok)
         #expect(new.error == "Restore the folder on your Mac, then try again.")
         fixture.settings.focusedProjectPath = gone.path
-        #expect(!fixture.command("new").ok)
+        #expect(await !fixture.command("new").ok)
         fixture.settings.focusedProjectPath = ""
 
         fixture.settings.executablePath = fixture.root.appendingPathComponent("missing-grok").path
-        let noCLI = fixture.command("open", text: kept.path, name: "kept-session")
+        let noCLI = await fixture.command("open", text: kept.path, name: "kept-session")
         #expect(!noCLI.ok)
         #expect(noCLI.error == "Restore the Grok CLI on your Mac, then try again.")
 
@@ -388,14 +388,14 @@ struct RemoteCommandsTests {
             id: "chosen-session", cwd: folder.path, summary: "Chosen", updatedAt: "2026-09-01T00:00:00Z", secret: "x")
         await fixture.store.reload()
 
-        let options = try #require(fixture.command("options").options)
+        let options = try #require(await fixture.command("options").options)
         #expect(options.providers.map(\.id) == CLIProvider.allCases.map(\.rawValue))
         #expect(options.providers.filter(\.takesModel).map(\.id) == [CLIProvider.grokBuild.rawValue])
         #expect(options.providers.allSatisfy { $0.problem == nil })
         #expect(options.models.starts(with: GrokModelCatalog.fallback))
         #expect(options.locations.map(\.folder).contains(fixture.root.path))
 
-        let started = fixture.command(
+        let started = await fixture.command(
             "new", text: folder.path, provider: CLIProvider.grokBuild.rawValue, model: "grok-4.6", effort: "high")
         #expect(started.ok)
         let tab = try #require(fixture.model.selectedTab)
@@ -403,9 +403,9 @@ struct RemoteCommandsTests {
         #expect(tab.spec.model == "grok-4.6")
         #expect(tab.spec.reasoningEffort == "high")
         let count = fixture.model.tabs.count
-        #expect(!fixture.command("new", text: folder.path, provider: "grokBuild", model: "--yolo").ok)
-        #expect(!fixture.command("new", text: folder.path, provider: "grokBuild", effort: "max").ok)
-        #expect(!fixture.command("new", text: folder.path, provider: "someOtherCLI").ok)
+        #expect(await !fixture.command("new", text: folder.path, provider: "grokBuild", model: "--yolo").ok)
+        #expect(await !fixture.command("new", text: folder.path, provider: "grokBuild", effort: "max").ok)
+        #expect(await !fixture.command("new", text: folder.path, provider: "someOtherCLI").ok)
         #expect(fixture.model.tabs.count == count)
         #expect(fixture.alerts.count == 0)
     }
@@ -422,29 +422,29 @@ struct RemoteCommandsTests {
         // Added on the Mac, with no chat yet.
         let added = try fixture.directory("added")
         fixture.model.addProject(added)
-        #expect(fixture.command("projects").projects?.contains { $0.folder == added.path } == true)
-        #expect(fixture.command("new", text: added.path).ok)
+        #expect(await fixture.command("projects").projects?.contains { $0.folder == added.path } == true)
+        #expect(await fixture.command("new", text: added.path).ok)
 
-        let created = fixture.command("createProject", text: fixture.root.path, name: " fresh ")
+        let created = await fixture.command("createProject", text: fixture.root.path, name: " fresh ")
         #expect(created.ok)
         let project = try #require(created.project)
         let fresh = fixture.root.appendingPathComponent("fresh")
         #expect(project.name == "fresh")
         #expect(project.folder == fresh.path)
         #expect(AppModel.isUsableDirectory(fresh))
-        #expect(fixture.command("projects").projects?.first?.folder == fresh.path)
-        #expect(fixture.command("new", text: project.folder).ok)
+        #expect(await fixture.command("projects").projects?.first?.folder == fresh.path)
+        #expect(await fixture.command("new", text: project.folder).ok)
         #expect(
             GrokPaths.canonicalPath(try #require(fixture.model.selectedTab).workingDirectory.path)
                 == GrokPaths.canonicalPath(fresh.path))
-        #expect(fixture.command("createProject", text: fixture.root.path, name: "fresh").ok)
+        #expect(await fixture.command("createProject", text: fixture.root.path, name: "fresh").ok)
 
         try Data("file".utf8).write(to: fixture.root.appendingPathComponent("a-file"))
         for (parent, name) in [
             (fixture.root.path, "../escape"), (fixture.root.path, ".hidden"), (fixture.root.path, "a/b"),
             (fixture.root.path, ""), (fixture.root.path, "a-file"), ("/usr", "nope"),
         ] {
-            #expect(!fixture.command("createProject", text: parent, name: name).ok, "\(parent) \(name)")
+            #expect(await !fixture.command("createProject", text: parent, name: name).ok, "\(parent) \(name)")
         }
         let escaped = fixture.root.deletingLastPathComponent().appendingPathComponent("escape")
         #expect(!FileManager.default.fileExists(atPath: escaped.path))
@@ -465,8 +465,8 @@ struct RemoteCommandsTests {
                 secret: "SECRET_PAGE_\(index)")
         }
         await fixture.store.reload()
-        let first = fixture.command("chats", index: 0)
-        let second = fixture.command("chats", index: 40)
+        let first = await fixture.command("chats", index: 0)
+        let second = await fixture.command("chats", index: 40)
         let page = try #require(first.chats)
         let rest = try #require(second.chats)
         #expect(page.count == 40)
@@ -474,10 +474,59 @@ struct RemoteCommandsTests {
         #expect(rest[0].title == "Paged chat 00")
         #expect(!page.contains { $0.title == "Paged chat 00" })
         #expect(try encoded(first).contains("SECRET_PAGE") == false)
-        let projects = try #require(fixture.command("projects").projects)
+        let projects = try #require(await fixture.command("projects").projects)
         #expect(projects.count == 1)
         #expect(projects[0].name == "paged")
         #expect(projects[0].folder == folder.path)
+    }
+
+    @Test @MainActor func phoneRecentChatsLeaveOutOpenTabs() async throws {
+        let fixture = try PhoneCommandFixture()
+        defer { fixture.cleanup() }
+        let folder = try fixture.directory("recent")
+        for id in ["open-chat", "closed-chat"] {
+            try fixture.writeSession(
+                id: id, cwd: folder.path, summary: "Recent \(id)", updatedAt: "2026-09-01T00:00:00Z", secret: "x")
+        }
+        await fixture.store.reload()
+        #expect(await fixture.command("open", text: folder.path, name: "open-chat").ok)
+        #expect(await fixture.command("chats").chats?.map(\.id) == ["closed-chat"])
+        #expect(await fixture.command("chats", text: "open-chat").chats?.map(\.id) == ["open-chat"])
+    }
+
+    @Test @MainActor func phoneNewStartsInANewWorktreeWhenSettingsSaySo() async throws {
+        let fixture = try PhoneCommandFixture()
+        defer { fixture.cleanup() }
+        let saved = RemoteCommands.worktreeRoot
+        RemoteCommands.worktreeRoot = fixture.root.appendingPathComponent("worktrees")
+        defer { RemoteCommands.worktreeRoot = saved }
+        let repository = try fixture.directory("repository")
+        try git(["init", "-q"], in: repository)
+        try git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"], in: repository)
+        fixture.model.addProject(repository)
+
+        #expect(fixture.settings.startsInWorktree)
+        #expect(await fixture.command("new", text: repository.path).ok)
+        let folder = try #require(fixture.model.selectedTab).workingDirectory.path
+        #expect(SigilWorktree.projectPath(of: folder, root: RemoteCommands.worktreeRoot) == repository.path)
+        #expect(try git(["rev-parse", "--abbrev-ref", "HEAD"], in: URL(fileURLWithPath: folder)).hasPrefix("sigil/"))
+
+        fixture.settings.startsInWorktree = false
+        #expect(await fixture.command("new", text: repository.path).ok)
+        #expect(
+            GrokPaths.canonicalPath(try #require(fixture.model.selectedTab).workingDirectory.path) == repository.path)
+
+        // With no commit git cannot add a worktree: the phone hears why and nothing starts.
+        fixture.settings.startsInWorktree = true
+        let empty = try fixture.directory("empty-repository")
+        try git(["init", "-q"], in: empty)
+        fixture.model.addProject(empty)
+        let count = fixture.model.tabs.count
+        let failed = await fixture.command("new", text: empty.path)
+        #expect(!failed.ok)
+        #expect(failed.error?.hasPrefix("Could not create a worktree.") == true)
+        #expect(fixture.model.tabs.count == count)
+        #expect(fixture.alerts.count == 0)
     }
 
     @Test @MainActor func aLongChatPageIsTrimmedInsteadOfReportedEmpty() async throws {
@@ -501,7 +550,7 @@ struct RemoteCommandsTests {
             try data.write(to: dir.appendingPathComponent("summary.json"))
         }
         await fixture.store.reload()
-        let reply = fixture.command("chats", text: "Wide")
+        let reply = await fixture.command("chats", text: "Wide")
         let chats = try #require(reply.chats)
         #expect(reply.ok)
         #expect(!chats.isEmpty)
@@ -588,7 +637,7 @@ struct RemoteCommandsTests {
         }
         #expect(tail.contains(late))
         #expect(!tail.contains(early))
-        let reply = fixture.command(
+        let reply = await fixture.command(
             "earlier",
             text: String(tail.prefix(80)),
             tabID: tab.id.uuidString,
@@ -674,8 +723,8 @@ private final class PhoneCommandFixture {
     func command(
         _ action: String, text: String? = nil, tabID: String? = nil, name: String? = nil, index: Int? = nil,
         provider: String? = nil, model chosenModel: String? = nil, effort: String? = nil
-    ) -> RemoteReply {
-        RemoteCommands.execute(
+    ) async -> RemoteReply {
+        await RemoteCommands.execute(
             RemoteRequest(
                 challenge: "test", sequence: 1, action: action, tabID: tabID, text: text, name: name, index: index,
                 provider: provider, model: chosenModel, effort: effort),
@@ -693,4 +742,16 @@ private final class AlertLog {
 private func encoded(_ reply: RemoteReply) throws -> String {
     let data = try JSONEncoder().encode(reply)
     return String(decoding: data, as: UTF8.self)
+}
+
+private func git(_ arguments: [String], in directory: URL) throws -> String {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = ["-C", directory.path] + arguments
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    try process.run()
+    process.waitUntilExit()
+    return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
 }
