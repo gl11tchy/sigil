@@ -189,6 +189,22 @@ extension AppSettingsTests {
         #expect(reloaded.defaultProvider == .claudeCode)
         #expect(!reloaded.startsInWorktree)
     }
+
+    @Test @MainActor
+    func kimiSignInDefaultsToTheAccountAndPersists() {
+        let defaults = isolatedDefaults()
+        defer { defaults.reset() }
+
+        let fresh = AppSettings(defaults: defaults.value)
+        #expect(fresh.kimiSignIn == .kimiAccount)
+        #expect(fresh.kimiModel == KimiCode.defaultModel)
+
+        fresh.kimiSignIn = .apiKey
+        fresh.kimiModel = "kimi-k2.7-code"
+        let reloaded = AppSettings(defaults: defaults.value)
+        #expect(reloaded.kimiSignIn == .apiKey)
+        #expect(reloaded.kimiModel == "kimi-k2.7-code")
+    }
 }
 
 private func temporaryDirectory() throws -> URL {

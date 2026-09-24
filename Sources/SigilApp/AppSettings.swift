@@ -29,6 +29,8 @@ final class AppSettings {
         static let optionAsMeta = "terminal.optionAsMetaKey"
         static let defaultProvider = "session.defaultProvider"
         static let startsInWorktree = "session.startsInWorktree"
+        static let kimiSignIn = "kimi.signIn"
+        static let kimiModel = "kimi.apiKeyModel"
     }
 
     private let defaults: UserDefaults
@@ -157,6 +159,14 @@ final class AppSettings {
     var startsInWorktree: Bool {
         didSet { defaults.set(startsInWorktree, forKey: Key.startsInWorktree) }
     }
+    /// The Kimi account by default; the API key itself lives in the Keychain.
+    var kimiSignIn: KimiSignIn {
+        didSet { defaults.set(kimiSignIn.rawValue, forKey: Key.kimiSignIn) }
+    }
+    /// The model an API-key sign-in runs, since Kimi Code needs one named.
+    var kimiModel: String {
+        didSet { defaults.set(kimiModel, forKey: Key.kimiModel) }
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -230,6 +240,9 @@ final class AppSettings {
             defaults.string(forKey: Key.defaultProvider).flatMap(CLIProvider.init(rawValue:))
             ?? .grokBuild
         startsInWorktree = defaults.object(forKey: Key.startsInWorktree) as? Bool ?? true
+        kimiSignIn =
+            defaults.string(forKey: Key.kimiSignIn).flatMap(KimiSignIn.init(rawValue:)) ?? .kimiAccount
+        kimiModel = defaults.string(forKey: Key.kimiModel) ?? KimiCode.defaultModel
     }
 
     /// Re-reads the pin, archive and name lists, which another running copy

@@ -188,7 +188,7 @@ struct NewSessionSheet: View {
             .padding(.top, 20)
         }
         .padding(20)
-        .frame(width: 560)
+        .frame(width: 600)
         .fixedSize(horizontal: false, vertical: true)
         .background(palette.surface)
         .environment(\.palette, Palette(theme: model.settings.theme))
@@ -281,7 +281,7 @@ struct NewSessionSheet: View {
     }
 
     private func start(_ provider: CLIProvider) {
-        guard canStart else { return }
+        guard canStart, model.canSignIn(provider) else { return }
         let fields = NewSessionLaunch.fields(
             provider: provider, model: modelName, effort: effort)
         let project = directory

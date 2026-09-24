@@ -71,7 +71,7 @@ struct NewSessionSheetTests {
 
     @Test func arrowKeysMoveAlongTheProviderRowAndStopAtItsEnds() {
         #expect(NewSessionLaunch.provider(after: .claudeCode, movingBy: 1) == .codex)
-        #expect(NewSessionLaunch.provider(after: .grokBuild, movingBy: -1) == .cursor)
+        #expect(NewSessionLaunch.provider(after: .grokBuild, movingBy: -1) == .kimi)
         #expect(NewSessionLaunch.provider(after: .grokBuild, movingBy: 1) == .grokBuild)
         #expect(NewSessionLaunch.provider(after: .claudeCode, movingBy: -1) == .claudeCode)
     }
@@ -127,7 +127,7 @@ struct NewSessionSheetTests {
         #expect(!process.isRunning)
     }
 
-    @Test(arguments: [CLIProvider.claudeCode, .codex, .devin, .cursor])
+    @Test(arguments: [CLIProvider.claudeCode, .codex, .devin, .cursor, .kimi])
     func otherProvidersNeverAskGrokForModels(provider: CLIProvider) {
         #expect(NewSessionLaunch.modelListPath(provider: provider, executablePath: "/opt/grok") == nil)
         #expect(NewSessionLaunch.modelListPath(provider: .grokBuild, executablePath: "/opt/grok") == "/opt/grok")
@@ -236,6 +236,7 @@ struct NewSessionSheetTests {
         #expect(CLIProvider.codex.applicationBundleID == "com.openai.codex")
         #expect(CLIProvider.devin.applicationBundleID == "com.exafunction.windsurf")
         #expect(CLIProvider.cursor.applicationBundleID == "com.todesktop.230313mzl4w4u92")
+        #expect(CLIProvider.kimi.applicationBundleID == "com.kimi.code.desktop")
         #expect(CLIProvider.grokBuild.applicationBundleID == nil)
     }
 }

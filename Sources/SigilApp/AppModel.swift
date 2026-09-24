@@ -20,6 +20,9 @@ final class AppModel {
     /// The right-hand utility column: scratch shell and per-conversation notes.
     let panel: RightPanel
     let remoteControl: RemoteControl
+    @ObservationIgnored private let kimiKeyStore: any KimiKeyStore
+    /// True while the Keychain holds a Kimi API key.
+    private(set) var hasKimiAPIKey = false
 
     private(set) var tabs: [TerminalTab] = []
     var selectedTabID: TerminalTab.ID? {
@@ -120,7 +123,8 @@ final class AppModel {
         tabMessagingSocketURL: URL? = nil,
         canonicalPath: (@Sendable (String) -> String)? = nil,
         panel: RightPanel? = nil,
-        pairingStore: (any RemotePairingStore)? = nil
+        pairingStore: (any RemotePairingStore)? = nil,
+        kimiKeyStore: (any KimiKeyStore)? = nil
     ) {
         self.settings = settings
         self.store = store
@@ -139,6 +143,41 @@ final class AppModel {
         self.mcpBinaryOverride = mcpBinary
         self.tabMessagingSocketURL = tabMessagingSocketURL ?? BridgePaths.configuredSocket
         self.resolveCanonicalPath = canonicalPath ?? { GrokPaths.canonicalPath($0) }
+        self.kimiKeyStore =
+            kimiKeyStore ?? (Self.isRunningAutomatedTests ? InMemoryKimiKeyStore() : KeychainKimiKeyStore())
+        hasKimiAPIKey = self.kimiKeyStore.load() != nil
+    }
+
+    /// Stores a Kimi Platform API key in the Keychain. Returns false when it was not stored.
+    @discardableResult
+    func saveKimiAPIKey(_ key: String) -> Bool {
+        guard let key = key.nilIfEmpty else { return false }
+        let saved = kimiKeyStore.save(key)
+        hasKimiAPIKey = kimiKeyStore.load() != nil
+        return saved
+    }
+
+    func removeKimiAPIKey() {
+        kimiKeyStore.clear()
+        hasKimiAPIKey = kimiKeyStore.load() != nil
+    }
+
+    /// Variables a Kimi Code tab needs for the chosen sign-in. Nil when an
+    /// API-key sign-in has no key to pass.
+    private func providerEnvironment(for provider: CLIProvider) -> [String: String]? {
+        guard provider == .kimi, settings.kimiSignIn == .apiKey else { return [:] }
+        guard let key = kimiKeyStore.load() else { return nil }
+        return KimiCode.apiKeyEnvironment(key: key, model: settings.kimiModel)
+    }
+
+    /// False, after saying why, when `provider` has no sign-in to start with.
+    /// New Session asks before it makes a worktree.
+    func canSignIn(_ provider: CLIProvider) -> Bool {
+        guard providerEnvironment(for: provider) == nil else { return true }
+        showError(
+            title: "Kimi API key is missing",
+            message: "Add it in Settings, or sign in with a Kimi account.")
+        return false
     }
 
     func onAppear() async {
@@ -532,12 +571,13 @@ final class AppModel {
             added: settings.addedProjects, into: projects, canonicalPath: canonicalPath)
     }
 
-    /// Adds a folder to Projects before it has a chat.
+    /// Adds a folder to Projects before it has a chat. A Sigil worktree adds its project.
     func addProject(_ directory: URL) {
+        let path = SigilWorktree.projectPath(of: directory.path) ?? directory.path
         settings.reloadSharedLists()
         var added = settings.addedProjects
-        added.removeAll { samePath($0.path, directory.path) }
-        added.insert(AddedProject(path: directory.path, addedAt: Date()), at: 0)
+        added.removeAll { samePath($0.path, path) }
+        added.insert(AddedProject(path: path, addedAt: Date()), at: 0)
         settings.addedProjects = added
     }
 
@@ -712,15 +752,23 @@ final class AppModel {
         if remainingPins != settings.pinnedConversations {
             settings.pinnedConversations = remainingPins
         }
-        let remainingProjectPins = pruningMissingProjects(settings.pinnedProjects)
+        // Earlier builds added a Sigil worktree as its own project, which
+        // could then be pinned or left open. Each becomes its project.
+        let remainingAdded = SidebarOrganization.foldingWorktrees(
+            settings.addedProjects, path: \.path,
+            moving: { AddedProject(path: $1, addedAt: $0.addedAt) }, samePath: samePath
+        ).filter { Self.isUsableDirectory(URL(fileURLWithPath: $0.path)) }
+        if remainingAdded != settings.addedProjects {
+            settings.addedProjects = remainingAdded
+        }
+        let remainingProjectPins = pruningMissingProjects(
+            SidebarOrganization.foldingWorktrees(
+                settings.pinnedProjects, path: { $0 }, moving: { $1 }, samePath: samePath))
         if remainingProjectPins != settings.pinnedProjects {
             settings.pinnedProjects = remainingProjectPins
         }
-        let remainingAdded = settings.addedProjects.filter {
-            Self.isUsableDirectory(URL(fileURLWithPath: $0.path))
-        }
-        if remainingAdded != settings.addedProjects {
-            settings.addedProjects = remainingAdded
+        if let project = SigilWorktree.projectPath(of: settings.focusedProjectPath) {
+            settings.focusedProjectPath = project
         }
         let remainingArchives = pruningMissing(settings.archivedConversations, list: "archive")
         if remainingArchives != settings.archivedConversations {
@@ -1506,6 +1554,9 @@ final class AppModel {
             showError(title: "Folder is unavailable", message: "Choose another folder.")
             return nil
         }
+        guard canSignIn(provider), let providerEnvironment = providerEnvironment(for: provider) else {
+            return nil
+        }
         let spec = GrokLaunchSpec(
             executable: provider == .grokBuild ? settings.executableURL : nil,
             workingDirectory: directory,
@@ -1514,6 +1565,7 @@ final class AppModel {
             reasoningEffort: (effort ?? settings.effort).nilIfEmpty,
             themeName: settings.theme.grokThemeName,
             themeVariables: settings.theme.grokThemeEnvironment,
+            providerEnvironment: providerEnvironment,
             provider: provider
         )
         return add(spec)
@@ -1601,6 +1653,7 @@ final class AppModel {
             )
             return
         }
+        guard canSignIn(old.spec.provider) else { return }
         let wasSelected = selectedTabID == old.id
         tabBridge?.noteTabClosed(id: old.id)
         old.terminateAndWait()
@@ -1627,6 +1680,8 @@ final class AppModel {
             spec.themeName = settings.theme.grokThemeName
             spec.themeVariables = settings.theme.grokThemeEnvironment
         }
+        // A restart follows the current Kimi sign-in, not the one it started with.
+        spec.providerEnvironment = providerEnvironment(for: spec.provider) ?? [:]
         spec.bridgeTabID = nil
         spec.bridgeSocketPath = nil
         let tabID = UUID()

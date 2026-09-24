@@ -11,6 +11,7 @@ extension CLIProvider {
         case .codex: "com.openai.codex"
         case .devin: "com.exafunction.windsurf"
         case .cursor: "com.todesktop.230313mzl4w4u92"
+        case .kimi: "com.kimi.code.desktop"
         case .grokBuild: nil
         }
     }
