@@ -139,7 +139,7 @@ struct SidebarView: View {
     private var header: some View {
         HStack {
             Spacer()
-            IconButton(systemImage: "sidebar.leading", help: "Hide Sidebar (⌘B)") {
+            IconButton(systemImage: "sidebar.leading", help: "Hide Sidebar (⌘B)", label: "Hide Sidebar") {
                 withAnimation(reduceMotion ? nil : Motion.slide) {
                     model.isSidebarVisible.toggle()
                 }
@@ -1440,7 +1440,8 @@ private struct DrillBar: View {
             if let newChat {
                 IconButton(
                     systemImage: "plus",
-                    help: "New Session in \(title) (⌘T)"
+                    help: "New Session in \(title) (⌘T)",
+                    label: "New Session"
                 ) {
                     newChat()
                 }

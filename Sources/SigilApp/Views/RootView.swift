@@ -252,7 +252,7 @@ private struct TopBar: View {
             if !model.isSidebarVisible {
                 // Room for the traffic lights, which now sit over the screen.
                 Color.clear.frame(width: 66)
-                IconButton(systemImage: "sidebar.leading", help: "Show Sidebar (⌘B)") {
+                IconButton(systemImage: "sidebar.leading", help: "Show Sidebar (⌘B)", label: "Show Sidebar") {
                     withAnimation(reduceMotion ? nil : Motion.slide) {
                         model.isSidebarVisible.toggle()
                     }
@@ -281,6 +281,7 @@ private struct TopBar: View {
             IconButton(
                 systemImage: "sidebar.trailing",
                 help: model.panel.isVisible ? "Hide Panel (⌥⌘B)" : "Show Panel (⌥⌘B)",
+                label: model.panel.isVisible ? "Hide Panel" : "Show Panel",
                 isOn: model.panel.isVisible
             ) {
                 withAnimation(reduceMotion ? nil : Motion.slide) { model.togglePanel() }
