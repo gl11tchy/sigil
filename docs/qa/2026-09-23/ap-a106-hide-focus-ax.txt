@@ -1,7 +1,7 @@
 # a106 — branch audit/app-panel @ 7d58b29, 2026-09-23 18:30:49
 
 ## 1. Focus before (panel shell, after Restart Shell)
-focused: AXTextArea | Description=Grok terminal | Value=exec@Reasonables-MBP acme-api % | Focused=1 | Position=934,307 | Size=264x439
+focused: AXTextArea | Description=Grok terminal | Value=exec@host acme-api % | Focused=1 | Position=934,307 | Size=264x439
  ↑ AXGroup | Description=Utility panel | Focused=0 | Enabled=1 | Position=926,262 | Size=280x492
 
 ## 2. AXPress on the top-bar panel toggle (Hide Panel)
@@ -22,7 +22,7 @@ focused: AXTextArea | Description=Grok Build terminal | Value=sandbox:workspace 
 SigilUX frontmost: true
 AXPress the top-bar toggle to reopen the panel:
 pressed [0] AXButton | Description=Hide Panel (⌥⌘B) | Help=Hide Panel (⌥⌘B) | Focused=0 | Enabled=1 | Identifier=sidebar.trailing | Position=851,269 | Size=22x22
-focused: AXTextArea | Description=Grok terminal | Value=exec@Reasonables-MBP acme-api % | Focused=1 | Position=934,307 | Size=264x439
+focused: AXTextArea | Description=Grok terminal | Value=exec@host acme-api % | Focused=1 | Position=934,307 | Size=264x439
  ↑ AXGroup | Description=Utility panel | Focused=0 | Enabled=1 | Position=926,262 | Size=280x492
 
 ## 6. AXPress on the panel's own Close Panel button

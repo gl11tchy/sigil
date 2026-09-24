@@ -9,14 +9,14 @@ focused: AXTextArea | Description=Grok Build terminal | Value=sandbox:workspace 
 pressed [0] AXButton | Description=Hide Panel (⌥⌘B) | Help=Hide Panel (⌥⌘B) | Focused=0 | Enabled=1 | Identifier=sidebar.trailing | Position=851,269 | Size=22x22
 
 ## 3. Focus 1.5 s after the panel opened
-focused: AXTextArea | Description=Grok terminal | Value=exec@Reasonables-MBP acme-api % | Focused=1 | Position=934,307 | Size=264x439
+focused: AXTextArea | Description=Grok terminal | Value=exec@host acme-api % | Focused=1 | Position=934,307 | Size=264x439
  ↑ AXGroup | Description=Utility panel | Focused=0 | Enabled=1 | Position=926,262 | Size=280x492
   ↑ AXGroup | Subrole=AXHostingView | Focused=0 | Position=306,262 | Size=900x492
    ↑ AXWindow | Subrole=AXStandardWindow | Title=SigilUX | Focused=0 | Identifier=SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._BackgroundModifier<SigilApp.Windo… | Position=306,262 | Size=900x492
     ↑ AXApplication | Title=SigilUX
 
 ## 4. Restart Shell by AXPress (details in ap-a120-restart-ax.txt), then focus
-focused: AXTextArea | Description=Grok terminal | Value=exec@Reasonables-MBP acme-api % | Focused=1 | Position=934,307 | Size=264x439
+focused: AXTextArea | Description=Grok terminal | Value=exec@host acme-api % | Focused=1 | Position=934,307 | Size=264x439
  ↑ AXGroup | Description=Utility panel | Focused=0 | Enabled=1 | Position=926,262 | Size=280x492
   ↑ AXGroup | Subrole=AXHostingView | Focused=0 | Position=306,262 | Size=900x492
    ↑ AXWindow | Subrole=AXStandardWindow | Title=SigilUX | Focused=0 | Identifier=SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._BackgroundModifier<SigilApp.Windo… | Position=306,262 | Size=900x492

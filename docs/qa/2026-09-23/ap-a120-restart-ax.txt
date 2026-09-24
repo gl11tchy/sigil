@@ -4,10 +4,10 @@
 92008 91221       01:02 /bin/zsh -il
 
 ## Restart Shell pressed by AXPress; timings
-old panel text area value: exec@Reasonables-MBP acme-api %
+old panel text area value: exec@host acme-api %
 AXPress Restart Shell result=0; AXPress call returned after 0.049156083 seconds
 first AX round trip after the press (app main thread free): 0.040442167 seconds
-new shell prompt in the focused panel text area after 0.631195625 seconds: exec@Reasonables-MBP acme-api %
+new shell prompt in the focused panel text area after 0.631195625 seconds: exec@host acme-api %
 old text area element still in tree: false
 
 ## Panel shell processes right after
@@ -17,7 +17,7 @@ old text area element still in tree: false
 92727 91221       00:05 Ss+  /bin/zsh -il
 
 ## Focus after restart
-focused: AXTextArea | Description=Grok terminal | Value=exec@Reasonables-MBP acme-api % | Focused=1 | Position=934,307 | Size=264x439
+focused: AXTextArea | Description=Grok terminal | Value=exec@host acme-api % | Focused=1 | Position=934,307 | Size=264x439
  ↑ AXGroup | Description=Utility panel | Focused=0 | Enabled=1 | Position=926,262 | Size=280x492
   ↑ AXGroup | Subrole=AXHostingView | Focused=0 | Position=306,262 | Size=900x492
    ↑ AXWindow | Subrole=AXStandardWindow | Title=SigilUX | Focused=0 | Identifier=SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._BackgroundModifier<SigilApp.Windo… | Position=306,262 | Size=900x492
