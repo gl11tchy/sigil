@@ -60,6 +60,9 @@ jobs:
       - name: Verify
         run: Scripts/verify.sh
 
+      - name: iPhone app logic and relay tests
+        run: iOS/scripts/relay-e2e.sh
+
       - name: Build release bundle
         if: github.event_name != 'pull_request'
         env:
