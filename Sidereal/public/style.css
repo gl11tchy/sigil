@@ -391,6 +391,17 @@ dialog::backdrop { background: var(--scrim); }
 #project-list button[data-more="true"] small { font-family: var(--sans); }
 #session-no-results, #saved-empty, #project-empty { padding: 10px; color: var(--ink2); font-size: 13px; line-height: 18px; }
 #project-list + #project-empty, #project-list { margin-top: 2px; }
+/* The CLI for a new session: label on the leading side, the choice on the trailing side. */
+#provider-field { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 2px 0 4px; padding-left: 10px; }
+#provider-field label { color: var(--ink2); font-size: 13px; }
+.provider-picker { position: relative; display: flex; min-width: 0; }
+.provider-picker select {
+  appearance: none; min-width: 0; max-width: 100%; min-height: 44px; padding: 0 30px 0 12px; border: 0;
+  border-radius: var(--radius-control); background: var(--field); color: var(--ink); font-size: 16px;
+  text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
+}
+.provider-picker .chevron { position: absolute; right: 13px; top: 50%; margin: -5px 0 0; pointer-events: none; }
+#provider-problem { margin: 0 4px 6px; padding: 8px 10px; border-radius: var(--radius-control); background: var(--orange-tint); color: var(--orange-ink); font-size: 13px; line-height: 18px; }
 dialog.confirm { width: min(360px, calc(100vw - 32px)); padding: 16px; }
 dialog.confirm .sheet-heading { min-height: 0; padding: 0; margin-bottom: 6px; }
 #forget-detail, #replace-detail { margin: 0 0 16px; font-size: 13px; line-height: 18px; }
