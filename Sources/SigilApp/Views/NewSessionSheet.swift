@@ -44,18 +44,21 @@ struct NewSessionSheet: View {
     @State private var modelName = ""
     @State private var effort = ""
     @State private var models = GrokModelCatalog.fallback
+    @State private var startsInWorktree: Bool
+    @State private var isCreatingWorktree = false
     @FocusState private var focusedProvider: CLIProvider?
     @FocusState private var isProviderRowFocused: Bool
 
-    init(model: AppModel, provider: CLIProvider = .grokBuild) {
+    init(model: AppModel, provider: CLIProvider? = nil) {
         self.model = model
-        _provider = State(initialValue: provider)
+        _provider = State(initialValue: provider ?? model.settings.defaultProvider)
+        _startsInWorktree = State(initialValue: model.settings.startsInWorktree)
     }
 
     private var recents: [URL] {
         var seen = Set<String>()
         return model.store.sessions.compactMap { session in
-            let url = URL(fileURLWithPath: GrokPaths.canonicalPath(session.cwd))
+            let url = URL(fileURLWithPath: GrokPaths.canonicalPath(session.projectPath))
             guard seen.insert(url.path).inserted else { return nil }
             return isDirectory(url) ? url : nil
         }
@@ -68,6 +71,10 @@ struct NewSessionSheet: View {
     }
 
     private var directoryIsAvailable: Bool { isDirectory(directory) }
+
+    private var isRepository: Bool { SigilWorktree.isInRepository(directory) }
+
+    private var canStart: Bool { directoryIsAvailable && !isCreatingWorktree }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -86,6 +93,18 @@ struct NewSessionSheet: View {
 
             VStack(spacing: 0) {
                 folderRow
+                if isRepository {
+                    divider
+                    SheetRow(label: "Work in") {
+                        Picker("Work in", selection: $startsInWorktree) {
+                            Text("New worktree").tag(true)
+                            Text("Project folder").tag(false)
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .fixedSize()
+                    }
+                }
                 if !recents.isEmpty {
                     divider
                     SheetRow(label: "Recent") {
@@ -129,6 +148,12 @@ struct NewSessionSheet: View {
             .surface(palette.isDark ? palette.inset : palette.surface, radius: Radius.card, elevation: .flat)
 
             HStack(spacing: 8) {
+                if isCreatingWorktree {
+                    ProgressView().controlSize(.small)
+                    Text("Creating worktree…")
+                        .ui(12)
+                        .foregroundStyle(palette.ink2)
+                }
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
                     .buttonStyle(.secondary)
@@ -136,7 +161,7 @@ struct NewSessionSheet: View {
                 Button("Start") { start(provider) }
                     .buttonStyle(.primary)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(!directoryIsAvailable)
+                    .disabled(!canStart)
             }
             .padding(.top, 20)
         }
@@ -149,7 +174,10 @@ struct NewSessionSheet: View {
         .animation(reduceMotion ? nil : Motion.slide, value: provider)
         .defaultFocus($isProviderRowFocused, true)
         .onAppear {
-            directory = model.pendingSessionDirectory ?? model.newSessionDirectory
+            let initial = model.pendingSessionDirectory ?? model.newSessionDirectory
+            directory = SigilWorktree.projectPath(of: initial.path)
+                .map { URL(fileURLWithPath: $0) }
+                .flatMap { isDirectory($0) ? $0 : nil } ?? initial
             modelName = model.settings.model.trimmingCharacters(in: .whitespacesAndNewlines)
             effort = model.settings.effort
         }
@@ -179,7 +207,7 @@ struct NewSessionSheet: View {
                         start(next)
                     }
                 }
-                .disabled(!directoryIsAvailable)
+                .disabled(!canStart)
             }
         }
         .accessibilityElement(children: .contain)
@@ -223,12 +251,29 @@ struct NewSessionSheet: View {
     }
 
     private func start(_ provider: CLIProvider) {
+        guard canStart else { return }
         let fields = NewSessionLaunch.fields(
             provider: provider, model: modelName, effort: effort)
-        if model.newTab(
-            in: directory, model: fields.model, effort: fields.effort, provider: provider
-        ) != nil {
-            dismiss()
+        let project = directory
+        let useWorktree = startsInWorktree && isRepository
+        isCreatingWorktree = useWorktree
+        Task {
+            defer { isCreatingWorktree = false }
+            var folder = project
+            if useWorktree {
+                do {
+                    folder = try await SigilWorktree.create(for: project) ?? project
+                } catch {
+                    model.showError(
+                        title: "Could not create a worktree", message: error.localizedDescription)
+                    return
+                }
+            }
+            if model.newTab(
+                in: folder, model: fields.model, effort: fields.effort, provider: provider
+            ) != nil {
+                dismiss()
+            }
         }
     }
 

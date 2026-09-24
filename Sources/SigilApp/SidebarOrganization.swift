@@ -270,7 +270,7 @@ enum SidebarOrganization {
         var grouped: [String: [GrokSession]] = [:]
         var representative: [String: GrokSession] = [:]
         for session in sessions {
-            let key = canonicalPath(session.cwd)
+            let key = canonicalPath(session.projectPath)
             if grouped[key] == nil {
                 order.append(key)
                 grouped[key] = [session]
@@ -290,9 +290,9 @@ enum SidebarOrganization {
             return SidebarProject(
                 id: key,
                 name: duplicated.contains(sample.projectName)
-                    ? sample.displayPath : sample.projectName,
-                displayPath: sample.displayPath,
-                cwd: sample.cwd,
+                    ? sample.projectDisplayPath : sample.projectName,
+                displayPath: sample.projectDisplayPath,
+                cwd: sample.projectPath,
                 sessions: list,
                 updatedAt: list.first?.updatedAt ?? sample.updatedAt
             )
@@ -336,7 +336,7 @@ enum SidebarOrganization {
         add(cwd)
         for session in sessions {
             add(session.projectName)
-            add(session.displayPath)
+            add(session.projectDisplayPath)
             add(session.cwd)
         }
         return ordered

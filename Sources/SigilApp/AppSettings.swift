@@ -27,6 +27,8 @@ final class AppSettings {
         static let model = "session.model"
         static let effort = "session.effort"
         static let optionAsMeta = "terminal.optionAsMetaKey"
+        static let defaultProvider = "session.defaultProvider"
+        static let startsInWorktree = "session.startsInWorktree"
     }
 
     private let defaults: UserDefaults
@@ -142,6 +144,15 @@ final class AppSettings {
         didSet { defaults.set(optionAsMetaKey, forKey: Key.optionAsMeta) }
     }
 
+    /// The CLI the New Session sheet selects first.
+    var defaultProvider: CLIProvider {
+        didSet { defaults.set(defaultProvider.rawValue, forKey: Key.defaultProvider) }
+    }
+    /// On by default: a new chat in a git repository gets its own worktree.
+    var startsInWorktree: Bool {
+        didSet { defaults.set(startsInWorktree, forKey: Key.startsInWorktree) }
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         fontSize =
@@ -210,6 +221,10 @@ final class AppSettings {
         model = defaults.string(forKey: Key.model) ?? ""
         let storedEffort = defaults.string(forKey: Key.effort) ?? ""
         effort = Self.effortOptions.contains(storedEffort) ? storedEffort : ""
+        defaultProvider =
+            defaults.string(forKey: Key.defaultProvider).flatMap(CLIProvider.init(rawValue:))
+            ?? .grokBuild
+        startsInWorktree = defaults.object(forKey: Key.startsInWorktree) as? Bool ?? true
     }
 
     /// Re-reads the pin, archive and name lists, which another running copy

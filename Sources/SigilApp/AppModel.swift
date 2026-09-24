@@ -421,13 +421,13 @@ final class AppModel {
 
     func archive(_ project: SidebarProject) {
         let projectTabs = tabs.filter {
-            $0.spec.provider == .grokBuild && samePath($0.workingDirectory.path, project.cwd)
+            $0.spec.provider == .grokBuild && inProject($0.workingDirectory.path, project.cwd)
         }
         if projectTabs.contains(where: \.shouldWarnBeforeStopping), !confirmStopWorking() {
             return
         }
         unpin(project)
-        for session in store.sessions where samePath(session.cwd, project.cwd) {
+        for session in store.sessions where inProject(session.cwd, project.cwd) {
             archive(session, confirmIfWorking: false)
         }
         for tab in projectTabs { closeTab(tab.id) }
@@ -439,7 +439,7 @@ final class AppModel {
     }
 
     func unarchive(_ project: SidebarProject) {
-        for session in store.sessions where samePath(session.cwd, project.cwd) {
+        for session in store.sessions where inProject(session.cwd, project.cwd) {
             unarchive(session)
         }
     }
@@ -512,13 +512,18 @@ final class AppModel {
     /// Chats in the open project, or the full sidebar list.
     var focusedSidebarSessions: [GrokSession] {
         guard let project = focusedProject else { return sidebarSessions }
-        return sidebarSessions.filter { samePath($0.cwd, project.cwd) }
+        return sidebarSessions.filter { inProject($0.cwd, project.cwd) }
     }
 
     /// Folder a new chat should start in: the open project, else the current tab.
     var newSessionDirectory: URL {
         if let project = focusedProject {
             return URL(fileURLWithPath: project.cwd)
+        }
+        if let project = SigilWorktree.projectPath(of: currentDirectory.path),
+            Self.isUsableDirectory(URL(fileURLWithPath: project))
+        {
+            return URL(fileURLWithPath: project)
         }
         return currentDirectory
     }
@@ -709,12 +714,12 @@ final class AppModel {
     /// The deleted conversation still sits in `store` until the next scan.
     private func dropOrphanedProjectPin(for session: GrokSession) {
         let othersRemain =
-            store.sessions.contains { $0.id != session.id && samePath($0.cwd, session.cwd) }
-            || tabs.contains { samePath($0.workingDirectory.path, session.cwd) }
+            store.sessions.contains { $0.id != session.id && inProject($0.cwd, session.projectPath) }
+            || tabs.contains { inProject($0.workingDirectory.path, session.projectPath) }
         if !othersRemain {
             settings.reloadSharedLists()
             settings.pinnedProjects = SidebarOrganization.removing(
-                session.cwd, from: settings.pinnedProjects, samePath: samePath)
+                session.projectPath, from: settings.pinnedProjects, samePath: samePath)
         }
     }
 
@@ -2388,7 +2393,7 @@ final class AppModel {
 
     private func rememberDefaultDirectory(_ directory: URL) {
         if isEphemeral(path: directory.path) { return }
-        settings.defaultDirectory = directory.path
+        settings.defaultDirectory = SigilWorktree.projectPath(of: directory.path) ?? directory.path
     }
 
     private func tabMatches(_ tab: TerminalTab, sessionID: String, cwd: String) -> Bool {
@@ -2409,6 +2414,11 @@ final class AppModel {
 
     private func entryKey(_ entry: OpenTabsSnapshot.Entry) -> String {
         entry.sessionID + "\u{0}" + canonicalPath(entry.cwd)
+    }
+
+    /// True when `path` is `project` or a Sigil worktree made from it.
+    private func inProject(_ path: String, _ project: String) -> Bool {
+        samePath(SigilWorktree.projectPath(of: path) ?? path, project)
     }
 
     private func samePath(_ lhs: String, _ rhs: String) -> Bool {
@@ -2448,8 +2458,8 @@ final class AppModel {
     }
 
     private func dropDeferred(inProjectPath path: String) {
-        deferredOpenTabs.removeAll { samePath($0.cwd, path) }
-        if let deferredSelectedEntry, samePath(deferredSelectedEntry.cwd, path) {
+        deferredOpenTabs.removeAll { inProject($0.cwd, path) }
+        if let deferredSelectedEntry, inProject(deferredSelectedEntry.cwd, path) {
             clearDeferredSelection()
         }
     }
@@ -2482,7 +2492,7 @@ final class AppModel {
             && isDirectory.boolValue
     }
 
-    private func showError(title: String, message: String) {
+    func showError(title: String, message: String) {
         presentError(AppActionError(title: title, message: message))
     }
 }

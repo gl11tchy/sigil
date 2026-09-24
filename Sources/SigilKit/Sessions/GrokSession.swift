@@ -57,17 +57,27 @@ public struct GrokSession: Identifiable, Hashable, Sendable {
         return "Untitled session in \(projectName)"
     }
 
-    /// Last path component of `cwd`, used to group the sidebar by project.
+    /// The folder the sidebar groups this session under: the project a Sigil
+    /// worktree was made from, else `cwd`.
+    public var projectPath: String { SigilWorktree.projectPath(of: cwd) ?? cwd }
+
+    /// Last path component of `projectPath`, used to group the sidebar by project.
     public var projectName: String {
-        let name = URL(fileURLWithPath: cwd).lastPathComponent
-        return name.isEmpty ? cwd : name
+        let path = projectPath
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        return name.isEmpty ? path : name
     }
 
     /// `cwd` with the user's home replaced by `~`.
-    public var displayPath: String {
+    public var displayPath: String { Self.abbreviated(cwd) }
+
+    /// `projectPath` with the user's home replaced by `~`.
+    public var projectDisplayPath: String { Self.abbreviated(projectPath) }
+
+    private static func abbreviated(_ path: String) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        if cwd == home { return "~" }
-        if cwd.hasPrefix(home + "/") { return "~" + cwd.dropFirst(home.count) }
-        return cwd
+        if path == home { return "~" }
+        if path.hasPrefix(home + "/") { return "~" + path.dropFirst(home.count) }
+        return path
     }
 }
