@@ -81,7 +81,8 @@ struct TabStripView: View {
                         }
                         IconButton(
                             systemImage: "plus",
-                            help: "New Session… (⌘T)"
+                            help: "New Session… (⌘T)",
+                            label: "New Session"
                         ) {
                             model.requestNewSession()
                         }

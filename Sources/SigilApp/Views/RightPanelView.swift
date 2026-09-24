@@ -54,7 +54,7 @@ struct RightPanelView: View {
         case .notes:
             EmptyView()
         }
-        IconButton(systemImage: "xmark", help: "Close Panel (⌥⌘B)") {
+        IconButton(systemImage: "xmark", help: "Close Panel (⌥⌘B)", label: "Close Panel") {
             model.togglePanel()
         }
     }

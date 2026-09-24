@@ -1,0 +1,24 @@
+a37: VoiceOver label (AXDescription) versus tooltip (AXHelp) of the chrome buttons, read with the native AX API (AXUIElementCopyAttributeValue) on the SigilUX process. System Events cannot read AXDescription on these SwiftUI buttons, so the reader is /tmp/sigil-ux/qa-0923-agent/axlabels.swift (read-only).
+
+== 1. Main window, sidebar visible, panel hidden (sidebar plus, sidebar toggle, Tabs button, panel toggle, top-bar plus):
+AXButton | id=plus | label(AXDescription)=New Session | attributedLabel=New Session | title= | tooltip(AXHelp)=New Session in /Users/Shared/sigil-ux/projects/acme-api (⌘T)
+AXButton | id=sidebar.leading | label(AXDescription)=Hide Sidebar | attributedLabel=Hide Sidebar | title= | tooltip(AXHelp)=Hide Sidebar (⌘B)
+AXButton | id=list.bullet | label(AXDescription)=Tabs | attributedLabel=Tabs | title= | tooltip(AXHelp)=Tabs (⌃⌘T)
+AXButton | id=sidebar.trailing | label(AXDescription)=Show Panel | attributedLabel=Show Panel | title= | tooltip(AXHelp)=Show Panel (⌥⌘B)
+AXButton | id=plus | label(AXDescription)=New Session | attributedLabel=New Session | title= | tooltip(AXHelp)=New Session in /Users/Shared/sigil-ux/projects/acme-api (⌘T)
+
+== 2. Sidebar drilled into the acme-api project (Back to projects, then AXPress on the acme-api row). Drill bar plus:
+AXButton | id=plus | label(AXDescription)=New Session in acme-api | attributedLabel=New Session in acme-api | title= | tooltip(AXHelp)=New Session in acme-api (⌘T)
+
+== 3. Find bar opened with Edit > Find (AXPress):
+AXButton | id=chevron.up | label(AXDescription)=Previous Match | attributedLabel=Previous Match | title= | tooltip(AXHelp)=Previous match (Shift+Return)
+AXButton | id=chevron.down | label(AXDescription)=Next Match | attributedLabel=Next Match | title= | tooltip(AXHelp)=Next match (Return)
+AXButton | id=xmark | label(AXDescription)=Close Find | attributedLabel=Close Find | title= | tooltip(AXHelp)=Close find (Escape)
+
+== 4. Right panel opened with View > Show Panel (AXPress):
+AXButton | id=sidebar.trailing | label(AXDescription)=Hide Panel | attributedLabel=Hide Panel | title= | tooltip(AXHelp)=Hide Panel (⌥⌘B)
+AXButton | id=xmark | label(AXDescription)=Close Panel | attributedLabel=Close Panel | title= | tooltip(AXHelp)=Close Panel (⌥⌘B)
+
+== 5. Panel hidden again, sidebar hidden with View > Hide Sidebar (AXPress):
+AXButton | id=sidebar.leading | label(AXDescription)=Show Sidebar | attributedLabel=Show Sidebar | title= | tooltip(AXHelp)=Show Sidebar (⌘B)
+AXButton | id=sidebar.trailing | label(AXDescription)=Show Panel | attributedLabel=Show Panel | title= | tooltip(AXHelp)=Show Panel (⌥⌘B)

@@ -79,13 +79,16 @@ struct TabListView: View {
     }
 
     var body: some View {
-        IconButton(systemImage: "list.bullet", help: "Tabs (⌃⌘T)", isOn: model.isShowingTabList, action: toggle)
-            .popover(isPresented: $model.isShowingTabList, arrowEdge: .top) {
-                tabList
-                    .frame(width: 360)
-                    .frame(height: listHeight)
-            }
-            .onDisappear { model.isShowingTabList = false }
+        IconButton(
+            systemImage: "list.bullet", help: "Tabs (⌃⌘T)", label: "Tabs",
+            isOn: model.isShowingTabList, action: toggle
+        )
+        .popover(isPresented: $model.isShowingTabList, arrowEdge: .top) {
+            tabList
+                .frame(width: 360)
+                .frame(height: listHeight)
+        }
+        .onDisappear { model.isShowingTabList = false }
     }
 
     private var listHeight: CGFloat {
