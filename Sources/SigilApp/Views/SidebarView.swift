@@ -1314,24 +1314,22 @@ private struct SidebarSectionLabel: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            HStack(spacing: 6) {
-                Text(title)
-                    .ui(12.5, .medium)
-                    .foregroundStyle(palette.ink2)
-                Spacer(minLength: 4)
-                Text("\(count)")
-                    .mono(11.5)
-                    .foregroundStyle(palette.ink2)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.isHeader)
-            .accessibilityLabel("\(title), \(count)")
+            Text(title)
+                .ui(12.5, .medium)
+                .foregroundStyle(palette.ink2)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityLabel("\(title), \(count)")
+            Spacer(minLength: 4)
+            // Before the count, so every section's count keeps one column.
             if let add {
                 RowAction(systemImage: "plus", help: "Add Project", action: add)
             }
+            Text("\(count)")
+                .mono(11.5)
+                .foregroundStyle(palette.ink2)
+                .accessibilityHidden(true)
         }
-        .padding(.leading, 16)
-        .padding(.trailing, add == nil ? 16 : 10)
+        .padding(.horizontal, 16)
         .padding(.top, isFirst ? 8 : 16)
         .padding(.bottom, add == nil ? 4 : 1)
         .frame(maxWidth: .infinity, alignment: .leading)
