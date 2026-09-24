@@ -111,3 +111,29 @@ test('Dockerfile-only changes invalidate the stamp and distinguish same-revision
   assert.notEqual(first.sourceSHA256, second.sourceSHA256);
   assert.deepEqual(await loadRevision(target, { required: true }), second);
 });
+
+test('the stamp runs when the script is named through a symlink, as macOS names /tmp', async t => {
+  const { mkdtempSync, symlinkSync, existsSync, readFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join, dirname } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const { execFileSync } = await import('node:child_process');
+  const here = dirname(fileURLToPath(import.meta.url));
+  const scratch = mkdtempSync(join(tmpdir(), 'sidereal-symlink-'));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  const link = join(scratch, 'sidereal-link');
+  symlinkSync(join(here, '..'), link);
+  const target = join(scratch, 'bundle');
+  execFileSync('mkdir', ['-p', target]);
+  for (const file of ['Dockerfile', 'package.json', 'package-lock.json', 'server.mjs', 'apns.mjs', 'revision.mjs']) {
+    execFileSync('cp', [join(here, '..', file), join(target, file)]);
+  }
+  execFileSync('cp', ['-R', join(here, '..', 'public'), join(target, 'public')]);
+  const out = execFileSync('node', [join(link, 'stamp-revision.mjs'), target], { encoding: 'utf8' });
+  assert.match(out, /^[a-f0-9]{40}(-dirty)? [a-f0-9]{64}\n$/);
+  // With the main module's link preserved, both sides still meet on the real path.
+  const preserved = execFileSync('node', ['--preserve-symlinks-main', join(link, 'stamp-revision.mjs'), target], { encoding: 'utf8' });
+  assert.match(preserved, /^[a-f0-9]{40}(-dirty)? [a-f0-9]{64}\n$/);
+  assert.ok(existsSync(join(target, 'revision.json')));
+  assert.equal(JSON.parse(readFileSync(join(target, 'revision.json'), 'utf8')).gitSHA.length, 40);
+});
