@@ -53,7 +53,12 @@ struct RootView: View {
         .tint(palette.accent)
         .environment(\.palette, palette)
         .background(WindowChrome(background: palette.canvasNSColor))
-        .background(WindowCloseGuard { model.tabs.contains(where: \.shouldWarnBeforeStopping) })
+        .background(
+            WindowCloseGuard {
+                model.tabs.contains(where: \.shouldWarnBeforeStopping)
+                    || model.panel.shellHasForegroundJob
+            }
+        )
         .sheet(isPresented: $model.isShowingNewSessionSheet) {
             NewSessionSheet(model: model)
                 .environment(\.palette, Palette(theme: model.settings.theme))
@@ -65,7 +70,7 @@ struct RootView: View {
             model.focusSelectedTerminal()
         }
         .onChange(of: model.isShowingNewSessionSheet) { _, shown in
-            if !shown { model.focusSelectedTerminal() }
+            if !shown { model.newSessionSheetDidClose() }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             model.windowDidBecomeKey()
