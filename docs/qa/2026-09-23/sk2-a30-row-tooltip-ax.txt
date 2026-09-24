@@ -1,0 +1,40 @@
+sk2 a30: sidebar row tooltip (AXHelp) and label, read with the AX API on the SigilUX test app (build 656564c, pr-sidebar-keys), 23:45:24.
+Setup: GROK_HOME pointed at a scratch copy of the harness sessions. In that copy the "Rate limit the token endpoint" session has
+summary.json num_chat_messages = 1 (file mtime kept). The copy was deleted after the run; the harness home was not changed.
+Expected: the one-message row reads "1 message", not "1 messages". The control row reads "6 messages".
+
+== one-message row:
+---- element 1
+  AXRole = "AXButton"
+  AXDescription = "Rate limit the token endpoint, acme-api, 1 day ago"
+  AXAttributedDescription = "Rate limit the token endpoint, acme-api, 1 day ago" (attributed)
+  AXTitle = <absent>
+  AXHelp = "Rate limit the token endpoint
+/Users/Shared/sigil-ux/projects/acme-api
+1 message · 1 day ago, Rate limit the token endpoint
+/Users/Shared/sigil-ux/projects/acme-api
+1 message · 1 day ago"
+  AXValue = "Closed"
+  AXIdentifier = ""
+  AXPosition = (60, 346)
+  AXSize = 272x32
+  AXEnabled = 1
+
+== control row:
+---- element 1
+  AXRole = "AXButton"
+  AXDescription = "Fix the 401 on expired refresh tokens, acme-api, 41 minutes ago"
+  AXAttributedDescription = "Fix the 401 on expired refresh tokens, acme-api, 41 minutes ago" (attributed)
+  AXTitle = <absent>
+  AXHelp = "Fix the 401 on expired refresh tokens
+/Users/Shared/sigil-ux/projects/acme-api
+6 messages · 41 minutes ago, Fix the 401 on expired refresh tokens
+/Users/Shared/sigil-ux/projects/acme-api
+6 messages · 41 minutes ago, Fix the 401 on expired refresh tokens
+/Users/Shared/sigil-ux/projects/acme-api
+6 messages · 41 minutes ago"
+  AXValue = "Selected, working"
+  AXIdentifier = ""
+  AXPosition = (60, 314)
+  AXSize = 272x32
+  AXEnabled = 1
