@@ -431,16 +431,19 @@ struct SidebarView: View {
 
     @ViewBuilder
     private var projectList: some View {
-        let pinned = visibleProjects(model.pinnedProjects(), from: listedSessions)
-        let rest = visibleProjects(model.unpinnedProjects(), from: listedSessions)
-        if !pinned.isEmpty || !rest.isEmpty {
-            section("Projects", count: pinned.count + rest.count, isFirst: model.tabs.isEmpty) {
-                ForEach(pinned, id: \.id) { item in
-                    projectRow(item.project, rows: item.rows)
-                }
-                ForEach(rest, id: \.id) { item in
-                    projectRow(item.project, rows: item.rows)
-                }
+        let pinned = visibleProjects(model.pinnedProjects(), from: listedSessions, keepEmpty: true)
+        let rest = visibleProjects(model.unpinnedProjects(), from: listedSessions, keepEmpty: true)
+        section(
+            "Projects",
+            count: pinned.count + rest.count,
+            isFirst: model.tabs.isEmpty,
+            add: { model.chooseProjectToAdd() }
+        ) {
+            ForEach(pinned, id: \.id) { item in
+                projectRow(item.project, rows: item.rows)
+            }
+            ForEach(rest, id: \.id) { item in
+                projectRow(item.project, rows: item.rows)
             }
         }
     }
@@ -480,12 +483,14 @@ struct SidebarView: View {
         }
     }
 
+    /// `keepEmpty` keeps an added folder that has no chats yet.
     private func visibleProjects(
-        _ projects: [SidebarProject], from sessions: [GrokSession]
+        _ projects: [SidebarProject], from sessions: [GrokSession], keepEmpty: Bool = false
     ) -> [ProjectRows] {
         projects.compactMap { project in
             let rows = SidebarOrganization.listedRows(in: project, from: sessions)
-            return rows.isEmpty ? nil : ProjectRows(project: project, rows: rows)
+            if rows.isEmpty, !(keepEmpty && project.sessions.isEmpty) { return nil }
+            return ProjectRows(project: project, rows: rows)
         }
     }
 
@@ -627,7 +632,9 @@ struct SidebarView: View {
             Button(model.isPinned(project) ? "Unpin Project" : "Pin Project") {
                 model.togglePin(project)
             }
-            Button("Archive Project") { model.archive(project) }
+            Button(project.sessions.isEmpty ? "Remove Project" : "Archive Project") {
+                model.archive(project)
+            }
             if let session = rows.first {
                 Button("Reveal Folder in Finder") { model.revealInFinder(session) }
             }
@@ -737,12 +744,13 @@ struct SidebarView: View {
         _ title: String,
         count: Int,
         isFirst: Bool,
+        add: (() -> Void)? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
         Section {
             content()
         } header: {
-            SidebarSectionLabel(title: title, count: count, isFirst: isFirst)
+            SidebarSectionLabel(title: title, count: count, isFirst: isFirst, add: add)
         }
     }
 
@@ -1300,26 +1308,33 @@ private struct SidebarSectionLabel: View {
     let title: String
     let count: Int
     let isFirst: Bool
+    var add: (() -> Void)? = nil
     @Environment(\.palette) private var palette
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(title)
-                .ui(12.5, .medium)
-                .foregroundStyle(palette.ink2)
-            Spacer(minLength: 4)
-            Text("\(count)")
-                .mono(11.5)
-                .foregroundStyle(palette.ink2)
+            HStack(spacing: 6) {
+                Text(title)
+                    .ui(12.5, .medium)
+                    .foregroundStyle(palette.ink2)
+                Spacer(minLength: 4)
+                Text("\(count)")
+                    .mono(11.5)
+                    .foregroundStyle(palette.ink2)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityLabel("\(title), \(count)")
+            if let add {
+                RowAction(systemImage: "plus", help: "Add Project", action: add)
+            }
         }
-        .padding(.horizontal, 16)
+        .padding(.leading, 16)
+        .padding(.trailing, add == nil ? 16 : 10)
         .padding(.top, isFirst ? 8 : 16)
-        .padding(.bottom, 4)
+        .padding(.bottom, add == nil ? 4 : 1)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(palette.canvas)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
-        .accessibilityLabel("\(title), \(count)")
     }
 }
 

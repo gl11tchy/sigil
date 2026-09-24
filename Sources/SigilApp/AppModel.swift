@@ -324,6 +324,7 @@ final class AppModel {
 
     func isWorking(_ project: SidebarProject) -> Bool {
         project.sessions.contains { isWorking($0) }
+            || tabs.contains { $0.activity == .working && samePath($0.workingDirectory.path, project.cwd) }
     }
 
     func isPinned(_ session: GrokSession) -> Bool {
@@ -427,6 +428,7 @@ final class AppModel {
             return
         }
         unpin(project)
+        removeAddedProject(project.cwd)
         for session in store.sessions where samePath(session.cwd, project.cwd) {
             archive(session, confirmIfWorking: false)
         }
@@ -490,7 +492,36 @@ final class AppModel {
     }
 
     var sidebarProjects: [SidebarProject] {
-        SidebarOrganization.projects(from: sidebarSessions, canonicalPath: canonicalPath)
+        let projects = SidebarOrganization.projects(from: sidebarSessions, canonicalPath: canonicalPath)
+        // A search ranks by match and Archived lists only archived chats.
+        guard !SidebarOrganization.isSearching(searchText), sidebarSurface != .archived else {
+            return projects
+        }
+        return SidebarOrganization.merging(
+            added: settings.addedProjects, into: projects, canonicalPath: canonicalPath)
+    }
+
+    /// Adds a folder to Projects before it has a chat.
+    func addProject(_ directory: URL) {
+        settings.reloadSharedLists()
+        var added = settings.addedProjects
+        added.removeAll { samePath($0.path, directory.path) }
+        added.insert(AddedProject(path: directory.path, addedAt: Date()), at: 0)
+        settings.addedProjects = added
+    }
+
+    func chooseProjectToAdd() {
+        if let directory = pickDirectory(prompt: "Add Project") { addProject(directory) }
+    }
+
+    private func removeAddedProject(_ path: String) {
+        settings.reloadSharedLists()
+        let added = settings.addedProjects.filter { !samePath($0.path, path) }
+        if added != settings.addedProjects { settings.addedProjects = added }
+    }
+
+    private func isAddedProject(_ path: String) -> Bool {
+        settings.addedProjects.contains { samePath($0.path, path) }
     }
 
     var focusedProject: SidebarProject? {
@@ -501,6 +532,10 @@ final class AppModel {
         else { return nil }
         return project(at: path, from: sidebarSessions)
             ?? project(at: path, from: store.sessions)
+            ?? SidebarOrganization.merging(
+                added: settings.addedProjects.filter { samePath($0.path, path) },
+                into: [], canonicalPath: canonicalPath
+            ).first
     }
 
     private func project(at path: String, from sessions: [GrokSession]) -> SidebarProject? {
@@ -578,6 +613,12 @@ final class AppModel {
         if remainingProjectPins != settings.pinnedProjects {
             settings.pinnedProjects = remainingProjectPins
         }
+        let remainingAdded = settings.addedProjects.filter {
+            Self.isUsableDirectory(URL(fileURLWithPath: $0.path))
+        }
+        if remainingAdded != settings.addedProjects {
+            settings.addedProjects = remainingAdded
+        }
         let remainingArchives = pruningMissing(settings.archivedConversations, list: "archive")
         if remainingArchives != settings.archivedConversations {
             settings.archivedConversations = remainingArchives
@@ -589,7 +630,8 @@ final class AppModel {
         let focused = settings.focusedProjectPath
         if !focused.isEmpty,
             !SidebarOrganization.isSentinel(focused),
-            !store.sessions.contains(where: { samePath($0.cwd, focused) })
+            !store.sessions.contains(where: { samePath($0.cwd, focused) }),
+            !isAddedProject(focused)
         {
             settings.focusedProjectPath = ""
         }
@@ -686,6 +728,7 @@ final class AppModel {
         paths.filter { path in
             store.sessions.contains { samePath($0.cwd, path) }
                 || tabs.contains { samePath($0.workingDirectory.path, path) }
+                || isAddedProject(path)
                 || awaitsScan(sharedKey("project", path))
         }
     }
@@ -1406,6 +1449,11 @@ final class AppModel {
         selectedTabID = tab.id
         if !isRestoringTabs { clearDeferredSelection() }
         if !isRestoringTabs { rememberDefaultDirectory(spec.workingDirectory) }
+        // Grok writes a session the sidebar finds. Other CLIs do not, so
+        // record their folder or it never shows up in Projects.
+        if !isRestoringTabs, spec.provider != .grokBuild, !isEphemeral(path: spec.workingDirectory.path) {
+            addProject(spec.workingDirectory)
+        }
         let id = tab.id
         tab.start(isSelected: { [weak self] in
             self?.selectedTabID == id && NSApp.isActive
@@ -2446,13 +2494,13 @@ final class AppModel {
         }
     }
 
-    func pickDirectory(startingAt directory: URL? = nil) -> URL? {
+    func pickDirectory(startingAt directory: URL? = nil, prompt: String = "Open Session Here") -> URL? {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.directoryURL = directory ?? currentDirectory
-        panel.prompt = "Open Session Here"
+        panel.prompt = prompt
         return panel.runModal() == .OK ? panel.url : nil
     }
 
