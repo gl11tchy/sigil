@@ -322,7 +322,7 @@ private struct ThemeCard: View {
                     .minimumScaleFactor(0.85)
             }
             .frame(maxWidth: .infinity)
-            .animation(.easeOut(duration: 0.12), value: isHovering)
+            .animation(.easeOut(duration: 0.16), value: isHovering)
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }

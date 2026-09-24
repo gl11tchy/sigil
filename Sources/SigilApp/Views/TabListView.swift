@@ -153,7 +153,7 @@ struct TabListView: View {
             }
             .onChange(of: highlighted) { _, id in
                 guard let id else { return }
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.12)) {
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
                     proxy.scrollTo(id, anchor: .center)
                 }
             }
@@ -225,6 +225,13 @@ private struct TabListRow: View {
             .background(
                 RoundedRectangle(cornerRadius: 6)
                     .fill(fill)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(
+                                isHighlighted ? palette.hairline : Color.clear,
+                                lineWidth: 1
+                            )
+                    )
             )
         }
         .buttonStyle(.plain)
