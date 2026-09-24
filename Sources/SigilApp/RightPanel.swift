@@ -107,6 +107,9 @@ final class RightPanel {
         shell?.startShell(ShellLaunchSpec(workingDirectory: directory))
     }
 
+    /// True while a command the user started holds the panel shell.
+    var shellHasForegroundJob: Bool { shell?.hasForegroundJob ?? false }
+
     func closeShellAndWait() {
         shell?.terminateAndWait()
         shell = nil

@@ -13,7 +13,7 @@ final class AppModel {
 
     typealias TrashConversation = (URL) throws -> Void
     typealias ErrorPresenter = (Error) -> Void
-    typealias ConfirmStopWorking = () -> Bool
+    typealias ConfirmStopWorking = (StopWorkingPrompt) -> Bool
 
     let settings: AppSettings
     let store: SessionStore
@@ -82,9 +82,9 @@ final class AppModel {
     private var deferredLegacySelectedSessionID: String?
     private let trashConversation: TrashConversation
     private let presentError: ErrorPresenter
-    /// Shown before a close or archive kills a tab that is mid-turn.
+    /// Shown before a close, archive or shell restart stops work still running.
     @ObservationIgnored
-    var confirmStopWorking: ConfirmStopWorking = { AppModel.promptToStopWorking() }
+    var confirmStopWorking: ConfirmStopWorking = { $0.runModal() }
     /// True while the stop prompt is up. Its modal loop still runs main-queue
     /// work, so a theme relaunch waits rather than replace the tab in question.
     @ObservationIgnored private var isAskingToStop = false
@@ -381,8 +381,8 @@ final class AppModel {
 
     private func archive(_ session: GrokSession, confirmIfWorking: Bool) {
         let matching = tabs.filter { tabMatches($0, sessionID: session.id, cwd: session.cwd) }
-        if confirmIfWorking, matching.contains(where: \.shouldWarnBeforeStopping),
-            !confirmStop()
+        if confirmIfWorking, let prompt = StopWorkingPrompt(action: .archive, stopping: matching),
+            !confirmStop(prompt)
         {
             return
         }
@@ -429,13 +429,14 @@ final class AppModel {
 
     /// Archives a multi-selection with at most one working-session prompt.
     func archive(_ sessions: [GrokSession]) {
-        let anyWorking = sessions.contains { session in
-            tabs.contains {
-                tabMatches($0, sessionID: session.id, cwd: session.cwd)
-                    && $0.shouldWarnBeforeStopping
-            }
+        let matching = tabs.filter { tab in
+            sessions.contains { tabMatches(tab, sessionID: $0.id, cwd: $0.cwd) }
         }
-        if anyWorking && !confirmStop() { return }
+        if let prompt = StopWorkingPrompt(action: .archive, stopping: matching),
+            !confirmStop(prompt)
+        {
+            return
+        }
         archiveWithoutAsking(sessions)
     }
 
@@ -447,7 +448,9 @@ final class AppModel {
         let projectTabs = tabs.filter {
             $0.spec.provider == .grokBuild && samePath($0.workingDirectory.path, project.cwd)
         }
-        if projectTabs.contains(where: \.shouldWarnBeforeStopping), !confirmStop() {
+        if let prompt = StopWorkingPrompt(action: .archive, stopping: projectTabs),
+            !confirmStop(prompt)
+        {
             return
         }
         unpin(project)
@@ -1556,16 +1559,12 @@ final class AppModel {
     /// User-facing close: warn when the agent is mid-turn so a click does not kill work.
     func requestCloseTab(_ id: TerminalTab.ID) {
         guard let tab = tabs.first(where: { $0.id == id }) else { return }
-        if tab.shouldWarnBeforeStopping, !confirmStop() { return }
+        if let prompt = StopWorkingPrompt(action: .closeTab, stopping: [tab]),
+            !confirmStop(prompt)
+        {
+            return
+        }
         closeTab(id)
-    }
-
-    private static func promptToStopWorking() -> Bool {
-        let alert = NSAlert()
-        alert.messageText = "This session is still working."
-        alert.addButton(withTitle: "Close Tab")
-        alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn
     }
 
     func closeSelectedTab() {
@@ -1925,6 +1924,12 @@ final class AppModel {
 
     /// Kills the scratch shell and starts a new one in the current folder.
     func restartPanelShell() {
+        if let prompt = StopWorkingPrompt(
+            action: .restartShell, stopping: [], panelJob: panel.shellHasForegroundJob),
+            !confirmStop(prompt)
+        {
+            return
+        }
         panel.restartShell(
             in: currentDirectory, theme: settings.theme, fontSize: settings.fontSize)
         panel.shell?.optionAsMetaKey = settings.optionAsMetaKey
@@ -1989,7 +1994,7 @@ final class AppModel {
 
     /// Asks before stopping work, then lets any theme relaunch that came due
     /// during the prompt run against the answer.
-    private func confirmStop() -> Bool {
+    private func confirmStop(_ prompt: StopWorkingPrompt) -> Bool {
         isAskingToStop = true
         defer {
             isAskingToStop = false
@@ -1997,7 +2002,7 @@ final class AppModel {
                 restartForThemeWhenSettled(tab)
             }
         }
-        return confirmStopWorking()
+        return confirmStopWorking(prompt)
     }
 
     /// A tab that kept the old theme because it was busy relaunches on the new
