@@ -1,0 +1,78 @@
+a37: drill-bar plus button label, real app (SigilUX test build of audit/views-voiceover at f13a6dc, which contains 2b46e62 and main's #94 redesign), 2026-09-23
+Drive: System Events AXPress on the sidebar project row acme-api (Home list), process SigilUX only.
+Read: System Events attribute list, then a read-only AXUIElementCopyAttributeValue read (System Events does not list AXDescription and cannot coerce AXAttributedDescription).
+
+== System Events
+AXPress on the sidebar project row acme-api (Home list)
+==== sidebar header buttons after the drill
+---- AXButton AXHelp="Hide Sidebar (⌘B)"
+  AXRoleDescription = button
+  AXHelp = Hide Sidebar (⌘B)
+  AXIdentifier = sidebar.leading
+  AXEnabled = true
+---- AXButton AXHelp="New Session… (⌘T), New Session… (⌘T), New Session… (⌘T)"
+  AXRoleDescription = button
+  AXHelp = New Session… (⌘T), New Session… (⌘T), New Session… (⌘T)
+  AXEnabled = true
+  AXValue = 
+---- AXButton AXHelp="Open sessions and projects, Open sessions and projects"
+  AXRoleDescription = button
+  AXHelp = Open sessions and projects, Open sessions and projects
+  AXEnabled = true
+  AXValue = 
+---- AXButton AXHelp="All conversations, newest first, All conversations, newest first, All conversations, newest first"
+  AXRoleDescription = button
+  AXHelp = All conversations, newest first, All conversations, newest first, All conversations, newest first
+  AXEnabled = true
+  AXValue = 13 chats
+---- AXButton AXHelp="Back to projects"
+  AXRoleDescription = button
+  AXHelp = Back to projects
+  AXEnabled = true
+---- AXButton AXHelp="Archive Project"
+  AXRoleDescription = button
+  AXHelp = Archive Project
+  AXIdentifier = archivebox
+  AXEnabled = true
+---- AXButton AXHelp="Pin Project"
+  AXRoleDescription = button
+  AXHelp = Pin Project
+  AXIdentifier = pin
+  AXEnabled = true
+---- AXButton AXHelp="New Session in acme-api (⌘T)"
+  AXRoleDescription = button
+  AXHelp = New Session in acme-api (⌘T)
+  AXIdentifier = plus
+  AXEnabled = true
+  (drill-bar plus) all attribute names: AXParent AXFocused AXRoleDescription AXAutoInteractable AXHelp AXChildren AXIdentifier AXPath AXAttributedDescription AXEnabled AXTopLevelUIElement AXSubrole AXRole AXWindow AXActivationPoint AXChildrenInNavigationOrder AXFrame AXSize AXPosition
+  explicit AXDescription -> Can’t make «class valL» of «class attr» "AXDescription" of item 8 of every «class butT» of «class sgrp» 1 of window "SigilUX" of «class pcap» "SigilUX" of application "System Events" into type string.
+---- AXButton AXHelp="Tabs (⌃⌘T)"
+  AXRoleDescription = button
+  AXHelp = Tabs (⌃⌘T)
+  AXIdentifier = list.bullet
+  AXEnabled = true
+---- AXButton AXHelp="Show Panel (⌥⌘B)"
+  AXRoleDescription = button
+  AXHelp = Show Panel (⌥⌘B)
+  AXIdentifier = sidebar.trailing
+  AXEnabled = true
+
+== AXUIElement read of the drill-bar buttons (same instance, drilled into acme-api)
+---- element 1
+  AXRole = "AXButton"
+  AXDescription = "New Session"
+  AXAttributedDescription = "New Session" (attributed)
+  AXTitle = <absent>
+  AXHelp = "New Session in acme-api (⌘T)"
+  AXValue = <absent>
+  AXIdentifier = "plus"
+---- element 1
+  AXRole = "AXButton"
+  AXDescription = "Back to projects"
+  AXAttributedDescription = "Back to projects" (attributed)
+  AXTitle = <absent>
+  AXHelp = "Back to projects"
+  AXValue = <absent>
+  AXIdentifier = <absent>
+
+Result: label (AXDescription) is exactly "New Session" with no folder name or path; AXHelp keeps "New Session in acme-api (⌘T)".
