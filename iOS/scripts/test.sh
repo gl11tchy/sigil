@@ -12,8 +12,8 @@ if ! cmp -s Sigil/Resources/readable-output.js ../Sidereal/public/output.mjs; th
 fi
 
 OUT="$(mktemp -d)/Sigil-tests"
-FILES=$(find Sigil/Core/Models Sigil/Core/Networking Sigil/Core/Utilities Tests \
-  -name '*.swift' 2>/dev/null | sort)
+FILES=$(find Sigil/Core/Networking Sigil/Core/Utilities Tests \
+  -name '*.swift' | sort)
 
 if [ -z "$FILES" ]; then
   echo "No Swift sources found." >&2

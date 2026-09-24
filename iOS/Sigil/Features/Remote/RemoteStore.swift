@@ -276,8 +276,8 @@ final class RemoteStore {
         attachments[id]?.removeAll { $0.id == attachment.id }
     }
 
-    func sendDraft(submit: Bool = true) {
-        guard canSend || (!submit && isConnected), let target = selectedTabID else { return }
+    func sendDraft() {
+        guard canSend, let target = selectedTabID else { return }
         let text = draft
         let files = selectedAttachments
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !files.isEmpty else { return }
@@ -296,10 +296,8 @@ final class RemoteStore {
             if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 _ = try await connection.request("input", text: payload, tabID: target)
             }
-            if submit {
-                try await Task.sleep(for: .milliseconds(100))
-                _ = try await connection.request("key", text: RemoteKey.enter.rawValue, tabID: target)
-            }
+            try await Task.sleep(for: .milliseconds(100))
+            _ = try await connection.request("key", text: RemoteKey.enter.rawValue, tabID: target)
             if self.drafts[target] == text { self.drafts[target] = "" }
         }
     }
