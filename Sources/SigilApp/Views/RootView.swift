@@ -621,9 +621,20 @@ extension URL {
         path == FileManager.default.homeDirectoryForCurrentUser.path ? "~" : lastPathComponent
     }
 
+    /// `project/worktree` for a folder in a Sigil worktree, e.g. `app/9e27b2dd`.
+    var sigilWorktreeLabel: String? {
+        guard let project = SigilWorktree.projectPath(of: path) else { return nil }
+        let prefix = SigilWorktree.root.path + "/"
+        let rest = path.hasPrefix(prefix) ? path.dropFirst(prefix.count) : Substring(path)
+        let parts = rest.split(separator: "/")
+        let name = parts.count >= 2 ? String(parts[1]) : lastPathComponent
+        return "\(URL(fileURLWithPath: project).lastPathComponent)/\(name)"
+    }
+
     /// Last two path components, e.g. `scratchpad/wt-pr-a`. The home folder
     /// keeps its `~`, which is shorter than its own two components.
     var breadcrumbPath: String {
+        if let label = sigilWorktreeLabel { return label }
         if path == FileManager.default.homeDirectoryForCurrentUser.path { return "~" }
         let names = pathComponents.filter { $0 != "/" }
         guard names.count >= 2 else { return abbreviatedPath }

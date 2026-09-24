@@ -42,6 +42,14 @@ struct SidebarOrganizationTests {
         #expect(grouped[0].sessions.map(\.id) == ["w", "p"])
     }
 
+    @Test func sigilWorktreeFoldersShowProjectAndWorktreeName() {
+        let folder = GrokPaths.encode(path: "/workspace/app")
+        let worktree = SigilWorktree.root.appendingPathComponent("\(folder)/ab12cd34")
+        #expect(worktree.sigilWorktreeLabel == "app/ab12cd34")
+        #expect(worktree.breadcrumbPath == "app/ab12cd34")
+        #expect(URL(fileURLWithPath: "/workspace/app").sigilWorktreeLabel == nil)
+    }
+
     @Test func pinningPrependsAndIsIdempotentOnIdentity() {
         let first = session(id: "a", cwd: "/tmp/one", updated: 2)
         let second = session(id: "b", cwd: "/tmp/two", updated: 1)
