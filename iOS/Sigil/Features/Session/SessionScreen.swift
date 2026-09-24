@@ -79,9 +79,9 @@ struct SessionScreen: View {
             }
         } else {
             OutputView(
-                styled: store.styledOutput, palette: store.palette, revision: store.outputRevision,
-                highlight: finding ? findText : "", onNearTop: { store.loadEarlier() }, atBottom: $atBottom,
-                scrollToEnd: scrollToEnd
+                styled: store.styledOutput, palette: store.palette, foreground: store.themeForeground,
+                background: store.themeBackground, revision: store.outputRevision, highlight: finding ? findText : "",
+                onNearTop: { store.loadEarlier() }, atBottom: $atBottom, scrollToEnd: scrollToEnd
             )
             .ignoresSafeArea(.container, edges: .bottom)
             .privacySensitive()

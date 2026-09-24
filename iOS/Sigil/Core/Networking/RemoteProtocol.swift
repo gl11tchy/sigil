@@ -128,6 +128,8 @@ struct RemoteScreenRow: Codable, Equatable {
 
 /// A window of rows, or the rows that changed since the last one.
 struct RemoteScreen: Decodable, Equatable {
+    /// The tab these rows belong to. Older Macs leave it out; the selection stands in.
+    let tab: String?
     let gen: Int
     let alt: Bool?
     let first: Int
@@ -174,6 +176,7 @@ struct RemoteState: Decodable, Equatable {
         if let selectedTabID, !seen.contains(selectedTabID) { throw RemoteCryptoError.invalidMessage }
         if let screen {
             guard screen.rows.count <= 2_000, screen.end >= screen.first, (screen.palette ?? []).count <= 16,
+                (screen.tab ?? "").utf8.count <= 64,
                 screen.rows.allSatisfy({ $0.i < screen.end && ($0.s ?? []).allSatisfy { $0.count == 5 } })
             else { throw RemoteCryptoError.invalidMessage }
         }
@@ -222,6 +225,8 @@ struct NewSessionOptions: Decodable, Equatable {
     let effort: String
     /// Folders a new project can go in.
     let locations: [RemoteProject]
+    /// The Mac's own default for repositories; absent from older Macs.
+    let startsInWorktree: Bool?
 }
 
 /// One page of saved chats, newest first. The Mac pages by offset and may

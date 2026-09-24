@@ -32,8 +32,10 @@ final class RemoteControl {
     @ObservationIgnored private weak var watchedModel: AppModel?
     /// Changes are batched this long, so a burst of output is one frame.
     static let changeDelay: Duration = .milliseconds(80)
-    /// Rows per event frame, so a full window stays under the sealed-frame cap.
-    static let rowsPerEvent = 60
+    /// Plaintext bytes per event frame: under the sealed-frame cap with room for the tab list.
+    nonisolated static let bytesPerEvent = 44_000
+    /// Frames of one flush go out this far apart; the relay closes a socket over 30 frames a second.
+    nonisolated static let frameSpacing: Duration = .milliseconds(50)
 
     /// Posted after a revoke, so another running copy of Sigil stops using the pairing.
     static let revokedNotification = Notification.Name("com.gl11tchy.sigil.remote.revoked")
@@ -391,31 +393,14 @@ final class RemoteControl {
         guard tabsChanged || screen != nil else { return }
         lastSentTabs = tabs
         lastSentSelection = selected
-        var frames: [RemoteReply] = []
+        let frames: [RemoteReply]
         var base = RemoteReply(challenge: watcher.challenge, sequence: 0, event: true)
         base.state = RemoteState(
             tabs: tabs, selectedTabID: selected, terminal: "", tabsTruncated: model.tabs.count > 100,
             screen: nil, mac: RemoteCommands.macName)
-        if let screen, screen.rows.count > Self.rowsPerEvent {
-            // The first frame carries the bounds and theme; the rest only rows.
-            var chunks = stride(from: 0, to: screen.rows.count, by: Self.rowsPerEvent).map {
-                Array(screen.rows[$0..<min($0 + Self.rowsPerEvent, screen.rows.count)])
-            }
-            var first = base
-            first.state?.screen = screen
-            first.state?.screen?.rows = chunks.removeFirst()
-            frames.append(first)
-            for chunk in chunks {
-                var next = base
-                next.state?.screen = RemoteScreen(
-                    gen: screen.gen, alt: screen.alt, first: screen.first, end: screen.end, rows: chunk)
-                frames.append(next)
-            }
-        } else {
-            base.state?.screen = screen
-            frames.append(base)
-        }
-        for frame in frames {
+        frames = Self.frames(base: base, screen: screen)
+        for (index, frame) in frames.enumerated() {
+            if index > 0 { try? await Task.sleep(for: Self.frameSpacing) }
             guard self.watcher?.peer == watcher.peer else { return }
             do {
                 let encrypted = try RemoteCrypto.seal(frame, key: watcher.deviceKey, direction: "mac")
@@ -425,6 +410,53 @@ final class RemoteControl {
                 return
             }
         }
+    }
+
+    /// Splits the changed rows over as many frames as their encoded size needs.
+    /// The first frame carries the bounds and theme; the rest only rows. A row too
+    /// big for a frame on its own loses its styles, then its tail.
+    nonisolated static func frames(base: RemoteReply, screen: RemoteScreen?, limit: Int = bytesPerEvent)
+        -> [RemoteReply]
+    {
+        guard let screen else { return [base] }
+        let encoder = JSONEncoder()
+        func size<T: Encodable>(_ value: T) -> Int { (try? encoder.encode(value).count) ?? limit }
+        var header = screen
+        header.rows = []
+        var headerFrame = base
+        headerFrame.state?.screen = header
+        let tail = RemoteScreen(
+            tab: screen.tab, gen: screen.gen, alt: screen.alt, first: screen.first, end: screen.end, rows: [])
+        var tailFrame = base
+        tailFrame.state?.screen = tail
+        let budgets = [limit - size(headerFrame), limit - size(tailFrame)]
+        var frames: [RemoteReply] = []
+        var rows: [RemoteScreen.Row] = []
+        var used = 0
+        func flush() {
+            var frame = frames.isEmpty ? headerFrame : tailFrame
+            frame.state?.screen?.rows = rows
+            frames.append(frame)
+            rows = []
+            used = 0
+        }
+        for var row in screen.rows {
+            var cost = size(row) + 1
+            let budget = max(budgets[frames.isEmpty ? 0 : 1], 1_024)
+            if cost > budget {
+                row.s = nil
+                cost = size(row) + 1
+                if cost > budget {
+                    row.t = String(row.t.prefix(max(budget / 4, 16)))
+                    cost = size(row) + 1
+                }
+            }
+            if !rows.isEmpty, used + cost > budget { flush() }
+            rows.append(row)
+            used += cost
+        }
+        if !rows.isEmpty || frames.isEmpty { flush() }
+        return frames
     }
 
     private func revokedElsewhere() {

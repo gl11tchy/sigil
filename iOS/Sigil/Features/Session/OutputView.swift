@@ -7,6 +7,9 @@ struct OutputView: UIViewRepresentable {
     let styled: StyledText
     /// The terminal theme's 16 colours, as `RRGGBB`; empty when the Mac sent none.
     let palette: [String]
+    /// The theme's default text and background; empty falls back to the system's.
+    let foreground: String
+    let background: String
     let revision: Int
     let highlight: String
 
@@ -35,6 +38,7 @@ struct OutputView: UIViewRepresentable {
     func updateUIView(_ view: UITextView, context: Context) {
         let coordinator = context.coordinator
         coordinator.parent = self
+        view.backgroundColor = UInt32(background, radix: 16).map(Self.color) ?? .clear
         let changed = coordinator.revision != revision || coordinator.highlight != highlight
         // A repaint drops a selection the reader is making; the next poll repaints instead.
         let selecting = view.selectedRange.length > 0 && coordinator.highlight == highlight
@@ -45,7 +49,8 @@ struct OutputView: UIViewRepresentable {
             coordinator.revision = revision
             coordinator.highlight = highlight
             coordinator.text = text
-            view.attributedText = Self.attributed(styled, palette: palette, highlight: highlight)
+            view.attributedText = Self.attributed(
+                styled, palette: palette, foreground: foreground, highlight: highlight)
             view.layoutIfNeeded()
             if wasAtBottom || coordinator.first {
                 coordinator.scrollToBottom(view)
@@ -62,8 +67,11 @@ struct OutputView: UIViewRepresentable {
         }
     }
 
-    nonisolated static func attributed(_ styled: StyledText, palette: [String], highlight: String) -> NSAttributedString {
+    nonisolated static func attributed(
+        _ styled: StyledText, palette: [String], foreground: String = "", highlight: String
+    ) -> NSAttributedString {
         let text = styled.text
+        let defaultText = UInt32(foreground, radix: 16).map(Self.color) ?? UIColor.label
         let base = UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         let font = UIFontMetrics(forTextStyle: .footnote).scaledFont(for: base)
         let bold = UIFontMetrics(forTextStyle: .footnote).scaledFont(
@@ -72,7 +80,7 @@ struct OutputView: UIViewRepresentable {
         paragraph.lineSpacing = 2
         let result = NSMutableAttributedString(
             string: text,
-            attributes: [.font: font, .foregroundColor: UIColor.label, .paragraphStyle: paragraph])
+            attributes: [.font: font, .foregroundColor: defaultText, .paragraphStyle: paragraph])
         let length = (text as NSString).length
         for span in styled.spans {
             guard span.location >= 0, span.length > 0, span.location + span.length <= length else { continue }
@@ -90,7 +98,7 @@ struct OutputView: UIViewRepresentable {
                 attributes[.foregroundColor] =
                     span.flags & StyledSpan.dim != 0 ? foreground.withAlphaComponent(0.6) : foreground
             } else if span.flags & StyledSpan.dim != 0 {
-                attributes[.foregroundColor] = UIColor.secondaryLabel
+                attributes[.foregroundColor] = defaultText.withAlphaComponent(0.6)
             }
             if let background { attributes[.backgroundColor] = background }
             if span.flags & StyledSpan.bold != 0 { attributes[.font] = bold }

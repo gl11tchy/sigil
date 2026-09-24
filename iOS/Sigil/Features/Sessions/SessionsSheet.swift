@@ -380,6 +380,8 @@ struct NewSessionSheet: View {
             providerID = options.provider
             model = options.model
             effort = options.effort
+            // The Mac's own default; a Mac without the field made worktrees by default.
+            inWorktree = options.startsInWorktree ?? true
         }
         loading = false
         guard hasProjects else {
@@ -402,7 +404,7 @@ struct NewSessionSheet: View {
         }
         store.newSession(
             in: folder, provider: options == nil ? nil : providerID, model: takesModel ? model : nil,
-            effort: takesModel ? effort : nil, worktree: canUseWorktree && inWorktree)
+            effort: takesModel ? effort : nil, worktree: canUseWorktree ? inWorktree : nil)
         dismiss()
     }
 

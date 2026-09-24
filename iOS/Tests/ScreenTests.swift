@@ -6,7 +6,7 @@ enum ScreenTests {
         runs: [Int: [[Int]]] = [:]
     ) -> RemoteScreen {
         RemoteScreen(
-            gen: gen, alt: nil, first: first ?? rows.first?.0 ?? 0, end: end ?? ((rows.last?.0 ?? -1) + 1),
+            tab: nil, gen: gen, alt: nil, first: first ?? rows.first?.0 ?? 0, end: end ?? ((rows.last?.0 ?? -1) + 1),
             rows: rows.map { RemoteScreenRow(i: $0.0, t: $0.1, w: nil, s: runs[$0.0]) }, palette: palette,
             fg: palette == nil ? nil : "ffffff", bg: palette == nil ? nil : "000000")
     }
@@ -84,6 +84,13 @@ enum ScreenTests {
         // A line the formatter rewrote gets no colour rather than the wrong one.
         let rewritten = StyledOutput.readable("ERROR elsewhere", lines: lines)
         try Expect.equal(rewritten.spans, [], "no match, no spans")
+        // Two identical rows in different colours each keep their own.
+        let twins = [
+            ScreenLine(index: 0, text: "same", runs: [[0, 4, 1, -1, 0]]),
+            ScreenLine(index: 1, text: "same", runs: [[0, 4, 2, -1, 0]]),
+        ]
+        let styled2 = StyledOutput.readable("same\nsame", lines: twins)
+        try Expect.equal(styled2.spans.map(\.fg), [1, 2], "each row styles its own line")
     }
 
     static func coloursResolveThroughThePalette() throws {
@@ -111,6 +118,7 @@ enum ScreenTests {
         try state.validate()
         try Expect.true(state.streamsScreen && state.supportsSessionOps, "capabilities")
         try Expect.equal(state.mac, "Studio", "mac name")
+        try Expect.equal(state.screen?.tab, nil, "older Macs send no tab on a screen")
         try Expect.equal(state.tabs[0].providerName, "Claude Code", "provider name")
         try Expect.equal(state.tabs[0].canArchive, false, "archive flag")
         let screen = try Expect.notNil(state.screen, "screen")

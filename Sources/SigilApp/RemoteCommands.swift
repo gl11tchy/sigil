@@ -59,6 +59,8 @@ struct RemoteNewSessionOptions: Codable, Sendable {
     var effort: String
     /// Folders a new project can go in.
     var locations: [RemoteProject]
+    /// The Mac's own default for repositories, so the phone's toggle starts where the Mac would.
+    var startsInWorktree: Bool?
 }
 
 struct RemoteReply: Codable, Sendable {
@@ -107,7 +109,8 @@ enum RemoteCommands {
             let older = tab.controller.remoteScreenRows(before: before)
             reply.state = snapshot(
                 model,
-                screen: RemoteScreen(gen: window.gen, first: window.first, end: window.end, rows: older))
+                screen: RemoteScreen(
+                    tab: tab.id.uuidString, gen: window.gen, first: window.first, end: window.end, rows: older))
             return fitting(reply)
         case "close":
             guard let tab else { return failure(request, "This tab is closed.") }
@@ -407,7 +410,8 @@ enum RemoteCommands {
             model: isModelName(saved) ? saved : "",
             efforts: AppSettings.effortOptions.map { .init(id: $0, name: AppSettings.effortLabel($0)) },
             effort: settings.effort,
-            locations: projectLocations(model))
+            locations: projectLocations(model),
+            startsInWorktree: settings.startsInWorktree)
     }
 
     /// Why `provider` cannot start now. Checked here because AppModel reports
@@ -512,8 +516,8 @@ enum RemoteCommands {
     static func snapshot(_ model: AppModel, screen window: RemoteScreenWindow?) -> RemoteState {
         let screen = window.map {
             RemoteScreen(
-                gen: $0.gen, alt: $0.alt ? true : nil, first: $0.first, end: $0.end, rows: $0.rows,
-                palette: $0.palette, fg: $0.fg, bg: $0.bg)
+                tab: model.selectedTab?.id.uuidString, gen: $0.gen, alt: $0.alt ? true : nil, first: $0.first,
+                end: $0.end, rows: $0.rows, palette: $0.palette, fg: $0.fg, bg: $0.bg)
         }
         return snapshot(model, screen: screen, terminal: false)
     }

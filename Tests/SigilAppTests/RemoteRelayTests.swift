@@ -372,6 +372,36 @@ struct RemoteEventStreamTests {
     }
 }
 
+struct RemoteEventFramingTests {
+    @Test func rowsAreSplitByEncodedSizeAndOversizedRowsLoseTheirStyles() throws {
+        var base = RemoteReply(challenge: "c", sequence: 0, event: true)
+        base.state = RemoteState(tabs: [], selectedTabID: "T", terminal: "", screen: nil, mac: "m")
+        // Every character styled differently: the runs, not the text, carry the weight.
+        let runs = (0..<200).map { [$0, 1, $0 % 256, -1, 0] }
+        let rows = (0..<40).map { RemoteScreen.Row(i: $0, t: String(repeating: "x", count: 200), s: runs) }
+        let screen = RemoteScreen(
+            tab: "T", gen: 1, first: 0, end: 40, rows: rows, palette: ["000000"], fg: "ffffff", bg: "000000")
+        let frames = RemoteControl.frames(base: base, screen: screen, limit: 20_000)
+        #expect(frames.count > 1)
+        for frame in frames {
+            #expect(try JSONEncoder().encode(frame).count <= 20_000)
+        }
+        #expect(frames[0].state?.screen?.palette == ["000000"])
+        #expect(frames[1].state?.screen?.palette == nil)
+        #expect(frames.flatMap { $0.state?.screen?.rows.map(\.i) ?? [] } == Array(0..<40))
+        #expect(frames.allSatisfy { $0.state?.screen?.tab == "T" && $0.state?.screen?.end == 40 })
+
+        let huge = RemoteScreen.Row(
+            i: 0, t: String(repeating: "y", count: 100), s: (0..<3_000).map { [$0 % 100, 1, $0 % 256, 4, 1] })
+        let single = RemoteControl.frames(
+            base: base, screen: RemoteScreen(gen: 1, first: 0, end: 1, rows: [huge]), limit: 20_000)
+        #expect(single.count == 1)
+        #expect(single[0].state?.screen?.rows.first?.s == nil)
+        #expect(single[0].state?.screen?.rows.first?.t.count == 100)
+        #expect(RemoteControl.frames(base: base, screen: nil).count == 1)
+    }
+}
+
 extension RelayPhone {
     /// The next sealed frame from the Mac, whatever its sequence.
     func receiveReply(key: String) async throws -> RemoteReply {

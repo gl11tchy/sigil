@@ -59,7 +59,7 @@ enum StyledOutput {
             guard !line.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
             if let index = byText[line]?.first(where: { $0 >= cursor }) {
                 spans += Self.spans(for: lines[index].runs, in: lines[index].text, at: offset)
-                cursor = index
+                cursor = index + 1
                 continue
             }
             // The formatter trimmed or unwrapped this line: find it inside a row nearby.
@@ -69,7 +69,7 @@ enum StyledOutput {
                 guard !source.runs.isEmpty, let range = source.text.range(of: line) else { continue }
                 let skipped = source.text[..<range.lowerBound].count
                 spans += Self.spans(for: source.runs, in: source.text, at: offset, from: skipped, length: line.count)
-                cursor = index
+                cursor = index + 1
                 break
             }
         }

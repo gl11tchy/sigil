@@ -21,6 +21,8 @@ public struct RemoteScreen: Codable, Sendable, Equatable {
         }
     }
 
+    /// The tab these rows belong to, so a late reply cannot land in another tab's rows.
+    public var tab: String?
     /// Bumped when the index space restarts: a buffer reset, a screen switch, or another tab.
     public var gen: Int
     public var alt: Bool?
@@ -35,9 +37,10 @@ public struct RemoteScreen: Codable, Sendable, Equatable {
     public var bg: String?
 
     public init(
-        gen: Int, alt: Bool? = nil, first: Int, end: Int, rows: [Row], palette: [String]? = nil,
+        tab: String? = nil, gen: Int, alt: Bool? = nil, first: Int, end: Int, rows: [Row], palette: [String]? = nil,
         fg: String? = nil, bg: String? = nil
     ) {
+        self.tab = tab
         self.gen = gen
         self.alt = alt
         self.first = first
@@ -127,8 +130,9 @@ public struct RemoteScreenStream: Sendable, Equatable {
         first = window.first
         guard fresh || !changed.isEmpty || boundsMoved else { return nil }
         return RemoteScreen(
-            gen: window.gen, alt: window.alt ? true : nil, first: window.first, end: window.end, rows: changed,
-            palette: fresh ? window.palette : nil, fg: fresh ? window.fg : nil, bg: fresh ? window.bg : nil)
+            tab: tabID, gen: window.gen, alt: window.alt ? true : nil, first: window.first, end: window.end,
+            rows: changed, palette: fresh ? window.palette : nil, fg: fresh ? window.fg : nil,
+            bg: fresh ? window.bg : nil)
     }
 
     public mutating func reset() {

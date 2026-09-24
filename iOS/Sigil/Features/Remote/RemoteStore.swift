@@ -43,6 +43,9 @@ final class RemoteStore {
     /// The output with the terminal's colours; `output` is its text.
     private(set) var styledOutput = StyledText.empty
     private(set) var palette: [String] = []
+    /// The terminal theme's default text and background, as `RRGGBB`; empty when unknown.
+    private(set) var themeForeground = ""
+    private(set) var themeBackground = ""
 
     let isDemo: Bool
     @ObservationIgnored private let connection = RemoteConnection()
@@ -231,13 +234,14 @@ final class RemoteStore {
     }
 
     /// A nil provider lets the Mac start its default CLI, as Macs before provider choice always do.
+    /// A nil worktree leaves the choice to the Mac's own setting.
     func newSession(
         in folder: String?, provider: String? = nil, model: String? = nil, effort: String? = nil,
-        worktree: Bool = false
+        worktree: Bool? = nil
     ) {
         perform {
             _ = try await $0.request(
-                "new", text: folder, provider: provider, model: model, effort: effort, worktree: worktree ? true : nil)
+                "new", text: folder, provider: provider, model: model, effort: effort, worktree: worktree)
         }
     }
 
@@ -518,21 +522,18 @@ final class RemoteStore {
         supportsSessionOps = state.supportsSessionOps
         if let name = state.mac, !name.isEmpty { macName = name }
         cachedAt = nil
-        if let id = state.selectedTabID {
-            if let screen = state.screen {
-                var model = screens[id] ?? ScreenModel()
-                if olderRows { model.prepend(screen) } else { model.apply(screen) }
-                screens[id] = model
-            } else if !state.terminal.isEmpty || screens[id] == nil {
-                // Text snapshots come from a poll or a command reply; a streaming
-                // Mac sends an empty terminal, which must not wipe the rows.
-                if screens[id] == nil {
-                    var bucket = histories[id] ?? TerminalHistory()
-                    bucket.apply(state.terminal)
-                    if let earlier { bucket.prepend(earlier) }
-                    histories[id] = bucket
-                }
-            }
+        if let screen = state.screen, let target = screen.tab ?? state.selectedTabID {
+            // Rows land in the tab they were read from, even if the selection moved meanwhile.
+            var model = screens[target] ?? ScreenModel()
+            if olderRows { model.prepend(screen) } else { model.apply(screen) }
+            screens[target] = model
+        } else if let id = state.selectedTabID, screens[id] == nil {
+            // Text snapshots come with polls and command replies. A tab that streams
+            // rows keeps them; a streaming Mac sends an empty terminal in any case.
+            var bucket = histories[id] ?? TerminalHistory()
+            bucket.apply(state.terminal)
+            if let earlier { bucket.prepend(earlier) }
+            histories[id] = bucket
         }
         if complete {
             screens = screens.filter { ids.contains($0.key) }
@@ -558,9 +559,13 @@ final class RemoteStore {
     func refreshOutput() {
         let next: StyledText
         var colours: [String] = []
+        var fg = ""
+        var bg = ""
         if let id = selectedTabID, let screen = screens[id] {
             let lines = screen.lines
             colours = screen.palette
+            fg = screen.foreground
+            bg = screen.background
             if rawMode {
                 next = StyledOutput.raw(lines)
             } else {
@@ -570,9 +575,11 @@ final class RemoteStore {
             let raw = selectedTabID.flatMap { histories[$0]?.text } ?? ""
             next = StyledText(text: rawMode ? raw : formatter.format(raw), spans: [])
         }
-        if next != styledOutput || colours != palette {
+        if next != styledOutput || colours != palette || fg != themeForeground || bg != themeBackground {
             styledOutput = next
             palette = colours
+            themeForeground = fg
+            themeBackground = bg
             output = next.text
             outputRevision += 1
         }
@@ -751,7 +758,7 @@ enum DemoData {
             return RemoteScreenRow(i: offset, t: row, w: nil, s: runs)
         }
         return RemoteScreen(
-            gen: 1, alt: nil, first: 0, end: rows.count, rows: rows,
+            tab: "demo-1", gen: 1, alt: nil, first: 0, end: rows.count, rows: rows,
             palette: [
                 "1c1c1e", "ff6b6b", "5ad27a", "ffd166", "5aa6ff", "d78bff", "5fd8e0", "e6e6e6",
                 "6b6b70", "ff8a8a", "7ee89a", "ffe08a", "8ac0ff", "e8a8ff", "8ae6ee", "ffffff",
@@ -784,7 +791,8 @@ enum DemoData {
             RemoteProject(name: "~/Documents", folder: "~/Documents"),
             RemoteProject(name: "~/Documents/sigil", folder: "~/Documents/sigil"),
             RemoteProject(name: "~", folder: "~"),
-        ])
+        ],
+        startsInWorktree: true)
 }
 
 extension String {
