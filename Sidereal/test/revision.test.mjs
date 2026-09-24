@@ -131,6 +131,9 @@ test('the stamp runs when the script is named through a symlink, as macOS names 
   execFileSync('cp', ['-R', join(here, '..', 'public'), join(target, 'public')]);
   const out = execFileSync('node', [join(link, 'stamp-revision.mjs'), target], { encoding: 'utf8' });
   assert.match(out, /^[a-f0-9]{40}(-dirty)? [a-f0-9]{64}\n$/);
+  // With the main module's link preserved, both sides still meet on the real path.
+  const preserved = execFileSync('node', ['--preserve-symlinks-main', join(link, 'stamp-revision.mjs'), target], { encoding: 'utf8' });
+  assert.match(preserved, /^[a-f0-9]{40}(-dirty)? [a-f0-9]{64}\n$/);
   assert.ok(existsSync(join(target, 'revision.json')));
   assert.equal(JSON.parse(readFileSync(join(target, 'revision.json'), 'utf8')).gitSHA.length, 40);
 });
