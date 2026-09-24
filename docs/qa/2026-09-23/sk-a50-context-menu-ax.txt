@@ -1,0 +1,38 @@
+a50: sidebar row context menus, read through System Events (AXShowMenu on the row, menu items of the AXMenu, then AXCancel).
+
+Row "Summarise the acme-api service and its layout" (AXValue: Open in another tab, working):
+Pin | enabled=true
+Archive | enabled=true
+---- | enabled=false
+Rename | enabled=true
+---- | enabled=false
+Show Tab | enabled=true
+Close Tab | enabled=true
+---- | enabled=false
+New Session in This Folder | enabled=true
+Unpin Project | enabled=true
+Reveal Folder in Finder | enabled=true
+Copy Session ID | enabled=true
+Export Transcript… | enabled=true
+---- | enabled=false
+Delete Conversation… | enabled=true
+---- | enabled=false
+
+
+Control row "Fix the 401 on expired refresh tokens" (AXValue: Closed):
+Pin | enabled=true
+Archive | enabled=true
+---- | enabled=false
+Rename | enabled=true
+---- | enabled=false
+Open in New Tab | enabled=true
+---- | enabled=false
+New Session in This Folder | enabled=true
+Unpin Project | enabled=true
+Reveal Folder in Finder | enabled=true
+Copy Session ID | enabled=true
+Export Transcript… | enabled=true
+---- | enabled=false
+Delete Conversation… | enabled=true
+---- | enabled=false
+

@@ -1,0 +1,32 @@
+sk2 a28: drilled-in sidebar header, read with the AX API on the SigilUX test app (build 656564c, pr-sidebar-keys).
+The project view for /Users/Shared/sigil-ux/projects/acme-api is open. The Back button carries the project name as its AXValue.
+
+== back button:
+---- element 1
+  AXRole = "AXButton"
+  AXDescription = "Back to projects"
+  AXAttributedDescription = "Back to projects" (attributed)
+  AXTitle = <absent>
+  AXHelp = "Back to projects"
+  AXValue = "acme-api"
+  AXIdentifier = ""
+  AXPosition = (68, 248)
+  AXSize = 93x30
+  AXEnabled = 1
+Recheck at 23:48:39 (same launch, no menu open), with the screenshot sk2-a28-drilled-acme-api.png:
+  AXRole = "AXButton"
+  AXDescription = "Back to projects"
+  AXAttributedDescription = "Back to projects" (attributed)
+  AXTitle = <absent>
+  AXHelp = "Back to projects"
+  AXValue = "acme-api"
+  AXIdentifier = <absent>
+  AXPosition = (68, 248)
+  AXSize = 93x30
+  AXEnabled = 1
+
+== drilled list (each row AXHelp holds the same tooltip text more than once; one copy is shown):
+row 1: help="Summarise the acme-api service and its layout | /Users/Shared/sigil-ux/projects/acme-api | 6 messages · 41 minutes ago" value="Open in another tab, working" (help text appears 3 times in AXHelp)
+row 2: help="Fix the 401 on expired refresh tokens | /Users/Shared/sigil-ux/projects/acme-api | 6 messages · 41 minutes ago" value="Selected, working" (help text appears 3 times in AXHelp)
+row 3: help="Rate limit the token endpoint | /Users/Shared/sigil-ux/projects/acme-api | 1 message · 1 day ago" value="Closed" (help text appears 2 times in AXHelp)
+session/project rows (AXButton with help): 3

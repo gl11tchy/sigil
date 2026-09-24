@@ -297,6 +297,59 @@ struct SidebarOrganizationTests {
         let rows = SidebarOrganization.listedRows(in: project, listed: listed)
         #expect(rows.map(\.id) == ["kept"])
     }
+
+    /// Leaving a folder puts the keyboard back on that folder's home row, so
+    /// Return reopens it and ↓ moves to the next one.
+    @Test func leavingASurfaceReturnsToItsHomeRow() {
+        #expect(
+            SidebarOrganization.homeRowID(leaving: .project, projectID: "/tmp/acme")
+                == "/tmp/acme")
+        #expect(
+            SidebarOrganization.homeRowID(leaving: .recents, projectID: nil)
+                == SidebarOrganization.recentsID)
+        #expect(
+            SidebarOrganization.homeRowID(leaving: .archived, projectID: nil)
+                == SidebarOrganization.archivedID)
+        #expect(SidebarOrganization.homeRowID(leaving: .folders, projectID: nil) == nil)
+        #expect(SidebarOrganization.homeRowID(leaving: .project, projectID: nil) == nil)
+    }
+
+    /// Set order follows the launch's hash seed; the anchor must follow the list.
+    @Test func droppingTheAnchorReanchorsOnTheFirstVisibleSelectedRow() {
+        let rows = (1...30).map { "row\($0)" }
+        let selection = Set(rows.dropFirst(4))
+
+        #expect(SidebarOrganization.reanchor(selection: selection, in: rows) == "row5")
+        #expect(SidebarOrganization.reanchor(selection: [], in: rows) == nil)
+    }
+
+    /// ⌘⌫ trashes what the user marked: the multi-selection first, else the
+    /// highlighted row, and only rows the list shows.
+    @Test func commandDeleteTargetsTheSelectionElseTheKeyboardRow() {
+        let rows = ["a", "b", "c", "d"]
+        #expect(
+            SidebarOrganization.trashTargets(keyboardRowID: "b", selection: [], in: rows) == ["b"])
+        #expect(
+            SidebarOrganization.trashTargets(keyboardRowID: "a", selection: ["d", "b"], in: rows)
+                == ["b", "d"])
+        #expect(
+            SidebarOrganization.trashTargets(keyboardRowID: "gone", selection: [], in: rows) == [])
+        #expect(SidebarOrganization.trashTargets(keyboardRowID: nil, selection: [], in: rows) == [])
+    }
+
+    /// A focused list always shows where the keys are.
+    @Test func focusedListAlwaysHasAHighlightedRow() {
+        let rows = ["a", "b", "c"]
+        #expect(
+            SidebarOrganization.keyboardRow(onFocus: "c", activeRowID: "b", in: rows) == "c")
+        #expect(
+            SidebarOrganization.keyboardRow(onFocus: nil, activeRowID: "b", in: rows) == "b")
+        #expect(
+            SidebarOrganization.keyboardRow(onFocus: "gone", activeRowID: nil, in: rows) == "a")
+        #expect(
+            SidebarOrganization.keyboardRow(onFocus: nil, activeRowID: "hidden", in: rows) == "a")
+        #expect(SidebarOrganization.keyboardRow(onFocus: nil, activeRowID: nil, in: []) == nil)
+    }
 }
 
 private func session(

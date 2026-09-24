@@ -35,6 +35,19 @@ enum ProjectRowAccessibility {
     }
 }
 
+/// The outline on the arrow-key row, the only mark of where the keys are.
+/// `lineStrong` reads under 1.6:1 on the hover fill; with Increase Contrast on
+/// it steps up to `ink3` at 1.5pt, which clears 3:1 (WCAG 1.4.11).
+enum KeyboardRowOutline {
+    static func color(_ contrast: ColorSchemeContrast) -> KeyPath<Palette, Color> {
+        contrast == .increased ? \.ink3 : \.lineStrong
+    }
+
+    static func width(_ contrast: ColorSchemeContrast) -> CGFloat {
+        contrast == .increased ? 1.5 : 1
+    }
+}
+
 /// The thread viewer: every Grok Build conversation on this machine.
 ///
 /// Home is the project list. Recents and Archived sit under it as destinations
@@ -118,6 +131,7 @@ struct SidebarView: View {
         }
         .task(id: snapshot.rowIDs) {
             clampKeyboardSelection()
+            showKeyboardRowIfListFocused()
             pruneMultiSelection()
             await prepareRename(forceReconfigure: false)
         }
@@ -290,7 +304,7 @@ struct SidebarView: View {
                 showsArchive: true,
                 archiveLabel: archiveLabel(for: project),
                 canStart: true,
-                leave: { model.leaveProject() },
+                leave: { leaveFolder() },
                 newChat: { model.requestNewSessionInProject(project) },
                 togglePin: { model.togglePin(project) },
                 toggleArchive: { model.archiveOrRemove(project) }
@@ -335,19 +349,28 @@ struct SidebarView: View {
             .focusable()
             .focusEffectDisabled()
             .focused($focus, equals: .list)
-            .onKeyPress(.upArrow) {
-                if model.renamingSessionKey != nil { return .ignored }
-                return moveKeyboardSelection(by: -1)
+            .onChange(of: focus) { _, newFocus in
+                if newFocus == .list { showKeyboardRowIfListFocused() }
             }
-            .onKeyPress(.downArrow) {
+            // ⇧ comes from the key event itself, not the keyboard state when a
+            // queued or repeated press is finally handled.
+            .onKeyPress(.upArrow, phases: [.down, .repeat]) { press in
                 if model.renamingSessionKey != nil { return .ignored }
-                return moveKeyboardSelection(by: 1)
+                return moveKeyboardSelection(by: -1, shift: press.modifiers.contains(.shift))
+            }
+            .onKeyPress(.downArrow, phases: [.down, .repeat]) { press in
+                if model.renamingSessionKey != nil { return .ignored }
+                return moveKeyboardSelection(by: 1, shift: press.modifiers.contains(.shift))
             }
             .onKeyPress(.return) {
                 if model.renamingSessionKey != nil { return .ignored }
                 return activateKeyboardSelection()
             }
             .onKeyPress(Self.f2) { renameKeyboardSelection() }
+            .onKeyPress(.delete, phases: .down) { press in
+                guard press.modifiers.contains(.command) else { return .ignored }
+                return trashKeyboardSelection()
+            }
             .onKeyPress(.escape) { handleEscape() }
             .onChange(of: keyboardSelectionID) { _, id in
                 // No anchor: scroll only as far as needed to reveal the row, so a
@@ -712,7 +735,9 @@ struct SidebarView: View {
                     Button("Reset Name") { model.resetName(session) }
                 }
                 Divider()
-                Button("Open in New Tab") { model.open(session) }
+                Button(model.isOpen(session) ? "Show Tab" : "Open in New Tab") {
+                    model.open(session)
+                }
                 if model.isOpen(session) {
                     Button("Close Tab") { dismissSession(session) }
                 }
@@ -844,6 +869,7 @@ struct SidebarView: View {
         }
         switch SidebarOrganization.escapeAction(
             isRenaming: model.renamingSessionKey != nil,
+            isSearching: listKind == .search,
             surface: model.sidebarSurface
         ) {
         case .cancelRename:
@@ -856,12 +882,23 @@ struct SidebarView: View {
                 focus = .list
             }
         case .leaveFolder:
-            model.leaveProject()
+            leaveFolder()
         case .leaveList:
             focus = nil
             model.focusSelectedTerminal()
         }
         return .handled
+    }
+
+    /// Opening a folder drops the highlight (its id is not a chat row), so put
+    /// it back on the folder being left.
+    private func leaveFolder() {
+        if let id = SidebarOrganization.homeRowID(
+            leaving: model.sidebarSurface, projectID: model.focusedProject?.id)
+        {
+            keyboardSelectionID = id
+        }
+        model.leaveProject()
     }
 
     private func activateSearchResult() {
@@ -885,6 +922,23 @@ struct SidebarView: View {
             return .ignored
         }
         beginInlineRename(session)
+        return .handled
+    }
+
+    /// ⌘⌫, as in Finder: the row's X for one chat, the bulk trash alert for a
+    /// multi-selection.
+    private func trashKeyboardSelection() -> KeyPress.Result {
+        guard model.renamingSessionKey == nil else { return .ignored }
+        let sessions = SidebarOrganization.trashTargets(
+            keyboardRowID: keyboardSelectionID, selection: multiSelection, in: visibleRowIDs()
+        ).compactMap { sessionAnywhere(for: $0) }
+        if sessions.count > 1 {
+            pendingBulkDelete = sessions
+        } else if let session = sessions.first {
+            dismissSession(session)
+        } else {
+            return .ignored
+        }
         return .handled
     }
 
@@ -1056,11 +1110,10 @@ struct SidebarView: View {
         return .handled
     }
 
-    private func moveKeyboardSelection(by delta: Int) -> KeyPress.Result {
+    private func moveKeyboardSelection(by delta: Int, shift: Bool) -> KeyPress.Result {
         let ids = visibleRowIDs()
         guard !ids.isEmpty else { return .ignored }
-        let extending =
-            NSEvent.modifierFlags.contains(.shift) && listKind != .projectList
+        let extending = shift && listKind != .projectList
         let anchor = extending ? (selectionAnchor ?? keyboardSelectionID) : nil
         if let current = keyboardSelectionID, let index = ids.firstIndex(of: current) {
             keyboardSelectionID = ids[min(max(index + delta, 0), ids.count - 1)]
@@ -1120,6 +1173,18 @@ struct SidebarView: View {
         }
     }
 
+    /// The list hides its focus ring, so while it has focus the arrow-key
+    /// highlight is the only mark of it and must always be on a row.
+    private func showKeyboardRowIfListFocused() {
+        guard focus == .list else { return }
+        let activeRowID =
+            listKind == .projectList
+            ? model.selectedTab.map { SidebarOrganization.openTabRowID($0.id) }
+            : model.sessionForSelectedTab().map { model.sessionKey($0) }
+        keyboardSelectionID = SidebarOrganization.keyboardRow(
+            onFocus: keyboardSelectionID, activeRowID: activeRowID, in: visibleRowIDs())
+    }
+
     // MARK: - Multi-selection
 
     /// ⌘ toggles one row, ⇧ extends a range from the anchor, a plain click
@@ -1130,7 +1195,10 @@ struct SidebarView: View {
         if modifiers.contains(.command) {
             if multiSelection.contains(key) {
                 multiSelection.remove(key)
-                if selectionAnchor == key { selectionAnchor = multiSelection.first }
+                if selectionAnchor == key {
+                    selectionAnchor = SidebarOrganization.reanchor(
+                        selection: multiSelection, in: visibleRowIDs())
+                }
             } else {
                 multiSelection.insert(key)
                 selectionAnchor = key
@@ -1240,6 +1308,7 @@ private struct RowHighlight: View {
     var isRenaming = false
 
     @Environment(\.palette) private var palette
+    @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.sidebarGlide) private var glide
 
     /// The sidebar sits on `canvas`. In dark mode `hover` lifts off it; in
@@ -1271,7 +1340,9 @@ private struct RowHighlight: View {
             if isMultiSelected {
                 shape.strokeBorder(palette.accent, lineWidth: 1)
             } else if isKeyboardSelected && !isSelected {
-                shape.strokeBorder(palette.lineStrong, lineWidth: 1)
+                shape.strokeBorder(
+                    palette[keyPath: KeyboardRowOutline.color(contrast)],
+                    lineWidth: KeyboardRowOutline.width(contrast))
             }
         }
     }
@@ -1391,6 +1462,8 @@ private struct DrillBar: View {
             .animation(Motion.fade, value: isHoveringBack)
             .help("Back to projects")
             .accessibilityLabel("Back to projects")
+            // The title is the only thing that says where the user is.
+            .accessibilityValue(title)
             Spacer(minLength: 4)
             if showsArchive, let toggleArchive {
                 IconButton(systemImage: "archivebox", help: archiveLabel) {
@@ -1976,8 +2049,10 @@ private struct SessionRow: View {
     }
 
     private var rowHelpText: String {
-        "\(title)\n\(session.displayPath)\n"
-            + "\(session.messageCount) messages · \(session.updatedAt.longRelative(to: now))"
+        let messages =
+            session.messageCount == 1 ? "1 message" : "\(session.messageCount) messages"
+        return "\(title)\n\(session.displayPath)\n"
+            + "\(messages) · \(session.updatedAt.longRelative(to: now))"
     }
 
     private var rowAccessibilityValue: String {
@@ -2246,29 +2321,38 @@ private func textTruncationMode(_ truncation: SearchMatchHighlight.Truncation) -
 }
 
 /// Accent on matched runs only. Empty query (or no hit in this string) is plain `Text`.
-private struct SearchHighlightedText: View {
+struct SearchHighlightedText: View {
     let runs: [SearchMatchHighlight.Run]
     let match: Color
     let rest: Color
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
 
     var body: some View {
         if runs.contains(where: \.isMatch) {
-            Text(Self.attributed(runs, match: match, rest: rest))
+            Text(
+                Self.attributed(
+                    runs, match: match, rest: rest, underlineMatches: differentiateWithoutColor))
         } else {
             Text(runs.map(\.text).joined())
                 .foregroundStyle(rest)
         }
     }
 
-    private static func attributed(
+    /// Nonisolated so tests can call it: on Swift 6.1 a View's statics are
+    /// inferred main-actor.
+    nonisolated static func attributed(
         _ runs: [SearchMatchHighlight.Run],
         match: Color,
-        rest: Color
+        rest: Color,
+        underlineMatches: Bool
     ) -> AttributedString {
         var result = AttributedString()
         for run in runs {
             var piece = AttributedString(run.text)
             piece.foregroundColor = run.isMatch ? match : rest
+            // The accent sits close to the title's luminance, so a user who asked
+            // not to rely on color gets an underline on the matched characters.
+            if run.isMatch, underlineMatches { piece.underlineStyle = .single }
             result += piece
         }
         return result

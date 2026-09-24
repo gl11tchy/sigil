@@ -170,8 +170,13 @@ enum SidebarOrganization {
         case leaveList
     }
 
-    static func escapeAction(isRenaming: Bool, surface: SidebarSurface) -> EscapeAction {
+    static func escapeAction(isRenaming: Bool, isSearching: Bool, surface: SidebarSurface)
+        -> EscapeAction
+    {
         if isRenaming { return .cancelRename }
+        // Results are global while searching; leaving the folder behind them
+        // would change nothing on screen and lose where the user was.
+        if isSearching { return .leaveList }
         if surface != .folders { return .leaveFolder }
         return .leaveList
     }
@@ -200,6 +205,23 @@ enum SidebarOrganization {
         return Set(rowIDs[min(a, b)...max(a, b)])
     }
 
+    /// The range anchor after ⌘-click drops the current one: the first row still
+    /// selected, in visible order (the rule `pruneMultiSelection` uses), so the
+    /// next ⇧-click selects the same range on every launch.
+    static func reanchor(selection: Set<String>, in rowIDs: [String]) -> String? {
+        rowIDs.first(where: selection.contains)
+    }
+
+    /// Rows ⌘⌫ acts on, in visible order: the ⌘/⇧ selection when there is one,
+    /// else the arrow-key row. Never a row the user just deselected.
+    static func trashTargets(keyboardRowID: String?, selection: Set<String>, in rowIDs: [String])
+        -> [String]
+    {
+        if !selection.isEmpty { return rowIDs.filter(selection.contains) }
+        guard let keyboardRowID, rowIDs.contains(keyboardRowID) else { return [] }
+        return [keyboardRowID]
+    }
+
     /// Recents and Archived are destinations, not folders.
     static func destinationRowIDs(recentsCount: Int, archivedCount: Int) -> [String] {
         var ids: [String] = []
@@ -220,6 +242,29 @@ enum SidebarOrganization {
         destinationRowIDs(recentsCount: recentsCount, archivedCount: archivedCount)
             + openTabIDs
             + folderListRowIDs(pinnedIDs: pinnedIDs, restIDs: restIDs)
+    }
+
+    /// Where the arrow-key highlight sits once the list has focus. The list
+    /// draws no focus ring, so a focused list with no highlight shows nothing
+    /// and Return does nothing. Keep a visible highlight, else the active row,
+    /// else the first row.
+    static func keyboardRow(onFocus current: String?, activeRowID: String?, in rowIDs: [String])
+        -> String?
+    {
+        if let current, rowIDs.contains(current) { return current }
+        if let activeRowID, rowIDs.contains(activeRowID) { return activeRowID }
+        return rowIDs.first
+    }
+
+    /// The home row that stands for the surface being left, so the arrow-key
+    /// highlight lands back on the folder or destination the user opened.
+    static func homeRowID(leaving surface: SidebarSurface, projectID: String?) -> String? {
+        switch surface {
+        case .project: return projectID
+        case .recents: return recentsID
+        case .archived: return archivedID
+        case .folders: return nil
+        }
     }
 
     /// Home lists every open tab above the folders, so the sessions in flight
