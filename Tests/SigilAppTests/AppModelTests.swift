@@ -1164,6 +1164,47 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func anAddedFolderIsAProjectUntilItIsRemoved() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(id: "a", cwd: "/Users/someone/Documents/alpha")
+        await fixture.store.reload()
+        let folder = try fixture.directory("added")
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        model.addProject(folder)
+        let added = try #require(model.sidebarProjects.first)
+        #expect(added.name == "added")
+        #expect(added.sessions.isEmpty)
+        #expect(model.sidebarProjects.count == 2)
+
+        model.openProject(added)
+        model.pruneMissingPins()
+        #expect(model.focusedProject?.cwd == folder.path)
+
+        #expect(model.isRemovableOnly(added))
+        model.archiveOrRemove(added)
+        #expect(fixture.settings.addedProjects.isEmpty)
+        #expect(model.sidebarProjects.map(\.name) == ["alpha"])
+    }
+
+    @Test @MainActor
+    func anAddedFolderWithHiddenChatsIsArchivedNotRemoved() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let folder = try fixture.directory("hidden")
+        try fixture.writeListedSession(id: "h", cwd: folder.path)
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        model.addProject(folder)
+        let project = try #require(model.sidebarProjects.first { $0.cwd == folder.path })
+        #expect(!model.isRemovableOnly(project))
+    }
+
+    @Test @MainActor
     func pruneDropsProjectPinsForMissingFolders() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
