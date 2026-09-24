@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/sigil-sidereal-deploy.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
-for file in Dockerfile package.json package-lock.json server.mjs revision.mjs; do
+for file in Dockerfile package.json package-lock.json server.mjs apns.mjs revision.mjs; do
   cp "$ROOT/Sidereal/$file" "$STAGE/$file"
 done
 cp -R "$ROOT/Sidereal/public" "$STAGE/public"

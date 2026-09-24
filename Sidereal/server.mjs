@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import { importKey, open } from './public/crypto.mjs';
 import { loadRevision } from './revision.mjs';
+import { createAPNs } from './apns.mjs';
 
 const revision = await loadRevision(undefined, { required: process.env.SIGIL_REQUIRE_REVISION === '1' });
 
@@ -23,7 +24,7 @@ const assets = new Map([
     .map(name => [`/fonts/${name}.woff2`, [`fonts/${name}.woff2`, 'font/woff2']]),
 ]);
 
-export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {}) {
+export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns = null } = {}) {
   const origin = new URL(publicOrigin);
   if (origin.origin !== publicOrigin || !(origin.protocol === 'https:' ||
       (origin.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(origin.hostname)))) {
@@ -75,6 +76,73 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
     if (socket?.readyState !== WebSocket.OPEN) return;
     if (socket.bufferedAmount > 220000) { socket.terminate(); return; }
     socket.send(JSON.stringify(value));
+  };
+  // Alerts for a phone that is away. The host registers the phone's device token
+  // once per connection; the relay keeps it only as long as the room lives and
+  // never logs it. Payload text stays sealed: the phone's extension opens it.
+  const hexToken = value => typeof value === 'string' && value.length >= 64 && value.length <= 200 && /^[a-f0-9]+$/.test(value);
+  const pushEnvironments = new Set(['production', 'development']);
+  const registerPush = (room, value) => {
+    if (value.pushToken === null) { room.push = undefined; return true; }
+    if (!hexToken(value.pushToken) || !pushEnvironments.has(value.pushEnvironment)) return false;
+    room.push = { token: value.pushToken, environment: value.pushEnvironment };
+    return true;
+  };
+  const activityState = state => {
+    if (!state || typeof state !== 'object' || Array.isArray(state)) return null;
+    const out = {};
+    if (typeof state.status === 'string' && state.status.length <= 16) out.status = state.status;
+    if (typeof state.since === 'number' && Number.isFinite(state.since)) out.since = state.since;
+    if (typeof state.asking === 'boolean') out.asking = state.asking;
+    return out.status ? out : null;
+  };
+  // Returns the APNs request for a host's push frame, or null when the frame is malformed.
+  const pushRequest = (room, push) => {
+    if (!push || typeof push !== 'object' || Array.isArray(push)) return null;
+    if (typeof push.data === 'string') {
+      if (push.data.length > 3000 || !/^[A-Za-z0-9+/=]+$/.test(push.data)) return null;
+      const thread = typeof push.thread === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(push.thread) ? push.thread : undefined;
+      return {
+        environment: room.push?.environment, token: room.push?.token, pushType: 'alert', collapseId: thread,
+        payload: {
+          aps: {
+            alert: { title: 'Sigil', body: 'A session needs you.' }, sound: 'default', 'mutable-content': 1,
+            category: 'SESSION', ...(thread ? { 'thread-id': thread } : {}),
+          },
+          sigil: { data: push.data },
+        },
+      };
+    }
+    if (hexToken(push.activity) && (push.event === 'update' || push.event === 'end')) {
+      const state = activityState(push.state);
+      if (!state) return null;
+      const seconds = Math.floor(now() / 1000);
+      return {
+        environment: room.push?.environment, token: push.activity, pushType: 'liveactivity', priority: 10,
+        payload: {
+          aps: {
+            timestamp: seconds, event: push.event, 'content-state': state,
+            ...(push.event === 'end' ? { 'dismissal-date': seconds + 300 } : {}),
+          },
+        },
+      };
+    }
+    return null;
+  };
+  const deliverPush = async (ws, room, push) => {
+    const request = pushRequest(room, push);
+    if (!request) return false;
+    if (now() - (room.pushWindow || 0) >= 60000) { room.pushWindow = now(); room.pushCount = 0; }
+    if (++room.pushCount > 60) { send(ws, { type: 'push', ok: false, reason: 'rate' }); return true; }
+    if (!apns || !room.push) { send(ws, { type: 'push', ok: false, reason: apns ? 'token' : 'off' }); return true; }
+    try {
+      const { status } = await apns.send(request);
+      if (status === 410) room.push = undefined;
+      send(ws, { type: 'push', ok: status === 200, status });
+    } catch {
+      send(ws, { type: 'push', ok: false, reason: 'unreachable' });
+    }
+    return true;
   };
   // Two Sigil copies can share one pairing. Hand the ticket to another room whose host is live.
   const liveRoomFor = (ticket, except) => {
@@ -181,6 +249,10 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
             } else { take('phone'); room.peer = peer; send(room.host, { type: 'peer', peer }); }
             return;
           }
+          if (role === 'host' && room.host === ws && ('pushToken' in value || 'push' in value)) {
+            if ('pushToken' in value ? !registerPush(room, value) : !(await deliverPush(ws, room, value.push))) ws.close(1008);
+            return;
+          }
           const frame = {};
           if (typeof value.data === 'string' && value.data.length <= 100000) frame.data = value.data;
           else if (role === 'host' && typeof value.hello === 'string' && value.hello.length <= 64) frame.hello = value.hello;
@@ -229,13 +301,20 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
   timer.unref();
   return { server, close() {
     clearInterval(timer);
+    apns?.close?.();
     for (const id of rooms.keys()) deleteRoom(id);
     for (const ws of wss.clients) ws.terminate();
     wss.close(); server.close(); server.closeAllConnections();
   } };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const relay = createRelay({ publicOrigin: process.env.PUBLIC_ORIGIN });
+  const relay = createRelay({
+    publicOrigin: process.env.PUBLIC_ORIGIN,
+    apns: createAPNs({
+      key: process.env.APNS_KEY, keyId: process.env.APNS_KEY_ID, teamId: process.env.APNS_TEAM_ID,
+      topic: process.env.APNS_TOPIC,
+    }),
+  });
   relay.server.listen(Number(process.env.PORT || 3000), '0.0.0.0');
   process.on('SIGTERM', () => relay.close());
   process.on('SIGINT', () => relay.close());

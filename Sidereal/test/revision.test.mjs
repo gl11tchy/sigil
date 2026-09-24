@@ -13,7 +13,7 @@ async function bundle(t) {
   const path = await mkdtemp(`${tmpdir()}/sidereal-revision-`);
   t.after(() => rm(path, { recursive: true, force: true }));
   const target = pathToFileURL(`${path}/`);
-  for (const file of ['Dockerfile', 'package.json', 'package-lock.json', 'server.mjs', 'revision.mjs']) {
+  for (const file of ['Dockerfile', 'package.json', 'package-lock.json', 'server.mjs', 'apns.mjs', 'revision.mjs']) {
     await copyFile(new URL(file, root), new URL(file, target));
   }
   await cp(new URL('public/', root), new URL('public/', target), { recursive: true });
@@ -93,7 +93,7 @@ const { pathToFileURL } = require('node:url');
     '--project', 'test-project', '--environment', 'test-environment', '--service', 'test-service', '--detach'],
   { env: { ...process.env, PATH: `${path}:${process.env.PATH}`, SIGIL_TEST_CAPTURE: capture } });
   const result = JSON.parse(await readFile(capture));
-  assert.deepEqual(result.files.sort(), ['Dockerfile', 'package-lock.json', 'package.json', 'public', 'revision.json', 'revision.mjs', 'server.mjs']);
+  assert.deepEqual(result.files.sort(), ['Dockerfile', 'apns.mjs', 'package-lock.json', 'package.json', 'public', 'revision.json', 'revision.mjs', 'server.mjs']);
   assert.deepEqual(result.args.slice(2), ['--path-as-root', '--project', 'test-project', '--environment', 'test-environment', '--service', 'test-service', '--detach']);
   assert.equal(result.stamp.sourceSHA256, await sourceHash(root));
   await assert.rejects(readFile(`${result.args[1]}/revision.json`), { code: 'ENOENT' });
