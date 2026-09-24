@@ -10,6 +10,7 @@ import SwiftUI
 /// is nothing happening.
 struct TerminalScreen: View {
     let tab: TerminalTab
+    var isSelected = true
 
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -18,6 +19,12 @@ struct TerminalScreen: View {
     /// One radius for the screen. It matches the 6pt row radius stepped up for a
     /// container this large; anything rounder reads as a widget, not a display.
     static let radius: CGFloat = 10
+
+    /// Unselected screens stay in the tree at opacity 0, so only the selected one
+    /// runs the repeating pulse.
+    nonisolated static func pulses(isWorking: Bool, isSelected: Bool, reduceMotion: Bool) -> Bool {
+        isWorking && isSelected && !reduceMotion
+    }
 
     var body: some View {
         TerminalPane(tab: tab, background: palette.groundNSColor, cornerRadius: Self.radius)
@@ -33,20 +40,25 @@ struct TerminalScreen: View {
                     .strokeBorder(edgeColor, lineWidth: 1)
             )
             .animation(
-                isWorking && !reduceMotion
+                pulses
                     ? .easeInOut(duration: 1.4).repeatForever(autoreverses: true)
                     : .easeOut(duration: 0.2),
                 value: isPulsing
             )
-            .onAppear { isPulsing = isWorking && !reduceMotion }
-            .onChange(of: isWorking) { _, working in isPulsing = working && !reduceMotion }
-            .onChange(of: reduceMotion) { _, reduced in isPulsing = isWorking && !reduced }
+            .onAppear { isPulsing = pulses }
+            .onChange(of: isWorking) { _, _ in isPulsing = pulses }
+            .onChange(of: isSelected) { _, _ in isPulsing = pulses }
+            .onChange(of: reduceMotion) { _, _ in isPulsing = pulses }
             // The same 8pt gutter the sidebar and the screen's own inset use, so
             // the frame sits off the window edge by one consistent step.
             .padding(8)
     }
 
     private var isWorking: Bool { tab.activity == .working }
+
+    private var pulses: Bool {
+        Self.pulses(isWorking: isWorking, isSelected: isSelected, reduceMotion: reduceMotion)
+    }
 
     private var edgeColor: Color {
         guard isWorking else { return palette.hairline }
