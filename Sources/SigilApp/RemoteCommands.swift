@@ -2,16 +2,26 @@ import Foundation
 import SigilKit
 
 struct RemoteState: Codable, Sendable {
-    struct Tab: Codable, Sendable {
+    struct Tab: Codable, Sendable, Equatable {
         let id: String
         let title: String
         let status: String
+        /// The CLI's id and name, and the folder label the Mac's tab shows.
+        var provider: String?
+        var providerName: String?
+        var folder: String?
+        /// Only a saved Grok chat can be archived; other tabs can only close.
+        var canArchive: Bool?
     }
     let tabs: [Tab]
     let selectedTabID: String?
     let terminal: String
-    var capabilities: [String] = ["restart"]
+    var capabilities: [String] = ["restart", "screen", "sessionOps"]
     var tabsTruncated = false
+    /// The selected tab's rows, on `watch`, `rows` and in events. Absent elsewhere.
+    var screen: RemoteScreen?
+    /// This Mac's name, for a phone paired with more than one.
+    var mac: String?
 }
 
 struct RemoteChat: Codable, Sendable {
@@ -23,6 +33,8 @@ struct RemoteChat: Codable, Sendable {
 struct RemoteProject: Codable, Sendable {
     var name: String
     var folder: String
+    /// True when a new session there can start in a worktree.
+    var repository: Bool?
 }
 
 /// What the phone may choose when it starts a session, as the Mac's New Session sheet offers.
@@ -64,13 +76,16 @@ struct RemoteReply: Codable, Sendable {
     var projectsTruncated = false
     var options: RemoteNewSessionOptions?
     var project: RemoteProject?
+    /// True on a frame the Mac sent unasked. Its sequence is 0.
+    var event: Bool?
 }
 
 @MainActor
 enum RemoteCommands {
     static var uploads = RemoteUpload.Inbox()
 
-    static func execute(_ request: RemoteRequest, model: AppModel) -> RemoteReply {
+    /// `worktreeFolder` is a checkout `prepareWorktree` already made for this `new` request.
+    static func execute(_ request: RemoteRequest, model: AppModel, worktreeFolder: URL? = nil) -> RemoteReply {
         uploads.prune()
         var reply = RemoteReply(challenge: request.challenge, sequence: request.sequence)
         let tab = model.tabs.first { $0.id.uuidString == request.tabID }
@@ -79,6 +94,34 @@ enum RemoteCommands {
         case "select":
             guard let tab else { return failure(request, "This tab is closed.") }
             model.select(tab.id)
+        case "watch":
+            // The stream itself is started by RemoteControl; the reply carries the full window.
+            reply.state = snapshot(model, screen: model.selectedTab?.controller.remoteScreenWindow())
+            return fitting(reply)
+        case "rows":
+            guard let tab else { return failure(request, "This tab is closed.") }
+            guard let before = request.index, before > 0 else { return failure(request, "Nothing earlier.") }
+            let window = tab.controller.remoteScreenWindow(maxRows: 0, maxCharacters: 0)
+            let older = tab.controller.remoteScreenRows(before: before)
+            reply.state = snapshot(
+                model,
+                screen: RemoteScreen(gen: window.gen, first: window.first, end: window.end, rows: older))
+            return fitting(reply)
+        case "close":
+            guard let tab else { return failure(request, "This tab is closed.") }
+            model.closeTab(tab.id)
+        case "rename":
+            guard let tab else { return failure(request, "This tab is closed.") }
+            let name = (request.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard name.utf8.count <= 80,
+                !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+            else { return failure(request, "Keep the name under 80 characters.") }
+            model.renameFromRemote(tab, to: name)
+        case "archive":
+            guard let tab else { return failure(request, "This tab is closed.") }
+            guard model.archiveFromRemote(tab) else {
+                return failure(request, "Only saved Grok chats can be archived. Close this tab instead.")
+            }
         case "new":
             // A phone that names no provider gets the one the Mac's New Session sheet opens on.
             let provider: CLIProvider
@@ -97,7 +140,16 @@ enum RemoteCommands {
             let chosenEffort = takesModel ? request.effort : ""
             guard chosenModel.map(isModelName) ?? true, chosenEffort.map(AppSettings.effortOptions.contains) ?? true
             else { return failure(request, "Choose a model and effort from the list.") }
-            if let folder = request.text?.trimmingCharacters(in: .whitespacesAndNewlines), !folder.isEmpty {
+            if let worktreeFolder {
+                let remembered = model.settings.defaultDirectory
+                let focused = model.settings.focusedProjectPath
+                guard
+                    model.newTab(in: worktreeFolder, model: chosenModel, effort: chosenEffort, provider: provider)
+                        != nil
+                else { return failure(request, "Could not start a session. Check Sigil on your Mac.") }
+                if model.settings.defaultDirectory != remembered { model.settings.defaultDirectory = remembered }
+                if model.settings.focusedProjectPath != focused { model.settings.focusedProjectPath = focused }
+            } else if let folder = request.text?.trimmingCharacters(in: .whitespacesAndNewlines), !folder.isEmpty {
                 guard
                     let project = projectRecords(model).first(where: {
                         GrokPaths.canonicalPath($0.folder) == GrokPaths.canonicalPath(folder)
@@ -251,6 +303,37 @@ enum RemoteCommands {
         return fitting(reply)
     }
 
+    /// Makes the worktree a `new` request with `worktree: true` asks for, before
+    /// `execute` runs. Returns the checkout, or the reply to send instead.
+    enum Prepared {
+        case folder(URL?)
+        case failed(RemoteReply)
+    }
+
+    static func prepareWorktree(_ request: RemoteRequest, model: AppModel) async -> Prepared {
+        guard request.action == "new", request.worktree == true else { return .folder(nil) }
+        guard let folder = request.text?.trimmingCharacters(in: .whitespacesAndNewlines), !folder.isEmpty,
+            let project = projectRecords(model).first(where: {
+                GrokPaths.canonicalPath($0.folder) == GrokPaths.canonicalPath(folder)
+            })
+        else { return .failed(failure(request, "Choose a project folder.")) }
+        let directory = URL(fileURLWithPath: project.folder)
+        guard AppModel.isUsableDirectory(directory) else {
+            return .failed(failure(request, "Restore the folder on your Mac, then try again."))
+        }
+        guard SigilWorktree.isInRepository(directory) else {
+            return .failed(failure(request, "That project is not a git repository."))
+        }
+        do {
+            guard let checkout = try await SigilWorktree.create(for: directory) else {
+                return .failed(failure(request, "That project is not a git repository."))
+            }
+            return .folder(checkout)
+        } catch {
+            return .failed(failure(request, "Could not create a worktree: \(error.localizedDescription)"))
+        }
+    }
+
     private static let pageSize = 40
 
     private static func savedChats(_ model: AppModel, query: String) -> [GrokSession] {
@@ -295,7 +378,9 @@ enum RemoteCommands {
             canonicalPath: GrokPaths.canonicalPath
         ).compactMap { project in
             guard project.cwd.utf8.count <= 4_000, !project.cwd.isEmpty else { return nil }
-            return RemoteProject(name: bounded(project.name, bytes: 96), folder: project.cwd)
+            return RemoteProject(
+                name: bounded(project.name, bytes: 96), folder: project.cwd,
+                repository: SigilWorktree.isInRepository(URL(fileURLWithPath: project.cwd)))
         }
     }
 
@@ -388,6 +473,13 @@ enum RemoteCommands {
         if fits() { return reply }
         reply.earlier = nil
         if fits() { return reply }
+        // Older rows go first; the phone asks for them again when it scrolls up.
+        while !fits(), var screen = reply.state?.screen, screen.rows.count > 1 {
+            screen.rows.removeFirst(max(1, screen.rows.count / 4))
+            screen.first = screen.rows.first?.i ?? screen.end
+            reply.state?.screen = screen
+        }
+        if fits() { return reply }
         reply = shrinkTerminal(reply, bytes: 4_000)
         if fits() { return reply }
         reply = shrinkTerminal(reply, bytes: 0)
@@ -419,7 +511,9 @@ enum RemoteCommands {
             selectedTabID: state.selectedTabID,
             terminal: bytes == 0 ? "" : boundedSuffix(state.terminal, bytes: bytes),
             capabilities: state.capabilities,
-            tabsTruncated: state.tabsTruncated
+            tabsTruncated: state.tabsTruncated,
+            screen: state.screen,
+            mac: state.mac
         )
         return reply
     }
@@ -428,18 +522,41 @@ enum RemoteCommands {
         (try? JSONEncoder().encode(reply).count) ?? Int.max
     }
 
-    static func snapshot(_ model: AppModel) -> RemoteState {
-        let tabs = model.tabs.map { tab in
-            let status = tab.activity.statusName
-            return RemoteState.Tab(
-                id: tab.id.uuidString, title: bounded(model.title(for: tab), bytes: 96), status: status)
-        }
-        return RemoteState(
-            tabs: visibleTabs(tabs, selectedID: model.selectedTab?.id.uuidString),
+    static func snapshot(_ model: AppModel, screen: RemoteScreen? = nil, terminal: Bool = true) -> RemoteState {
+        RemoteState(
+            tabs: visibleTabs(tabRecords(model), selectedID: model.selectedTab?.id.uuidString),
             selectedTabID: model.selectedTab?.id.uuidString,
-            terminal: boundedSuffix(model.selectedTab?.controller.remoteSnapshot() ?? "", bytes: 12_000),
-            tabsTruncated: tabs.count > 100
+            terminal: terminal
+                ? boundedSuffix(model.selectedTab?.controller.remoteSnapshot() ?? "", bytes: 12_000) : "",
+            tabsTruncated: model.tabs.count > 100,
+            screen: screen,
+            mac: macName
         )
+    }
+
+    static func snapshot(_ model: AppModel, screen window: RemoteScreenWindow?) -> RemoteState {
+        let screen = window.map {
+            RemoteScreen(
+                gen: $0.gen, alt: $0.alt ? true : nil, first: $0.first, end: $0.end, rows: $0.rows,
+                palette: $0.palette, fg: $0.fg, bg: $0.bg)
+        }
+        return snapshot(model, screen: screen, terminal: false)
+    }
+
+    static func tabRecords(_ model: AppModel) -> [RemoteState.Tab] {
+        model.tabs.map { tab in
+            RemoteState.Tab(
+                id: tab.id.uuidString, title: bounded(model.title(for: tab), bytes: 96),
+                status: tab.activity.statusName, provider: tab.spec.provider.rawValue,
+                providerName: tab.spec.provider.name,
+                folder: bounded(
+                    tab.workingDirectory.sigilWorktreeLabel ?? tab.workingDirectory.lastPathComponent, bytes: 96),
+                canArchive: model.session(for: tab) != nil)
+        }
+    }
+
+    static var macName: String {
+        bounded(Host.current().localizedName ?? "Mac", bytes: 64)
     }
 
     static func visibleTabs(_ tabs: [RemoteState.Tab], selectedID: String?) -> [RemoteState.Tab] {

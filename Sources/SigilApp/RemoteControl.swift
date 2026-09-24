@@ -23,6 +23,17 @@ final class RemoteControl {
     @ObservationIgnored private var network: URLSession?
     @ObservationIgnored private let store: any RemotePairingStore
     @ObservationIgnored private let notifications: NotificationCenter
+    /// The phone asked to watch: changes go out as events until it leaves.
+    @ObservationIgnored private var watcher: Watcher?
+    @ObservationIgnored private var stream = RemoteScreenStream()
+    @ObservationIgnored private var changeTask: Task<Void, Never>?
+    @ObservationIgnored private var lastSentTabs: [RemoteState.Tab]?
+    @ObservationIgnored private var lastSentSelection: String?
+    @ObservationIgnored private weak var watchedModel: AppModel?
+    /// Changes are batched this long, so a burst of output is one frame.
+    static let changeDelay: Duration = .milliseconds(80)
+    /// Rows per event frame, so a full window stays under the sealed-frame cap.
+    static let rowsPerEvent = 60
 
     /// Posted after a revoke, so another running copy of Sigil stops using the pairing.
     static let revokedNotification = Notification.Name("com.gl11tchy.sigil.remote.revoked")
@@ -177,12 +188,14 @@ final class RemoteControl {
                         } else if frame.type == "peer", let id = frame.peer, id.count <= 64 {
                             if retireRoom { break }
                             self.peer = id
+                            self.stopWatching()
                             session.resetConnection()
                             // A new peer is not the phone until it authenticates.
                             self.status = session.isPaired ? "Phone disconnected" : "Scan to connect"
                             try await self.send(Frame(peer: id, hello: session.challenge), socket: socket)
                         } else if frame.type == "left", frame.peer == self.peer {
                             self.peer = nil
+                            self.stopWatching()
                             self.status = session.isPaired ? "Phone disconnected" : "Scan to connect"
                             if retireRoom { break }
                         } else if let id = frame.peer, id == self.peer, let ciphertext = frame.data {
@@ -212,10 +225,20 @@ final class RemoteControl {
                                         self.error = unsaved
                                     }
                                 }
-                                if command.action == "options" {
-                                    await RemoteCommands.refreshModels(model: model)
+                                var reply: RemoteReply
+                                if command.action == "watch" {
+                                    reply = self.startWatching(
+                                        command, model: model, socket: socket, peer: id, session: session)
+                                } else {
+                                    if command.action == "options" {
+                                        await RemoteCommands.refreshModels(model: model)
+                                    }
+                                    switch await RemoteCommands.prepareWorktree(command, model: model) {
+                                    case .failed(let failed): reply = failed
+                                    case .folder(let folder):
+                                        reply = RemoteCommands.execute(command, model: model, worktreeFolder: folder)
+                                    }
                                 }
-                                var reply = RemoteCommands.execute(command, model: model)
                                 reply.ticket = session.ticket
                                 let encrypted = try RemoteCrypto.seal(
                                     reply, key: session.deviceKey!, direction: "mac")
@@ -237,7 +260,9 @@ final class RemoteControl {
                     // Reached only to retire the room. The phone reconnects by ticket.
                     socket.cancel(with: .goingAway, reason: nil)
                     self.peer = nil
+                    self.stopWatching()
                 } catch {
+                    self.stopWatching()
                     self.socket?.cancel(with: .goingAway, reason: nil)
                     guard self.generation == current, !Task.isCancelled else { return }
                     failures += 1
@@ -264,6 +289,7 @@ final class RemoteControl {
         generation = UUID()
         task?.cancel()
         task = nil
+        stopWatching()
         if revoke, let socket, let peer {
             // The relay forwards this and closes the phone, which then stops
             // reconnecting and asks for a new scan. A plain stop stays silent.
@@ -287,6 +313,121 @@ final class RemoteControl {
             distributed.postNotificationName(Self.revokedNotification, object: nil, deliverImmediately: true)
         } else {
             notifications.post(name: Self.revokedNotification, object: nil)
+        }
+    }
+
+    // MARK: Events
+
+    private struct Watcher {
+        let socket: URLSessionWebSocketTask
+        let peer: String
+        let challenge: String
+        let deviceKey: String
+    }
+
+    /// Any change the phone should see: output, status, tabs, selection, titles.
+    func noteChange() {
+        guard watcher != nil, changeTask == nil else { return }
+        changeTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: Self.changeDelay)
+            guard let self, !Task.isCancelled else { return }
+            self.changeTask = nil
+            await self.flushChanges()
+        }
+    }
+
+    private func startWatching(
+        _ command: RemoteRequest, model: AppModel, socket: URLSessionWebSocketTask, peer: String,
+        session: RemoteSession
+    ) -> RemoteReply {
+        guard let deviceKey = session.deviceKey else {
+            return RemoteReply(
+                challenge: command.challenge, sequence: command.sequence, ok: false, error: "Not paired.")
+        }
+        watcher = Watcher(socket: socket, peer: peer, challenge: session.challenge, deviceKey: deviceKey)
+        watchedModel = model
+        stream.reset()
+        let window = model.selectedTab?.controller.remoteScreenWindow()
+        let selected = model.selectedTab?.id.uuidString
+        // Prime the stream with what the reply carries, so the next event is a diff.
+        if let window { _ = stream.update(window, tabID: selected, force: true) }
+        var reply = RemoteReply(challenge: command.challenge, sequence: command.sequence)
+        reply.state = RemoteCommands.snapshot(model, screen: window)
+        reply = RemoteCommands.fitting(reply)
+        lastSentTabs = reply.state?.tabs
+        lastSentSelection = selected
+        observeModel(model)
+        return reply
+    }
+
+    private func stopWatching() {
+        watcher = nil
+        watchedModel = nil
+        changeTask?.cancel()
+        changeTask = nil
+        stream.reset()
+        lastSentTabs = nil
+        lastSentSelection = nil
+    }
+
+    /// Tabs, selection and titles are observable; output and status arrive through the tab hooks.
+    private func observeModel(_ model: AppModel) {
+        withObservationTracking {
+            _ = model.tabs.map { model.title(for: $0) }
+            _ = model.selectedTabID
+        } onChange: { [weak self, weak model] in
+            Task { @MainActor in
+                guard let self, let model, self.watchedModel === model else { return }
+                self.noteChange()
+                self.observeModel(model)
+            }
+        }
+    }
+
+    private func flushChanges() async {
+        guard let watcher, let model = watchedModel else { return }
+        let tabs = RemoteCommands.visibleTabs(
+            RemoteCommands.tabRecords(model), selectedID: model.selectedTab?.id.uuidString)
+        let selected = model.selectedTab?.id.uuidString
+        let window = model.selectedTab?.controller.remoteScreenWindow() ?? .empty
+        let screen = stream.update(window, tabID: selected)
+        let tabsChanged = tabs != lastSentTabs || selected != lastSentSelection
+        guard tabsChanged || screen != nil else { return }
+        lastSentTabs = tabs
+        lastSentSelection = selected
+        var frames: [RemoteReply] = []
+        var base = RemoteReply(challenge: watcher.challenge, sequence: 0, event: true)
+        base.state = RemoteState(
+            tabs: tabs, selectedTabID: selected, terminal: "", tabsTruncated: model.tabs.count > 100,
+            screen: nil, mac: RemoteCommands.macName)
+        if let screen, screen.rows.count > Self.rowsPerEvent {
+            // The first frame carries the bounds and theme; the rest only rows.
+            var chunks = stride(from: 0, to: screen.rows.count, by: Self.rowsPerEvent).map {
+                Array(screen.rows[$0..<min($0 + Self.rowsPerEvent, screen.rows.count)])
+            }
+            var first = base
+            first.state?.screen = screen
+            first.state?.screen?.rows = chunks.removeFirst()
+            frames.append(first)
+            for chunk in chunks {
+                var next = base
+                next.state?.screen = RemoteScreen(
+                    gen: screen.gen, alt: screen.alt, first: screen.first, end: screen.end, rows: chunk)
+                frames.append(next)
+            }
+        } else {
+            base.state?.screen = screen
+            frames.append(base)
+        }
+        for frame in frames {
+            guard self.watcher?.peer == watcher.peer else { return }
+            do {
+                let encrypted = try RemoteCrypto.seal(frame, key: watcher.deviceKey, direction: "mac")
+                try await send(Frame(peer: watcher.peer, data: encrypted), socket: watcher.socket)
+            } catch {
+                // The socket loop notices a dead connection and reconnects; the phone re-watches.
+                return
+            }
         }
     }
 

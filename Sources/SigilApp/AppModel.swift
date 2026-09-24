@@ -1501,10 +1501,43 @@ final class AppModel {
 
     /// The conversation on screen, when the store knows it. Menu-bar Rename uses this.
     func sessionForSelectedTab() -> GrokSession? {
-        guard let tab = selectedTab, let id = tab.sessionID else { return nil }
+        guard let tab = selectedTab else { return nil }
+        return session(for: tab)
+    }
+
+    /// The saved Grok chat behind `tab`, when the store knows it.
+    func session(for tab: TerminalTab) -> GrokSession? {
+        guard let id = tab.sessionID else { return nil }
         return store.sessions.first {
             $0.id == id && samePath($0.cwd, tab.workingDirectory.path)
         }
+    }
+
+    /// Output and status changes reach the phone through the remote stream.
+    private func wireRemoteStream(_ tab: TerminalTab) {
+        tab.onActivityChange = { [weak self] in self?.remoteControl.noteChange() }
+        tab.controller.onRemoteOutput = { [weak self, weak tab] in
+            guard let self, let tab, self.selectedTabID == tab.id else { return }
+            self.remoteControl.noteChange()
+        }
+    }
+
+    /// The phone's rename. A saved chat keeps the name; any other tab keeps it
+    /// for as long as it is open. An empty name restores the default.
+    func renameFromRemote(_ tab: TerminalTab, to name: String) {
+        if let session = session(for: tab) {
+            rename(session, to: name)
+        } else {
+            tab.sessionTitle = name.isEmpty ? nil : name
+        }
+    }
+
+    /// The phone's archive: never asks, because a modal alert would block the
+    /// remote loop. Returns false for a tab with no saved chat to archive.
+    func archiveFromRemote(_ tab: TerminalTab) -> Bool {
+        guard let session = session(for: tab) else { return false }
+        archiveWithoutAsking([session])
+        return true
     }
 
     /// A tab's label. New sessions start out named after their folder; once the CLI
@@ -1617,6 +1650,7 @@ final class AppModel {
         tab.onSettle = { [weak self, weak tab] in
             if let self, let tab { self.restartForThemeWhenSettled(tab) }
         }
+        wireRemoteStream(tab)
         tabs.append(tab)
         selectedTabID = tab.id
         if !isRestoringTabs { clearDeferredSelection() }
@@ -1695,6 +1729,7 @@ final class AppModel {
         tab.onSettle = { [weak self, weak tab] in
             if let self, let tab { self.restartForThemeWhenSettled(tab) }
         }
+        wireRemoteStream(tab)
         tab.sessionTitle = old.sessionTitle
         tab.restoreUnseenActivity(from: old)
         let newID = tab.id

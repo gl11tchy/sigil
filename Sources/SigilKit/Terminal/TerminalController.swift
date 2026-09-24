@@ -22,6 +22,13 @@ public final class TerminalController {
     public var onUserSubmit: (() -> Void)?
     /// Called when the child sets the terminal title (the CLI reports its state here).
     public var onTitleChange: ((String) -> Void)?
+    /// Called on every child write, uncoalesced, so a remote stream can send the change at once.
+    public var onRemoteOutput: (() -> Void)?
+    /// The theme in force, sent to the phone with a full screen window.
+    public private(set) var theme: TerminalTheme
+    private var screenGeneration = 0
+    private var screenRowTotal = 0
+    private var screenWasAlternate = false
 
     private let terminalView: GrokProcessTerminalView
     private let childPid = OSAllocatedUnfairLock(initialState: pid_t(0))
@@ -48,10 +55,12 @@ public final class TerminalController {
         )
         self.terminalView = terminal
         self.view = terminal
+        self.theme = theme
         terminal.optionAsMetaKey = false
         terminal.processDelegate = self
         terminal.onChildOutput = { [weak self] in
             self?.noteActivity()
+            self?.onRemoteOutput?()
         }
         terminal.onUserSubmit = { [weak self] in
             self?.onUserSubmit?()
@@ -223,6 +232,94 @@ public final class TerminalController {
     /// snapshot: the report has to stay readable, not be complete.
     public func crashSnapshot() -> String { accessibilitySnapshot(maxCharacters: 4_000) }
 
+    /// The rows the phone shows, with their styles, addressed by buffer-absolute
+    /// index. The window is the newest rows up to `maxCharacters` of text.
+    public func remoteScreenWindow(maxRows: Int = 400, maxCharacters: Int = 12_000) -> RemoteScreenWindow {
+        let terminal = terminalView.getTerminal()
+        let count = terminalRowCount()
+        let base = terminal.buffer.totalLinesTrimmed
+        let alternate = terminal.isCurrentBufferAlternate
+        // A reset or a screen switch restarts the index space.
+        if base + count < screenRowTotal || alternate != screenWasAlternate {
+            screenGeneration += 1
+        }
+        screenRowTotal = base + count
+        screenWasAlternate = alternate
+        var rows: [RemoteScreen.Row] = []
+        var characters = 0
+        var index = count - 1
+        while index >= 0, rows.count < maxRows, characters < maxCharacters {
+            if let row = styledRow(at: index, absolute: base + index) {
+                characters += row.t.count + 1
+                rows.append(row)
+            }
+            index -= 1
+        }
+        rows.reverse()
+        // Rows older than the window belong to history, so they are not resent.
+        return RemoteScreenWindow(
+            gen: screenGeneration, alt: alternate, first: rows.first?.i ?? base + count, end: base + count,
+            rows: rows, palette: theme.ansiHex.map(RemoteScreen.hex), fg: RemoteScreen.hex(theme.foregroundHex),
+            bg: RemoteScreen.hex(theme.backgroundHex))
+    }
+
+    /// Older rows before `absolute`, for the phone's scroll-up. Same shape as the window.
+    public func remoteScreenRows(before absolute: Int, maxRows: Int = 200, maxCharacters: Int = 12_000)
+        -> [RemoteScreen.Row]
+    {
+        let base = terminalView.getTerminal().buffer.totalLinesTrimmed
+        var rows: [RemoteScreen.Row] = []
+        var characters = 0
+        var index = min(absolute - base, terminalRowCount()) - 1
+        while index >= 0, rows.count < maxRows, characters < maxCharacters {
+            if let row = styledRow(at: index, absolute: base + index) {
+                characters += row.t.count + 1
+                rows.append(row)
+            }
+            index -= 1
+        }
+        return rows.reversed()
+    }
+
+    /// One row as the phone draws it: text plus style runs over Character offsets.
+    private func styledRow(at row: Int, absolute: Int) -> RemoteScreen.Row? {
+        let terminal = terminalView.getTerminal()
+        guard let line = terminal.bufferLine(atRow: row) else { return nil }
+        let limit = line.getTrimmedLength()
+        var text = ""
+        var runs = RemoteStyleRuns()
+        var column = 0
+        var offset = 0
+        while column < limit {
+            let cell = line[column]
+            let character = terminal.getCharacter(for: cell)
+            if character == "\0", column > 0, line[column - 1].width == 2 {
+                column += 1
+                continue
+            }
+            let scalar = character == "\0" ? " " : character
+            let safe = scalar.unicodeScalars.allSatisfy { $0 == "\t" || $0.properties.generalCategory != .control }
+            text.append(safe ? scalar : " ")
+            runs.append(Self.styleCell(cell.attribute), at: offset)
+            offset += 1
+            column += max(Int(cell.width), 1)
+        }
+        return RemoteScreen.Row(i: absolute, t: text, w: line.isWrapped ? true : nil, s: runs.finish())
+    }
+
+    private static func styleCell(_ attribute: Attribute) -> RemoteStyleRuns.Cell {
+        RemoteStyleRuns.Cell(
+            fg: remoteColor(attribute.fg), bg: remoteColor(attribute.bg), flags: Int(attribute.style.rawValue))
+    }
+
+    private static func remoteColor(_ color: Attribute.Color) -> Int {
+        switch color {
+        case .defaultColor, .defaultInvertedColor: return RemoteScreen.defaultColor
+        case .ansi256(let code): return Int(code)
+        case .trueColor(let red, let green, let blue): return RemoteScreen.trueColor(red: red, green: green, blue: blue)
+        }
+    }
+
     /// Readable text immediately before the phone's already loaded window.
     /// One slice is at most 12_000 characters. This does not widen `remoteSnapshot`.
     public func remoteEarlierSlice(
@@ -284,6 +381,7 @@ public final class TerminalController {
     }
 
     public func apply(theme: TerminalTheme) {
+        self.theme = theme
         terminalView.installColors(theme.ansi)
         terminalView.nativeBackgroundColor = Self.nsColor(theme.background)
         terminalView.nativeForegroundColor = Self.nsColor(theme.foreground)

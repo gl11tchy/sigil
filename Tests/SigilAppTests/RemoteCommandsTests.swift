@@ -606,7 +606,7 @@ struct RemoteCommandsTests {
 }
 
 @MainActor
-private final class PhoneCommandFixture {
+final class PhoneCommandFixture {
     let root: URL
     let executable: URL
     let settings: AppSettings
@@ -686,11 +686,141 @@ private final class PhoneCommandFixture {
 }
 
 @MainActor
-private final class AlertLog {
+final class AlertLog {
     var count = 0
 }
 
 private func encoded(_ reply: RemoteReply) throws -> String {
     let data = try JSONEncoder().encode(reply)
     return String(decoding: data, as: UTF8.self)
+}
+
+@Suite(.serialized)
+struct RemoteSessionOpsTests {
+    @Test @MainActor func tabsCarryProviderFolderAndArchiveability() throws {
+        let fixture = try PhoneCommandFixture()
+        defer { fixture.cleanup() }
+        let folder = try fixture.directory("ops-folder")
+        let tab = try #require(fixture.model.newTab(in: folder))
+        let reply = fixture.command("state")
+        let record = try #require(reply.state?.tabs.first { $0.id == tab.id.uuidString })
+        #expect(record.provider == "grokBuild")
+        #expect(record.providerName == "Grok Build")
+        #expect(record.folder == "ops-folder")
+        // No summary has been written, so the store does not know this chat yet.
+        #expect(record.canArchive == false)
+        #expect(reply.state?.capabilities.contains("screen") == true)
+        #expect(reply.state?.capabilities.contains("sessionOps") == true)
+        #expect(reply.state?.mac?.isEmpty == false)
+    }
+
+    @Test @MainActor func closeRenameAndArchiveFollowTheMac() throws {
+        let fixture = try PhoneCommandFixture()
+        defer { fixture.cleanup() }
+        let folder = try fixture.directory("ops-folder")
+        fixture.settings.defaultProvider = .claudeCode
+        setenv("SHELL", "/bin/sh", 1)
+        let tab = try #require(fixture.model.newTab(in: folder, provider: .claudeCode))
+        let id = tab.id.uuidString
+
+        #expect(fixture.command("rename", tabID: id, name: "  Phone name  ").ok)
+        #expect(fixture.model.title(for: tab) == "Phone name")
+        #expect(fixture.command("rename", tabID: id, name: "").ok)
+        #expect(fixture.model.title(for: tab) == "Claude Code · ops-folder")
+        #expect(!fixture.command("rename", tabID: id, name: String(repeating: "x", count: 81)).ok)
+        #expect(!fixture.command("rename", tabID: id, name: "bad\u{7}name").ok)
+
+        // A tab with no saved chat cannot be archived, only closed.
+        let archived = fixture.command("archive", tabID: id)
+        #expect(!archived.ok)
+        #expect(archived.error?.contains("Close this tab") == true)
+        #expect(fixture.model.tabs.contains { $0.id == tab.id })
+
+        #expect(fixture.command("close", tabID: id).ok)
+        #expect(!fixture.model.tabs.contains { $0.id == tab.id })
+        #expect(!fixture.command("close", tabID: id).ok)
+        #expect(fixture.alerts.count == 0)
+    }
+
+    @Test @MainActor func archiveHidesASavedChatAndClosesItsTab() async throws {
+        let fixture = try PhoneCommandFixture()
+        defer { fixture.cleanup() }
+        let folder = try fixture.directory("archive-folder")
+        fixture.settings.showEmptySessions = true
+        let tab = try #require(fixture.model.newTab(in: folder))
+        let sessionID = try #require(tab.sessionID)
+        try fixture.writeSession(
+            id: sessionID, cwd: folder.path, summary: "Archive me", updatedAt: "2026-08-03T00:00:00Z", secret: "S")
+        await fixture.store.reload()
+        let before = fixture.command("state")
+        #expect(before.state?.tabs.first?.canArchive == true)
+        #expect(fixture.command("archive", tabID: tab.id.uuidString).ok)
+        #expect(fixture.model.tabs.isEmpty)
+        let session = try #require(fixture.model.store.sessions.first { $0.id == sessionID })
+        #expect(fixture.model.isArchived(session))
+        #expect(fixture.alerts.count == 0)
+    }
+
+    @Test @MainActor func watchAndRowsReturnStyledScreens() async throws {
+        let fixture = try PhoneCommandFixture()
+        defer { fixture.cleanup() }
+        let folder = try fixture.directory("screen-folder")
+        let script =
+            "#!/bin/sh\nfor i in $(seq 1 30); do echo \"row $i\"; done\nprintf '\\033[32mGREEN\\033[0m\\n'\nsleep 60\n"
+        try Data(script.utf8).write(to: fixture.executable)
+        let tab = try #require(fixture.model.newTab(in: folder))
+        for _ in 0..<200 {
+            if tab.controller.remoteSnapshot().contains("GREEN") { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let watched = fixture.command("watch")
+        let screen = try #require(watched.state?.screen)
+        #expect(watched.state?.terminal == "")
+        #expect(screen.palette?.count == 16)
+        let green = try #require(screen.rows.first { $0.t == "GREEN" })
+        #expect(green.s == [[0, 5, 2, -1, 0]])
+        #expect(screen.rows.contains { $0.t == "row 30" })
+        #expect(screen.end == screen.rows.last!.i + 1)
+
+        let older = fixture.command("rows", tabID: tab.id.uuidString, index: green.i)
+        let rows = try #require(older.state?.screen?.rows)
+        #expect(rows.last?.t == "row 30")
+        #expect(rows.last?.i == green.i - 1)
+        #expect(older.state?.screen?.gen == screen.gen)
+        #expect(!fixture.command("rows", tabID: tab.id.uuidString, index: 0).ok)
+    }
+
+    @Test @MainActor func projectsSayWhetherAWorktreeCanStartThere() async throws {
+        let fixture = try PhoneCommandFixture()
+        defer { fixture.cleanup() }
+        let repo = try fixture.directory("repo-folder")
+        let plain = try fixture.directory("plain-folder")
+        fixture.settings.showWorktreeSessions = true
+        try FileManager.default.createDirectory(
+            at: repo.appendingPathComponent(".git"), withIntermediateDirectories: true)
+        try fixture.writeSession(
+            id: "r", cwd: repo.path, summary: "Repo", updatedAt: "2026-08-03T00:00:00Z", secret: "S")
+        try fixture.writeSession(
+            id: "p", cwd: plain.path, summary: "Plain", updatedAt: "2026-08-02T00:00:00Z", secret: "S")
+        await fixture.store.reload()
+        let projects = try #require(fixture.command("projects").projects)
+        #expect(projects.first { $0.folder == repo.path }?.repository == true)
+        #expect(projects.first { $0.folder == plain.path }?.repository == false)
+
+        // Not a repository: the worktree request fails before anything starts.
+        let request = RemoteRequest(
+            challenge: "test", sequence: 1, action: "new", text: plain.path, worktree: true)
+        guard case .failed(let failed) = await RemoteCommands.prepareWorktree(request, model: fixture.model) else {
+            Issue.record("expected a failure for a plain folder")
+            return
+        }
+        #expect(failed.error == "That project is not a git repository.")
+        guard
+            case .folder(nil) = await RemoteCommands.prepareWorktree(
+                RemoteRequest(challenge: "test", sequence: 1, action: "new", text: plain.path), model: fixture.model)
+        else {
+            Issue.record("a plain new request needs no worktree")
+            return
+        }
+    }
 }

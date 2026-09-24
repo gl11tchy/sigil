@@ -48,8 +48,11 @@ final class TerminalTab: Identifiable {
         didSet {
             guard activity != oldValue else { return }
             workingSince = activity == .working ? Date() : nil
+            onActivityChange?()
         }
     }
+    /// Called after `activity` changes, so the phone stream can send the new status.
+    var onActivityChange: (() -> Void)?
     /// When the turn in flight started, for the elapsed time beside "Working".
     private(set) var workingSince: Date?
     /// Set when a turn finishes while this tab is in the background.
