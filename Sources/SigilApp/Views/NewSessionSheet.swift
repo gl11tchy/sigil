@@ -20,6 +20,12 @@ enum NewSessionLaunch: Equatable {
         return (model, effort)
     }
 
+    /// The Grok path whose model list the sheet loads. Nil for other
+    /// providers, which have no model menu, so `grok models` never runs.
+    static func modelListPath(provider: CLIProvider, executablePath: String) -> String? {
+        showsModelAndEffort(provider) ? executablePath : nil
+    }
+
     static func action(selected: CLIProvider, tapped: CLIProvider) -> Action {
         selected == tapped ? .start(tapped) : .select(tapped)
     }
@@ -55,15 +61,30 @@ struct NewSessionSheet: View {
         _startsInWorktree = State(initialValue: model.settings.startsInWorktree)
     }
 
-    private var recents: [URL] {
+    /// Read once when the sheet opens; it resolves every folder on disk.
+    @State private var recents: [URL] = []
+
+    /// Distinct folders of recent conversations, filtered like the sidebar so
+    /// agent worktrees, subagents and archived chats do not crowd out projects.
+    static func recentDirectories(
+        in model: AppModel, canonicalPath: (String) -> String = GrokPaths.canonicalPath
+    ) -> [URL] {
+        var seenCwds = Set<String>()
         var seen = Set<String>()
-        return model.store.sessions.compactMap { session in
-            let url = URL(fileURLWithPath: GrokPaths.canonicalPath(session.projectPath))
-            guard seen.insert(url.path).inserted else { return nil }
-            return isDirectory(url) ? url : nil
+        var result: [URL] = []
+        let settings = model.settings
+        for session in model.store.sessions {
+            if !settings.showWorktreeSessions, isEphemeral(path: session.cwd) { continue }
+            if !settings.showSubagentSessions, session.isSubagent { continue }
+            if model.isArchived(session) { continue }
+            // Resolve each stored folder once, and stop when the list is full.
+            guard seenCwds.insert(session.projectPath).inserted else { continue }
+            let url = URL(fileURLWithPath: canonicalPath(session.projectPath))
+            guard seen.insert(url.path).inserted, AppModel.isUsableDirectory(url) else { continue }
+            result.append(url)
+            if result.count == 8 { break }
         }
-        .prefix(8)
-        .map { $0 }
+        return result
     }
 
     private var recentChoices: [URL] {
@@ -181,12 +202,18 @@ struct NewSessionSheet: View {
                 SigilWorktree.projectPath(of: initial.path)
                 .map { URL(fileURLWithPath: $0) }
                 .flatMap { isDirectory($0) ? $0 : nil } ?? initial
+            recents = Self.recentDirectories(in: model)
             modelName = model.settings.model.trimmingCharacters(in: .whitespacesAndNewlines)
             effort = model.settings.effort
         }
-        .task(id: model.settings.executablePath) {
-            let found = await GrokModelCatalog.load(executable: model.settings.executableURL)
-            if !found.isEmpty { models = found }
+        .task(
+            id: NewSessionLaunch.modelListPath(
+                provider: provider, executablePath: model.settings.executablePath)
+        ) {
+            guard NewSessionLaunch.showsModelAndEffort(provider) else { return }
+            if let found = await GrokModelCatalog.menuModels(executable: model.settings.executableURL) {
+                models = found
+            }
         }
     }
 
