@@ -77,25 +77,20 @@ final class RightPanel {
     // MARK: - Visibility
 
     /// Opens the panel on `mode`, or closes it when that tool is already showing.
-    func toggle(_ requested: RightPanelMode? = nil, in directory: URL) {
+    func toggle(_ requested: RightPanelMode? = nil) {
         if let requested, isVisible, requested != mode {
             mode = requested
-            prepare(in: directory)
             return
         }
         isVisible.toggle()
         if let requested { mode = requested }
-        if isVisible { prepare(in: directory) }
     }
-
-    /// Starts whatever the visible tool needs and has not got yet.
-    func prepare(in _: URL) {}
 
     // MARK: - Shell
 
     /// Creates and starts the scratch shell in `directory`. A shell that is already
     /// running is left alone, even if the selected tab has since moved folder.
-    func startShellIfNeeded(in directory: URL, theme: TerminalTheme = .grokNight, fontSize: CGFloat = 13) {
+    func startShellIfNeeded(in directory: URL, theme: TerminalTheme, fontSize: CGFloat) {
         if let shell, shell.isRunning { return }
         shell?.terminateAndWait()
         let controller = TerminalController(theme: theme, fontSize: fontSize)
@@ -105,7 +100,7 @@ final class RightPanel {
     }
 
     /// Kills the shell and starts a fresh one in `directory`.
-    func restartShell(in directory: URL, theme: TerminalTheme = .grokNight, fontSize: CGFloat = 13) {
+    func restartShell(in directory: URL, theme: TerminalTheme, fontSize: CGFloat) {
         shell?.terminateAndWait()
         shell = TerminalController(theme: theme, fontSize: fontSize)
         shellDirectory = directory
