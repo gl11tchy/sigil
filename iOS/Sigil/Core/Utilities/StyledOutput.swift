@@ -25,8 +25,10 @@ struct StyledText: Equatable {
 
 /// Builds the output the session screen draws, with the terminal's colours.
 enum StyledOutput {
-    /// Raw mode: every row as the Mac drew it.
+    /// Raw mode: every row as the Mac drew it, without the blank rows under the cursor.
     static func raw(_ lines: [ScreenLine]) -> StyledText {
+        var lines = lines
+        while let last = lines.last, last.text.trimmingCharacters(in: .whitespaces).isEmpty { lines.removeLast() }
         var text = ""
         var spans: [StyledSpan] = []
         var offset = 0

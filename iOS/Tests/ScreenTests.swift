@@ -51,8 +51,8 @@ enum ScreenTests {
             ScreenLine(index: 2, text: "next"),
         ]
         try Expect.equal(ScreenModel.text(of: lines), "long line part two\nnext", "wrap joins")
-        let raw = StyledOutput.raw(lines)
-        try Expect.equal(raw.text, "long line part two\nnext", "raw text")
+        let raw = StyledOutput.raw(lines + [ScreenLine(index: 3, text: ""), ScreenLine(index: 4, text: "  ")])
+        try Expect.equal(raw.text, "long line part two\nnext", "raw text drops the blank rows under the cursor")
     }
 
     static func rawSpansCountUTF16Units() throws {
@@ -143,6 +143,30 @@ enum ScreenTests {
             """
         let short = try JSONDecoder().decode(RemoteReply.self, from: Data(badRun.utf8))
         try Expect.true((try? short.state?.validate()) == nil, "a run needs five numbers")
+    }
+
+    static func decodesAPrompt() throws {
+        let json = """
+            {"challenge":"c","sequence":1,"state":{"tabs":[],"selectedTabID":null,"terminal":"",
+            "prompt":{"id":"abc123","question":"Do you want to proceed?","style":"menu","yes":"1","no":"3",
+            "choices":[{"label":"Yes","key":"1"},{"label":"Yes, always","key":"2"},{"label":"No (esc)","key":"3"}]}}}
+            """
+        let reply = try JSONDecoder().decode(RemoteReply.self, from: Data(json.utf8))
+        let state = try Expect.notNil(reply.state, "state")
+        try state.validate()
+        let prompt = try Expect.notNil(state.prompt, "prompt")
+        try Expect.equal(prompt.style, .menu, "style")
+        try Expect.equal(prompt.id, "abc123", "id")
+        try Expect.equal(prompt.choices.map(\.key), ["1", "2", "3"], "keys")
+        try Expect.equal(prompt.yes, "1", "yes")
+        let odd = json.replacingOccurrences(of: "\"menu\"", with: "\"wheel\"")
+        let unknown = try JSONDecoder().decode(RemoteReply.self, from: Data(odd.utf8))
+        try Expect.equal(unknown.state?.prompt?.style, .unknown("wheel"), "an unknown style is kept as is")
+        let tooMany = json.replacingOccurrences(
+            of: "{\"label\":\"Yes\",\"key\":\"1\"},",
+            with: String(repeating: "{\"label\":\"x\",\"key\":\"9\"},", count: 8))
+        let crowded = try JSONDecoder().decode(RemoteReply.self, from: Data(tooMany.utf8))
+        try Expect.true((try? crowded.state?.validate()) == nil, "ten choices are rejected")
     }
 
     static func requestCarriesWorktree() throws {

@@ -73,6 +73,11 @@ struct RemoteRequest: Codable, Sendable {
   `worktree: true` makes a worktree first. Tabs report `provider`,
   `providerName`, `folder` and `canArchive`; projects report `repository`;
   state reports `mac` and the capabilities `screen` and `sessionOps`.
+- `prompt` in state and events: an approval question read from the last screen
+  rows (numbered menus such as Claude Code's and Codex's, or `[y/n]` questions),
+  with `choices`, `yes` and `no` keys. `answer` (`text` = key) types the digit,
+  or the letter and Return, only after reading the screen again and finding the
+  same kind of prompt; anything else is refused.
 - Spec: `docs/phone-companion-2-spec.md`.
 
 ## Verification and boundaries

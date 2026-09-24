@@ -57,6 +57,7 @@ enum TestMain {
         run("decodes an event with a screen") { try ScreenTests.decodesAnEventWithAScreen() }
         run("rejects a malformed screen") { try ScreenTests.rejectsAMalformedScreen() }
         run("request carries worktree") { try ScreenTests.requestCarriesWorktree() }
+        run("decodes a prompt") { try ScreenTests.decodesAPrompt() }
 
         if let port = ProcessInfo.processInfo.environment["SIGIL_RELAY_PORT"] {
             do {

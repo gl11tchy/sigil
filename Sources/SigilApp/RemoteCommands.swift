@@ -22,6 +22,8 @@ struct RemoteState: Codable, Sendable {
     var screen: RemoteScreen?
     /// This Mac's name, for a phone paired with more than one.
     var mac: String?
+    /// An approval question the selected tab is showing, for the phone's answer buttons.
+    var prompt: RemotePrompt?
 }
 
 struct RemoteChat: Codable, Sendable {
@@ -286,6 +288,20 @@ enum RemoteCommands {
             guard let key = request.text, tab.controller.sendRemoteKey(key) else {
                 return failure(request, "Unknown key.")
             }
+        case "answer":
+            guard let tab, tab.controller.isRunning else { return failure(request, "This session is not running.") }
+            // The prompt is read again now and must be the one the phone saw, so a
+            // stale button cannot type into whatever replaced it.
+            guard let prompt = prompt(for: tab), request.name == prompt.id, let key = request.text,
+                prompt.keys.contains(key)
+            else {
+                return failure(request, "That question is no longer on screen.")
+            }
+            switch key {
+            case "enter", "escape": _ = tab.controller.sendRemoteKey(key)
+            case "y", "n": tab.controller.send(text: key + "\r")
+            default: tab.controller.send(text: key)
+            }
         case "file":
             guard let tab, tab.controller.isRunning else { return failure(request, "This session is not running.") }
             guard let transfer = request.transfer, let name = request.name, let index = request.index,
@@ -492,7 +508,8 @@ enum RemoteCommands {
             capabilities: state.capabilities,
             tabsTruncated: state.tabsTruncated,
             screen: state.screen,
-            mac: state.mac
+            mac: state.mac,
+            prompt: state.prompt
         )
         return reply
     }
@@ -509,8 +526,16 @@ enum RemoteCommands {
                 ? boundedSuffix(model.selectedTab?.controller.remoteSnapshot() ?? "", bytes: 12_000) : "",
             tabsTruncated: model.tabs.count > 100,
             screen: screen,
-            mac: macName
+            mac: macName,
+            prompt: model.selectedTab.flatMap(prompt(for:))
         )
+    }
+
+    /// The approval question at the bottom of `tab`'s screen, if any.
+    static func prompt(for tab: TerminalTab) -> RemotePrompt? {
+        guard tab.controller.isRunning else { return nil }
+        let window = tab.controller.remoteScreenWindow(maxRows: PromptDetector.window + 80, maxCharacters: 12_000)
+        return PromptDetector.detect(rows: window.rows.map(\.t))
     }
 
     static func snapshot(_ model: AppModel, screen window: RemoteScreenWindow?) -> RemoteState {
