@@ -18,10 +18,15 @@ public struct RemoteRequest: Codable, Sendable {
     public var index: Int?
     public var count: Int?
     public var transfer: String?
+    /// New sessions: the CLI, and for Grok its model and effort.
+    public var provider: String?
+    public var model: String?
+    public var effort: String?
 
     public init(
         challenge: String, sequence: Int, action: String, tabID: String? = nil, text: String? = nil,
-        name: String? = nil, index: Int? = nil, count: Int? = nil, transfer: String? = nil
+        name: String? = nil, index: Int? = nil, count: Int? = nil, transfer: String? = nil,
+        provider: String? = nil, model: String? = nil, effort: String? = nil
     ) {
         self.challenge = challenge
         self.sequence = sequence
@@ -32,6 +37,9 @@ public struct RemoteRequest: Codable, Sendable {
         self.index = index
         self.count = count
         self.transfer = transfer
+        self.provider = provider
+        self.model = model
+        self.effort = effort
     }
 }
 
@@ -72,7 +80,8 @@ public struct RemoteSession: Sendable {
         let inBounds =
             request.action.utf8.count <= 32 && (request.text?.utf8.count ?? 0) <= textLimit
             && (request.tabID?.utf8.count ?? 0) <= 64 && (request.name?.utf8.count ?? 0) <= 80
-            && (request.transfer?.utf8.count ?? 0) <= 64
+            && (request.transfer?.utf8.count ?? 0) <= 64 && (request.provider?.utf8.count ?? 0) <= 32
+            && (request.model?.utf8.count ?? 0) <= 64 && (request.effort?.utf8.count ?? 0) <= 16
         if deviceKey == nil {
             guard inBounds else { throw RemoteError.invalidMessage }
             guard now < expiresAt else { throw RemoteError.pairingExpired }

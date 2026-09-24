@@ -118,7 +118,8 @@ final class RemoteConnection {
     /// Sends in order. A second tap waits behind the first instead of racing it.
     func request(
         _ action: String, text: String? = nil, tabID: String? = nil, name: String? = nil,
-        index: Int? = nil, count: Int? = nil, transfer: String? = nil
+        index: Int? = nil, count: Int? = nil, transfer: String? = nil, provider: String? = nil,
+        model: String? = nil, effort: String? = nil
     ) async throws -> RemoteReply {
         let previous = queue
         let current = generation
@@ -129,7 +130,7 @@ final class RemoteConnection {
             return try await self.transmit(
                 RequestFields(
                     action: action, text: text, tabID: tabID, name: name, index: index, count: count,
-                    transfer: transfer),
+                    transfer: transfer, provider: provider, model: model, effort: effort),
                 pairing: false)
         }
         queue = Task { _ = try? await work.value }
@@ -144,6 +145,9 @@ final class RemoteConnection {
         var index: Int?
         var count: Int?
         var transfer: String?
+        var provider: String?
+        var model: String?
+        var effort: String?
     }
 
     private func transmit(_ fields: RequestFields, pairing: Bool) async throws -> RemoteReply {
@@ -155,7 +159,8 @@ final class RemoteConnection {
         let seq = sequence
         let request = RemoteRequest(
             challenge: challenge, sequence: seq, action: fields.action, tabID: fields.tabID, text: fields.text,
-            name: fields.name, index: fields.index, count: fields.count, transfer: fields.transfer)
+            name: fields.name, index: fields.index, count: fields.count, transfer: fields.transfer,
+            provider: fields.provider, model: fields.model, effort: fields.effort)
         let sealed = try RemoteCrypto.seal(request, key: key, direction: "phone")
         let frame = try Self.json(["data": sealed])
         return try await withCheckedThrowingContinuation { continuation in

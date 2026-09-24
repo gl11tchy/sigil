@@ -212,6 +212,9 @@ final class RemoteControl {
                                         self.error = unsaved
                                     }
                                 }
+                                if command.action == "options" {
+                                    await RemoteCommands.refreshModels(model: model)
+                                }
                                 var reply = RemoteCommands.execute(command, model: model)
                                 reply.ticket = session.ticket
                                 let encrypted = try RemoteCrypto.seal(

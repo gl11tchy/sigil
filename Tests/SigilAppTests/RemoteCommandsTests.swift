@@ -379,6 +379,78 @@ struct RemoteCommandsTests {
         #expect(fixture.alerts.count == 0)
     }
 
+    @Test @MainActor func phoneNewSessionUsesTheChosenModelAndEffort() async throws {
+        let fixture = try PhoneCommandFixture()
+        defer { fixture.cleanup() }
+        fixture.settings.showWorktreeSessions = true
+        let folder = try fixture.directory("chosen")
+        try fixture.writeSession(
+            id: "chosen-session", cwd: folder.path, summary: "Chosen", updatedAt: "2026-09-01T00:00:00Z", secret: "x")
+        await fixture.store.reload()
+
+        let options = try #require(fixture.command("options").options)
+        #expect(options.providers.map(\.id) == CLIProvider.allCases.map(\.rawValue))
+        #expect(options.providers.filter(\.takesModel).map(\.id) == [CLIProvider.grokBuild.rawValue])
+        #expect(options.providers.allSatisfy { $0.problem == nil })
+        #expect(options.models.starts(with: GrokModelCatalog.fallback))
+        #expect(options.locations.map(\.folder).contains(fixture.root.path))
+
+        let started = fixture.command(
+            "new", text: folder.path, provider: CLIProvider.grokBuild.rawValue, model: "grok-4.6", effort: "high")
+        #expect(started.ok)
+        let tab = try #require(fixture.model.selectedTab)
+        #expect(tab.spec.provider == .grokBuild)
+        #expect(tab.spec.model == "grok-4.6")
+        #expect(tab.spec.reasoningEffort == "high")
+        let count = fixture.model.tabs.count
+        #expect(!fixture.command("new", text: folder.path, provider: "grokBuild", model: "--yolo").ok)
+        #expect(!fixture.command("new", text: folder.path, provider: "grokBuild", effort: "max").ok)
+        #expect(!fixture.command("new", text: folder.path, provider: "someOtherCLI").ok)
+        #expect(fixture.model.tabs.count == count)
+        #expect(fixture.alerts.count == 0)
+    }
+
+    @Test @MainActor func phoneCreatesProjectsAndStartsInAddedOnes() async throws {
+        let fixture = try PhoneCommandFixture()
+        defer { fixture.cleanup() }
+        fixture.settings.showWorktreeSessions = true
+        let existing = try fixture.directory("existing")
+        try fixture.writeSession(
+            id: "existing-session", cwd: existing.path, summary: "Existing", updatedAt: "2026-09-01T00:00:00Z",
+            secret: "x")
+        await fixture.store.reload()
+        // Added on the Mac, with no chat yet.
+        let added = try fixture.directory("added")
+        fixture.model.addProject(added)
+        #expect(fixture.command("projects").projects?.contains { $0.folder == added.path } == true)
+        #expect(fixture.command("new", text: added.path).ok)
+
+        let created = fixture.command("createProject", text: fixture.root.path, name: " fresh ")
+        #expect(created.ok)
+        let project = try #require(created.project)
+        let fresh = fixture.root.appendingPathComponent("fresh")
+        #expect(project.name == "fresh")
+        #expect(project.folder == fresh.path)
+        #expect(AppModel.isUsableDirectory(fresh))
+        #expect(fixture.command("projects").projects?.first?.folder == fresh.path)
+        #expect(fixture.command("new", text: project.folder).ok)
+        #expect(
+            GrokPaths.canonicalPath(try #require(fixture.model.selectedTab).workingDirectory.path)
+                == GrokPaths.canonicalPath(fresh.path))
+        #expect(fixture.command("createProject", text: fixture.root.path, name: "fresh").ok)
+
+        try Data("file".utf8).write(to: fixture.root.appendingPathComponent("a-file"))
+        for (parent, name) in [
+            (fixture.root.path, "../escape"), (fixture.root.path, ".hidden"), (fixture.root.path, "a/b"),
+            (fixture.root.path, ""), (fixture.root.path, "a-file"), ("/usr", "nope"),
+        ] {
+            #expect(!fixture.command("createProject", text: parent, name: name).ok, "\(parent) \(name)")
+        }
+        let escaped = fixture.root.deletingLastPathComponent().appendingPathComponent("escape")
+        #expect(!FileManager.default.fileExists(atPath: escaped.path))
+        #expect(fixture.alerts.count == 0)
+    }
+
     @Test @MainActor func phoneChatPagesStayWithinOneSlice() async throws {
         let fixture = try PhoneCommandFixture()
         defer { fixture.cleanup() }
@@ -600,11 +672,13 @@ private final class PhoneCommandFixture {
     }
 
     func command(
-        _ action: String, text: String? = nil, tabID: String? = nil, name: String? = nil, index: Int? = nil
+        _ action: String, text: String? = nil, tabID: String? = nil, name: String? = nil, index: Int? = nil,
+        provider: String? = nil, model chosenModel: String? = nil, effort: String? = nil
     ) -> RemoteReply {
         RemoteCommands.execute(
             RemoteRequest(
-                challenge: "test", sequence: 1, action: action, tabID: tabID, text: text, name: name, index: index),
+                challenge: "test", sequence: 1, action: action, tabID: tabID, text: text, name: name, index: index,
+                provider: provider, model: chosenModel, effort: effort),
             model: model)
     }
 

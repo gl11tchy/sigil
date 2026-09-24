@@ -34,6 +34,9 @@ enum TestMain {
         run("request omits missing fields") { try ProtocolTests.requestOmitsMissingFields() }
         run("decodes a Mac reply") { try ProtocolTests.decodesMacReply() }
         run("state validation") { try ProtocolTests.stateValidation() }
+        run("new-session options round trip") { try ProtocolTests.newSessionOptionsRoundTrip() }
+        run("chat list pages") { try ProtocolTests.chatListPages() }
+        run("project name rules") { try ProtocolTests.projectNameRules() }
 
         run("history keeps scrolled text") { try OutputTests.historyKeepsScrolledText() }
         run("history redraw replaces tail") { try OutputTests.historyRedrawReplacesTail() }
