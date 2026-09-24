@@ -565,6 +565,9 @@ final class AppModel {
     /// Drops pins, archives, and names whose conversations are gone, after a successful scan.
     func pruneMissingPins() {
         guard !store.isLoading, store.loadError == nil else { return }
+        // A missing folder lists nothing without an error; that is no proof
+        // the pinned chats are gone.
+        guard FileManager.default.fileExists(atPath: store.root.path) else { return }
         let held = sharedListKeys()
         settings.reloadSharedLists()
         for key in sharedListKeys().subtracting(held) where sharedArrivals[key] == nil {
@@ -2038,7 +2041,7 @@ final class AppModel {
     /// Closes any tab showing `session`, then moves its directory to the Trash.
     /// A permanent delete would be unrecoverable from here.
     @discardableResult
-    func deleteConversation(_ session: GrokSession) -> Bool {
+    func deleteConversation(_ session: GrokSession, reload: Bool = true) -> Bool {
         let matchingTabs = tabs.filter {
             tabMatches($0, sessionID: session.id, cwd: session.cwd)
         }
@@ -2097,7 +2100,7 @@ final class AppModel {
             }
             refreshDockIndicator()
             persistOpenTabs()
-            Task { await store.reload() }
+            if reload { Task { await store.reload() } }
             return true
         } catch {
             var replacementForSelection: TerminalTab.ID?
@@ -2121,7 +2124,9 @@ final class AppModel {
     @discardableResult
     func deleteConversations(_ sessions: [GrokSession]) -> Int {
         var deleted = 0
-        for session in sessions where deleteConversation(session) { deleted += 1 }
+        for session in sessions where deleteConversation(session, reload: false) { deleted += 1 }
+        // One rescan for the whole selection, not one per chat.
+        if deleted > 0 { Task { await store.reload() } }
         return deleted
     }
 

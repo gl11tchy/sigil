@@ -1042,6 +1042,39 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func pinsSurviveWhileTheSessionsFolderIsMissing() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(id: "kept", cwd: "/Users/someone/Documents/project")
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(fixture.store.sessions.first)
+        model.pin(session)
+
+        // A fresh store, as at launch, finds the folder gone: an unmounted
+        // volume or a changed GROK_HOME must not erase the sidebar lists.
+        let root = fixture.grokHome.appendingPathComponent("sessions")
+        try FileManager.default.removeItem(at: root)
+        let relaunched = AppModel(
+            settings: fixture.settings,
+            store: SessionStore(root: root),
+            trashConversation: { _ in },
+            presentError: { _ in },
+            panel: RightPanel(
+                defaults: fixture.defaults,
+                notesStore: ConversationNotesStore(root: fixture.notesRoot)
+            ),
+            pairingStore: InMemoryRemotePairingStore()
+        )
+        defer { relaunched.closeAllTabsAndWait() }
+        await relaunched.store.reload()
+        relaunched.pruneMissingPins()
+
+        #expect(fixture.settings.pinnedConversations.map(\.sessionID) == ["kept"])
+    }
+
+    @Test @MainActor
     func deletingOneChatKeepsTheProjectPin() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
@@ -3375,6 +3408,41 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func deletingASelectionRescansTheSessionsOnce() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let scans = ScanCount()
+        let store = SessionStore(
+            root: fixture.grokHome.appendingPathComponent("sessions"),
+            timing: SessionStoreTiming(),
+            scanOperation: { root, cache, ignoringCache in
+                scans.increment()
+                return SessionScanner.scan(root: root, cache: cache, ignoringCache: ignoringCache)
+            }
+        )
+        let model = AppModel(
+            settings: fixture.settings,
+            store: store,
+            trashConversation: { _ in },
+            presentError: { _ in },
+            panel: RightPanel(
+                defaults: fixture.defaults,
+                notesStore: ConversationNotesStore(root: fixture.notesRoot)
+            ),
+            pairingStore: InMemoryRemotePairingStore()
+        )
+        defer { model.closeAllTabsAndWait() }
+
+        let selection = (1...5).map { makeSession(id: "s-\($0)", cwd: cwd) }
+        #expect(model.deleteConversations(selection) == 5)
+        #expect(await waitUntil { scans.value > 0 })
+        try await Task.sleep(for: .milliseconds(200))
+
+        #expect(scans.value == 1)
+    }
+
+    @Test @MainActor
     func legacyFolderNotesMigrateToTheNewestConversationInTheFolder() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
@@ -3967,6 +4035,14 @@ private func waitUntil(
         try? await Task.sleep(for: .milliseconds(10))
     }
     return condition()
+}
+
+private final class ScanCount: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int { lock.withLock { count } }
+    func increment() { lock.withLock { count += 1 } }
 }
 
 private final class RunnerProbe: @unchecked Sendable {

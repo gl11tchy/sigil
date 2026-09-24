@@ -27,8 +27,10 @@ public final class SessionStore {
     /// Set when the sessions directory or one or more session summaries could not be read.
     public private(set) var loadError: String?
 
-    private let root: URL
+    public let root: URL
     @ObservationIgnored private var cache: [String: SessionCacheEntry] = [:]
+    /// Folded search fields, one per entry of `sessions`, in the same order.
+    @ObservationIgnored private var searchKeys: [SessionScanner.SearchKey] = []
     @ObservationIgnored private var isStarted = false
     /// How many scans have started, and which of them produced `sessions`.
     /// A scan numbered above a moment's `scanSequence` began after it.
@@ -154,13 +156,11 @@ public final class SessionStore {
         _ query: String,
         displayedTitle: ((GrokSession) -> String)? = nil
     ) -> [GrokSession] {
-        if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return sessions
-        }
-        return sessions.compactMap { session -> (GrokSession, SessionScanner.SearchRank)? in
+        guard let query = SessionScanner.SearchQuery(query) else { return sessions }
+        return zip(sessions, searchKeys).compactMap { session, key -> (GrokSession, SessionScanner.SearchRank)? in
             guard
                 let rank = SessionScanner.searchRank(
-                    session,
+                    key,
                     query: query,
                     displayedTitle: displayedTitle?(session)
                 )
@@ -172,13 +172,6 @@ public final class SessionStore {
             return SessionScanner.isNewer(lhs.0, rhs.0)
         }
         .map(\.0)
-    }
-
-    /// Groups `search` results by working directory, in that same order.
-    public func groupedByProject(matching query: String = "") -> [(
-        cwd: String, sessions: [GrokSession]
-    )] {
-        SessionScanner.grouped(search(query))
     }
 
     /// Walks `root` off the main actor. Cache hits skip JSON decoding.
@@ -223,6 +216,7 @@ public final class SessionStore {
         cache = result.cache
         if sessions != result.sessions {
             sessions = result.sessions
+            searchKeys = sessions.map(SessionScanner.SearchKey.init)
         }
         if loadError != result.loadError {
             loadError = result.loadError
