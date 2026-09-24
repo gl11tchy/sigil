@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -17,7 +18,10 @@ export async function stampRevision(directory = source, checkout = source) {
   return stamp;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Node resolves the running file's real path; a caller may name it through a
+// symlink such as macOS's /tmp, so compare real paths or the stamp silently never runs.
+const invokedAs = process.argv[1] && (() => { try { return pathToFileURL(realpathSync(process.argv[1])).href; } catch { return null; } })();
+if (invokedAs && import.meta.url === invokedAs) {
   const directory = process.argv[2] ? pathToFileURL(`${resolve(process.argv[2])}/`) : source;
   const stamp = await stampRevision(directory);
   process.stdout.write(`${stamp.revision} ${stamp.sourceSHA256}\n`);

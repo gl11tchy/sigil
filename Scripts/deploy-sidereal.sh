@@ -10,4 +10,6 @@ for file in Dockerfile package.json package-lock.json server.mjs apns.mjs revisi
 done
 cp -R "$ROOT/Sidereal/public" "$STAGE/public"
 node "$ROOT/Sidereal/stamp-revision.mjs" "$STAGE"
+# The image build needs the stamp; a bundle without it must never leave this Mac.
+[[ -s "$STAGE/revision.json" ]] || { echo "deploy-sidereal: revision.json was not written to $STAGE" >&2; exit 1; }
 railway up "$STAGE" --path-as-root "$@"
