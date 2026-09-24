@@ -191,7 +191,7 @@ struct SidebarView: View {
             )
             IconButton(
                 systemImage: "plus",
-                help: "New Session in \(model.newSessionDirectory.abbreviatedPath) (⌘T)"
+                help: "New Session… (⌘T)"
             ) {
                 model.requestNewSession()
             }

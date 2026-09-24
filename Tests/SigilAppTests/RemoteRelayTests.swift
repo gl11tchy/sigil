@@ -67,6 +67,81 @@ struct RemoteRelayTests {
             RemoteRequest(challenge: paired.challenge, sequence: 3, action: "state"), key: paired.device)
         #expect(state.ok)
     }
+
+    @Test @MainActor func newPeerIsNotShownAsConnectedUntilItAuthenticates() async throws {
+        let relay = try await RelayFixture()
+        defer { relay.stop() }
+        let device = RemoteCrypto.randomKey()
+        let ticket = RemoteCrypto.randomKey()
+        let store = InMemoryRemotePairingStore()
+        store.save(RemotePairing(origin: relay.origin, deviceKey: device, ticket: ticket))
+        let model = AppModel()
+        let remote = RemoteControl(store: store)
+        defer { remote.stop() }
+        remote.resumeIfPaired(model: model)
+        try await waitUntil { remote.status == "Phone disconnected" }
+        let phone = try RelayPhone(relay: relay)
+        defer { phone.close() }
+        let challenge = try await phone.route(["ticket": ticket])
+        #expect(
+            try await phone.request(RemoteRequest(challenge: challenge, sequence: 1, action: "state"), key: device).ok)
+        #expect(remote.status == "Phone connected")
+        let silent = try RelayPhone(relay: relay)
+        defer { silent.close() }
+        _ = try await silent.route(["ticket": ticket])
+        try await waitUntil { remote.status != "Phone connected" }
+        #expect(remote.status == "Phone disconnected")
+    }
+
+    @Test @MainActor func pairingRoomStopsRoutingOnceThePairedPhoneLeaves() async throws {
+        let relay = try await RelayFixture()
+        defer { relay.stop() }
+        let model = AppModel()
+        let remote = RemoteControl(store: InMemoryRemotePairingStore())
+        defer { remote.stop() }
+        remote.start(urlText: relay.origin, model: model)
+        let paired = try await relay.pair(remote)
+        paired.phone.close()
+        var resumed = false
+        for _ in 0..<100 where !resumed {
+            let phone = try RelayPhone(relay: relay)
+            resumed = (try? await phone.route(["ticket": paired.ticket])) != nil
+            phone.close()
+            if !resumed { try await Task.sleep(for: .milliseconds(100)) }
+        }
+        #expect(resumed)
+        let intruder = try RelayPhone(relay: relay)
+        defer { intruder.close() }
+        let hello = try? await intruder.route(["room": paired.room])
+        #expect(hello == nil)
+        #expect(intruder.closeCode == .policyViolation)
+    }
+
+    @Test @MainActor func deletedRoomIsReplacedOnTheFirstRefusedReconnect() async throws {
+        let relay = try await RelayFixture()
+        defer { relay.stop() }
+        let model = AppModel()
+        let store = InMemoryRemotePairingStore()
+        store.save(
+            RemotePairing(origin: relay.origin, deviceKey: RemoteCrypto.randomKey(), ticket: RemoteCrypto.randomKey()))
+        let remote = RemoteControl(store: store)
+        defer { remote.stop() }
+        remote.resumeIfPaired(model: model)
+        try await waitUntil { remote.status == "Phone disconnected" }
+        try await relay.restartWithoutRooms()
+        try await waitUntil { remote.status == "Reconnecting…" }
+        let dropped = ContinuousClock.now
+        try await waitUntil(for: .seconds(12)) { remote.status == "Phone disconnected" }
+        #expect(remote.status == "Phone disconnected")
+        #expect(ContinuousClock.now - dropped < .seconds(5))
+    }
+
+    @MainActor private func waitUntil(for timeout: Duration = .seconds(5), _ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while !condition(), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+    }
 }
 
 private final class UnsavableStore: RemotePairingStore {
@@ -81,17 +156,44 @@ private final class UnsavableStore: RemotePairingStore {
 final class RelayFixture {
     let origin: String
     let phoneOrigin = "http://localhost:3099"
-    private let process = Process()
+    private var process = Process()
     private let root: URL
+    private let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent()
 
     init() async throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent()
         let portFile = root.appendingPathComponent("port")
+        process = try await Self.launch(
+            [repo.appendingPathComponent("Sidereal/test/relay-fixture.mjs").path], portFile: portFile)
+        origin = "http://127.0.0.1:\(try String(contentsOf: portFile, encoding: .utf8))"
+    }
+
+    /// Replaces the relay on the same port. Every room is gone and the host is
+    /// dropped, as when the relay deletes a room at its 24 h limit.
+    func restartWithoutRooms() async throws {
+        process.terminate()
+        process.waitUntilExit()
+        let port = try #require(URLComponents(string: origin)?.port)
+        let server = repo.appendingPathComponent("Sidereal/server.mjs").absoluteString
+        let script = """
+            import { writeFileSync } from 'node:fs';
+            import { createRelay } from '\(server)';
+            const relay = createRelay({ publicOrigin: 'http://localhost:3099' });
+            relay.server.listen(\(port), '127.0.0.1', () => {
+              writeFileSync(process.env.SIGIL_TEST_PORT_FILE, '\(port)', { mode: 0o600 });
+            });
+            process.on('SIGTERM', () => relay.close());
+            """
+        process = try await Self.launch(
+            ["--input-type=module", "-e", script], portFile: root.appendingPathComponent("restarted"))
+    }
+
+    private static func launch(_ arguments: [String], portFile: URL) async throws -> Process {
+        let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["node", repo.appendingPathComponent("Sidereal/test/relay-fixture.mjs").path]
+        process.arguments = ["node"] + arguments
         process.environment = ProcessInfo.processInfo.environment.merging(["SIGIL_TEST_PORT_FILE": portFile.path]) {
             _, new in new
         }
@@ -102,7 +204,7 @@ final class RelayFixture {
             if FileManager.default.fileExists(atPath: portFile.path) { break }
             try await Task.sleep(for: .milliseconds(20))
         }
-        origin = "http://127.0.0.1:\(try String(contentsOf: portFile, encoding: .utf8))"
+        return process
     }
 
     func stop() {

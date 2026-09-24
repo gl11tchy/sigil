@@ -1,0 +1,69 @@
+## a35 (branch audit/prov-settings build): saved Grok path is missing: /Users/Shared/sigil-ux/no-grok/bin/grok
+## Settings opened from the app menu (18:13:24)
+AXTextField | Value=/Users/Shared/sigil-ux/no-grok/bin/grok | Focused=1 | Enabled=1 | Position=556,376 | Size=274x24
+AXStaticText | Value=Not found | Focused=0 | Enabled=1 | Position=559,404 | Size=71x13
+windows:
+AXWindow | Subrole=AXStandardWindow | Title=General | Focused=0 | Identifier=com_apple_SwiftUI_Settings_window
+AXWindow | Subrole=AXStandardWindow | Title=SigilUX | Focused=0 | Identifier=SwiftUI.ModifiedContent<SwiftUI.M
+sheets/alert text: 0 match(es)
+
+## step 1: guarded click into the path field
+clicked 656.0,388.0
+focused: AXTextField | Value=/Users/Shared/sigil-ux/no-grok/bin/grok | Focused=1 | Enabled=1 | Position=556,376 | Size=274x24
+windows:
+AXWindow | Subrole=AXStandardWindow | Title=General | Focused=0 | Identifier=com_apple_SwiftUI_Settings_window
+AXWindow | Subrole=AXStandardWindow | Title=SigilUX | Focused=0 | Identifier=SwiftUI.ModifiedContent<SwiftUI.M
+sheets/alert text: 0 match(es)
+
+## step 2: guarded click on empty Settings space right of 'Found' label row (no typing)
+clicked 760.0,405.0
+focused: AXTextField | Value=/Users/Shared/sigil-ux/no-grok/bin/grok | Focused=1 | Enabled=1 | Position=556,376 | Size=274x24
+windows:
+AXWindow | Subrole=AXStandardWindow | Title=General | Focused=0 | Identifier=com_apple_SwiftUI_Settings_window
+AXWindow | Subrole=AXStandardWindow | Title=SigilUX | Focused=0 | Identifier=SwiftUI.ModifiedContent<SwiftUI.M
+sheets/alert text: 0 match(es)
+
+## step 3: guarded click on the Appearance toolbar tab (field leaves the view, focus leaves it)
+clicked 699.0,274.0
+focused: AXWindow | Subrole=AXStandardWindow | Title=Appearance | Focused=1 | Identifier=com_apple_SwiftUI_Settings_window | Position=506,214 | Size=500x450
+windows:
+AXWindow | Subrole=AXStandardWindow | Title=Appearance | Focused=1 | Identifier=com_apple_SwiftUI_Settings_win
+AXWindow | Subrole=AXStandardWindow | Title=SigilUX | Focused=0 | Identifier=SwiftUI.ModifiedContent<SwiftUI.M
+sheets/alert text: 0 match(es)
+
+## step 4: guarded click back on General
+clicked 765.0,274.0
+AXTextField | Value=/Users/Shared/sigil-ux/no-grok/bin/grok | Focused=0 | Enabled=1 | Position=556,376 | Size=274x24
+windows:
+AXWindow | Subrole=AXStandardWindow | Title=General | Focused=1 | Identifier=com_apple_SwiftUI_Settings_window
+AXWindow | Subrole=AXStandardWindow | Title=SigilUX | Focused=0 | Identifier=SwiftUI.ModifiedContent<SwiftUI.M
+sheets/alert text: 0 match(es)
+
+## step 5: guarded click into the path field, then guarded click on the Settings close button
+clicked 656.0,388.0
+focused: AXTextField | Value=/Users/Shared/sigil-ux/no-grok/bin/grok | Focused=1 | Enabled=1 | Position=556,376 | Size=274x24
+clicked 522.0,230.0
+windows:
+AXWindow | Subrole=AXStandardWindow | Title=SigilUX | Focused=1 | Identifier=SwiftUI.ModifiedContent<SwiftUI.M
+sheets/alert text: 0 match(es)
+
+## step 6: reopen Settings from the app menu (18:14:16)
+AXTextField | Value=/Users/Shared/sigil-ux/no-grok/bin/grok | Focused=1 | Enabled=1 | Position=556,376 | Size=274x24
+windows:
+AXWindow | Subrole=AXStandardWindow | Title=General | Focused=0 | Identifier=com_apple_SwiftUI_Settings_window
+AXWindow | Subrole=AXStandardWindow | Title=SigilUX | Focused=0 | Identifier=SwiftUI.ModifiedContent<SwiftUI.M
+sheets/alert text: 0 match(es)
+## defaults: /Users/Shared/sigil-ux/no-grok/bin/grok
+
+## step 7 (fix build relaunched, 18:17:43): the path that raises the alert on the pre-fix build (see ps-a35-control-prefix-ax.txt):
+## guarded click into the path field, then guarded click into the main window's search field
+AXTextField | Value=/Users/Shared/sigil-ux/no-grok/bin/grok | Focused=1 | Enabled=1 | Position=556,376 | Size=274x24
+clicked 656.0,388.0
+focused: AXTextField | Value=/Users/Shared/sigil-ux/no-grok/bin/grok | Focused=1 | Enabled=1 | Position=556,376 | Size=274x24
+clicked 420.0,311.0
+focused: AXTextField | Description=Search conversations | Focused=1 | Enabled=1 | Position=341,305 | Size=191x13
+windows:
+AXWindow | Subrole=AXStandardWindow | Title=SigilUX | Focused=0 | Identifier=SwiftUI.ModifiedContent<SwiftUI.M
+AXWindow | Subrole=AXStandardWindow | Title=General | Focused=0 | Identifier=com_apple_SwiftUI_Settings_window
+sheets/alert text: 0 match(es)
+## defaults after: /Users/Shared/sigil-ux/no-grok/bin/grok
