@@ -126,6 +126,7 @@ final class RemoteStore {
         streaming = false
         supportsSessionOps = false
         canRestart = false
+        activityTokens = [:]
         clearChats()
         projects = []
         sessionOptions = nil
