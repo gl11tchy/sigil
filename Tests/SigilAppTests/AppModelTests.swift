@@ -1229,6 +1229,28 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func aPinnedOrOpenWorktreeProjectMovesToItsProject() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let project = try fixture.directory("app")
+        let worktree = SigilWorktree.root
+            .appendingPathComponent(GrokPaths.encode(path: project.path))
+            .appendingPathComponent("ab12cd34")
+        fixture.settings.addedProjects = [AddedProject(path: worktree.path, addedAt: Date())]
+        fixture.settings.pinnedProjects = [worktree.path, project.path]
+        fixture.settings.focusedProjectPath = worktree.path
+        try fixture.writeListedSession(id: "a", cwd: "/Users/someone/Documents/alpha")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        model.pruneMissingPins()
+        #expect(fixture.settings.pinnedProjects == [project.path])
+        #expect(fixture.settings.focusedProjectPath == project.path)
+        #expect(model.focusedProject?.cwd == project.path)
+    }
+
+    @Test @MainActor
     func anAddedFolderWithHiddenChatsIsArchivedNotRemoved() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }

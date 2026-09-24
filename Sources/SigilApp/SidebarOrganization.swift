@@ -492,15 +492,18 @@ enum SidebarOrganization {
     }
 
     /// Replaces each Sigil worktree entry with its project and keeps the
-    /// first entry per folder, so the newest add date wins.
-    static func foldingWorktrees(
-        _ added: [AddedProject], samePath: (String, String) -> Bool
-    ) -> [AddedProject] {
-        var result: [AddedProject] = []
-        for entry in added {
-            let path = SigilWorktree.projectPath(of: entry.path) ?? entry.path
-            if result.contains(where: { samePath($0.path, path) }) { continue }
-            result.append(AddedProject(path: path, addedAt: entry.addedAt))
+    /// first entry per folder, so the newest entry wins.
+    static func foldingWorktrees<Entry>(
+        _ entries: [Entry],
+        path: (Entry) -> String,
+        moving: (Entry, String) -> Entry,
+        samePath: (String, String) -> Bool
+    ) -> [Entry] {
+        var result: [Entry] = []
+        for entry in entries {
+            let project = SigilWorktree.projectPath(of: path(entry)) ?? path(entry)
+            if result.contains(where: { samePath(path($0), project) }) { continue }
+            result.append(moving(entry, project))
         }
         return result
     }

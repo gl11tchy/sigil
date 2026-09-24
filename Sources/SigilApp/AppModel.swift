@@ -170,6 +170,16 @@ final class AppModel {
         return KimiCode.apiKeyEnvironment(key: key, model: settings.kimiModel)
     }
 
+    /// False, after saying why, when `provider` has no sign-in to start with.
+    /// New Session asks before it makes a worktree.
+    func canSignIn(_ provider: CLIProvider) -> Bool {
+        guard providerEnvironment(for: provider) == nil else { return true }
+        showError(
+            title: "Kimi API key is missing",
+            message: "Add it in Settings, or sign in with a Kimi account.")
+        return false
+    }
+
     func onAppear() async {
         guard !didAppear else { return }
         didAppear = true
@@ -742,16 +752,23 @@ final class AppModel {
         if remainingPins != settings.pinnedConversations {
             settings.pinnedConversations = remainingPins
         }
-        let remainingProjectPins = pruningMissingProjects(settings.pinnedProjects)
-        if remainingProjectPins != settings.pinnedProjects {
-            settings.pinnedProjects = remainingProjectPins
-        }
-        // Earlier builds added a Sigil worktree as its own project.
+        // Earlier builds added a Sigil worktree as its own project, which
+        // could then be pinned or left open. Each becomes its project.
         let remainingAdded = SidebarOrganization.foldingWorktrees(
-            settings.addedProjects, samePath: samePath
+            settings.addedProjects, path: \.path,
+            moving: { AddedProject(path: $1, addedAt: $0.addedAt) }, samePath: samePath
         ).filter { Self.isUsableDirectory(URL(fileURLWithPath: $0.path)) }
         if remainingAdded != settings.addedProjects {
             settings.addedProjects = remainingAdded
+        }
+        let remainingProjectPins = pruningMissingProjects(
+            SidebarOrganization.foldingWorktrees(
+                settings.pinnedProjects, path: { $0 }, moving: { $1 }, samePath: samePath))
+        if remainingProjectPins != settings.pinnedProjects {
+            settings.pinnedProjects = remainingProjectPins
+        }
+        if let project = SigilWorktree.projectPath(of: settings.focusedProjectPath) {
+            settings.focusedProjectPath = project
         }
         let remainingArchives = pruningMissing(settings.archivedConversations, list: "archive")
         if remainingArchives != settings.archivedConversations {
@@ -1537,10 +1554,7 @@ final class AppModel {
             showError(title: "Folder is unavailable", message: "Choose another folder.")
             return nil
         }
-        guard let providerEnvironment = providerEnvironment(for: provider) else {
-            showError(
-                title: "Kimi API key is missing",
-                message: "Add it in Settings, or sign in with a Kimi account.")
+        guard canSignIn(provider), let providerEnvironment = providerEnvironment(for: provider) else {
             return nil
         }
         let spec = GrokLaunchSpec(
@@ -1639,12 +1653,7 @@ final class AppModel {
             )
             return
         }
-        guard providerEnvironment(for: old.spec.provider) != nil else {
-            showError(
-                title: "Kimi API key is missing",
-                message: "Add it in Settings, or sign in with a Kimi account.")
-            return
-        }
+        guard canSignIn(old.spec.provider) else { return }
         let wasSelected = selectedTabID == old.id
         tabBridge?.noteTabClosed(id: old.id)
         old.terminateAndWait()

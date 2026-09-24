@@ -148,6 +148,11 @@ struct ProviderBoundaryTests {
         defer { fixture.cleanup() }
         fixture.model.settings.kimiSignIn = .apiKey
         #expect(!fixture.model.hasKimiAPIKey)
+        #expect(fixture.model.canSignIn(.claudeCode))
+        #expect(fixture.errors.titles.isEmpty)
+        // New Session asks this before it makes a worktree.
+        #expect(!fixture.model.canSignIn(.kimi))
+        fixture.errors.titles.removeAll()
         #expect(fixture.model.newTab(in: fixture.root, provider: .kimi) == nil)
         #expect(fixture.model.tabs.isEmpty)
         #expect(fixture.errors.titles == ["Kimi API key is missing"])

@@ -281,7 +281,7 @@ struct NewSessionSheet: View {
     }
 
     private func start(_ provider: CLIProvider) {
-        guard canStart else { return }
+        guard canStart, model.canSignIn(provider) else { return }
         let fields = NewSessionLaunch.fields(
             provider: provider, model: modelName, effort: effort)
         let project = directory

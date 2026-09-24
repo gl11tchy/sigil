@@ -45,6 +45,10 @@ struct KimiSettingsSection: View {
             }
         }
         .onAppear { login.refresh() }
+        // Its Cancel button leaves with the account row.
+        .onChange(of: model.settings.kimiSignIn) { _, method in
+            if method != .kimiAccount { login.cancel() }
+        }
     }
 
     // MARK: Kimi account

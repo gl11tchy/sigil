@@ -92,9 +92,17 @@ final class KeychainKimiKeyStore: KimiKeyStore {
         return String(data: data, encoding: .utf8)?.nilIfEmpty
     }
 
-    /// Delete and add, so the new item's access list trusts this build.
+    /// Delete and add, so the new item's access list trusts this build. A
+    /// failed add puts the previous key back.
     @discardableResult func save(_ key: String) -> Bool {
+        let previous = load()
         guard clear() else { return false }
+        if add(key) { return true }
+        if let previous { add(previous) }
+        return false
+    }
+
+    @discardableResult private func add(_ key: String) -> Bool {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

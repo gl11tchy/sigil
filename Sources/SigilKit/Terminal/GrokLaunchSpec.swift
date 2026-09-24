@@ -43,7 +43,12 @@ public struct GrokLaunchSpec: Sendable, Hashable {
     public var bridgeTabID: String?
     public var bridgeSocketPath: String?
     /// Variables only a non-Grok CLI receives, such as Kimi Code's API key.
+    /// Login-shell startup files run before the CLI and may set the same
+    /// names, so these travel under `providerEnvironmentPrefix` and the host
+    /// command exports them last.
     public var providerEnvironment: [String: String]
+
+    public static let providerEnvironmentPrefix = "SIGIL_PROVIDER_"
 
     public init(
         executable: URL? = nil,
@@ -127,21 +132,26 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         }
         if provider != .grokBuild {
             let command = searchesPATH ? provider.command : executable.path
+            let prefix = Self.providerEnvironmentPrefix
+            let names = providerEnvironment.keys.filter(Self.isEnvironmentName).sorted()
             // Arguments stay positional, including paths containing shell metacharacters.
             if shell.lastPathComponent == "fish" {
+                let exports = names.map { "set -gx \($0) $\(prefix)\($0); set -e \(prefix)\($0); " }.joined()
                 return HostCommand(
                     executable: shell,
                     arguments: [
                         "-lic",
-                        "set -gx PATH $PATH (string split : -- $argv[1]); cd -- $argv[2]; or exit; exec $argv[3..-1]",
+                        exports
+                            + "set -gx PATH $PATH (string split : -- $argv[1]); cd -- $argv[2]; or exit; exec $argv[3..-1]",
                         CLIProvider.fallbackPath, workingDirectory.path, command,
                     ] + arguments()
                 )
             }
+            let exports = names.map { "export \($0)=\"$\(prefix)\($0)\"; unset \(prefix)\($0); " }.joined()
             return HostCommand(
                 executable: shell,
                 arguments: [
-                    "-lic", "export PATH=\"$PATH:$1\"; cd -- \"$2\" || exit; shift 2; exec \"$@\"",
+                    "-lic", exports + "export PATH=\"$PATH:$1\"; cd -- \"$2\" || exit; shift 2; exec \"$@\"",
                     "sigil-\(provider.rawValue)", CLIProvider.fallbackPath, workingDirectory.path, command,
                 ] + arguments()
             )
@@ -173,7 +183,9 @@ public struct GrokLaunchSpec: Sendable, Hashable {
             }
             env.removeValue(forKey: BridgePaths.tabEnvironmentKey)
             env.removeValue(forKey: BridgePaths.socketEnvironmentKey)
-            env.merge(providerEnvironment) { _, provided in provided }
+            for (name, value) in providerEnvironment where Self.isEnvironmentName(name) {
+                env[Self.providerEnvironmentPrefix + name] = value
+            }
             return env
         }
         env["GROK_WRAPPER"] = "Sigil.app"
@@ -215,5 +227,13 @@ public struct GrokLaunchSpec: Sendable, Hashable {
             env.removeValue(forKey: BridgePaths.socketEnvironmentKey)
         }
         return env
+    }
+
+    /// Only plain variable names reach the shell command text.
+    static func isEnvironmentName(_ name: String) -> Bool {
+        guard let first = name.unicodeScalars.first, first == "_" || ("A"..."Z").contains(first) else {
+            return false
+        }
+        return name.unicodeScalars.allSatisfy { $0 == "_" || ("A"..."Z").contains($0) || ("0"..."9").contains($0) }
     }
 }
