@@ -11,7 +11,7 @@ struct SessionLiveActivity: Widget {
             LockScreenView(attributes: context.attributes, state: context.state)
                 .activityBackgroundTint(Color.black.opacity(0.75))
                 .activitySystemActionForegroundColor(.white)
-                .widgetURL(SessionLink.url(tabID: context.attributes.tabID))
+                .widgetURL(SessionLink.url(tabID: context.attributes.tabID, macID: context.attributes.macID))
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
@@ -43,7 +43,7 @@ struct SessionLiveActivity: Widget {
             } minimal: {
                 StatusDot(state: context.state)
             }
-            .widgetURL(SessionLink.url(tabID: context.attributes.tabID))
+            .widgetURL(SessionLink.url(tabID: context.attributes.tabID, macID: context.attributes.macID))
         }
     }
 }
@@ -138,11 +138,12 @@ enum StatusWords {
 
 /// The one link a widget may open: the app, on a session. It navigates only.
 enum SessionLink {
-    static func url(tabID: String) -> URL? {
+    static func url(tabID: String, macID: String?) -> URL? {
         var parts = URLComponents()
         parts.scheme = "sigilremote"
         parts.host = "session"
         parts.queryItems = [URLQueryItem(name: "tab", value: tabID)]
+        if let macID { parts.queryItems?.append(URLQueryItem(name: "mac", value: macID)) }
         return parts.url
     }
 }

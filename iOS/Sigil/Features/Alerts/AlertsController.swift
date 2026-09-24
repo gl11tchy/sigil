@@ -59,8 +59,10 @@ final class AlertsController: NSObject, UIApplicationDelegate, UNUserNotificatio
     func userNotificationCenter(
         _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
     ) async {
-        guard let tabID = response.notification.request.content.userInfo["tabID"] as? String else { return }
-        await MainActor.run { Self.store?.open(tabID: tabID) }
+        let info = response.notification.request.content.userInfo
+        guard let tabID = info["tabID"] as? String else { return }
+        let macID = info["macID"] as? String
+        await MainActor.run { Self.store?.open(tabID: tabID, macID: macID) }
     }
 
     /// The environment APNs will deliver to, which is what the relay has to be told.

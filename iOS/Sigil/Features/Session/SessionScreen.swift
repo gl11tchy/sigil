@@ -6,6 +6,7 @@ struct SessionScreen: View {
     @State private var showingSessions = false
     @State private var showingProjects = false
     @State private var confirmingForget = false
+    @State private var addingMac = false
     @State private var finding = false
     @State private var findText = ""
     @State private var atBottom = true
@@ -30,12 +31,16 @@ struct SessionScreen: View {
                     })
                 }
                 .sheet(isPresented: $showingProjects) { NewSessionSheet() }
+                .sheet(isPresented: $addingMac) { PairView(embedded: true) }
                 .confirmationDialog(
                     "Forget this Mac?", isPresented: $confirmingForget, titleVisibility: .visible
                 ) {
                     Button("Forget", role: .destructive) { store.forget() }
                 } message: {
-                    Text("You will need to scan a new code in Sigil to connect again.")
+                    Text(
+                        store.macs.count > 1
+                            ? "Your other Macs stay paired. Scan a new code to add this one back."
+                            : "You will need to scan a new code in Sigil to connect again.")
                 }
         }
     }
@@ -269,10 +274,15 @@ struct SessionScreen: View {
                         Label("Reconnect", systemImage: "arrow.clockwise")
                     }
                 }
+                Button {
+                    addingMac = true
+                } label: {
+                    Label("Pair another Mac", systemImage: "desktopcomputer.and.arrow.down")
+                }
                 Button(role: .destructive) {
                     confirmingForget = true
                 } label: {
-                    Label("Forget this Mac", systemImage: "trash")
+                    Label(store.macs.count > 1 ? "Forget \(store.macName ?? "this Mac")" : "Forget this Mac", systemImage: "trash")
                 }
             } label: {
                 Label("More", systemImage: "ellipsis")
@@ -284,8 +294,10 @@ struct SessionScreen: View {
         if store.isRevoked { return "Disconnected" }
         if !store.isConnected { return "Reconnecting…" }
         let status = store.selectedTab?.status.label ?? "No session"
-        guard let provider = store.selectedTab?.providerName else { return status }
-        return "\(provider) · \(status)"
+        var parts = [status]
+        if let provider = store.selectedTab?.providerName { parts.insert(provider, at: 0) }
+        if store.macs.count > 1, let mac = store.macName { parts.append(mac) }
+        return parts.joined(separator: " · ")
     }
 
     /// While the socket comes up, the screen shows what was last seen and says when.

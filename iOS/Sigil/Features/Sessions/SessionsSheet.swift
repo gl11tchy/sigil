@@ -9,6 +9,7 @@ struct SessionsSheet: View {
     @State private var renaming: RemoteTab?
     @State private var newName = ""
     @State private var closing: RemoteTab?
+    @State private var addingMac = false
 
     private var matches: [RemoteTab] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -21,6 +22,7 @@ struct SessionsSheet: View {
     var body: some View {
         NavigationStack {
             List {
+                if store.macs.count > 1 { macsSection }
                 Section {
                     if matches.isEmpty {
                         Text(store.tabs.isEmpty ? "No open sessions." : "No matching sessions.")
@@ -130,7 +132,19 @@ struct SessionsSheet: View {
                 } header: {
                     Text(searching ? "Saved chats" : "Recent chats")
                 }
+
+                if !store.isDemo || store.macs.count <= 1 {
+                    Section {
+                        Button {
+                            addingMac = true
+                        } label: {
+                            Label("Pair another Mac", systemImage: "desktopcomputer.and.arrow.down")
+                                .foregroundStyle(Theme.accent)
+                        }
+                    }
+                }
             }
+            .sheet(isPresented: $addingMac) { PairView(embedded: true) }
             .privacySensitive()
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search sessions and chats")
             .onChange(of: query) { _, value in store.loadChats(value) }
@@ -177,6 +191,42 @@ struct SessionsSheet: View {
             .onDisappear { store.clearChats() }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    /// Every paired Mac; choosing one swaps the whole screen to it.
+    private var macsSection: some View {
+        Section {
+            ForEach(store.macs) { mac in
+                Button {
+                    store.switchTo(macID: mac.id)
+                    dismiss()
+                } label: {
+                    HStack(spacing: Theme.Space.small) {
+                        Image(systemName: "desktopcomputer")
+                            .foregroundStyle(mac.id == store.activeMacID ? Theme.accent : Theme.secondaryText)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(mac.label)
+                                .foregroundStyle(Theme.primaryText)
+                            Text(mac.origin.host ?? "")
+                                .font(.caption.monospaced())
+                                .foregroundStyle(Theme.secondaryText)
+                        }
+                        Spacer(minLength: 0)
+                        if mac.id == store.activeMacID {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(Theme.accent)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(mac.id == store.activeMacID ? .isSelected : [])
+            }
+        } header: {
+            Text("Macs")
+        }
     }
 
     /// "Claude Code · Working · sigil/feature"; older Macs send status only.

@@ -20,6 +20,11 @@ output view runs `Sidereal/public/output.mjs` itself, bundled as
 
 SwiftUI, iOS 26, no third-party dependencies. Dark only, like the Mac app.
 
+More than one Mac: Pair another Mac (in the Sessions sheet or the menu) adds a
+pairing; the Sessions sheet lists the Macs and swaps the whole screen to the one
+chosen. Each pairing keeps its own cached screen. A notification or the Lock
+Screen card names its Mac and opens it. Forget drops only the Mac on screen.
+
 Alerts: once connected the app asks for notification permission and hands its
 APNs token to the Mac. With the app closed, a turn that finishes, a question
 that appears, or a session that ends arrives as a notification; the Mac seals

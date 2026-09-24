@@ -20,5 +20,7 @@ import Foundation
         var title: String
         var provider: String
         var mac: String
+        /// The pairing this session belongs to, so the card opens the right Mac.
+        var macID: String?
     }
 #endif

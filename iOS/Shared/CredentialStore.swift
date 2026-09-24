@@ -1,46 +1,100 @@
 import Foundation
 import Security
 
-/// The pairing lives in the Keychain, this device only, readable after first unlock.
-/// It is never in a backup, so a restored phone has to pair again.
+/// The pairings live in the Keychain, this device only, readable after first
+/// unlock. They are never in a backup, so a restored phone has to pair again.
+/// One item holds the whole list; a single pairing saved by an earlier build is
+/// folded into it on first load.
 enum CredentialStore {
     private static let service = "com.gl11tchy.sigilremote.pairing"
-    private static let account = "mac"
+    private static let legacyAccount = "mac"
+    private static let listAccount = "macs"
 
-    /// Every pairing on this phone. One today; the list is what the notification
-    /// extension tries keys from.
-    static func loadAll() -> [PairingCredential] {
-        load().map { [$0] } ?? []
+    /// The whole list, migrating a pre-list pairing if one is still there.
+    static func loadList() -> PairingList {
+        if let data = read(account: listAccount), let list = try? JSONDecoder().decode(PairingList.self, from: data) {
+            return PairingList(macs: list.macs.filter(\.isValid), selectedID: list.selectedID)
+        }
+        guard let data = read(account: legacyAccount),
+            let old = try? JSONDecoder().decode(PairingCredential.self, from: data), old.isValid
+        else { return PairingList() }
+        var list = PairingList()
+        list.upsert(old)
+        if save(list) { delete(account: legacyAccount) }
+        return list
     }
 
+    /// Every pairing on this phone, for the notification extension to try keys from.
+    static func loadAll() -> [PairingCredential] {
+        loadList().macs
+    }
+
+    /// The selected pairing, or nil when the phone has none.
     static func load() -> PairingCredential? {
-        var query = base
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let data = item as? Data,
-            let credential = try? JSONDecoder().decode(PairingCredential.self, from: data), credential.isValid
-        else { return nil }
-        return credential
+        loadList().selected
+    }
+
+    /// Adds or replaces one pairing and selects it.
+    @discardableResult
+    static func save(_ credential: PairingCredential, select: Bool = true) -> Bool {
+        var list = loadList()
+        list.upsert(credential, select: select)
+        return save(list)
     }
 
     @discardableResult
-    static func save(_ credential: PairingCredential) -> Bool {
-        guard let data = try? JSONEncoder().encode(credential) else { return false }
-        SecItemDelete(base as CFDictionary)
-        var item = base
+    static func save(_ list: PairingList) -> Bool {
+        guard let data = try? JSONEncoder().encode(list) else { return false }
+        return write(data, account: listAccount)
+    }
+
+    @discardableResult
+    static func select(id: String) -> Bool {
+        var list = loadList()
+        guard list.macs.contains(where: { $0.id == id }) else { return false }
+        list.selectedID = id
+        return save(list)
+    }
+
+    /// Removes one pairing. With none left the list item goes too.
+    @discardableResult
+    static func delete(id: String) -> Bool {
+        var list = loadList()
+        list.remove(id: id)
+        if list.macs.isEmpty { return delete(account: listAccount) }
+        return save(list)
+    }
+
+    /// Removes every pairing.
+    @discardableResult
+    static func delete() -> Bool {
+        delete(account: legacyAccount) && delete(account: listAccount)
+    }
+
+    private static func read(account: String) -> Data? {
+        var query = base(account)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess else { return nil }
+        return item as? Data
+    }
+
+    private static func write(_ data: Data, account: String) -> Bool {
+        SecItemDelete(base(account) as CFDictionary)
+        var item = base(account)
         item[kSecValueData as String] = data
         item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         return SecItemAdd(item as CFDictionary, nil) == errSecSuccess
     }
 
     @discardableResult
-    static func delete() -> Bool {
-        let status = SecItemDelete(base as CFDictionary)
+    private static func delete(account: String) -> Bool {
+        let status = SecItemDelete(base(account) as CFDictionary)
         return status == errSecSuccess || status == errSecItemNotFound
     }
 
-    private static var base: [String: Any] {
+    private static func base(_ account: String) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

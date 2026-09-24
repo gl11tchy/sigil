@@ -14,6 +14,9 @@ struct Attachment: Identifiable, Equatable {
 @Observable
 final class RemoteStore {
     private(set) var hasPairing = false
+    /// Every Mac this phone is paired with, and the one the screens show.
+    private(set) var macs: [PairingCredential] = []
+    private(set) var activeMacID: String?
     private(set) var phase: RemoteConnection.Phase = .offline
     private(set) var tabs: [RemoteTab] = []
     private(set) var selectedTabID: String?
@@ -55,6 +58,8 @@ final class RemoteStore {
     @ObservationIgnored private var pushToken: String?
     /// A session a notification or widget chose before the socket was up.
     @ObservationIgnored private var pendingTabID: String?
+    /// The Mac on screen when Pair another Mac began, for Cancel.
+    @ObservationIgnored private var macBeforePairing: String?
     /// Live Activity push tokens by tab, replayed after every handshake: the Mac holds them in memory only.
     @ObservationIgnored private var activityTokens: [String: String] = [:]
     @ObservationIgnored private let liveActivity = LiveActivityController()
@@ -82,13 +87,59 @@ final class RemoteStore {
         liveActivity.onEnd = { [weak self] tabID in self?.forgetActivityToken(for: tabID) }
         if isDemo {
             DemoData.seed(self)
-        } else if let saved = CredentialStore.load() {
-            hasPairing = true
-            credential = saved
-            macAddress = saved.origin.host
-            restoreCache(for: saved)
-            connection.resume(saved)
+        } else {
+            let list = CredentialStore.loadList()
+            macs = list.macs
+            if let saved = list.selected { activate(saved) }
         }
+    }
+
+    /// Shows one Mac: its cached screen first, then its live connection.
+    private func activate(_ saved: PairingCredential) {
+        activeMacID = saved.id
+        hasPairing = true
+        credential = saved
+        macAddress = saved.origin.host
+        macName = saved.name
+        restoreCache(for: saved)
+        connection.resume(saved)
+    }
+
+    /// Switches the screens to another paired Mac.
+    func switchTo(macID: String) {
+        guard macID != activeMacID, let next = macs.first(where: { $0.id == macID }) else { return }
+        if isDemo {
+            // The demo is offline: only the name changes, the seeded sessions stay.
+            activeMacID = macID
+            macName = next.label
+            return
+        }
+        saveCacheNow()
+        connection.stop()
+        liveActivity.end()
+        clearMacState()
+        CredentialStore.select(id: macID)
+        activate(next)
+    }
+
+    /// Everything that belongs to the Mac on screen. Drafts stay: tab ids never collide across Macs.
+    private func clearMacState() {
+        tabs = []
+        selectedTabID = nil
+        screens = [:]
+        histories = [:]
+        prompt = nil
+        macName = nil
+        cachedAt = nil
+        streaming = false
+        supportsSessionOps = false
+        canRestart = false
+        activityTokens = [:]
+        clearChats()
+        projects = []
+        sessionOptions = nil
+        errorMessage = nil
+        refreshOutput()
     }
 
     var selectedTab: RemoteTab? { tabs.first { $0.id == selectedTabID } }
@@ -117,9 +168,37 @@ final class RemoteStore {
         case .success(let link):
             if isDemo { return nil }
             errorMessage = nil
+            // Pairing another Mac: the one on screen keeps its place in the list and comes back on Cancel.
+            if hasPairing {
+                macBeforePairing = activeMacID
+                saveCacheNow()
+                connection.stop()
+                liveActivity.end()
+                clearMacState()
+                activeMacID = nil
+                credential = nil
+            }
             macAddress = link.origin.host
             connection.pair(link)
             return nil
+        }
+    }
+
+    /// True while a new Mac is being paired from inside the app.
+    var isPairingAnother: Bool { hasPairing && activeMacID == nil }
+
+    /// Goes back to the Mac that was on screen after a pairing attempt that did not finish.
+    func cancelPairing() {
+        guard isPairingAnother else { return }
+        connection.stop(forget: true)
+        errorMessage = nil
+        let previous = macs.first { $0.id == macBeforePairing } ?? macs.first
+        macBeforePairing = nil
+        if let previous {
+            CredentialStore.select(id: previous.id)
+            activate(previous)
+        } else {
+            hasPairing = false
         }
     }
 
@@ -128,32 +207,32 @@ final class RemoteStore {
         connection.reconnect()
     }
 
+    /// Forgets the Mac on screen. Another paired Mac takes its place, if there is one.
     func forget() {
         pollTask?.cancel()
         saveTask?.cancel()
         connection.stop(forget: true)
-        if let credential { ScreenCache.delete(for: credential) }
+        liveActivity.end()
+        if let credential {
+            ScreenCache.delete(for: credential)
+            CredentialStore.delete(id: credential.id)
+            macs.removeAll { $0.id == credential.id }
+        } else {
+            CredentialStore.delete()
+            macs = []
+        }
         credential = nil
-        CredentialStore.delete()
-        hasPairing = false
-        macAddress = nil
-        macName = nil
-        prompt = nil
-        cachedAt = nil
-        tabs = []
-        selectedTabID = nil
-        screens = [:]
-        histories = [:]
+        activeMacID = nil
+        clearMacState()
         drafts = [:]
         attachments = [:]
-        clearChats()
-        projects = []
-        sessionOptions = nil
-        errorMessage = nil
         rawMode = false
-        streaming = false
-        supportsSessionOps = false
-        refreshOutput()
+        if let next = CredentialStore.loadList().selected {
+            activate(next)
+        } else {
+            hasPairing = false
+            macAddress = nil
+        }
     }
 
     // MARK: Lifecycle
@@ -249,8 +328,12 @@ final class RemoteStore {
         Task { _ = try? await connection.request("activity", text: "", tabID: tabID) }
     }
 
-    /// Opens the session a notification or a widget named, now or once connected.
-    func open(tabID: String) {
+    /// Opens the session a notification or a widget named, on the Mac it names,
+    /// now or once connected.
+    func open(tabID: String, macID: String? = nil) {
+        if let macID, macID != activeMacID, macs.contains(where: { $0.id == macID }) {
+            switchTo(macID: macID)
+        }
         if isConnected, let tab = tabs.first(where: { $0.id == tabID }) {
             pendingTabID = nil
             select(tab)
@@ -260,7 +343,7 @@ final class RemoteStore {
     }
 
     private func reflectLiveActivity() {
-        liveActivity.reflect(tab: selectedTab, prompt: prompt, mac: macName)
+        liveActivity.reflect(tab: selectedTab, prompt: prompt, mac: macName, macID: activeMacID)
     }
 
     // MARK: Commands
@@ -601,7 +684,10 @@ final class RemoteStore {
         canRestart = state.canRestart
         supportsSessionOps = state.supportsSessionOps
         prompt = state.prompt
-        if let name = state.mac, !name.isEmpty { macName = name }
+        if let name = state.mac, !name.isEmpty {
+            macName = name
+            rememberMacName(name)
+        }
         cachedAt = nil
         if let screen = state.screen, let target = screen.tab ?? state.selectedTabID {
             // Rows land in the tab they were read from, even if the selection moved meanwhile.
@@ -667,6 +753,15 @@ final class RemoteStore {
         }
     }
 
+    /// The Mac's name goes into the pairing, so the picker can show it before connecting.
+    private func rememberMacName(_ name: String) {
+        guard var current = credential, current.name != name else { return }
+        current.name = name
+        credential = current
+        if let index = macs.firstIndex(where: { $0.id == current.id }) { macs[index] = current }
+        CredentialStore.save(current, select: false)
+    }
+
     // MARK: Cache
 
     private func restoreCache(for credential: PairingCredential) {
@@ -719,6 +814,12 @@ final class RemoteStore {
         phase = .connected
         macAddress = "remote.sigilapp.dev"
         macName = "Studio"
+        let key = RemoteCrypto.randomKey()
+        macs = [
+            PairingCredential(id: "demo-mac-1", origin: URL(string: "https://remote.sigilapp.dev")!, room: String(repeating: "0", count: 32), deviceKey: key, ticket: nil, name: "Studio"),
+            PairingCredential(id: "demo-mac-2", origin: URL(string: "https://remote.sigilapp.dev")!, room: String(repeating: "1", count: 32), deviceKey: key, ticket: nil, name: "MacBook Air"),
+        ]
+        activeMacID = "demo-mac-1"
         self.tabs = tabs
         selectedTabID = selected
         canRestart = true
@@ -774,12 +875,17 @@ extension RemoteStore: RemoteConnectionDelegate {
     }
 
     func connection(_ connection: RemoteConnection, didSave credential: PairingCredential) {
-        if !CredentialStore.save(credential) {
+        var kept = credential
+        if let known = macs.first(where: { $0.id == credential.id }), kept.name == nil { kept.name = known.name }
+        if !CredentialStore.save(kept) {
             errorMessage = "Could not save this pairing. It ends when the app closes."
         }
-        self.credential = credential
+        self.credential = kept
+        macs = CredentialStore.loadList().macs
+        if !macs.contains(where: { $0.id == kept.id }) { macs.append(kept) }
+        activeMacID = kept.id
         hasPairing = true
-        macAddress = credential.origin.host
+        macAddress = kept.origin.host
     }
 
     func connection(_ connection: RemoteConnection, didFail message: String) {

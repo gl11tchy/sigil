@@ -17,7 +17,7 @@ final class LiveActivityController {
     var runningTabID: String? { activity?.attributes.tabID }
 
     /// Reflects the selected tab. Starts when it works, updates on change, ends when it is gone.
-    func reflect(tab: RemoteTab?, prompt: RemotePrompt?, mac: String?) {
+    func reflect(tab: RemoteTab?, prompt: RemotePrompt?, mac: String?, macID: String?) {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         guard let tab else {
             end()
@@ -40,7 +40,7 @@ final class LiveActivityController {
         if activity != nil { end() }
         guard tab.status == .working || prompt != nil else { return }
         let attributes = SessionActivityAttributes(
-            tabID: tab.id, title: tab.title, provider: tab.providerName ?? "Session", mac: mac ?? "Mac")
+            tabID: tab.id, title: tab.title, provider: tab.providerName ?? "Session", mac: mac ?? "Mac", macID: macID)
         do {
             let started = try Activity.request(
                 attributes: attributes, content: ActivityContent(state: state, staleDate: nil), pushType: .token)
