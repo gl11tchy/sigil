@@ -1,9 +1,16 @@
 # Sigil for iPhone
 
 The native phone companion for Sigil. It does what the Sidereal web page does,
-as an app: pair with the Mac by QR code, see open sessions, read their output,
-reply, press terminal keys, stop a turn, start a session in a project, reopen a
-saved chat, and send photos and files.
+as an app: pair with the Mac by QR code, see open sessions, read their output
+in the terminal's colours, reply, press terminal keys, stop a turn, start a
+session in a project or a fresh worktree, close, rename and archive sessions,
+reopen a saved chat, and send photos and files.
+
+After the handshake the app asks the Mac to `watch`: the Mac then sends every
+change as it happens, as the rows that changed with their styles, and the app
+sends no periodic request. A Mac that predates `watch` is polled once a second
+as before. The last screen seen from the Mac is kept on disk, so the app shows
+it the moment it opens, before the socket comes up.
 
 It speaks the same sealed protocol as `Sidereal/public/app.mjs` through the
 same relay (`https://remote.sigilapp.dev` unless the code names another). The

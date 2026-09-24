@@ -22,11 +22,13 @@ public struct RemoteRequest: Codable, Sendable {
     public var provider: String?
     public var model: String?
     public var effort: String?
+    /// New sessions: start in a fresh worktree of the project, as the Mac's sheet can.
+    public var worktree: Bool?
 
     public init(
         challenge: String, sequence: Int, action: String, tabID: String? = nil, text: String? = nil,
         name: String? = nil, index: Int? = nil, count: Int? = nil, transfer: String? = nil,
-        provider: String? = nil, model: String? = nil, effort: String? = nil
+        provider: String? = nil, model: String? = nil, effort: String? = nil, worktree: Bool? = nil
     ) {
         self.challenge = challenge
         self.sequence = sequence
@@ -40,6 +42,7 @@ public struct RemoteRequest: Codable, Sendable {
         self.provider = provider
         self.model = model
         self.effort = effort
+        self.worktree = worktree
     }
 }
 

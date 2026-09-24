@@ -165,7 +165,7 @@ enum ProtocolTests {
         func state(_ ids: [String], selected: String?, truncated: Bool? = nil) -> RemoteState {
             RemoteState(
                 tabs: ids.map { RemoteTab(id: $0, title: $0, status: .idle) }, selectedTabID: selected,
-                terminal: "", capabilities: nil, tabsTruncated: truncated)
+                terminal: "", capabilities: nil, tabsTruncated: truncated, screen: nil, mac: nil)
         }
         try state(["a", "b"], selected: "a").validate()
         try state([], selected: nil).validate()

@@ -56,6 +56,25 @@ struct RemoteRequest: Codable, Sendable {
 }
 ```
 
+## Live stream and session operations (2026-09-24)
+
+- `watch` makes the Mac send events: sealed replies with `event: true` and
+  `sequence: 0`, carrying the tab list, the selection and a `screen` of changed
+  rows. Rows are addressed by buffer-absolute index (`i`), with text (`t`),
+  a wrap flag (`w`) and style runs (`s` = `[start, length, fg, bg, flags]` over
+  Character offsets; colours are -1 default, 0…255 ANSI, `2^24 + 0xRRGGBB` true
+  colour; flags are SwiftTerm `CharacterStyle` bits). `gen` restarts the index
+  space (reset, alternate screen, another tab). A full window carries the tab's
+  theme (`palette`, `fg`, `bg`). Events go out only while a phone is watching,
+  batched at 80 ms, at most 60 rows a frame. Clients that do not know events drop
+  them: neither pending sequence nor error.
+- `rows` returns older rows before `index`; `close`, `rename` (`name`) and
+  `archive` act on a tab (archive needs a saved Grok chat); `new` with
+  `worktree: true` makes a worktree first. Tabs report `provider`,
+  `providerName`, `folder` and `canArchive`; projects report `repository`;
+  state reports `mac` and the capabilities `screen` and `sessionOps`.
+- Spec: `docs/phone-companion-2-spec.md`.
+
 ## Verification and boundaries
 
 Build/tests: `swift test --no-parallel`.

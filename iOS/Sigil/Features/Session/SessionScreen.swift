@@ -79,7 +79,8 @@ struct SessionScreen: View {
             }
         } else {
             OutputView(
-                text: store.output, revision: store.outputRevision, highlight: finding ? findText : "",
+                styled: store.styledOutput, palette: store.palette, foreground: store.themeForeground,
+                background: store.themeBackground, revision: store.outputRevision, highlight: finding ? findText : "",
                 onNearTop: { store.loadEarlier() }, atBottom: $atBottom, scrollToEnd: scrollToEnd
             )
             .ignoresSafeArea(.container, edges: .bottom)
@@ -118,7 +119,7 @@ struct SessionScreen: View {
             if !store.isConnected, !store.isRevoked, !store.isDemo {
                 HStack(spacing: Theme.Space.tight) {
                     ProgressView().controlSize(.small)
-                    Text(store.selectedTab == nil ? "Connecting…" : "Reconnecting… Your draft is kept.")
+                    Text(reconnectingText)
                         .font(.footnote)
                     Spacer(minLength: 0)
                     Button("Retry") { store.reconnect() }
@@ -282,7 +283,17 @@ struct SessionScreen: View {
     private var statusText: String {
         if store.isRevoked { return "Disconnected" }
         if !store.isConnected { return "Reconnecting…" }
-        return store.selectedTab?.status.label ?? "No session"
+        let status = store.selectedTab?.status.label ?? "No session"
+        guard let provider = store.selectedTab?.providerName else { return status }
+        return "\(provider) · \(status)"
+    }
+
+    /// While the socket comes up, the screen shows what was last seen and says when.
+    private var reconnectingText: String {
+        if let seen = store.cachedAt {
+            return "Reconnecting… Showing output from \(seen.formatted(date: .omitted, time: .shortened))."
+        }
+        return store.selectedTab == nil ? "Connecting…" : "Reconnecting… Your draft is kept."
     }
 
     private func startNewSession() {
