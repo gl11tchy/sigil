@@ -848,6 +848,43 @@ struct RemoteSessionOpsTests {
         #expect(await !fixture.command("rows", tabID: tab.id.uuidString, index: 0).ok)
     }
 
+    @Test @MainActor func answerTypesOnlyWhatTheQuestionOnScreenAllows() async throws {
+        let fixture = try PhoneCommandFixture()
+        defer { fixture.cleanup() }
+        let folder = try fixture.directory("prompt-folder")
+        let received = fixture.root.appendingPathComponent("received")
+        let script = """
+            #!/bin/sh
+            stty -echo
+            printf 'Do you want to proceed?\n'
+            printf '❯ 1. Yes\n  2. Yes, and always\n  3. No, and tell Claude what to do differently (esc)\n'
+            while IFS= read -r line; do printf '%s' "$line" > '\(received.path)'; done
+            """
+        try Data(script.utf8).write(to: fixture.executable)
+        let tab = try #require(fixture.model.newTab(in: folder))
+        for _ in 0..<200 {
+            if tab.controller.remoteSnapshot().contains("3. No") { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let state = try #require(await fixture.command("state").state)
+        let prompt = try #require(state.prompt)
+        #expect(prompt.question == "Do you want to proceed?")
+        #expect(prompt.choices.map(\.key) == ["1", "2", "3"])
+        #expect(prompt.yes == "1" && prompt.no == "3")
+
+        let id = tab.id.uuidString
+        #expect(await !fixture.command("answer", text: "7", tabID: id).ok)
+        #expect(await !fixture.command("answer", text: "rm -rf /", tabID: id).ok)
+        #expect(await fixture.command("answer", text: "2", tabID: id).ok)
+        _ = await fixture.command("key", text: "enter", tabID: id)
+        for _ in 0..<100 {
+            if (try? String(contentsOf: received, encoding: .utf8)) == "2" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(try String(contentsOf: received, encoding: .utf8) == "2")
+        #expect(fixture.alerts.count == 0)
+    }
+
     @Test @MainActor func projectsSayWhetherAWorktreeCanStartThere() async throws {
         let fixture = try PhoneCommandFixture()
         defer { fixture.cleanup() }

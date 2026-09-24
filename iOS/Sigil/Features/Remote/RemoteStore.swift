@@ -24,6 +24,8 @@ final class RemoteStore {
     private(set) var loadingEarlier = false
     private(set) var macAddress: String?
     private(set) var macName: String?
+    /// The approval question on the selected session, for the answer buttons.
+    fileprivate(set) var prompt: RemotePrompt?
     /// When the tabs on screen were last heard from the Mac; nil once live.
     private(set) var cachedAt: Date?
     var errorMessage: String?
@@ -127,6 +129,7 @@ final class RemoteStore {
         hasPairing = false
         macAddress = nil
         macName = nil
+        prompt = nil
         cachedAt = nil
         tabs = []
         selectedTabID = nil
@@ -231,6 +234,15 @@ final class RemoteStore {
 
     func archive(_ tab: RemoteTab) {
         perform { _ = try await $0.request("archive", tabID: tab.id) }
+    }
+
+    /// Answers the approval question with one of its keys. The Mac checks the
+    /// question is still on screen before it types.
+    func answer(_ key: String) {
+        guard let id = selectedTabID, let prompt,
+            prompt.choices.contains(where: { $0.key == key }) || key == prompt.yes || key == prompt.no
+        else { return }
+        perform { _ = try await $0.request("answer", text: key, tabID: id) }
     }
 
     /// A nil provider lets the Mac start its default CLI, as Macs before provider choice always do.
@@ -520,6 +532,7 @@ final class RemoteStore {
         selectedTabID = state.selectedTabID
         canRestart = state.canRestart
         supportsSessionOps = state.supportsSessionOps
+        prompt = state.prompt
         if let name = state.mac, !name.isEmpty { macName = name }
         cachedAt = nil
         if let screen = state.screen, let target = screen.tab ?? state.selectedTabID {
@@ -721,6 +734,13 @@ enum DemoData {
                 providerName: "Codex", folder: "sigil/a1b2c3d4", canArchive: false),
         ]
         store.seedDemo(tabs: tabs, selected: "demo-1", screen: screen)
+        store.prompt = RemotePrompt(
+            question: "Do you want to proceed?", style: .menu,
+            choices: [
+                .init(label: "Yes", key: "1"),
+                .init(label: "Yes, and don't ask again for scripts/test.sh", key: "2"),
+                .init(label: "No, and tell Claude what to do differently (esc)", key: "3"),
+            ], yes: "1", no: "3")
     }
 
     /// Terminal rows with the colours a real session has: a bold prompt, green

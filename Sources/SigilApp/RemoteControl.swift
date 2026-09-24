@@ -29,6 +29,7 @@ final class RemoteControl {
     @ObservationIgnored private var changeTask: Task<Void, Never>?
     @ObservationIgnored private var lastSentTabs: [RemoteState.Tab]?
     @ObservationIgnored private var lastSentSelection: String?
+    @ObservationIgnored private var lastSentPrompt: RemotePrompt?
     @ObservationIgnored private weak var watchedModel: AppModel?
     /// Changes are batched this long, so a burst of output is one frame.
     static let changeDelay: Duration = .milliseconds(80)
@@ -354,6 +355,7 @@ final class RemoteControl {
         reply = RemoteCommands.fitting(reply)
         lastSentTabs = reply.state?.tabs
         lastSentSelection = selected
+        lastSentPrompt = reply.state?.prompt
         observeModel(model)
         return reply
     }
@@ -366,6 +368,7 @@ final class RemoteControl {
         stream.reset()
         lastSentTabs = nil
         lastSentSelection = nil
+        lastSentPrompt = nil
     }
 
     /// Tabs, selection and titles are observable; output and status arrive through the tab hooks.
@@ -389,15 +392,17 @@ final class RemoteControl {
         let selected = model.selectedTab?.id.uuidString
         let window = model.selectedTab?.controller.remoteScreenWindow() ?? .empty
         let screen = stream.update(window, tabID: selected)
-        let tabsChanged = tabs != lastSentTabs || selected != lastSentSelection
+        let prompt = model.selectedTab.flatMap(RemoteCommands.prompt(for:))
+        let tabsChanged = tabs != lastSentTabs || selected != lastSentSelection || prompt != lastSentPrompt
         guard tabsChanged || screen != nil else { return }
         lastSentTabs = tabs
         lastSentSelection = selected
+        lastSentPrompt = prompt
         let frames: [RemoteReply]
         var base = RemoteReply(challenge: watcher.challenge, sequence: 0, event: true)
         base.state = RemoteState(
             tabs: tabs, selectedTabID: selected, terminal: "", tabsTruncated: model.tabs.count > 100,
-            screen: nil, mac: RemoteCommands.macName)
+            screen: nil, mac: RemoteCommands.macName, prompt: prompt)
         frames = Self.frames(base: base, screen: screen)
         for (index, frame) in frames.enumerated() {
             if index > 0 { try? await Task.sleep(for: Self.frameSpacing) }

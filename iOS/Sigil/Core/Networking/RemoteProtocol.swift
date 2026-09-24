@@ -143,6 +143,56 @@ struct RemoteScreen: Decodable, Equatable {
     static let trueColorBase = 1 << 24
 }
 
+/// An approval question the selected session is showing. The Mac reads the
+/// screen again when a button is tapped, so a stale prompt cannot type.
+struct RemotePrompt: Decodable, Equatable {
+    struct Choice: Decodable, Equatable, Identifiable {
+        let label: String
+        /// What `answer` sends: a digit for a menu row, a letter for a yes/no question.
+        let key: String
+        var id: String { key }
+    }
+
+    enum Style: Equatable {
+        case menu
+        case yesNo
+        case unknown(String)
+
+        init(raw: String) {
+            switch raw {
+            case "menu": self = .menu
+            case "yesNo": self = .yesNo
+            default: self = .unknown(raw)
+            }
+        }
+    }
+
+    let question: String
+    let style: Style
+    let choices: [Choice]
+    let yes: String
+    let no: String
+
+    private enum CodingKeys: String, CodingKey { case question, style, choices, yes, no }
+
+    init(question: String, style: Style, choices: [Choice], yes: String, no: String) {
+        self.question = question
+        self.style = style
+        self.choices = choices
+        self.yes = yes
+        self.no = no
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        question = try c.decode(String.self, forKey: .question)
+        style = Style(raw: try c.decode(String.self, forKey: .style))
+        choices = try c.decode([Choice].self, forKey: .choices)
+        yes = try c.decode(String.self, forKey: .yes)
+        no = try c.decode(String.self, forKey: .no)
+    }
+}
+
 struct RemoteState: Decodable, Equatable {
     let tabs: [RemoteTab]
     let selectedTabID: String?
@@ -153,6 +203,8 @@ struct RemoteState: Decodable, Equatable {
     let screen: RemoteScreen?
     /// This Mac's name.
     let mac: String?
+    /// An approval question on the selected session's screen.
+    let prompt: RemotePrompt?
 
     var canRestart: Bool { capabilities?.contains("restart") == true }
     /// The Mac streams changed rows after `watch`; older Macs are polled for text.
@@ -178,6 +230,11 @@ struct RemoteState: Decodable, Equatable {
             guard screen.rows.count <= 2_000, screen.end >= screen.first, (screen.palette ?? []).count <= 16,
                 (screen.tab ?? "").utf8.count <= 64,
                 screen.rows.allSatisfy({ $0.i < screen.end && ($0.s ?? []).allSatisfy { $0.count == 5 } })
+            else { throw RemoteCryptoError.invalidMessage }
+        }
+        if let prompt {
+            guard prompt.choices.count <= 9, prompt.question.count <= 300,
+                prompt.choices.allSatisfy({ $0.label.count <= 300 && $0.key.count <= 8 })
             else { throw RemoteCryptoError.invalidMessage }
         }
     }

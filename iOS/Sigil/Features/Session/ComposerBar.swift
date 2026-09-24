@@ -23,6 +23,7 @@ struct ComposerBar: View {
         @Bindable var store = store
         VStack(spacing: Theme.Space.small) {
             if !store.selectedAttachments.isEmpty { attachmentRow }
+            if let prompt = store.prompt, !ended { answerBar(prompt) }
             if showingKeys { keysRow }
             if ended, store.canRestart {
                 Button {
@@ -160,6 +161,58 @@ struct ComposerBar: View {
                 }
             }
         }
+    }
+
+    /// Yes, No and one button per numbered row of the question on screen.
+    private func answerBar(_ prompt: RemotePrompt) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.tight) {
+            if !prompt.question.isEmpty {
+                Text(prompt.question)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.secondaryText)
+                    .lineLimit(2)
+                    .padding(.horizontal, Theme.Space.tight)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Theme.Space.tight) {
+                    answerButton("Yes", key: prompt.yes, tint: Theme.success)
+                    answerButton("No", key: prompt.no, tint: Theme.danger)
+                    ForEach(prompt.choices) { choice in
+                        answerButton("\(choice.key)  \(Self.shortLabel(choice.label))", key: choice.key, tint: nil)
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(prompt.question.isEmpty ? "Approval question" : prompt.question)
+    }
+
+    private func answerButton(_ title: String, key: String, tint: Color?) -> some View {
+        Button {
+            store.answer(key)
+        } label: {
+            Text(title)
+                .font(.subheadline.weight(Theme.emphasis(.semibold)))
+                .foregroundStyle(tint == nil ? Theme.primaryText : .white)
+                .lineLimit(1)
+                .padding(.horizontal, Theme.Space.medium)
+                .frame(minWidth: 44, minHeight: 36)
+                .chromeGlass(
+                    tint.map { .regular.tint($0).interactive() } ?? .regular.interactive(),
+                    in: Capsule(), fallback: tint ?? Theme.cardBackground)
+        }
+        .buttonStyle(.icon)
+        .disabled(!store.isConnected || store.busy)
+        .accessibilityLabel(title)
+    }
+
+    /// A menu row shortened for a button. The key hint a CLI appends, like "(esc)", goes.
+    static func shortLabel(_ label: String) -> String {
+        var trimmed = label.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasSuffix(")"), let open = trimmed.lastIndex(of: "(") {
+            trimmed = trimmed[..<open].trimmingCharacters(in: .whitespaces)
+        }
+        return trimmed.count > 30 ? String(trimmed.prefix(29)) + "…" : trimmed
     }
 
     private var keysRow: some View {
