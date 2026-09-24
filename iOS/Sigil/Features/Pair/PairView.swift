@@ -2,6 +2,9 @@ import SwiftUI
 
 struct PairView: View {
     @Environment(RemoteStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    /// Shown as a sheet from a paired phone to add another Mac.
+    var embedded = false
     @State private var scanning = false
     @State private var pasting = false
     @State private var link = ""
@@ -40,7 +43,21 @@ struct PairView: View {
             .flowsUnderChrome()
             .background(Theme.groupedBackground)
             .safeAreaInset(edge: .bottom) { actions }
-            .navigationTitle(AppInfo.displayName)
+            .navigationTitle(embedded ? "Pair another Mac" : AppInfo.displayName)
+            .toolbar {
+                if embedded {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            store.cancelPairing()
+                            dismiss()
+                        }
+                    }
+                }
+            }
+            .onChange(of: store.activeMacID) { _, id in
+                // The new Mac accepted the phone: the sheet's job is done.
+                if embedded, id != nil, store.isConnected || store.hasPairing { dismiss() }
+            }
             .sheet(isPresented: $scanning) {
                 ScannerSheet { code in
                     scanning = false

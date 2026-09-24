@@ -59,6 +59,8 @@ enum TestMain {
         run("request carries worktree") { try ScreenTests.requestCarriesWorktree() }
         run("decodes a prompt") { try ScreenTests.decodesAPrompt() }
         run("alert opens with the right key only") { try ScreenTests.alertOpensWithTheRightKeyOnly() }
+        run("pairing list rules") { try ScreenTests.pairingListRules() }
+        run("alert names the Mac that sent it") { try ScreenTests.alertNamesTheMacThatSentIt() }
 
         if let port = ProcessInfo.processInfo.environment["SIGIL_RELAY_PORT"] {
             do {

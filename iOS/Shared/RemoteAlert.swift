@@ -63,9 +63,14 @@ struct RemoteAlert: Codable, Equatable {
     /// Opens a sealed alert with any of the given device keys: a phone paired
     /// with several Macs tries each, and AES-GCM rejects every wrong one.
     static func open(_ sealed: String, keys: [String]) -> RemoteAlert? {
-        for key in keys {
+        opened(sealed, keys: keys)?.alert
+    }
+
+    /// The alert and the index of the key that opened it, which names the Mac.
+    static func opened(_ sealed: String, keys: [String]) -> (alert: RemoteAlert, keyIndex: Int)? {
+        for (index, key) in keys.enumerated() {
             if let alert: RemoteAlert = try? RemoteCrypto.open(sealed, key: key, direction: direction) {
-                return alert
+                return (alert, index)
             }
         }
         return nil

@@ -188,6 +188,43 @@ enum ScreenTests {
         try Expect.equal(RemoteAlert(kind: .finished, tabID: "T", title: "t", body: "").shownBody, "Finished and waiting for you.", "finished body")
     }
 
+    static func pairingListRules() throws {
+        let origin = URL(string: "https://remote.example")!
+        let a = PairingCredential(id: "a", origin: origin, room: String(repeating: "0", count: 32), deviceKey: String(repeating: "ab", count: 32), ticket: nil, name: "Studio")
+        let b = PairingCredential(id: "b", origin: origin, room: String(repeating: "1", count: 32), deviceKey: String(repeating: "cd", count: 32), ticket: nil)
+        var list = PairingList()
+        try Expect.equal(list.selected, nil, "empty list")
+        list.upsert(a)
+        list.upsert(b)
+        try Expect.equal(list.selected?.id, "b", "a new Mac is selected")
+        var renamed = a
+        renamed.name = "Studio 2"
+        list.upsert(renamed, select: false)
+        try Expect.equal(list.macs.map(\.name), ["Studio 2", nil], "upsert replaces by id in place")
+        try Expect.equal(list.selectedID, "b", "select false keeps the selection")
+        list.remove(id: "b")
+        try Expect.equal(list.selectedID, "a", "selection moves when the selected Mac goes")
+        list.remove(id: "a")
+        try Expect.equal(list.selected, nil, "nothing left")
+        try Expect.equal(b.label, "remote.example", "no name shows the host")
+        try Expect.equal(a.label, "Studio", "name wins")
+        // A pairing saved before ids decodes with a fresh one; the round trip keeps it.
+        let old = Data("{\"origin\":\"https://remote.example\",\"room\":\"\(String(repeating: "0", count: 32))\",\"deviceKey\":\"\(String(repeating: "ab", count: 32))\"}".utf8)
+        let decoded = try JSONDecoder().decode(PairingCredential.self, from: old)
+        try Expect.true(!decoded.id.isEmpty && decoded.isValid, "legacy pairing gets an id")
+        let again = try JSONDecoder().decode(PairingCredential.self, from: try JSONEncoder().encode(decoded))
+        try Expect.equal(again.id, decoded.id, "id survives a round trip")
+    }
+
+    static func alertNamesTheMacThatSentIt() throws {
+        let keys = [RemoteCrypto.randomKey(), RemoteCrypto.randomKey()]
+        let alert = RemoteAlert(kind: .ended, tabID: "T", title: "sigil", body: "")
+        let sealed = try RemoteCrypto.seal(alert, key: keys[1], direction: RemoteAlert.direction)
+        let opened = try Expect.notNil(RemoteAlert.opened(sealed, keys: keys), "opens")
+        try Expect.equal(opened.keyIndex, 1, "the second Mac's key")
+        try Expect.equal(opened.alert, alert, "same alert")
+    }
+
     static func requestCarriesWorktree() throws {
         var request = RemoteRequest(challenge: "c", sequence: 1, action: "new")
         request.worktree = true

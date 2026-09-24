@@ -21,10 +21,10 @@ struct SigilApp: App {
                 .onOpenURL { url in
                     // A widget or notification link only chooses a session.
                     guard url.scheme == "sigilremote", url.host == "session",
-                        let tab = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
-                            .first(where: { $0.name == "tab" })?.value
+                        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+                        let tab = items.first(where: { $0.name == "tab" })?.value
                     else { return }
-                    store.open(tabID: tab)
+                    store.open(tabID: tab, macID: items.first(where: { $0.name == "mac" })?.value)
                 }
         }
         .onChange(of: scenePhase) { _, phase in
