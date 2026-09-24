@@ -44,7 +44,14 @@ final class TerminalTab: Identifiable {
     let spec: GrokLaunchSpec
     let controller: TerminalController
 
-    private(set) var activity: Activity = .starting
+    private(set) var activity: Activity = .starting {
+        didSet {
+            guard activity != oldValue else { return }
+            workingSince = activity == .working ? Date() : nil
+        }
+    }
+    /// When the turn in flight started, for the elapsed time beside "Working".
+    private(set) var workingSince: Date?
     /// Set when a turn finishes while this tab is in the background.
     private(set) var hasUnseenActivity = false
     private(set) var bridgeInbox: [BridgeInboxItem] = []

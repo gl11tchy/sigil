@@ -1,0 +1,14 @@
+b72: Window menu, opened with AXPress on the menu bar item (excerpt from Next Tab to Tab 3; the system items above it are left out):
+  Next Tab | enabled=true
+  Previous Tab | enabled=true
+  Show Tab List… | enabled=true
+  ---- | enabled=false
+  Tab 1 | enabled=true
+  Tab 2 | enabled=true
+  Tab 3 | enabled=true
+Show Tab List… shortcut: AXMenuItemCmdChar=T, AXMenuItemCmdModifiers=4 (Control+Command, so ⌃⌘T)
+
+AXPress on Window > Show Tab List… with 3 tabs open. SigilUX windows after the press (CGWindowList):
+  SigilUX window 24122 0 928 103 386 166
+  SigilUX window 24003 0 306 262 900 492
+The second window (386x166) is the tab list popover; see vs-b72-tab-list-from-menu.png. The selected tab (acme-api) is highlighted.
