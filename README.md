@@ -5,7 +5,7 @@
 [![CI](https://github.com/gl11tchy/sigil/actions/workflows/ci.yml/badge.svg)](https://github.com/gl11tchy/sigil/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-MIT-6A6A6A)
 
-A native macOS app for Claude Code, Codex, Devin, Cursor, and Grok Build.
+A native macOS app for Claude Code, Codex, Devin, Cursor, Kimi Code, and Grok Build.
 It runs each provider's real CLI in a terminal tab. Grok Build also has a
 searchable conversation sidebar.
 
@@ -19,8 +19,10 @@ By gl11tchy.
 
 - **Provider picker.** Press ⌘T or click a new-session plus, then click a large
   provider icon to launch its CLI in the chosen folder. Claude Code uses `claude`,
-  Codex uses `codex`, Devin uses `devin`, and Cursor uses `cursor-agent`.
-  Install and sign in to each CLI separately. Sigil uses your login shell's PATH
+  Codex uses `codex`, Devin uses `devin`, Cursor uses `cursor-agent`, and Kimi Code
+  uses `kimi`. Install and sign in to each CLI separately. Kimi Code can also sign
+  in from Settings › General: with a Kimi account (`kimi login` in the browser) or
+  with a Kimi Platform API key, which stays in the Keychain. Sigil uses your login shell's PATH
   and the standard installation folders. Grok keeps its configured Settings path.
   Other providers keep their own history inside their CLI; Sigil's sidebar,
   transcript export, tab messaging, and automatic chat restoration remain Grok-only.
