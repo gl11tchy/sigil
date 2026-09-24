@@ -291,6 +291,33 @@ struct AppShellTests {
         #expect(window.firstResponder === shell.view)
     }
 
+    @Test func aPanelShellOpenedUnderTheNewSessionSheetTakesFocusWhenItCloses() async throws {
+        let home = try TemporaryShellHome()
+        defer { home.restore() }
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        let tab = try #require(model.newTab(in: try fixture.directory("project")))
+        defer { model.closeAllTabsAndWait() }
+        let window = makeClosableWindow()
+        try #require(window.contentView).addSubview(tab.controller.view)
+        defer { tab.controller.view.removeFromSuperview() }
+        model.panel.isVisible = false
+        model.isShowingNewSessionSheet = true
+
+        model.showPanel(.shell)
+        let shell = try #require(model.panel.shell)
+        try #require(window.contentView).addSubview(shell.view)
+        model.focusPanelShell()
+        await flushMainAsync()
+        #expect(window.firstResponder !== shell.view)
+
+        model.isShowingNewSessionSheet = false
+        model.newSessionSheetDidClose()
+        await flushMainAsync()
+        #expect(window.firstResponder === shell.view)
+    }
+
     private func makeClosableWindow() -> NSWindow {
         _ = NSApplication.shared
         let window = NSWindow(

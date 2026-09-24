@@ -1792,8 +1792,13 @@ final class AppModel {
         retryPendingTerminalFocus()
     }
 
+    /// A panel shell opened while the sheet was up takes focus once it closes.
+    func newSessionSheetDidClose() {
+        if needsPanelShellFocus { focusPanelShell() } else { focusSelectedTerminal() }
+    }
+
     func windowDidBecomeKey() {
-        retryPendingTerminalFocus()
+        if needsPanelShellFocus { focusPanelShell() } else { retryPendingTerminalFocus() }
     }
 
     private func retryPendingTerminalFocus() {
@@ -1852,8 +1857,8 @@ final class AppModel {
     func focusPanelShell() {
         guard needsPanelShellFocus else { return }
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.needsPanelShellFocus, self.panel.isVisible,
-                self.panel.mode == .shell, let shell = self.panel.shell,
+            guard let self, self.needsPanelShellFocus, !self.isShowingNewSessionSheet,
+                self.panel.isVisible, self.panel.mode == .shell, let shell = self.panel.shell,
                 let window = shell.view.window, window.attachedSheet == nil
             else { return }
             self.needsPanelShellFocus = false
