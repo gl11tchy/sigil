@@ -55,7 +55,7 @@ struct RightPanelView: View {
             EmptyView()
         }
         IconButton(systemImage: "xmark", help: "Close Panel (⌥⌘B)") {
-            panel.isVisible = false
+            model.togglePanel()
         }
     }
 
@@ -78,6 +78,10 @@ struct RightPanelView: View {
                     }
                 }
                 .padding([.leading, .trailing, .bottom], 1)
+                .task(id: ObjectIdentifier(shell)) {
+                    await Task.yield()
+                    model.focusPanelShell()
+                }
             } else {
                 PanelPlaceholder(text: "Starting a shell…")
             }
@@ -94,9 +98,17 @@ struct RightPanelView: View {
                 )
                 .id("\(cwd)/\(sessionID)")
             } else {
-                PanelPlaceholder(text: "Open a conversation to keep notes on it.")
+                PanelPlaceholder(text: Self.notesPlaceholder(for: model.selectedTab))
             }
         }
+    }
+
+    /// Notes are keyed by a Grok session, which other providers never have.
+    static func notesPlaceholder(for tab: TerminalTab?) -> String {
+        if let tab, tab.spec.provider != .grokBuild {
+            return "Notes are available for Grok Build sessions."
+        }
+        return "Open a conversation to keep notes on it."
     }
 }
 

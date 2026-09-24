@@ -211,6 +211,154 @@ struct AppShellTests {
         #expect(!model.needsTerminalFocus)
     }
 
+    @Test func hidingThePanelGivesFocusBackToTheTerminal() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        let tab = try #require(model.newTab(in: try fixture.directory("project")))
+        defer { model.closeAllTabsAndWait() }
+        let window = makeClosableWindow()
+        let notes = NSTextView()
+        try #require(window.contentView).addSubview(notes)
+        try #require(window.contentView).addSubview(tab.controller.view)
+        defer { tab.controller.view.removeFromSuperview() }
+
+        for hide in [{ model.togglePanel() }, { model.showPanel(.notes) }] {
+            model.panel.mode = .notes
+            model.panel.isVisible = true
+            #expect(window.makeFirstResponder(notes))
+            await flushMainAsync()
+            model.needsTerminalFocus = false
+
+            hide()
+            await flushMainAsync()
+
+            #expect(!model.panel.isVisible)
+            #expect(model.needsTerminalFocus)
+        }
+    }
+
+    @Test func hidingThePanelLeavesFocusInTheSidebar() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        let tab = try #require(model.newTab(in: try fixture.directory("project")))
+        defer { model.closeAllTabsAndWait() }
+        let window = makeClosableWindow()
+        let sidebarList = FocusableView()
+        try #require(window.contentView).addSubview(sidebarList)
+        try #require(window.contentView).addSubview(tab.controller.view)
+        defer { tab.controller.view.removeFromSuperview() }
+        model.panel.mode = .notes
+        model.panel.isVisible = true
+        #expect(window.makeFirstResponder(sidebarList))
+        await flushMainAsync()
+        model.needsTerminalFocus = false
+
+        model.togglePanel()
+        await flushMainAsync()
+
+        #expect(!model.needsTerminalFocus)
+    }
+
+    @Test func showingOrRestartingThePanelShellFocusesIt() async throws {
+        let home = try TemporaryShellHome()
+        defer { home.restore() }
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let window = makeClosableWindow()
+        model.panel.mode = .shell
+        model.panel.isVisible = false
+
+        model.togglePanel()
+        let shell = try #require(model.panel.shell)
+        try #require(window.contentView).addSubview(shell.view)
+        await flushMainAsync()
+        #expect(window.firstResponder === shell.view)
+
+        window.makeFirstResponder(nil)
+        model.restartPanelShell()
+        let restarted = try #require(model.panel.shell)
+        try #require(window.contentView).addSubview(restarted.view)
+        await flushMainAsync()
+        #expect(window.firstResponder === restarted.view)
+    }
+
+    @Test func aPanelShellThatAppearsLateStillTakesFocus() async throws {
+        let home = try TemporaryShellHome()
+        defer { home.restore() }
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let window = makeClosableWindow()
+        model.panel.isVisible = false
+
+        model.showPanel(.shell)
+        await flushMainAsync()
+        let shell = try #require(model.panel.shell)
+        try #require(window.contentView).addSubview(shell.view)
+        model.focusPanelShell()
+        await flushMainAsync()
+
+        #expect(window.firstResponder === shell.view)
+    }
+
+    @Test func aPanelShellOpenedUnderTheNewSessionSheetTakesFocusWhenItCloses() async throws {
+        let home = try TemporaryShellHome()
+        defer { home.restore() }
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        let tab = try #require(model.newTab(in: try fixture.directory("project")))
+        defer { model.closeAllTabsAndWait() }
+        let window = makeClosableWindow()
+        try #require(window.contentView).addSubview(tab.controller.view)
+        defer { tab.controller.view.removeFromSuperview() }
+        model.panel.isVisible = false
+        model.isShowingNewSessionSheet = true
+
+        model.showPanel(.shell)
+        let shell = try #require(model.panel.shell)
+        try #require(window.contentView).addSubview(shell.view)
+        model.focusPanelShell()
+        await flushMainAsync()
+        #expect(window.firstResponder !== shell.view)
+
+        model.isShowingNewSessionSheet = false
+        model.newSessionSheetDidClose()
+        await flushMainAsync()
+        #expect(window.firstResponder === shell.view)
+    }
+
+    @Test func switchingFromThePanelShellToNotesGivesFocusBackToTheTerminal() async throws {
+        let home = try TemporaryShellHome()
+        defer { home.restore() }
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        let tab = try #require(model.newTab(in: try fixture.directory("project")))
+        defer { model.closeAllTabsAndWait() }
+        let window = makeClosableWindow()
+        try #require(window.contentView).addSubview(tab.controller.view)
+        defer { tab.controller.view.removeFromSuperview() }
+        model.panel.isVisible = false
+        model.showPanel(.shell)
+        let shell = try #require(model.panel.shell)
+        try #require(window.contentView).addSubview(shell.view)
+        await flushMainAsync()
+        #expect(window.firstResponder === shell.view)
+        model.needsTerminalFocus = false
+
+        model.showPanel(.notes)
+        await flushMainAsync()
+
+        #expect(model.panel.isVisible)
+        #expect(model.needsTerminalFocus)
+    }
+
     private func makeClosableWindow() -> NSWindow {
         _ = NSApplication.shared
         let window = NSWindow(
@@ -221,6 +369,29 @@ struct AppShellTests {
         )
         window.isReleasedWhenClosed = false
         return window
+    }
+}
+
+/// Points HOME at an empty folder and SHELL at /bin/sh, so a panel shell
+/// started by a test reads none of the user's startup files.
+@MainActor
+private final class TemporaryShellHome {
+    let root: URL
+    private let oldHome = ProcessInfo.processInfo.environment["HOME"]
+    private let oldShell = ProcessInfo.processInfo.environment["SHELL"]
+
+    init() throws {
+        root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AppShellTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        setenv("HOME", root.path, 1)
+        setenv("SHELL", "/bin/sh", 1)
+    }
+
+    func restore() {
+        if let oldHome { setenv("HOME", oldHome, 1) } else { unsetenv("HOME") }
+        if let oldShell { setenv("SHELL", oldShell, 1) } else { unsetenv("SHELL") }
+        try? FileManager.default.removeItem(at: root)
     }
 }
 

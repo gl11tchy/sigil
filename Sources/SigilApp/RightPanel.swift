@@ -62,6 +62,8 @@ final class RightPanel {
     private(set) var shellDirectory: URL?
     /// The current shell has exited. The panel offers a restart.
     private(set) var shellExited = false
+    /// Replaced shells that are still stopping.
+    @ObservationIgnored private var stoppingShells: [ObjectIdentifier: TerminalController] = [:]
 
     init(defaults: UserDefaults = .standard, notesStore: ConversationNotesStore? = nil) {
         self.defaults = defaults
@@ -102,9 +104,18 @@ final class RightPanel {
         controller.startShell(ShellLaunchSpec(workingDirectory: directory))
     }
 
-    /// Kills the shell and starts a fresh one in `directory`.
+    /// Kills the shell and starts a fresh one in `directory`. The old shell is
+    /// stopped in the background: an interactive shell ignores SIGTERM, and
+    /// waiting for the SIGKILL would freeze the window.
     func restartShell(in directory: URL, theme: TerminalTheme, fontSize: CGFloat) {
-        shell?.terminateAndWait()
+        if let old = shell, old.isRunning {
+            // Freeing the controller kills its child at once, so hold it until
+            // the stop finishes and a command still gets its SIGTERM cleanup.
+            let id = ObjectIdentifier(old)
+            stoppingShells[id] = old
+            old.onTerminate = { [weak self] _ in self?.stoppingShells[id] = nil }
+            old.terminate()
+        }
         let controller = TerminalController(theme: theme, fontSize: fontSize)
         shell = controller
         shellDirectory = directory

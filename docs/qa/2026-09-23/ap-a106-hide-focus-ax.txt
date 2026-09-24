@@ -1,0 +1,39 @@
+# a106 — branch audit/app-panel @ 7d58b29, 2026-09-23 18:30:49
+
+## 1. Focus before (panel shell, after Restart Shell)
+focused: AXTextArea | Description=Grok terminal | Value=exec@host acme-api % | Focused=1 | Position=934,307 | Size=264x439
+ ↑ AXGroup | Description=Utility panel | Focused=0 | Enabled=1 | Position=926,262 | Size=280x492
+
+## 2. AXPress on the top-bar panel toggle (Hide Panel)
+pressed [0] AXButton | Description=Show Panel (⌥⌘B) | Help=Show Panel (⌥⌘B) | Focused=0 | Enabled=1 | Identifier=sidebar.trailing | Position=1132,269 | Size=22x22
+
+## 3. Focus after the panel hid
+focused: AXTextArea | Description=Grok Build terminal | Value=sandbox:workspace /Users/Shared/sigil-ux/projects/acme-api   0K / 500K⏎⏎╭────────────────────────────────────────────────────────────────────────╮⏎│ ❯ Build any… | Focused=1 | Position=595,315 | Size=595x423
+ ↑ AXGroup | Subrole=AXHostingView | Focused=0 | Position=306,262 | Size=900x492
+  ↑ AXWindow | Subrole=AXStandardWindow | Title=SigilUX | Focused=0 | Identifier=SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._BackgroundModifier<SigilApp.Windo… | Position=306,262 | Size=900x492
+   ↑ AXApplication | Title=SigilUX
+
+## 4. Panel still in tree?
+(none)
+
+(The 'pressed' line prints the button after the press, so its label already reads Show Panel.)
+
+## 5. Panel close button path. SigilUX brought to front first (a shared-machine app had taken the front on an earlier try).
+SigilUX frontmost: true
+AXPress the top-bar toggle to reopen the panel:
+pressed [0] AXButton | Description=Hide Panel (⌥⌘B) | Help=Hide Panel (⌥⌘B) | Focused=0 | Enabled=1 | Identifier=sidebar.trailing | Position=851,269 | Size=22x22
+focused: AXTextArea | Description=Grok terminal | Value=exec@host acme-api % | Focused=1 | Position=934,307 | Size=264x439
+ ↑ AXGroup | Description=Utility panel | Focused=0 | Enabled=1 | Position=926,262 | Size=280x492
+
+## 6. AXPress on the panel's own Close Panel button
+SigilUX frontmost: true
+pressed [0] 
+
+## 7. Focus after the panel's close button hid the panel
+SigilUX frontmost: true
+focused: AXTextArea | Description=Grok Build terminal | Value=sandbox:workspace /Users/Shared/sigil-ux/projects/acme-api   0K / 500K⏎⏎╭────────────────────────────────────────────────────────────────────────╮⏎│ ❯ Build any… | Focused=1 | Position=595,315 | Size=595x423
+ ↑ AXGroup | Subrole=AXHostingView | Focused=0 | Position=306,262 | Size=900x492
+Utility panel in tree: (none)
+
+Result: after the top-bar Hide Panel and the panel's own Close Panel button, focus returns to the tab's Grok Build terminal.
+Side note: when another app was frontmost, focus stayed on the window until SigilUX came to the front; then it moved to the tab terminal (deferred path).
