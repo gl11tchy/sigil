@@ -23,16 +23,15 @@ struct RightPanelTests {
     func pickingTheShowingToolClosesThePanel() {
         let (panel, notesRoot) = makePanel()
         defer { try? FileManager.default.removeItem(at: notesRoot) }
-        let directory = FileManager.default.homeDirectoryForCurrentUser
-        panel.toggle(.notes, in: directory)
+        panel.toggle(.notes)
         #expect(panel.isVisible)
         #expect(panel.mode == .notes)
 
-        panel.toggle(.shell, in: directory)
+        panel.toggle(.shell)
         #expect(panel.isVisible)
         #expect(panel.mode == .shell)
 
-        panel.toggle(.shell, in: directory)
+        panel.toggle(.shell)
         #expect(!panel.isVisible)
     }
 
@@ -192,13 +191,13 @@ struct RightPanelTests {
         let (panel, notesRoot) = makePanel()
         defer { try? FileManager.default.removeItem(at: notesRoot) }
 
-        panel.startShellIfNeeded(in: root)
+        panel.startShellIfNeeded(in: root, theme: .grokNight, fontSize: 13)
         let first = try #require(panel.shell)
         let oldPID = try #require((first.view as? LocalProcessTerminalView)?.process.shellPid)
         // An interactive zsh at its prompt ignores SIGTERM.
         try await Task.sleep(for: .milliseconds(500))
 
-        let elapsed = ContinuousClock().measure { panel.restartShell(in: root) }
+        let elapsed = ContinuousClock().measure { panel.restartShell(in: root, theme: .grokNight, fontSize: 13) }
         let second = try #require(panel.shell)
         defer { second.terminateAndWait() }
 
@@ -229,13 +228,13 @@ struct RightPanelTests {
         defer { try? FileManager.default.removeItem(at: notesRoot) }
         let cleaned = root.appendingPathComponent("cleaned")
 
-        panel.startShellIfNeeded(in: root)
+        panel.startShellIfNeeded(in: root, theme: .grokNight, fontSize: 13)
         try await Task.sleep(for: .milliseconds(500))
         // Like a command that finishes its write when asked to stop.
         panel.shell?.send(text: "trap 'touch \(cleaned.path); exit' TERM\r")
         try await Task.sleep(for: .milliseconds(300))
 
-        panel.restartShell(in: root)
+        panel.restartShell(in: root, theme: .grokNight, fontSize: 13)
         defer { panel.shell?.terminateAndWait() }
 
         let deadline = ContinuousClock.now + .seconds(3)

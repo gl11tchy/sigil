@@ -94,37 +94,6 @@ public enum SearchMatchHighlight: Sendable {
         query.split(whereSeparator: \.isWhitespace).contains { contains(haystack, query: String($0)) }
     }
 
-    /// `ranges(in:query:)` relocated onto `container`, which must start with `haystack`.
-    /// Used for a subtitle that shows a project name (or path) then a timestamp.
-    public static func ranges(
-        in haystack: String,
-        query: String,
-        asPrefixOf container: String
-    ) -> [Range<String.Index>] {
-        guard container.hasPrefix(haystack) else { return [] }
-        return ranges(in: haystack, query: query).map { range in
-            let start = haystack.distance(from: haystack.startIndex, to: range.lowerBound)
-            let end = haystack.distance(from: haystack.startIndex, to: range.upperBound)
-            let lower = container.index(container.startIndex, offsetBy: start)
-            let upper = container.index(container.startIndex, offsetBy: end)
-            return lower..<upper
-        }
-    }
-
-    /// Title or subtitle broken into unmatched / matched runs, in order.
-    public static func runs(in haystack: String, query: String) -> [Run] {
-        runs(in: haystack, matching: ranges(in: haystack, query: query))
-    }
-
-    /// `runs(in:query:)` relocated onto `container`, which must start with `haystack`.
-    public static func runs(
-        in haystack: String,
-        query: String,
-        asPrefixOf container: String
-    ) -> [Run] {
-        runs(in: container, matching: ranges(in: haystack, query: query, asPrefixOf: container))
-    }
-
     /// Split `haystack` on already-computed ranges. The ranges must belong to `haystack`.
     public static func runs(
         in haystack: String,
@@ -260,16 +229,6 @@ public enum SearchMatchHighlight: Sendable {
             $0.upperBound <= text.index(text.startIndex, offsetBy: prefix.count)
         }
         return HeaderPaint(text: text, runs: runs(in: text, matching: ranges))
-    }
-
-    public static func projectHeader(
-        name: String,
-        displayPath: String,
-        cwd: String,
-        count: Int,
-        query: String
-    ) -> HeaderPaint {
-        projectHeader(name: name, paths: [displayPath, cwd], count: count, query: query)
     }
 
     /// VoiceOver text for a Projects header. Speak `paint.text` only when the

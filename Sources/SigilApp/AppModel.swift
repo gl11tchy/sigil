@@ -39,6 +39,9 @@ final class AppModel {
     var needsTerminalFocus = false
     /// True when the panel shell was opened before its view reached the window.
     @ObservationIgnored private var needsPanelShellFocus = false
+    private let transcriptExports = TranscriptExports()
+    /// Grok tabs that kept the old theme because they were busy or held messages.
+    @ObservationIgnored private var themeRestartsWhenSettled: Set<TerminalTab.ID> = []
     var findQuery = ""
     var findMatchIndex = 0
     var findMatchCount = 0
@@ -84,6 +87,9 @@ final class AppModel {
     /// Shown before a close or archive kills a tab that is mid-turn.
     @ObservationIgnored
     var confirmStopWorking: ConfirmStopWorking = { AppModel.promptToStopWorking() }
+    /// True while the stop prompt is up. Its modal loop still runs main-queue
+    /// work, so a theme relaunch waits rather than replace the tab in question.
+    @ObservationIgnored private var isAskingToStop = false
     @ObservationIgnored private let registrationRunner: BridgeRegistration.Runner
     @ObservationIgnored private let mcpBinaryOverride: URL?
     @ObservationIgnored private let tabMessagingSocketURL: URL
@@ -307,10 +313,6 @@ final class AppModel {
         entryKey(.init(sessionID: session.id, cwd: session.cwd))
     }
 
-    func isCurrentFolder(_ cwd: String) -> Bool {
-        samePath(cwd, currentDirectory.path)
-    }
-
     func activity(of session: GrokSession) -> TerminalTab.Activity? {
         tabs.first { tabMatches($0, sessionID: session.id, cwd: session.cwd) }?.activity
     }
@@ -382,16 +384,38 @@ final class AppModel {
     private func archive(_ session: GrokSession, confirmIfWorking: Bool) {
         let matching = tabs.filter { tabMatches($0, sessionID: session.id, cwd: session.cwd) }
         if confirmIfWorking, matching.contains(where: \.shouldWarnBeforeStopping),
-            !confirmStopWorking()
+            !confirmStop()
         {
             return
         }
-        unpin(session)
+        archiveWithoutAsking([session])
+    }
+
+    /// Archives `sessions` and closes their tabs, writing each setting once
+    /// however many sessions there are.
+    private func archiveWithoutAsking(_ sessions: [GrokSession]) {
         settings.reloadSharedLists()
-        settings.archivedConversations = SidebarOrganization.inserting(
-            session, onto: settings.archivedConversations, samePath: samePath)
-        for tab in matching { closeTab(tab.id) }
-        dropDeferred(matching: session)
+        var pinned = settings.pinnedConversations
+        var archived = settings.archivedConversations
+        for session in sessions {
+            pinned = SidebarOrganization.removing(session, from: pinned, samePath: samePath)
+            archived = SidebarOrganization.inserting(session, onto: archived, samePath: samePath)
+        }
+        settings.pinnedConversations = pinned
+        settings.archivedConversations = archived
+        stopAndWait(
+            tabs.filter { tab in
+                sessions.contains { tabMatches(tab, sessionID: $0.id, cwd: $0.cwd) }
+            })
+        for session in sessions {
+            while let index = tabs.firstIndex(where: {
+                tabMatches($0, sessionID: session.id, cwd: session.cwd)
+            }) {
+                removeTab(at: index)
+            }
+            dropDeferred(matching: session)
+        }
+        refreshDockIndicator()
         persistOpenTabs()
     }
 
@@ -413,8 +437,8 @@ final class AppModel {
                     && $0.shouldWarnBeforeStopping
             }
         }
-        if anyWorking && !confirmStopWorking() { return }
-        for session in sessions { archive(session, confirmIfWorking: false) }
+        if anyWorking && !confirmStop() { return }
+        archiveWithoutAsking(sessions)
     }
 
     func unarchive(_ sessions: [GrokSession]) {
@@ -425,15 +449,17 @@ final class AppModel {
         let projectTabs = tabs.filter {
             $0.spec.provider == .grokBuild && samePath($0.workingDirectory.path, project.cwd)
         }
-        if projectTabs.contains(where: \.shouldWarnBeforeStopping), !confirmStopWorking() {
+        if projectTabs.contains(where: \.shouldWarnBeforeStopping), !confirmStop() {
             return
         }
         unpin(project)
-        for session in store.sessions where samePath(session.cwd, project.cwd) {
-            archive(session, confirmIfWorking: false)
+        stopAndWait(projectTabs)
+        archiveWithoutAsking(store.sessions.filter { samePath($0.cwd, project.cwd) })
+        for tab in projectTabs {
+            if let index = tabs.firstIndex(where: { $0.id == tab.id }) { removeTab(at: index) }
         }
-        for tab in projectTabs { closeTab(tab.id) }
         dropDeferred(inProjectPath: project.cwd)
+        refreshDockIndicator()
         persistOpenTabs()
         if focusedProject.map({ samePath($0.cwd, project.cwd) }) == true {
             leaveProject()
@@ -567,6 +593,9 @@ final class AppModel {
     /// Drops pins, archives, and names whose conversations are gone, after a successful scan.
     func pruneMissingPins() {
         guard !store.isLoading, store.loadError == nil else { return }
+        // A missing folder lists nothing without an error; that is no proof
+        // the pinned chats are gone.
+        guard FileManager.default.fileExists(atPath: store.root.path) else { return }
         let held = sharedListKeys()
         settings.reloadSharedLists()
         for key in sharedListKeys().subtracting(held) where sharedArrivals[key] == nil {
@@ -640,11 +669,13 @@ final class AppModel {
     /// Each folder note lands on the newest conversation the sidebar lists in
     /// that folder (an open one first); when that conversation already has a
     /// note the legacy text is appended, not dropped. Folders with no listed
-    /// conversation yet keep their entry for a later launch.
+    /// conversation yet, or whose note file could not be written, keep their
+    /// entry for a later launch.
     func migrateLegacyPanelNotes() {
         let legacy = panel.legacyFolderNotes
         guard !legacy.isEmpty else { return }
         var remaining = legacy
+        var moved: [String: GrokSession] = [:]
         for (folder, text) in legacy {
             let listed = store.sessions.filter {
                 samePath($0.cwd, folder) && !isArchived($0) && passesSidebarFilters($0)
@@ -664,13 +695,19 @@ final class AppModel {
             } else if existing != text && !existing.hasSuffix(section) {
                 panel.setNotes(existing + section, forSessionID: session.id, cwd: session.cwd)
             }
-            remaining.removeValue(forKey: folder)
+            moved[folder] = session
         }
-        if remaining.count != legacy.count {
+        if !moved.isEmpty {
             // Persist before the legacy source goes away: a crash between a
             // debounced write and clearing UserDefaults would lose the note.
             panel.flushNotes()
-            panel.setLegacyFolderNotes(remaining)
+            for (folder, session) in moved
+            where panel.notesStore.isSaved(for: session.id, cwd: session.cwd) {
+                remaining.removeValue(forKey: folder)
+            }
+            if remaining.count != legacy.count {
+                panel.setLegacyFolderNotes(remaining)
+            }
         }
     }
 
@@ -1150,11 +1187,6 @@ final class AppModel {
         !isFreshKey && !showRenameAlert && preparedSurface == .prompt
     }
 
-    /// Focus steal may suppress blur-commit; the select-all wait must not.
-    static func shouldSuppressBlurCommitDuringRenameSelectAllWait() -> Bool {
-        false
-    }
-
     /// One frame between retries. The first ready check is immediate.
     static let renameSelectAllRetryInterval: Duration = .milliseconds(16)
 
@@ -1404,10 +1436,19 @@ final class AppModel {
         let tabID = UUID()
         let tab = TerminalTab(id: tabID, spec: tagged(spec, tabID: tabID), settings: settings)
         tab.onUnseenActivityChange = { [weak self] in self?.refreshDockIndicator() }
+        tab.onSettle = { [weak self, weak tab] in
+            if let self, let tab { self.restartForThemeWhenSettled(tab) }
+        }
         tabs.append(tab)
         selectedTabID = tab.id
         if !isRestoringTabs { clearDeferredSelection() }
         if !isRestoringTabs { rememberDefaultDirectory(spec.workingDirectory) }
+        // Opened by hand now, so closing it must not bring the saved entry back.
+        if !isRestoringTabs, let sessionID = tab.sessionID {
+            deferredOpenTabs.removeAll {
+                entryMatches($0, sessionID: sessionID, cwd: spec.workingDirectory.path)
+            }
+        }
         let id = tab.id
         tab.start(isSelected: { [weak self] in
             self?.selectedTabID == id && NSApp.isActive
@@ -1465,6 +1506,9 @@ final class AppModel {
         let tabID = UUID()
         let tab = TerminalTab(id: tabID, spec: tagged(spec, tabID: tabID), settings: settings)
         tab.onUnseenActivityChange = { [weak self] in self?.refreshDockIndicator() }
+        tab.onSettle = { [weak self, weak tab] in
+            if let self, let tab { self.restartForThemeWhenSettled(tab) }
+        }
         tab.sessionTitle = old.sessionTitle
         tab.restoreUnseenActivity(from: old)
         let newID = tab.id
@@ -1477,6 +1521,14 @@ final class AppModel {
 
     func closeTab(_ id: TerminalTab.ID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        removeTab(at: index)
+        refreshDockIndicator()
+        persistOpenTabs()
+    }
+
+    /// Everything closing a tab does except writing the open-tab list.
+    private func removeTab(at index: Int) {
+        let id = tabs[index].id
         tabBridge?.noteTabClosed(id: id)
         // Do not let a quick reopen overlap two Grok processes on one session.
         tabs[index].terminateAndWait()
@@ -1490,14 +1542,23 @@ final class AppModel {
                 selectedTabID = nil
             }
         }
-        refreshDockIndicator()
-        persistOpenTabs()
+    }
+
+    /// Stops several tabs against one shared deadline. Every child gets SIGTERM
+    /// first, so a child that ignores it does not make the next one wait.
+    private func stopAndWait(_ stopping: [TerminalTab]) {
+        for tab in stopping { tab.terminate() }
+        let deadline = ContinuousClock.now + .milliseconds(1500)
+        for tab in stopping {
+            // A short floor still reaps a child killed after the deadline.
+            tab.terminateAndWait(timeout: max(deadline - .now, .milliseconds(100)))
+        }
     }
 
     /// User-facing close: warn when the agent is mid-turn so a click does not kill work.
     func requestCloseTab(_ id: TerminalTab.ID) {
         guard let tab = tabs.first(where: { $0.id == id }) else { return }
-        if tab.shouldWarnBeforeStopping, !confirmStopWorking() { return }
+        if tab.shouldWarnBeforeStopping, !confirmStop() { return }
         closeTab(id)
     }
 
@@ -1561,19 +1622,6 @@ final class AppModel {
         select(tabs[next].id)
     }
 
-    func closeAllTabs() {
-        for tab in tabs {
-            tabBridge?.noteTabClosed(id: tab.id)
-            tab.terminateAndWait()
-        }
-        tabs.removeAll()
-        selectedTabID = nil
-        deferredOpenTabs.removeAll()
-        clearDeferredSelection()
-        refreshDockIndicator()
-        persistOpenTabs()
-    }
-
     /// Quit path: no `grok` process may outlive the app, and there is no run loop
     /// left to finish an asynchronous kill. Does not persist — the last user
     /// mutation already wrote the tabs that should come back next launch.
@@ -1582,7 +1630,8 @@ final class AppModel {
         stopTabMessaging()
         panel.closeShellAndWait()
         panel.flushNotes()
-        for tab in tabs { tab.terminateAndWait() }
+        transcriptExports.stopAll()
+        stopAndWait(tabs)
         tabs.removeAll()
         selectedTabID = nil
         refreshDockIndicator()
@@ -1873,7 +1922,7 @@ final class AppModel {
     func showPanel(_ mode: RightPanelMode) {
         let wasVisible = panel.isVisible
         let wasShell = wasVisible && panel.mode == .shell
-        panel.toggle(mode, in: currentDirectory)
+        panel.toggle(mode)
         preparePanel()
         // Switching away from the shell removes its view, just as hiding does.
         let isShell = panel.isVisible && panel.mode == .shell
@@ -1886,7 +1935,7 @@ final class AppModel {
     /// Opens or closes the panel on whatever tool it last showed.
     func togglePanel() {
         let wasVisible = panel.isVisible
-        panel.toggle(nil, in: currentDirectory)
+        panel.toggle(nil)
         preparePanel()
         if wasVisible, !panel.isVisible { refocusTerminalAfterHiding(.panel) }
         requestPanelShellFocusIfShown()
@@ -1922,14 +1971,10 @@ final class AppModel {
 
     /// Starts whatever the visible tool needs, with the app's own theme and size.
     private func preparePanel() {
-        guard panel.isVisible else { return }
-        if panel.mode == .shell {
-            panel.startShellIfNeeded(
-                in: currentDirectory, theme: settings.theme, fontSize: settings.fontSize)
-            panel.shell?.optionAsMetaKey = settings.optionAsMetaKey
-        } else {
-            panel.prepare(in: currentDirectory)
-        }
+        guard panel.isVisible, panel.mode == .shell else { return }
+        panel.startShellIfNeeded(
+            in: currentDirectory, theme: settings.theme, fontSize: settings.fontSize)
+        panel.shell?.optionAsMetaKey = settings.optionAsMetaKey
     }
 
     // MARK: - Appearance
@@ -1972,8 +2017,43 @@ final class AppModel {
         let vars = settings.theme.grokThemeEnvironment
         for tab in tabs where tab.spec.provider == .grokBuild {
             if tab.spec.themeName == name, tab.spec.themeVariables == vars { continue }
-            if tab.shouldWarnBeforeStopping { continue }
+            // A relaunch would drop queued messages and fail pending questions.
+            if tab.shouldWarnBeforeStopping || !tab.bridgeInbox.isEmpty {
+                themeRestartsWhenSettled.insert(tab.id)
+                continue
+            }
             restartTab(id: tab.id)
+        }
+    }
+
+    /// Asks before stopping work, then lets any theme relaunch that came due
+    /// during the prompt run against the answer.
+    private func confirmStop() -> Bool {
+        isAskingToStop = true
+        defer {
+            isAskingToStop = false
+            for tab in tabs where themeRestartsWhenSettled.contains(tab.id) {
+                restartForThemeWhenSettled(tab)
+            }
+        }
+        return confirmStopWorking()
+    }
+
+    /// A tab that kept the old theme because it was busy relaunches on the new
+    /// one once it settles, unless the theme was changed back meanwhile.
+    private func restartForThemeWhenSettled(_ tab: TerminalTab) {
+        guard themeRestartsWhenSettled.contains(tab.id) else { return }
+        DispatchQueue.main.async { [weak self, weak tab] in
+            guard let self, let tab, !self.isAskingToStop, self.tabs.contains(where: { $0 === tab }),
+                !tab.shouldWarnBeforeStopping, tab.bridgeInbox.isEmpty
+            else { return }
+            self.themeRestartsWhenSettled.remove(tab.id)
+            let theme = self.settings.theme
+            guard
+                tab.spec.themeName != theme.grokThemeName
+                    || tab.spec.themeVariables != theme.grokThemeEnvironment
+            else { return }
+            self.restartTab(id: tab.id)
         }
     }
 
@@ -2069,7 +2149,7 @@ final class AppModel {
     /// Closes any tab showing `session`, then moves its directory to the Trash.
     /// A permanent delete would be unrecoverable from here.
     @discardableResult
-    func deleteConversation(_ session: GrokSession) -> Bool {
+    func deleteConversation(_ session: GrokSession, reload: Bool = true) -> Bool {
         let matchingTabs = tabs.filter {
             tabMatches($0, sessionID: session.id, cwd: session.cwd)
         }
@@ -2128,7 +2208,7 @@ final class AppModel {
             }
             refreshDockIndicator()
             persistOpenTabs()
-            Task { await store.reload() }
+            if reload { Task { await store.reload() } }
             return true
         } catch {
             var replacementForSelection: TerminalTab.ID?
@@ -2152,7 +2232,9 @@ final class AppModel {
     @discardableResult
     func deleteConversations(_ sessions: [GrokSession]) -> Int {
         var deleted = 0
-        for session in sessions where deleteConversation(session) { deleted += 1 }
+        for session in sessions where deleteConversation(session, reload: false) { deleted += 1 }
+        // One rescan for the whole selection, not one per chat.
+        if deleted > 0 { Task { await store.reload() } }
         return deleted
     }
 
@@ -2184,14 +2266,22 @@ final class AppModel {
         panel.nameFieldStringValue = Self.transcriptFilename(for: title)
         panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        startTranscriptExport(sessionID: sessionID, output: url, workingDirectory: workingDirectory)
+    }
+
+    func startTranscriptExport(sessionID: String, output url: URL, workingDirectory: URL) {
         let executable = settings.executableURL
+        let exports = transcriptExports
+        let id = UUID()
         Task {
+            defer { exports.remove(id) }
             do {
                 try await Self.runTranscriptExport(
                     executable: executable,
                     sessionID: sessionID,
                     output: url,
-                    workingDirectory: workingDirectory
+                    workingDirectory: workingDirectory,
+                    onStart: { exports.add(id, process: $0, temporaryOutput: $1) }
                 )
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             } catch {
@@ -2205,7 +2295,8 @@ final class AppModel {
         sessionID: String,
         output: URL,
         workingDirectory: URL,
-        timeout: Duration = .seconds(300)
+        timeout: Duration = .seconds(300),
+        onStart: (@Sendable (Process, URL) -> Void)? = nil
     ) async throws {
         let task = Task.detached(priority: .userInitiated) {
             let temporaryOutput = output.deletingLastPathComponent().appendingPathComponent(
@@ -2240,6 +2331,7 @@ final class AppModel {
             }
             do {
                 try process.run()
+                onStart?(process, temporaryOutput)
                 try? pipe.fileHandleForWriting.close()
             } catch {
                 try? pipe.fileHandleForWriting.close()
