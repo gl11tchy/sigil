@@ -37,6 +37,8 @@ public struct GrokLaunchSpec: Sendable, Hashable {
     /// `bridgeSocketPath` must be set for tab messaging to reach the app.
     public var bridgeTabID: String?
     public var bridgeSocketPath: String?
+    /// Variables only a non-Grok CLI receives, such as Kimi Code's API key.
+    public var providerEnvironment: [String: String]
 
     public init(
         executable: URL? = nil,
@@ -49,6 +51,7 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         themeVariables: [String: String] = [:],
         bridgeTabID: String? = nil,
         bridgeSocketPath: String? = nil,
+        providerEnvironment: [String: String] = [:],
         provider: CLIProvider = .grokBuild
     ) {
         self.provider = provider
@@ -68,6 +71,7 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         self.themeVariables = themeVariables
         self.bridgeTabID = bridgeTabID
         self.bridgeSocketPath = bridgeSocketPath
+        self.providerEnvironment = providerEnvironment
     }
 
     /// The session directory this launch reads and writes, when the app knows it up front.
@@ -164,6 +168,7 @@ public struct GrokLaunchSpec: Sendable, Hashable {
             }
             env.removeValue(forKey: BridgePaths.tabEnvironmentKey)
             env.removeValue(forKey: BridgePaths.socketEnvironmentKey)
+            env.merge(providerEnvironment) { _, provided in provided }
             return env
         }
         env["GROK_WRAPPER"] = "Sigil.app"

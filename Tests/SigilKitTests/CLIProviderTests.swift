@@ -56,6 +56,22 @@ struct CLIProviderTests {
         #expect(command.arguments.last == "kimi")
     }
 
+    @Test func onlyTheOtherCLIReceivesItsProviderVariables() {
+        let variables = ["KIMI_MODEL_NAME": "kimi-k3", "KIMI_MODEL_API_KEY": "sk-test"]
+        let kimi = GrokLaunchSpec(
+            workingDirectory: URL(fileURLWithPath: "/tmp"), mode: .new(sessionID: UUID()),
+            providerEnvironment: variables, provider: .kimi)
+        let env = kimi.environment(processEnvironment: ["KIMI_MODEL_NAME": "inherited"])
+        #expect(env["KIMI_MODEL_NAME"] == "kimi-k3")
+        #expect(env["KIMI_MODEL_API_KEY"] == "sk-test")
+        #expect(!kimi.arguments().contains("sk-test"))
+
+        let grok = GrokLaunchSpec(
+            workingDirectory: URL(fileURLWithPath: "/tmp"), mode: .new(sessionID: UUID()),
+            providerEnvironment: variables)
+        #expect(grok.environment(processEnvironment: [:])["KIMI_MODEL_API_KEY"] == nil)
+    }
+
     @Test func cursorUsesItsUnambiguousCLIName() {
         // Grok also installs an `agent` binary. Never use that ambiguous alias.
         #expect(CLIProvider.cursor.command == "cursor-agent")

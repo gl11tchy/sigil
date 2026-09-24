@@ -20,6 +20,9 @@ final class AppModel {
     /// The right-hand utility column: scratch shell and per-conversation notes.
     let panel: RightPanel
     let remoteControl: RemoteControl
+    @ObservationIgnored private let kimiKeyStore: any KimiKeyStore
+    /// True while the Keychain holds a Kimi API key.
+    private(set) var hasKimiAPIKey = false
 
     private(set) var tabs: [TerminalTab] = []
     var selectedTabID: TerminalTab.ID? {
@@ -120,7 +123,8 @@ final class AppModel {
         tabMessagingSocketURL: URL? = nil,
         canonicalPath: (@Sendable (String) -> String)? = nil,
         panel: RightPanel? = nil,
-        pairingStore: (any RemotePairingStore)? = nil
+        pairingStore: (any RemotePairingStore)? = nil,
+        kimiKeyStore: (any KimiKeyStore)? = nil
     ) {
         self.settings = settings
         self.store = store
@@ -139,6 +143,31 @@ final class AppModel {
         self.mcpBinaryOverride = mcpBinary
         self.tabMessagingSocketURL = tabMessagingSocketURL ?? BridgePaths.configuredSocket
         self.resolveCanonicalPath = canonicalPath ?? { GrokPaths.canonicalPath($0) }
+        self.kimiKeyStore =
+            kimiKeyStore ?? (Self.isRunningAutomatedTests ? InMemoryKimiKeyStore() : KeychainKimiKeyStore())
+        hasKimiAPIKey = self.kimiKeyStore.load() != nil
+    }
+
+    /// Stores a Kimi Platform API key in the Keychain. Returns false when it was not stored.
+    @discardableResult
+    func saveKimiAPIKey(_ key: String) -> Bool {
+        guard let key = key.nilIfEmpty else { return false }
+        let saved = kimiKeyStore.save(key)
+        hasKimiAPIKey = kimiKeyStore.load() != nil
+        return saved
+    }
+
+    func removeKimiAPIKey() {
+        kimiKeyStore.clear()
+        hasKimiAPIKey = kimiKeyStore.load() != nil
+    }
+
+    /// Variables a Kimi Code tab needs for the chosen sign-in. Nil when an
+    /// API-key sign-in has no key to pass.
+    private func providerEnvironment(for provider: CLIProvider) -> [String: String]? {
+        guard provider == .kimi, settings.kimiSignIn == .apiKey else { return [:] }
+        guard let key = kimiKeyStore.load() else { return nil }
+        return KimiCode.apiKeyEnvironment(key: key, model: settings.kimiModel)
     }
 
     func onAppear() async {
@@ -1508,6 +1537,12 @@ final class AppModel {
             showError(title: "Folder is unavailable", message: "Choose another folder.")
             return nil
         }
+        guard let providerEnvironment = providerEnvironment(for: provider) else {
+            showError(
+                title: "Kimi API key is missing",
+                message: "Add it in Settings, or sign in with a Kimi account.")
+            return nil
+        }
         let spec = GrokLaunchSpec(
             executable: provider == .grokBuild ? settings.executableURL : nil,
             workingDirectory: directory,
@@ -1516,6 +1551,7 @@ final class AppModel {
             reasoningEffort: (effort ?? settings.effort).nilIfEmpty,
             themeName: settings.theme.grokThemeName,
             themeVariables: settings.theme.grokThemeEnvironment,
+            providerEnvironment: providerEnvironment,
             provider: provider
         )
         return add(spec)
@@ -1603,6 +1639,12 @@ final class AppModel {
             )
             return
         }
+        guard providerEnvironment(for: old.spec.provider) != nil else {
+            showError(
+                title: "Kimi API key is missing",
+                message: "Add it in Settings, or sign in with a Kimi account.")
+            return
+        }
         let wasSelected = selectedTabID == old.id
         tabBridge?.noteTabClosed(id: old.id)
         old.terminateAndWait()
@@ -1629,6 +1671,8 @@ final class AppModel {
             spec.themeName = settings.theme.grokThemeName
             spec.themeVariables = settings.theme.grokThemeEnvironment
         }
+        // A restart follows the current Kimi sign-in, not the one it started with.
+        spec.providerEnvironment = providerEnvironment(for: spec.provider) ?? [:]
         spec.bridgeTabID = nil
         spec.bridgeSocketPath = nil
         let tabID = UUID()

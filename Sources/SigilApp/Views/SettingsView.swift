@@ -159,6 +159,8 @@ struct SettingsView: View {
                 }
             }
 
+            KimiSettingsSection(model: model)
+
             SettingsSection(title: "Sidebar") {
                 SettingsToggle(
                     "Show one-message sessions",

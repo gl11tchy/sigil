@@ -115,6 +115,47 @@ struct ProviderBoundaryTests {
         #expect(!grok.controller.isRunning)
         #expect(other.controller.isRunning)
     }
+
+    @Test func kimiAccountSignInPassesNoKey() throws {
+        let fixture = try ProviderFixture()
+        defer { fixture.cleanup() }
+        fixture.model.saveKimiAPIKey("sk-unused")
+        let tab = try #require(fixture.model.newTab(in: fixture.root, provider: .kimi))
+        #expect(tab.spec.providerEnvironment.isEmpty)
+    }
+
+    @Test func kimiAPIKeySignInPassesTheKeyAndModelToEveryLaunch() throws {
+        let fixture = try ProviderFixture()
+        defer { fixture.cleanup() }
+        fixture.model.settings.kimiSignIn = .apiKey
+        fixture.model.settings.kimiModel = "kimi-k2.7-code"
+        #expect(fixture.model.saveKimiAPIKey("  sk-first  "))
+        #expect(fixture.model.hasKimiAPIKey)
+        let tab = try #require(fixture.model.newTab(in: fixture.root, provider: .kimi))
+        #expect(tab.spec.providerEnvironment["KIMI_MODEL_API_KEY"] == "sk-first")
+        #expect(tab.spec.providerEnvironment["KIMI_MODEL_NAME"] == "kimi-k2.7-code")
+        #expect(fixture.settings.openTabs.tabs.isEmpty)
+
+        fixture.model.saveKimiAPIKey("sk-second")
+        fixture.model.restartTab(id: tab.id)
+        let restarted = try #require(fixture.model.selectedTab)
+        #expect(restarted.id != tab.id)
+        #expect(restarted.spec.providerEnvironment["KIMI_MODEL_API_KEY"] == "sk-second")
+    }
+
+    @Test func kimiAPIKeySignInWithoutAKeyStartsNothing() throws {
+        let fixture = try ProviderFixture()
+        defer { fixture.cleanup() }
+        fixture.model.settings.kimiSignIn = .apiKey
+        #expect(!fixture.model.hasKimiAPIKey)
+        #expect(fixture.model.newTab(in: fixture.root, provider: .kimi) == nil)
+        #expect(fixture.model.tabs.isEmpty)
+        #expect(fixture.errors.titles == ["Kimi API key is missing"])
+
+        fixture.model.saveKimiAPIKey("sk-test")
+        fixture.model.removeKimiAPIKey()
+        #expect(!fixture.model.hasKimiAPIKey)
+    }
 }
 
 /// Every child is a local read loop, never an authenticated provider. The fake
@@ -123,6 +164,8 @@ struct ProviderBoundaryTests {
 private struct ProviderFixture {
     let root: URL
     let model: AppModel
+    let settings: AppSettings
+    let errors = PresentedErrors()
     private let suite: String
     private let defaults: UserDefaults
     private let oldShell: String?
@@ -137,12 +180,14 @@ private struct ProviderFixture {
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: shell.path)
         suite = "ProviderBoundaryTests.\(UUID().uuidString)"
         defaults = try #require(UserDefaults(suiteName: suite))
-        let settings = AppSettings(defaults: defaults)
+        settings = AppSettings(defaults: defaults)
         settings.executablePath = shell.path
+        let errors = errors
         model = AppModel(
             settings: settings, store: SessionStore(root: root.appendingPathComponent("sessions")),
-            presentError: { _ in }, panel: RightPanel(defaults: defaults),
-            pairingStore: InMemoryRemotePairingStore())
+            presentError: { errors.titles.append($0.localizedDescription) },
+            panel: RightPanel(defaults: defaults),
+            pairingStore: InMemoryRemotePairingStore(), kimiKeyStore: InMemoryKimiKeyStore())
         oldShell = ProcessInfo.processInfo.environment["SHELL"]
         setenv("SHELL", shell.path, 1)
     }
@@ -153,4 +198,9 @@ private struct ProviderFixture {
         defaults.removePersistentDomain(forName: suite)
         try? FileManager.default.removeItem(at: root)
     }
+}
+
+@MainActor
+private final class PresentedErrors {
+    var titles: [String] = []
 }
