@@ -1,0 +1,35 @@
+a7/a27 recheck on pr-sidebar-cleanup, built 8fdd498 (branch HEAD, after the #94 redesign merge), 2026-09-23.
+Real app: isolated SigilUX test build, seeded throwaway home. No input between the reads.
+
+Result: PASS. The relative times refresh on their own; the session files did not change.
+- Newest summary.json modification time stayed 22:10:20 for every read.
+- Read 1, 22:12:47: top rows "6 messages · 2 minutes ago"; row labels "2m" (sc2-a7-1-recents-first-read.png).
+- Read 2, 22:12:53: the same rows read "3 minutes ago"; row labels "3m" at 22:13:23 (sc2-a7-2-recents-second-read.png).
+- Read 3, 22:26:24: the same rows read "16 minutes ago"; row labels "15m" in sc2-b84-2-after-clear.png (22:26:15).
+- Not checked: the Today/Yesterday bucket change at midnight (needs a wait past 00:00).
+
+######## a7/a27 first read (148 s after launch, 22:12:47); newest summary.json mtime 22:10:20
+shot sc2-a7-1-recents-first-read at 22:12:48 (panel.visible=0)
+== Recents list second read (154 s after launch, 22:12:53); newest summary.json mtime 22:10:20
+row 1: help="Summarise the acme-api service and its layout | /Users/Shared/sigil-ux/projects/acme-api | 6 messages · 3 minutes ago" value="Open in another tab, working"
+row 2: help="Fix the 401 on expired refresh tokens | /Users/Shared/sigil-ux/projects/acme-api | 6 messages · 3 minutes ago" value="Selected, working"
+row 3: help="Make the sidebar search rank folders too | /Users/Shared/sigil-ux/projects/sigil | 6 messages · 5 hours ago" value="Closed"
+row 4: help="Explain how tab restore picks the selected tab | /Users/Shared/sigil-ux/projects/sigil | 6 messages · 11 hours ago" value="Closed"
+row 5: help="Rate limit the token endpoint | /Users/Shared/sigil-ux/projects/acme-api | 6 messages · 1 day ago" value="Closed"
+row 6: help="Dark mode for the settings panel | /Users/Shared/sigil-ux/projects/acme-web | 6 messages · 1 day ago" value="Closed"
+row 7: help="Replace the date picker with a native one | /Users/Shared/sigil-ux/projects/acme-web | 6 messages · 1 day ago" value="Closed"
+row 8: help="Why does the checkout page flash on load | /Users/Shared/sigil-ux/projects/acme-web | 6 messages · 2 days ago" value="Closed"
+row 9: help="Add a keyboard shortcut for renaming | /Users/Shared/sigil-ux/projects/sigil | 6 messages · 4 days ago" value="Closed"
+row 10: help="Audit the remote relay for replay protection | /Users/Shared/sigil-ux/projects/sigil | 6 messages · 1 week ago" value="Closed"
+row 11: help="Rotate the staging database credentials | /Users/Shared/sigil-ux/projects/terraform-infra | 6 messages · 2 weeks ago" value="Closed"
+row 12: help="Cut the NAT gateway bill in half | /Users/Shared/sigil-ux/projects/terraform-infra | 6 messages · 1 month ago" value="Closed"
+  (AXHeading text="<none>")
+  (AXHeading text="<none>")
+  (AXHeading text="<none>")
+  (AXHeading text="<none>")
+  (AXHeading text="<none>")
+session/project rows (AXButton with help): 12
+shot sc2-a7-2-recents-second-read at 22:13:23 (panel.visible=0)
+== third read at 22:26:24; newest summary.json mtime 22:10:20
+row 1: help="Summarise the acme-api service and its layout | /Users/Shared/sigil-ux/projects/acme-api | 6 messages · 16 minutes ago, Summarise the acme-api service and its layout | /Users/Shared/sigi
+row 2: help="Fix the 401 on expired refresh tokens | /Users/Shared/sigil-ux/projects/acme-api | 6 messages · 16 minutes ago, Fix the 401 on expired refresh tokens | /Users/Shared/sigil-ux/projects/ac

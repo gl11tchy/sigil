@@ -1,0 +1,26 @@
+a29 recheck on pr-sidebar-cleanup, built 8fdd498 (branch HEAD, after the #94 redesign merge), 2026-09-23.
+Real app: isolated SigilUX test build with an empty scratch Grok home and no restored tabs (first-run state). Read through the macOS accessibility API.
+
+Result: PASS. The first-run hint does not wrap beside the key cap.
+- "Press", the "⌘T" key cap and "to start one." sit on one line (y 248-249); "to start one." is 71x15 pt, one line high.
+- Only the next sentence wraps, at full sidebar width (203 pt wide, 2 lines), below the key cap line.
+- Screenshot: sc2-a29-empty-state.png. No session files were written to the scratch home.
+
+== sidebar list (System Events)
+  (AXStaticText text="No conversations yet")
+  (AXStaticText text="Press")
+  (AXStaticText text="⌘T")
+  (AXStaticText text="to start one.")
+  (AXStaticText text="It shows up here as soon as it has a name.")
+session/project rows (AXButton with help): 0
+
+== static text frames in the window (AXPosition in screen points; the window is at 60,60)
+AXValue = "No conversations yet" | AXPosition = (76, 228) | AXSize = 134x16
+AXValue = "Press" | AXPosition = (76, 249) | AXSize = 33x15
+AXValue = "⌘T" | AXPosition = (113, 248) | AXSize = 23x18
+AXValue = "to start one." | AXPosition = (140, 249) | AXSize = 71x15
+AXValue = "It shows up here as soon as it has a name." | AXPosition = (76, 270) | AXSize = 203x32
+AXValue = "No open session" | AXPosition = (792, 466) | AXSize = 118x19
+AXValue = "Press" | AXPosition = (705, 490) | AXSize = 34x16
+AXValue = "⌘T" | AXPosition = (745, 489) | AXSize = 22x18
+AXValue = "to start one, or pick a chat on the left." | AXPosition = (772, 490) | AXSize = 225x16
