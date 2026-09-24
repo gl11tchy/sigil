@@ -170,6 +170,11 @@ final class AppModel {
         return KimiCode.apiKeyEnvironment(key: key, model: settings.kimiModel)
     }
 
+    /// Whether `provider` has a sign-in to start with. Never shows an alert.
+    func hasSignIn(_ provider: CLIProvider) -> Bool {
+        providerEnvironment(for: provider) != nil
+    }
+
     /// False, after saying why, when `provider` has no sign-in to start with.
     /// New Session asks before it makes a worktree.
     func canSignIn(_ provider: CLIProvider) -> Bool {

@@ -25,6 +25,30 @@ struct RemoteProject: Codable, Sendable {
     var folder: String
 }
 
+/// What the phone may choose when it starts a session, as the Mac's New Session sheet offers.
+struct RemoteNewSessionOptions: Codable, Sendable {
+    struct Provider: Codable, Sendable {
+        var id: String
+        var name: String
+        /// Only these take a model and an effort.
+        var takesModel: Bool
+        /// Why Sigil cannot start it now, or nil.
+        var problem: String?
+    }
+    struct Choice: Codable, Sendable {
+        var id: String
+        var name: String
+    }
+    var providers: [Provider]
+    var provider: String
+    var models: [String]
+    var model: String
+    var efforts: [Choice]
+    var effort: String
+    /// Folders a new project can go in.
+    var locations: [RemoteProject]
+}
+
 struct RemoteReply: Codable, Sendable {
     let challenge: String
     let sequence: Int
@@ -38,6 +62,8 @@ struct RemoteReply: Codable, Sendable {
     var earlier: String?
     var chatsTruncated = false
     var projectsTruncated = false
+    var options: RemoteNewSessionOptions?
+    var project: RemoteProject?
 }
 
 @MainActor
@@ -54,20 +80,38 @@ enum RemoteCommands {
             guard let tab else { return failure(request, "This tab is closed.") }
             model.select(tab.id)
         case "new":
-            guard model.settings.executableExists else {
-                return failure(request, "Could not start a session. Check Sigil on your Mac.")
+            // A phone that names no provider gets the one the Mac's New Session sheet opens on.
+            let provider: CLIProvider
+            if let raw = request.provider {
+                guard let chosen = CLIProvider(rawValue: raw) else {
+                    return failure(request, "Update Sigil on your Mac to use that provider.")
+                }
+                provider = chosen
+            } else {
+                provider = model.settings.defaultProvider
             }
+            if let problem = startProblem(provider, model: model) { return failure(request, problem) }
+            // Other CLIs do not take Grok's model or effort flags.
+            let takesModel = NewSessionLaunch.showsModelAndEffort(provider)
+            let chosenModel = takesModel ? request.model.map(GrokModelCatalog.normalized) : ""
+            let chosenEffort = takesModel ? request.effort : ""
+            guard chosenModel.map(isModelName) ?? true, chosenEffort.map(AppSettings.effortOptions.contains) ?? true
+            else { return failure(request, "Choose a model and effort from the list.") }
             if let folder = request.text?.trimmingCharacters(in: .whitespacesAndNewlines), !folder.isEmpty {
                 guard
-                    let project = projectSessions(model).first(where: {
-                        GrokPaths.canonicalPath($0.cwd) == GrokPaths.canonicalPath(folder)
+                    let project = projectRecords(model).first(where: {
+                        GrokPaths.canonicalPath($0.folder) == GrokPaths.canonicalPath(folder)
                     })
                 else { return failure(request, "Choose a project folder.") }
-                guard AppModel.isUsableDirectory(URL(fileURLWithPath: project.cwd))
+                guard AppModel.isUsableDirectory(URL(fileURLWithPath: project.folder))
                 else { return failure(request, "Restore the folder on your Mac, then try again.") }
                 let remembered = model.settings.defaultDirectory
                 let focused = model.settings.focusedProjectPath
-                guard model.newTab(in: URL(fileURLWithPath: project.cwd)) != nil else {
+                guard
+                    model.newTab(
+                        in: URL(fileURLWithPath: project.folder), model: chosenModel, effort: chosenEffort,
+                        provider: provider) != nil
+                else {
                     return failure(request, "Could not start a session. Check Sigil on your Mac.")
                 }
                 if model.settings.defaultDirectory != remembered {
@@ -78,9 +122,37 @@ enum RemoteCommands {
                 }
             } else if !AppModel.isUsableDirectory(model.newSessionDirectory) {
                 return failure(request, "Restore the folder on your Mac, then try again.")
-            } else if model.newTab(in: model.newSessionDirectory) == nil {
+            } else if model.newTab(
+                in: model.newSessionDirectory, model: chosenModel, effort: chosenEffort, provider: provider) == nil
+            {
                 return failure(request, "Could not start a session. Check Sigil on your Mac.")
             }
+        case "options":
+            reply.options = newSessionOptions(model)
+        case "createProject":
+            let name = (request.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard isFolderName(name) else {
+                return failure(request, "Name the folder without slashes, colons or a leading dot.")
+            }
+            guard let parent = request.text,
+                let location = projectLocations(model).first(where: {
+                    GrokPaths.canonicalPath($0.folder) == GrokPaths.canonicalPath(parent)
+                })
+            else { return failure(request, "Choose where the project goes.") }
+            let folder = URL(fileURLWithPath: location.folder).appendingPathComponent(name, isDirectory: true)
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory) {
+                // An existing folder of that name becomes the project.
+                guard isDirectory.boolValue else { return failure(request, "A file with that name is already there.") }
+            } else {
+                do {
+                    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+                } catch {
+                    return failure(request, "Could not create that folder on your Mac.")
+                }
+            }
+            model.addProject(folder)
+            reply.project = RemoteProject(name: bounded(name, bytes: 96), folder: folder.path)
         case "chats":
             reply.chats = page(savedChats(model, query: request.text ?? ""), offset: request.index ?? 0).compactMap {
                 chatRecord($0, model: model)
@@ -216,11 +288,89 @@ enum RemoteCommands {
         return RemoteChat(id: session.id, title: bounded(model.title(for: session), bytes: 96), folder: folder)
     }
 
+    /// The sidebar's folders: grouped from chats, plus added folders with no chat yet.
     private static func projectRecords(_ model: AppModel) -> [RemoteProject] {
-        projectSessions(model).compactMap { project in
+        SidebarOrganization.merging(
+            added: model.settings.addedProjects, into: projectSessions(model),
+            canonicalPath: GrokPaths.canonicalPath
+        ).compactMap { project in
             guard project.cwd.utf8.count <= 4_000, !project.cwd.isEmpty else { return nil }
             return RemoteProject(name: bounded(project.name, bytes: 96), folder: project.cwd)
         }
+    }
+
+    /// Where a new project may go: the folders holding the listed projects, then home.
+    static func projectLocations(_ model: AppModel) -> [RemoteProject] {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        var seen = Set<String>()
+        var result: [RemoteProject] = []
+        func add(_ path: String) {
+            guard !path.isEmpty, path != "/", path.utf8.count <= 4_000,
+                seen.insert(GrokPaths.canonicalPath(path)).inserted,
+                model.settings.showWorktreeSessions || !isEphemeral(path: path),
+                AppModel.isUsableDirectory(URL(fileURLWithPath: path))
+            else { return }
+            let shown = path == home ? "~" : path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
+            result.append(RemoteProject(name: shown, folder: path))
+        }
+        for project in projectRecords(model) where result.count < 7 {
+            add(URL(fileURLWithPath: project.folder).deletingLastPathComponent().path)
+        }
+        add(home)
+        return result
+    }
+
+    /// Grok's model list, read by `refreshModels` before an options reply.
+    /// The CLI can take seconds to answer, so it never runs inside `execute`.
+    static var listedModels: (executable: String, models: [String])?
+
+    static func refreshModels(model: AppModel) async {
+        let path = model.settings.executablePath
+        guard let found = await GrokModelCatalog.menuModels(executable: model.settings.executableURL) else { return }
+        listedModels = (path, found)
+    }
+
+    static func newSessionOptions(_ model: AppModel) -> RemoteNewSessionOptions {
+        let settings = model.settings
+        let listed =
+            listedModels.flatMap { $0.executable == settings.executablePath ? $0.models : nil }
+            ?? GrokModelCatalog.fallback
+        let saved = GrokModelCatalog.normalized(settings.model)
+        return RemoteNewSessionOptions(
+            providers: CLIProvider.allCases.map {
+                .init(
+                    id: $0.rawValue, name: $0.name, takesModel: NewSessionLaunch.showsModelAndEffort($0),
+                    problem: startProblem($0, model: model))
+            },
+            provider: settings.defaultProvider.rawValue,
+            models: Array(GrokModelCatalog.choices(listed: listed, saved: saved).filter(isModelName).prefix(100)),
+            model: isModelName(saved) ? saved : "",
+            efforts: AppSettings.effortOptions.map { .init(id: $0, name: AppSettings.effortLabel($0)) },
+            effort: settings.effort,
+            locations: projectLocations(model))
+    }
+
+    /// Why `provider` cannot start now. Checked here because AppModel reports
+    /// these with a modal alert, which would block this loop.
+    static func startProblem(_ provider: CLIProvider, model: AppModel) -> String? {
+        if provider == .grokBuild, !model.settings.executableExists {
+            return "Restore the Grok CLI on your Mac, then try again."
+        }
+        if !model.hasSignIn(provider) {
+            return "Set up \(provider.name) sign-in in Sigil on your Mac, then try again."
+        }
+        return nil
+    }
+
+    /// Empty picks the CLI default. Anything else is one argument, never a flag.
+    static func isModelName(_ name: String) -> Bool {
+        name.isEmpty || (name.utf8.count <= 64 && !name.hasPrefix("-") && !name.contains(where: \.isWhitespace))
+    }
+
+    /// One new folder name: no path separators, no hidden or relative names.
+    static func isFolderName(_ name: String) -> Bool {
+        !name.isEmpty && name.utf8.count <= 80 && !name.hasPrefix(".") && !name.contains("/")
+            && !name.contains(":") && !name.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
     }
 
     private static func page<T>(_ items: [T], offset: Int) -> [T] {
