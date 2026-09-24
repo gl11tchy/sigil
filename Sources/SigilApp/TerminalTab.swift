@@ -56,6 +56,9 @@ final class TerminalTab: Identifiable {
     private(set) var hasUnseenActivity = false
     private(set) var bridgeInbox: [BridgeInboxItem] = []
     var onUnseenActivityChange: (() -> Void)?
+    /// Called when a turn ends or the inbox empties, so work held back until
+    /// then can run.
+    var onSettle: (() -> Void)?
     private var hasUnseenTurnCompletion = false
     private var unseenBridgeItemIDs: Set<UUID> = []
 
@@ -290,6 +293,7 @@ final class TerminalTab: Identifiable {
         stopTurnTracking()
         activity = .idle
         if !isSelected() { markUnseenTurnCompletion() }
+        onSettle?()
     }
 
     private func armIdleFallback() {
@@ -450,6 +454,7 @@ final class TerminalTab: Identifiable {
         let item = bridgeInbox.removeFirst()
         removeUnseenBridgeItem(item.id)
         item.onDismiss?()
+        if bridgeInbox.isEmpty { onSettle?() }
     }
 
     /// Drops a question that already timed out or was cancelled. This is not a
@@ -460,6 +465,7 @@ final class TerminalTab: Identifiable {
         }
         let item = bridgeInbox.remove(at: index)
         removeUnseenBridgeItem(item.id)
+        if bridgeInbox.isEmpty { onSettle?() }
     }
 
     func clearUnseenActivity() {
@@ -509,9 +515,9 @@ final class TerminalTab: Identifiable {
     }
 
     /// Used when the app is quitting: returns only once the child is gone.
-    func terminateAndWait() {
+    func terminateAndWait(timeout: Duration = .milliseconds(1500)) {
         stopTurnTracking()
-        controller.terminateAndWait()
+        controller.terminateAndWait(timeout: timeout)
     }
 
 }

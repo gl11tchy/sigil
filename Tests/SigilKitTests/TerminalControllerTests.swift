@@ -294,6 +294,40 @@ struct TerminalControllerTests {
             })
     }
 
+    /// Quitting several tabs gives the later ones only a short share of the wait.
+    /// The child must still be gone, not left behind as an unreaped zombie.
+    @Test func aShortSynchronousStopStillReapsAChildThatIgnoresSIGTERM() async throws {
+        let helper = try TerminalTestSupport.makeFlagStrippingHelper()
+        let controller = TerminalController()
+
+        controller.start(
+            TerminalTestSupport.launchSpec(
+                executable: helper,
+                extraArguments: [
+                    "/bin/sh", "-c",
+                    "trap '' TERM; printf RESIST_READY; while :; do /bin/sleep 1; done",
+                ]
+            )
+        )
+        #expect(
+            await TerminalTestSupport.waitUntil {
+                controller.bufferText().contains("RESIST_READY")
+            })
+        let pid = controller.processID
+        #expect(pid > 0)
+        defer {
+            if TerminalTestSupport.processIsAlive(pid) {
+                kill(-pid, SIGKILL)
+                kill(pid, SIGKILL)
+                _ = TerminalController.reap(pid)
+            }
+        }
+
+        controller.terminateAndWait(timeout: .milliseconds(1))
+
+        #expect(kill(pid, 0) != 0)
+    }
+
     @Test func accessibilityExposesBoundedUnicodeTerminalText() async throws {
         let helper = try TerminalTestSupport.makeFlagStrippingHelper()
         let controller = TerminalController()
