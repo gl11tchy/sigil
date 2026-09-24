@@ -242,7 +242,7 @@ final class RemoteStore {
         guard let id = selectedTabID, let prompt,
             prompt.choices.contains(where: { $0.key == key }) || key == prompt.yes || key == prompt.no
         else { return }
-        perform { _ = try await $0.request("answer", text: key, tabID: id) }
+        perform { _ = try await $0.request("answer", text: key, tabID: id, name: prompt.id) }
     }
 
     /// A nil provider lets the Mac start its default CLI, as Macs before provider choice always do.

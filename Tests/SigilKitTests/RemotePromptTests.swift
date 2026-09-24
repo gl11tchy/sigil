@@ -86,6 +86,34 @@ struct RemotePromptTests {
         }
     }
 
+    @Test func outputBetweenRowsEndsTheMenu() {
+        #expect(PromptDetector.detect(rows: ["Proceed?", "1. Yes", "finished task", "2. No"]) == nil)
+        #expect(PromptDetector.detect(rows: ["Proceed?", "1. Yes", "", "2. No"])?.choices.count == 2)
+        // A new menu after an old one counts on its own.
+        let again = PromptDetector.detect(rows: [
+            "Proceed?", "1. Yes", "2. No", "done", "Again?", "1. Yes", "2. No", "3. Later",
+        ])
+        #expect(again?.choices.count == 3)
+        #expect(again?.question == "Again?")
+    }
+
+    @Test func colonAndPromptTerminatedYesNoCount() throws {
+        for line in ["Overwrite the file? (yes/no):", "Continue? [Y/n]:", "Allow [y/n] >"] {
+            #expect(PromptDetector.detect(rows: [line])?.style == .yesNo, "\(line)")
+        }
+    }
+
+    @Test func theIdFollowsTheWordsOnScreen() {
+        let first = PromptDetector.detect(rows: ["Proceed?", "1. Yes", "2. No"])
+        let same = PromptDetector.detect(rows: ["Proceed?", "1. Yes", "2. No"])
+        let other = PromptDetector.detect(rows: ["Delete it?", "1. Yes", "2. No"])
+        let widerMenu = PromptDetector.detect(rows: ["Proceed?", "1. Yes", "2. No", "3. Ask"])
+        #expect(first?.id == same?.id)
+        #expect(first?.id != other?.id)
+        #expect(first?.id != widerMenu?.id)
+        #expect(first?.id.count == 24)
+    }
+
     @Test func onlyTheLastFilledRowsAreRead() throws {
         var lines = ["Do you want to proceed?", "1. Yes", "2. No"]
         // Blank rows under the cursor do not hide the question.

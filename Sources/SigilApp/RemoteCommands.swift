@@ -290,8 +290,11 @@ enum RemoteCommands {
             }
         case "answer":
             guard let tab, tab.controller.isRunning else { return failure(request, "This session is not running.") }
-            // The prompt is read again now, so a stale button cannot type into whatever replaced it.
-            guard let prompt = prompt(for: tab), let key = request.text, prompt.keys.contains(key) else {
+            // The prompt is read again now and must be the one the phone saw, so a
+            // stale button cannot type into whatever replaced it.
+            guard let prompt = prompt(for: tab), request.name == prompt.id, let key = request.text,
+                prompt.keys.contains(key)
+            else {
                 return failure(request, "That question is no longer on screen.")
             }
             switch key {

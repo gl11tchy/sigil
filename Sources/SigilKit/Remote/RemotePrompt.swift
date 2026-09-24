@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// An approval question a CLI is showing at the bottom of its screen, as the
@@ -22,6 +23,9 @@ public struct RemotePrompt: Codable, Sendable, Equatable {
         case yesNo
     }
 
+    /// A digest of the words on screen. An answer names it, so a tap meant for
+    /// one question cannot land on the question that replaced it.
+    public var id: String
     public var question: String
     public var style: Style
     public var choices: [Choice]
@@ -35,6 +39,12 @@ public struct RemotePrompt: Codable, Sendable, Equatable {
         self.choices = choices
         self.yes = yes
         self.no = no
+        self.id = Self.digest(question: question, style: style, choices: choices)
+    }
+
+    static func digest(question: String, style: Style, choices: [Choice]) -> String {
+        let words = ([style.rawValue, question] + choices.flatMap { [$0.key, $0.label] }).joined(separator: "\u{1f}")
+        return SHA256.hash(data: Data(words.utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
     }
 
     /// Every key `answer` may send for this prompt.
@@ -65,14 +75,21 @@ public enum PromptDetector {
     }
 
     /// `❯ 1. Yes` rows numbered 1…n at the bottom of the screen, under a question.
+    /// The rows have to sit together: output between them means the menu is gone.
     private static func menu(in rows: [String]) -> RemotePrompt? {
         var options: [Option] = []
         for (index, row) in rows.enumerated() {
-            guard let option = option(row, at: index) else { continue }
+            guard let option = option(row, at: index) else {
+                // Output between the rows means the menu is gone; a hint under it is part of it.
+                if !options.isEmpty, !row.trimmingCharacters(in: .whitespaces).isEmpty, !isHint(row) { options = [] }
+                continue
+            }
             if option.number == 1 {
                 options = [option]
             } else if option.number == options.count + 1 {
                 options.append(option)
+            } else {
+                options = []
             }
         }
         guard options.count >= 2, options.count <= 9, let first = options.first, let last = options.last else {
@@ -130,8 +147,10 @@ public enum PromptDetector {
     }
 
     private static func hasYesNoMarker(_ text: String) -> Bool {
-        let folded = text.lowercased().replacingOccurrences(of: " ", with: "")
-        for marker in ["[y/n]", "(y/n)", "[y/n]:", "(y/n):", "[yes/no]", "(yes/no)"] where folded.hasSuffix(marker) {
+        var folded = text.lowercased().replacingOccurrences(of: " ", with: "")
+        // `Overwrite? (yes/no):` waits for input just as `[y/N]` does.
+        while let last = folded.last, ":>".contains(last) { folded.removeLast() }
+        for marker in ["[y/n]", "(y/n)", "[yes/no]", "(yes/no)"] where folded.hasSuffix(marker) {
             return true
         }
         return false

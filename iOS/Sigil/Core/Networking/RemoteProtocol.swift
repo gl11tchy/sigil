@@ -167,15 +167,18 @@ struct RemotePrompt: Decodable, Equatable {
         }
     }
 
+    /// The Mac's digest of the words on screen; an answer names it.
+    let id: String?
     let question: String
     let style: Style
     let choices: [Choice]
     let yes: String
     let no: String
 
-    private enum CodingKeys: String, CodingKey { case question, style, choices, yes, no }
+    private enum CodingKeys: String, CodingKey { case id, question, style, choices, yes, no }
 
-    init(question: String, style: Style, choices: [Choice], yes: String, no: String) {
+    init(id: String? = nil, question: String, style: Style, choices: [Choice], yes: String, no: String) {
+        self.id = id
         self.question = question
         self.style = style
         self.choices = choices
@@ -185,6 +188,7 @@ struct RemotePrompt: Decodable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id)
         question = try c.decode(String.self, forKey: .question)
         style = Style(raw: try c.decode(String.self, forKey: .style))
         choices = try c.decode([Choice].self, forKey: .choices)
@@ -233,7 +237,7 @@ struct RemoteState: Decodable, Equatable {
             else { throw RemoteCryptoError.invalidMessage }
         }
         if let prompt {
-            guard prompt.choices.count <= 9, prompt.question.count <= 300,
+            guard prompt.choices.count <= 9, prompt.question.count <= 300, (prompt.id ?? "").utf8.count <= 64,
                 prompt.choices.allSatisfy({ $0.label.count <= 300 && $0.key.count <= 8 })
             else { throw RemoteCryptoError.invalidMessage }
         }

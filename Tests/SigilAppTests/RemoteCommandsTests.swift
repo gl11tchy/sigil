@@ -873,9 +873,12 @@ struct RemoteSessionOpsTests {
         #expect(prompt.yes == "1" && prompt.no == "3")
 
         let id = tab.id.uuidString
-        #expect(await !fixture.command("answer", text: "7", tabID: id).ok)
-        #expect(await !fixture.command("answer", text: "rm -rf /", tabID: id).ok)
-        #expect(await fixture.command("answer", text: "2", tabID: id).ok)
+        #expect(await !fixture.command("answer", text: "7", tabID: id, name: prompt.id).ok)
+        #expect(await !fixture.command("answer", text: "rm -rf /", tabID: id, name: prompt.id).ok)
+        // A tap meant for another question, or for none, types nothing.
+        #expect(await !fixture.command("answer", text: "2", tabID: id, name: "stale").ok)
+        #expect(await !fixture.command("answer", text: "2", tabID: id).ok)
+        #expect(await fixture.command("answer", text: "2", tabID: id, name: prompt.id).ok)
         _ = await fixture.command("key", text: "enter", tabID: id)
         for _ in 0..<100 {
             if (try? String(contentsOf: received, encoding: .utf8)) == "2" { break }

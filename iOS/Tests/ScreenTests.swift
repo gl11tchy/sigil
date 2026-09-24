@@ -148,7 +148,7 @@ enum ScreenTests {
     static func decodesAPrompt() throws {
         let json = """
             {"challenge":"c","sequence":1,"state":{"tabs":[],"selectedTabID":null,"terminal":"",
-            "prompt":{"question":"Do you want to proceed?","style":"menu","yes":"1","no":"3",
+            "prompt":{"id":"abc123","question":"Do you want to proceed?","style":"menu","yes":"1","no":"3",
             "choices":[{"label":"Yes","key":"1"},{"label":"Yes, always","key":"2"},{"label":"No (esc)","key":"3"}]}}}
             """
         let reply = try JSONDecoder().decode(RemoteReply.self, from: Data(json.utf8))
@@ -156,6 +156,7 @@ enum ScreenTests {
         try state.validate()
         let prompt = try Expect.notNil(state.prompt, "prompt")
         try Expect.equal(prompt.style, .menu, "style")
+        try Expect.equal(prompt.id, "abc123", "id")
         try Expect.equal(prompt.choices.map(\.key), ["1", "2", "3"], "keys")
         try Expect.equal(prompt.yes, "1", "yes")
         let odd = json.replacingOccurrences(of: "\"menu\"", with: "\"wheel\"")
