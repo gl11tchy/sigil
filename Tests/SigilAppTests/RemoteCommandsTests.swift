@@ -511,6 +511,13 @@ struct RemoteCommandsTests {
         #expect(SigilWorktree.projectPath(of: folder, root: RemoteCommands.worktreeRoot) == repository.path)
         #expect(try git(["rev-parse", "--abbrev-ref", "HEAD"], in: URL(fileURLWithPath: folder)).hasPrefix("sigil/"))
 
+        // Stopping Remote while git runs starts nothing.
+        let before = fixture.model.tabs.count
+        let cancelled = Task { await fixture.command("new", text: repository.path) }
+        cancelled.cancel()
+        #expect(await !cancelled.value.ok)
+        #expect(fixture.model.tabs.count == before)
+
         fixture.settings.startsInWorktree = false
         #expect(await fixture.command("new", text: repository.path).ok)
         #expect(

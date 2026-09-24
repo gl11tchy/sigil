@@ -123,6 +123,8 @@ enum RemoteCommands {
                     let detail = error.localizedDescription.split(whereSeparator: \.isNewline).first ?? ""
                     return failure(request, bounded("Could not create a worktree. \(detail)", bytes: 240))
                 }
+                // Remote was stopped while git ran: start nothing for a phone that is gone.
+                guard !Task.isCancelled else { return failure(request, "Remote was turned off.") }
             }
             let remembered = model.settings.defaultDirectory
             let focused = model.settings.focusedProjectPath
