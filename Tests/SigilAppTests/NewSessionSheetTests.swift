@@ -126,6 +126,31 @@ struct NewSessionSheetTests {
         #expect(!process.isRunning)
     }
 
+    @Test(arguments: [CLIProvider.claudeCode, .codex, .devin, .cursor])
+    func otherProvidersNeverAskGrokForModels(provider: CLIProvider) {
+        #expect(NewSessionLaunch.modelListPath(provider: provider, executablePath: "/opt/grok") == nil)
+        #expect(NewSessionLaunch.modelListPath(provider: .grokBuild, executablePath: "/opt/grok") == "/opt/grok")
+    }
+
+    @Test func aPathThatListsNoModelsShowsTheFallbackList() async {
+        // The menu must not keep the rows of the previous path.
+        let models = await GrokModelCatalog.menuModels(executable: URL(fileURLWithPath: "/opt/grok")) { _ in [] }
+        #expect(models == GrokModelCatalog.fallback)
+    }
+
+    @Test func aCancelledModelLoadChangesNothing() async {
+        // SwiftUI cancels the old path's load when the path changes; its late
+        // result must not replace the list for the new path.
+        let load = Task {
+            await GrokModelCatalog.menuModels(executable: URL(fileURLWithPath: "/opt/grok")) { _ in
+                try? await Task.sleep(for: .seconds(30))
+                return ["grok-old"]
+            }
+        }
+        load.cancel()
+        #expect(await load.value == nil)
+    }
+
     /// A stand-in `zsh` that runs the command without reading any profile,
     /// and a fake `grok` with the given script body.
     private func fakeModelsCLI(_ body: String) throws -> (dir: URL, shell: URL, grok: URL) {
