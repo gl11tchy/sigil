@@ -63,7 +63,26 @@ struct BridgeRegistrationTests {
             ])
     }
 
+    /// `grok mcp list` prints one `  name: command` line per server. Only the
+    /// name counts; a `sigil` folder in another server's command does not.
     @Test(arguments: [
+        ListingCase(
+            output: "  sigil: /Applications/Sigil.app/Contents/MacOS/sigil-mcp\n",
+            code: 0,
+            expected: true
+        ),
+        ListingCase(output: "  sigil: /tmp/sigil-mcp (disabled)\n", code: 0, expected: true),
+        ListingCase(
+            output: "  other: /Users/me/sigil/bin/server\n  github: npx server-github\n",
+            code: 0,
+            expected: false
+        ),
+        ListingCase(output: "| other | stdio | /opt/sigil/server |", code: 0, expected: false),
+        ListingCase(
+            output: "No MCP servers configured. Run `grok mcp add --help` to get started.\n",
+            code: 0,
+            expected: false
+        ),
         ListingCase(
             output: """
                 | Server | Transport | Endpoint / Package |
@@ -82,14 +101,16 @@ struct BridgeRegistrationTests {
             code: 0,
             expected: false
         ),
-        ListingCase(output: "sigil", code: 1, expected: false),
     ])
-    func isInstalledRequiresWholeServerName(listing: ListingCase) {
+    func removeRunsOnlyWhenAServerIsNamedSigil(listing: ListingCase) throws {
         let probe = RunnerProbe()
-        probe.response = (listing.code, listing.output)
+        probe.responses = [(listing.code, listing.output), (0, "removed")]
         let registration = BridgeRegistration(executable: grok, runner: probe.run)
-        #expect(registration.isInstalled() == listing.expected)
-        #expect(probe.calls == [["mcp", "list"]])
+
+        try registration.remove()
+
+        let removed = probe.calls.contains(["mcp", "remove", "sigil", "-s", "user"])
+        #expect(removed == listing.expected)
     }
 
     @Test func installAndRemoveThrowRunnerOutputOnFailure() {

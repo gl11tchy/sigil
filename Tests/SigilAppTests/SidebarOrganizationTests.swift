@@ -183,7 +183,7 @@ struct SidebarOrganizationTests {
             ])
     }
 
-    @Test func homeListPutsDestinationsAfterProjects() {
+    @Test func homeListPutsDestinationsFirstAsNavItems() {
         #expect(
             SidebarOrganization.homeRowIDs(
                 recentsCount: 2,
@@ -191,7 +191,7 @@ struct SidebarOrganizationTests {
                 pinnedIDs: ["pin"],
                 restIDs: ["rest"]
             ) == [
-                "pin", "rest", SidebarOrganization.recentsID, SidebarOrganization.archivedID,
+                SidebarOrganization.recentsID, SidebarOrganization.archivedID, "pin", "rest",
             ])
         #expect(
             SidebarOrganization.homeRowIDs(
@@ -199,14 +199,14 @@ struct SidebarOrganizationTests {
             ) == ["a"])
     }
 
-    @Test func homeListPutsOpenTabsFirst() {
+    @Test func homeListPutsOpenTabsBeforeProjects() {
         let tab = UUID()
         let rowID = SidebarOrganization.openTabRowID(tab)
         #expect(
             SidebarOrganization.homeRowIDs(
                 recentsCount: 1, archivedCount: 0, pinnedIDs: ["pin"], restIDs: ["rest"],
                 openTabIDs: [rowID]
-            ) == [rowID, "pin", "rest", SidebarOrganization.recentsID])
+            ) == [SidebarOrganization.recentsID, rowID, "pin", "rest"])
         #expect(SidebarOrganization.openTabID(fromRowID: rowID) == tab)
         #expect(SidebarOrganization.openTabID(fromRowID: "pin") == nil)
         #expect(SidebarOrganization.openTabID(fromRowID: SidebarOrganization.openTabPrefix + "x") == nil)

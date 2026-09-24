@@ -6,7 +6,20 @@ import SwiftUI
 @main
 struct SigilApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @State private var model = AppModel()
+    @State private var model: AppModel
+
+    init() {
+        // Inter and JetBrains Mono, before the first view or terminal asks for them.
+        Typeface.registerBundledFonts()
+        // A Dock launch lacks the profile's GROK_HOME, but the CLI, started
+        // through the login shell, has it. Adopt it before the model reads it.
+        if ProcessInfo.processInfo.environment["GROK_HOME"]?.isEmpty ?? true,
+            let grokHome = GrokPaths.loginShellGrokHome()
+        {
+            setenv("GROK_HOME", grokHome, 1)
+        }
+        _model = State(initialValue: AppModel())
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -74,17 +87,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         MainActor.assumeIsolated {
-            guard let model else { return .terminateNow }
-            let working = model.tabs.filter(\.shouldWarnBeforeStopping).count
-            guard working > 0 else { return .terminateNow }
-            let alert = NSAlert()
-            alert.messageText =
-                working == 1
-                ? "A session is still working. Quit anyway?"
-                : "\(working) sessions are still working. Quit anyway?"
-            alert.addButton(withTitle: "Quit")
-            alert.addButton(withTitle: "Cancel")
-            return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+            guard let model,
+                let prompt = StopWorkingPrompt(
+                    action: .quit, stopping: model.tabs,
+                    panelJob: model.panel.shellHasForegroundJob)
+            else { return .terminateNow }
+            return prompt.runModal() ? .terminateNow : .terminateCancel
         }
     }
 
@@ -222,6 +230,9 @@ struct GrokCommands: Commands {
             Button("Previous Tab") { model.cycleTab(by: -1) }
                 .keyboardShortcut("[", modifiers: [.command, .shift])
                 .disabled(model.tabs.count < 2)
+            Button("Show Tab List…") { model.isShowingTabList.toggle() }
+                .keyboardShortcut("t", modifiers: [.command, .control])
+                .disabled(!TabListRows.isShown(tabCount: model.tabs.count))
             Divider()
             ForEach(1...9, id: \.self) { index in
                 Button("Tab \(index)") { model.select(index: index - 1) }

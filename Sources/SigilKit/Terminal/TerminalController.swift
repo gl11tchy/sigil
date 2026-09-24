@@ -210,7 +210,10 @@ public final class TerminalController {
             usleep(20_000)
         }
         Self.signal(SIGKILL, to: pid)
-        Self.reap(pid)
+        // SIGKILL cannot be ignored, but the child is not reapable the instant it
+        // is sent. Wait for it so a short timeout does not leave a zombie behind.
+        let killDeadline = ContinuousClock.now + Self.killGrace
+        while !Self.reap(pid), ContinuousClock.now < killDeadline { usleep(5_000) }
     }
 
     /// Bounded readable output for an explicitly paired remote controller.
@@ -613,11 +616,9 @@ extension TerminalController {
         min(max(size, minFontSize), maxFontSize)
     }
 
+    /// JetBrains Mono when the app bundle carries it, else SF Mono.
     private static func monospacedFont(size: CGFloat) -> NSFont {
-        if let font = NSFont(name: "SF Mono", size: size) { return font }
-        if let font = NSFont(name: "SFMono-Regular", size: size) { return font }
-        if let font = NSFont(name: "Menlo", size: size) { return font }
-        return NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        Typeface.terminalFont(size: size)
     }
 
     private static func nsColor(_ color: SwiftTerm.Color) -> NSColor {

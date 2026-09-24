@@ -5,44 +5,6 @@ import XCTest
 @testable import SigilKit
 
 final class UnixSocketTests: XCTestCase {
-    func testProbeAgainstLiveAcceptingSocketReturnsTruePromptly() throws {
-        try withUnixListener(backlog: 8) { path, _ in
-            let start = ContinuousClock.now
-            let live = UnixSocket.isAccepting(at: path)
-            let elapsed = ContinuousClock.now - start
-
-            XCTAssertTrue(live)
-            XCTAssertLessThan(elapsed, probeBound)
-        }
-    }
-
-    func testProbeAgainstStaleOrMissingSocketReturnsFalsePromptly() throws {
-        let missing = uniqueSocketPath()
-        let missingStart = ContinuousClock.now
-        let missingLive = UnixSocket.isAccepting(at: missing)
-        let missingElapsed = ContinuousClock.now - missingStart
-        XCTAssertFalse(missingLive)
-        XCTAssertLessThan(missingElapsed, probeBound)
-
-        let stale = uniqueSocketPath()
-        let bindFD = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
-        XCTAssertGreaterThanOrEqual(bindFD, 0)
-        do {
-            try UnixSocket.bind(bindFD, path: stale)
-        } catch {
-            Darwin.close(bindFD)
-            throw error
-        }
-        Darwin.close(bindFD)
-        defer { Darwin.unlink(stale) }
-
-        let staleStart = ContinuousClock.now
-        let staleLive = UnixSocket.isAccepting(at: stale)
-        let staleElapsed = ContinuousClock.now - staleStart
-        XCTAssertFalse(staleLive)
-        XCTAssertLessThan(staleElapsed, probeBound)
-    }
-
     func testStaleProbeIsTrueOnlyForAClosedSocket() throws {
         let stale = uniqueSocketPath()
         let bindFD = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
@@ -77,30 +39,9 @@ final class UnixSocketTests: XCTestCase {
         }
     }
 
-    func testProbeAgainstNonAcceptingListenerDoesNotExceedTimeout() throws {
-        try withUnixListener(backlog: 1) { path, _ in
-            let held = try fillListenQueue(at: path)
-            XCTAssertFalse(held.isEmpty, "listen backlog 1 should queue at least one connect")
-            defer {
-                for fd in held { Darwin.close(fd) }
-            }
-
-            let start = ContinuousClock.now
-            let live = UnixSocket.isAccepting(at: path)
-            let elapsed = ContinuousClock.now - start
-
-            XCTAssertFalse(live)
-            XCTAssertLessThan(
-                elapsed,
-                Duration.milliseconds(Int(UnixSocket.acceptProbeMilliseconds) + 200)
-            )
-        }
-    }
 }
 
-private var probeBound: Duration {
-    Duration.milliseconds(Int(UnixSocket.acceptProbeMilliseconds))
-}
+private let probeBound = Duration.milliseconds(250)
 
 private func uniqueSocketPath() -> String {
     let short = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(8))

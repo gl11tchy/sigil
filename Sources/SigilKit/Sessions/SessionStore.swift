@@ -27,8 +27,10 @@ public final class SessionStore {
     /// Set when the sessions directory or one or more session summaries could not be read.
     public private(set) var loadError: String?
 
-    private let root: URL
+    public let root: URL
     @ObservationIgnored private var cache: [String: SessionCacheEntry] = [:]
+    /// Folded search fields, one per entry of `sessions`, in the same order.
+    @ObservationIgnored private var searchKeys: [SessionScanner.SearchKey] = []
     @ObservationIgnored private var isStarted = false
     /// How many scans have started, and which of them produced `sessions`.
     /// A scan numbered above a moment's `scanSequence` began after it.
@@ -154,13 +156,11 @@ public final class SessionStore {
         _ query: String,
         displayedTitle: ((GrokSession) -> String)? = nil
     ) -> [GrokSession] {
-        if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return sessions
-        }
-        return sessions.compactMap { session -> (GrokSession, SessionScanner.SearchRank)? in
+        guard let query = SessionScanner.SearchQuery(query) else { return sessions }
+        return zip(sessions, searchKeys).compactMap { session, key -> (GrokSession, SessionScanner.SearchRank)? in
             guard
                 let rank = SessionScanner.searchRank(
-                    session,
+                    key,
                     query: query,
                     displayedTitle: displayedTitle?(session)
                 )
@@ -172,13 +172,6 @@ public final class SessionStore {
             return SessionScanner.isNewer(lhs.0, rhs.0)
         }
         .map(\.0)
-    }
-
-    /// Groups `search` results by working directory, in that same order.
-    public func groupedByProject(matching query: String = "") -> [(
-        cwd: String, sessions: [GrokSession]
-    )] {
-        SessionScanner.grouped(search(query))
     }
 
     /// Walks `root` off the main actor. Cache hits skip JSON decoding.
@@ -223,6 +216,7 @@ public final class SessionStore {
         cache = result.cache
         if sessions != result.sessions {
             sessions = result.sessions
+            searchKeys = sessions.map(SessionScanner.SearchKey.init)
         }
         if loadError != result.loadError {
             loadError = result.loadError
@@ -272,13 +266,16 @@ public final class SessionStore {
         }
     }
 
+    /// Watches the root only. While it is missing, nothing is watched: its
+    /// nearest existing ancestor can be the home folder, whose churn would
+    /// rescan constantly. The retry loop starts the watcher once it appears.
     private func refreshWatcher() {
         guard isStarted else { return }
-        guard let desiredPath = nearestExistingDirectory(to: root) else {
-            if watchedPath != nil {
-                watcher.stop()
-                watchedPath = nil
-            }
+        guard let desiredPath = existingRootPath() else {
+            // Also ends a stream whose root was just deleted (a restart
+            // event clears `watchedPath` before this runs).
+            watcher.stop()
+            watchedPath = nil
             return
         }
         guard desiredPath != watchedPath else { return }
@@ -299,19 +296,12 @@ public final class SessionStore {
         }
     }
 
-    private func nearestExistingDirectory(to requestedRoot: URL) -> String? {
-        let fm = FileManager.default
-        var candidate = requestedRoot.standardizedFileURL
-        while true {
-            var isDirectory: ObjCBool = false
-            if fm.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
-                isDirectory.boolValue
-            {
-                return candidate.path
-            }
-            let parent = candidate.deletingLastPathComponent()
-            if parent.path == candidate.path { return nil }
-            candidate = parent
-        }
+    private func existingRootPath() -> String? {
+        let path = root.standardizedFileURL.path
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+            isDirectory.boolValue
+        else { return nil }
+        return path
     }
 }

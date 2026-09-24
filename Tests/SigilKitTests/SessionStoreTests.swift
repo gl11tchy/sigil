@@ -164,13 +164,14 @@ struct SessionStoreTests {
         )
     }
 
-    @Test func missingRootSetsLoadErrorAndLeavesSessionsEmpty() async {
+    @Test func aMissingRootBeforeTheFirstSessionIsAnEmptyListNotAnError() async {
+        // A fresh Grok install has no sessions folder until the first chat.
         let missing = FileManager.default.temporaryDirectory
             .appendingPathComponent("Sigil-missing-\(UUID().uuidString)", isDirectory: true)
         let store = SessionStore(root: missing)
         await store.scan(ignoringCache: false)
         #expect(store.sessions.isEmpty)
-        #expect(store.loadError != nil)
+        #expect(store.loadError == nil)
         #expect(!store.isLoading)
     }
 
@@ -210,7 +211,8 @@ struct SessionStoreTests {
 
         harness.store.start()
         await harness.store.reload()
-        #expect(harness.store.loadError != nil)
+        #expect(harness.store.sessions.isEmpty)
+        #expect(harness.store.loadError == nil)
 
         try harness.write(
             fixture: "minimal.json",
@@ -259,6 +261,44 @@ struct SessionStoreTests {
         }
     }
 
+    @Test func aMissingRootDoesNotRescanOnUnrelatedFolderChanges() async throws {
+        // Without ~/.grok the nearest existing folder is the home folder;
+        // its churn must not drive scans.
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Sigil-missing-root-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let recorder = ScanRecorder()
+        let store = SessionStore(
+            root: base.appendingPathComponent("grok/sessions", isDirectory: true),
+            timing: SessionStoreTiming(
+                debounceDelay: .milliseconds(50),
+                maximumDebounceDelay: .milliseconds(150),
+                watcherRetryDelay: .seconds(30),
+                watcherLatency: 0.05
+            ),
+            scanOperation: { root, cache, _ in
+                await recorder.record()
+                return SessionScanner.scan(root: root, cache: cache)
+            }
+        )
+        store.start()
+        defer { store.stop() }
+        try await waitUntil { !store.isLoading }
+        try await Task.sleep(for: .milliseconds(400))
+        let baseline = await recorder.count
+
+        for index in 0..<5 {
+            try FileManager.default.createDirectory(
+                at: base.appendingPathComponent("unrelated-\(index)/child"),
+                withIntermediateDirectories: true)
+            try await Task.sleep(for: .milliseconds(60))
+        }
+        try await Task.sleep(for: .milliseconds(500))
+
+        #expect(await recorder.count == baseline)
+    }
+
     @Test func continuousEventsCannotStarveScans() async throws {
         let recorder = ScanRecorder()
         let timing = SessionStoreTiming(
@@ -293,7 +333,7 @@ struct SessionStoreTests {
     }
 
     @Test(arguments: SessionQueryCase.all)
-    func searchAndGrouping(_ queryCase: SessionQueryCase) async throws {
+    func searchFindsAndOrdersSessions(_ queryCase: SessionQueryCase) async throws {
         let harness = try FixtureHarness()
         defer { harness.tearDown() }
         try harness.installOrderingFixtures()
@@ -302,9 +342,28 @@ struct SessionStoreTests {
 
         #expect(harness.store.sessions.map(\.id) == ["a1", "b1", "g1", "a2", "b2"])
         #expect(harness.store.search(queryCase.query).map(\.id) == queryCase.expectedIDs)
-        let groups = harness.store.groupedByProject(matching: queryCase.query)
-        #expect(groups.map(\.cwd) == queryCase.expectedGroupOrder)
-        #expect(groups.map { $0.sessions.map(\.id) } == queryCase.expectedGroupedIDs)
+    }
+
+    @Test func searchFollowsTheLatestScan() async throws {
+        let harness = try FixtureHarness()
+        defer { harness.tearDown() }
+        try harness.write(
+            fixture: "minimal.json",
+            cwd: "/Users/exec",
+            id: "019ffeab-c76b-7fe1-be40-508369febd51"
+        )
+        await harness.store.scan(ignoringCache: false)
+        #expect(harness.store.search("keyholding").isEmpty)
+
+        try harness.write(
+            fixture: "full.json",
+            cwd: "/Users/exec/Documents/keyholding-v0-v2",
+            id: "019f780a-34d7-7993-aadc-f23a46c40a73"
+        )
+        await harness.store.scan(ignoringCache: false)
+
+        #expect(harness.store.search("keyholding").map(\.id) == ["019f780a-34d7-7993-aadc-f23a46c40a73"])
+        #expect(harness.store.search("Users exec").count == 2)
     }
 
     @Test func emptySearchDoesNotComputeDisplayedTitle() async throws {
@@ -577,8 +636,6 @@ struct SessionStoreTests {
 struct SessionQueryCase: Sendable, CustomTestStringConvertible {
     var query: String
     var expectedIDs: [String]
-    var expectedGroupOrder: [String]
-    var expectedGroupedIDs: [[String]]
 
     var testDescription: String {
         query.isEmpty ? "empty" : query
@@ -587,45 +644,31 @@ struct SessionQueryCase: Sendable, CustomTestStringConvertible {
     static let all: [SessionQueryCase] = [
         SessionQueryCase(
             query: "",
-            expectedIDs: ["a1", "b1", "g1", "a2", "b2"],
-            expectedGroupOrder: ["/proj/Alpha", "/proj/Beta", "/proj/Gamma"],
-            expectedGroupedIDs: [["a1", "a2"], ["b1", "b2"], ["g1"]]
+            expectedIDs: ["a1", "b1", "g1", "a2", "b2"]
         ),
         SessionQueryCase(
             query: "   \t",
-            expectedIDs: ["a1", "b1", "g1", "a2", "b2"],
-            expectedGroupOrder: ["/proj/Alpha", "/proj/Beta", "/proj/Gamma"],
-            expectedGroupedIDs: [["a1", "a2"], ["b1", "b2"], ["g1"]]
+            expectedIDs: ["a1", "b1", "g1", "a2", "b2"]
         ),
         SessionQueryCase(
             query: "alpha",
-            expectedIDs: ["a2", "a1"],
-            expectedGroupOrder: ["/proj/Alpha"],
-            expectedGroupedIDs: [["a2", "a1"]]
+            expectedIDs: ["a2", "a1"]
         ),
         SessionQueryCase(
             query: "cafe",
-            expectedIDs: ["b1"],
-            expectedGroupOrder: ["/proj/Beta"],
-            expectedGroupedIDs: [["b1"]]
+            expectedIDs: ["b1"]
         ),
         SessionQueryCase(
             query: "BETA",
-            expectedIDs: ["b2", "b1"],
-            expectedGroupOrder: ["/proj/Beta"],
-            expectedGroupedIDs: [["b2", "b1"]]
+            expectedIDs: ["b2", "b1"]
         ),
         SessionQueryCase(
             query: "Zebra",
-            expectedIDs: ["a1"],
-            expectedGroupOrder: ["/proj/Alpha"],
-            expectedGroupedIDs: [["a1"]]
+            expectedIDs: ["a1"]
         ),
         SessionQueryCase(
             query: "zzz",
-            expectedIDs: [],
-            expectedGroupOrder: [],
-            expectedGroupedIDs: []
+            expectedIDs: []
         ),
     ]
 }
