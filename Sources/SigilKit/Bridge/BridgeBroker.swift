@@ -9,22 +9,19 @@ public struct BridgeTabRef: Equatable, Sendable, Hashable {
     public var directory: String
     /// `working`, `idle`, or `exited`.
     public var status: String
-    public var isRunning: Bool
 
     public init(
         tabID: String,
         sessionID: String? = nil,
         title: String,
         directory: String,
-        status: String,
-        isRunning: Bool
+        status: String
     ) {
         self.tabID = tabID
         self.sessionID = sessionID
         self.title = title
         self.directory = directory
         self.status = status
-        self.isRunning = isRunning
     }
 }
 
