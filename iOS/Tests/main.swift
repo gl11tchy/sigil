@@ -55,6 +55,17 @@ enum TestMain {
             }
         }
 
+        if let port = ProcessInfo.processInfo.environment["SIGIL_RELAY_PORT"] {
+            do {
+                try await RelayTests.lostPairingReplyAsksForANewCode(port: port)
+                passed += 1
+                print("PASS relay: a lost pairing reply asks for a new code")
+            } catch {
+                failed += 1
+                print("FAIL relay lost reply: \(error)")
+            }
+        }
+
         if failed > 0 {
             print("FAILED \(failed)")
             exit(1)

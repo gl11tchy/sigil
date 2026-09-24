@@ -6,3 +6,6 @@ xcuserdata/
 .tmp-swift/
 .build/
 Sigil-DerivedData/
+
+# The root ignores *.xcodeproj for the Mac package; this project is the app.
+!Sigil.xcodeproj

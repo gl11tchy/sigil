@@ -63,6 +63,8 @@ final class RemoteConnection {
     private var queue: Task<Void, Never>?
     private var bootstrapKey: String?
     private var unsaved = false
+    /// Set once a pair request goes out. Without a ticket back, that QR room is gone.
+    private var pairSent = false
     private var stopped = true
     private var reconnectDelay: Double = 0.5
     private var reconnectTask: Task<Void, Never>?
@@ -77,6 +79,7 @@ final class RemoteConnection {
         self.credential = credential
         bootstrapKey = nil
         unsaved = false
+        pairSent = false
         start()
     }
 
@@ -86,6 +89,7 @@ final class RemoteConnection {
             origin: link.origin, room: link.room, deviceKey: RemoteCrypto.randomKey(), ticket: nil)
         bootstrapKey = link.key
         unsaved = true
+        pairSent = false
         start()
     }
 
@@ -159,6 +163,9 @@ final class RemoteConnection {
                 try? await Task.sleep(for: .seconds(10))
                 guard !Task.isCancelled, let self, let item = self.pending.removeValue(forKey: seq) else { return }
                 item.continuation.resume(throwing: RemoteConnectionError.noResponse)
+                // A silent socket may be half-open after a network change. Drop it so the
+                // receive loop ends and a fresh connection is made.
+                self.socket?.cancel(with: .goingAway, reason: nil)
             }
             pending[seq] = Pending(
                 continuation: continuation, action: fields.action, tabID: fields.tabID, timeout: timeout)
@@ -278,6 +285,7 @@ final class RemoteConnection {
 
     private func authorize(generation current: Int) {
         let pairing = bootstrapKey != nil
+        if pairing { pairSent = true }
         let fields =
             pairing
             ? RequestFields(action: "pair", text: credential?.deviceKey)
@@ -296,7 +304,8 @@ final class RemoteConnection {
                     self.delegate?.connection(self, didSave: saved)
                 }
             } catch {
-                guard current == self.generation else { return }
+                // After a refusal the reason is already shown; "connection lost" would hide it.
+                guard current == self.generation, self.phase != .revoked else { return }
                 self.delegate?.connection(self, didFail: error.localizedDescription)
             }
         }
@@ -305,6 +314,14 @@ final class RemoteConnection {
     private func closed(generation current: Int) {
         guard current == generation else { return }
         socket = nil
+        if pairSent, credential?.ticket == nil {
+            // The Mac may have accepted the phone and retired the QR room, but the reply
+            // with the ticket never arrived. Nothing can route back in; ask for a new code.
+            stopped = true
+            goOffline(.revoked)
+            delegate?.connection(self, didFail: "Pairing did not finish. Scan a new code in Sigil.")
+            return
+        }
         if stopped {
             if phase != .revoked { goOffline(.offline) }
             return

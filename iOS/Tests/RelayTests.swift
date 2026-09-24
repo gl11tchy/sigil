@@ -43,6 +43,26 @@ enum RelayTests {
         mac.stop()
     }
 
+    /// The Mac accepts the phone and retires the QR room, but the reply with the ticket is lost.
+    static func lostPairingReplyAsksForANewCode(port: String) async throws {
+        let mac = FakeMac(origin: URL(string: "http://localhost:\(port)")!)
+        mac.dropPairReply = true
+        let room = try await mac.register()
+        guard case .success(let link) = PairingLink.parse("http://localhost:\(port)/#room=\(room)&key=\(mac.pairingKey)")
+        else { throw TestFailure("link did not parse") }
+        let phone = RemoteConnection()
+        let watcher = Watcher()
+        phone.delegate = watcher
+        phone.pair(link)
+        try await until("Mac accepted the device key") { mac.deviceKey != nil }
+        mac.retireAndReRegister()
+        try await until("phone gives up and asks for a new code", timeout: 20) { phone.phase == .revoked }
+        try Expect.true(watcher.saved == nil, "nothing saved without a ticket")
+        try Expect.equal(watcher.failure, "Pairing did not finish. Scan a new code in Sigil.", "told to scan again")
+        phone.stop(forget: true)
+        mac.stop()
+    }
+
     private static func until(_ what: String, timeout: Double = 15, _ condition: () -> Bool) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition() {
@@ -54,12 +74,13 @@ enum RelayTests {
     final class Watcher: RemoteConnectionDelegate {
         var saved: PairingCredential?
         var lastState: RemoteState?
+        var failure: String?
         func connection(_ connection: RemoteConnection, didChange phase: RemoteConnection.Phase) {}
         func connection(_ connection: RemoteConnection, didReceive reply: RemoteReply, for action: String, tabID: String?) {
             lastState = reply.state
         }
         func connection(_ connection: RemoteConnection, didSave credential: PairingCredential) { saved = credential }
-        func connection(_ connection: RemoteConnection, didFail message: String) {}
+        func connection(_ connection: RemoteConnection, didFail message: String) { failure = message }
     }
 }
 
@@ -104,6 +125,7 @@ final class FakeMac {
     let pairingKey = RemoteCrypto.randomKey()
     let ticket = RemoteCrypto.randomKey()
     private(set) var deviceKey: String?
+    var dropPairReply = false
     private(set) var connections = 0
     private var socket: URLSessionWebSocketTask?
     private var peer: String?
@@ -190,6 +212,7 @@ final class FakeMac {
             }
             deviceKey = key
         }
+        if request.action == "pair", dropPairReply { return }
         var reply = Reply(challenge: request.challenge, sequence: request.sequence, ticket: ticket)
         switch request.action {
         case "pair", "state":
