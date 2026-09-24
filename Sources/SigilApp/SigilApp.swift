@@ -9,6 +9,8 @@ struct SigilApp: App {
     @State private var model: AppModel
 
     init() {
+        // Inter and JetBrains Mono, before the first view or terminal asks for them.
+        Typeface.registerBundledFonts()
         // A Dock launch lacks the profile's GROK_HOME, but the CLI, started
         // through the login shell, has it. Adopt it before the model reads it.
         if ProcessInfo.processInfo.environment["GROK_HOME"]?.isEmpty ?? true,

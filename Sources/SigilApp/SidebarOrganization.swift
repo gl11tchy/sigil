@@ -159,9 +159,11 @@ enum SidebarOrganization {
         restIDs: [String],
         openTabIDs: [String] = []
     ) -> [String] {
-        openTabIDs
+        // Recents and Archived are nav items above the lists, so the arrow
+        // keys meet them first, in the order they are drawn.
+        destinationRowIDs(recentsCount: recentsCount, archivedCount: archivedCount)
+            + openTabIDs
             + folderListRowIDs(pinnedIDs: pinnedIDs, restIDs: restIDs)
-            + destinationRowIDs(recentsCount: recentsCount, archivedCount: archivedCount)
     }
 
     /// Where the arrow-key highlight sits once the list has focus. The list

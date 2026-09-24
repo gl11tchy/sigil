@@ -2,7 +2,8 @@ import AppKit
 import SigilKit
 import SwiftUI
 
-/// The right-hand utility column: one header of tool buttons over one tool.
+/// The right-hand utility column: a second screen beside the first, with a
+/// segmented control over one tool.
 struct RightPanelView: View {
     @Bindable var model: AppModel
     var availableWidth: Double = 380
@@ -11,13 +12,16 @@ struct RightPanelView: View {
     private var panel: RightPanel { model.panel }
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Radius.window, style: .continuous)
         VStack(spacing: 0) {
             header
-            Rectangle().fill(palette.hairline).frame(height: 1)
+            Rectangle().fill(palette.line).frame(height: 1)
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(palette.ground)
+        .background(shape.fill(palette.page))
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(palette.line, lineWidth: 1).allowsHitTesting(false))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Utility panel")
     }
@@ -25,21 +29,19 @@ struct RightPanelView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: 2) {
-            ForEach(RightPanelMode.allCases) { mode in
-                ToolButton(
-                    mode: mode,
-                    isSelected: panel.mode == mode,
-                    showsTitle: availableWidth >= 360 || panel.mode == mode,
-                    action: { model.showPanel(mode) }
-                )
-            }
+        HStack(spacing: 4) {
+            SegmentedPill(
+                items: RightPanelMode.allCases,
+                selection: Binding(get: { panel.mode }, set: { model.showPanel($0) }),
+                title: \.title,
+                systemImage: \.systemImage,
+                showsTitle: { availableWidth >= 320 || panel.mode == $0 }
+            )
             Spacer(minLength: 6)
             trailingControls
         }
-        .padding(.horizontal, 6)
-        .frame(height: 36)
-        .background(palette.ground)
+        .padding(.horizontal, 8)
+        .frame(height: 44)
     }
 
     @ViewBuilder
@@ -55,7 +57,6 @@ struct RightPanelView: View {
         IconButton(systemImage: "xmark", help: "Close Panel (⌥⌘B)") {
             panel.isVisible = false
         }
-        .padding(.trailing, 2)
     }
 
     // MARK: - Tools
@@ -65,7 +66,13 @@ struct RightPanelView: View {
         switch panel.mode {
         case .shell:
             if let shell = panel.shell {
-                TerminalPane(controller: shell, background: palette.groundNSColor)
+                TerminalPane(
+                    controller: shell,
+                    background: Palette.nsColor(model.settings.theme.backgroundHex),
+                    cornerRadius: Radius.window - 1,
+                    roundsTopCorners: false
+                )
+                .padding([.leading, .trailing, .bottom], 1)
             } else {
                 PanelPlaceholder(text: "Starting a shell…")
             }
@@ -88,43 +95,6 @@ struct RightPanelView: View {
     }
 }
 
-/// One tool tab in the panel header.
-private struct ToolButton: View {
-    let mode: RightPanelMode
-    let isSelected: Bool
-    let showsTitle: Bool
-    let action: () -> Void
-
-    @Environment(\.palette) private var palette
-    @State private var isHovering = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: mode.systemImage)
-                    .font(.system(size: 10.5, weight: .medium))
-                if showsTitle {
-                    Text(mode.title)
-                        .font(.system(size: 11, weight: .medium))
-                }
-            }
-            .padding(.horizontal, 8)
-            .frame(height: 22)
-            .background(
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(isSelected ? palette.selected : (isHovering ? palette.raised : .clear))
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(isSelected ? palette.text : palette.textDim)
-        .onHover { isHovering = $0 }
-        .help(mode.title)
-        .accessibilityLabel(mode.title)
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-    }
-}
-
 /// A plain scratch pad, saved per conversation as the user types.
 private struct NotesPane: View {
     let title: String
@@ -134,23 +104,31 @@ private struct NotesPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(title)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(palette.textFaint)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .padding(.horizontal, 10)
-                .frame(height: 22, alignment: .leading)
-                .help("\(title) — \(subtitle)")
+            HStack(spacing: 6) {
+                Text(title)
+                    .ui(12.5, .medium)
+                    .foregroundStyle(palette.ink)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .mono(11)
+                    .foregroundStyle(palette.ink2)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+            .help("\(title) — \(subtitle)")
             TextEditor(text: $text)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(palette.text)
+                .mono(12.5)
+                .foregroundStyle(palette.ink)
+                .lineSpacing(3)
                 .scrollContentBackground(.hidden)
-                .padding(.horizontal, 6)
-                .padding(.bottom, 6)
+                .padding(.horizontal, 9)
+                .padding(.bottom, 8)
                 .accessibilityLabel("Notes for \(title)")
         }
-        .background(palette.ground)
+        .background(palette.page)
     }
 }
 
@@ -160,13 +138,16 @@ private struct PanelPlaceholder: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 11))
-            .foregroundStyle(palette.textFaint)
+            .ui(13)
+            .foregroundStyle(palette.ink2)
+            .multilineTextAlignment(.center)
+            .padding(24)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
-/// The draggable seam between the terminal and the panel.
+/// The draggable seam between the screen and the panel. It draws nothing;
+/// focus shows an accent bar.
 struct PanelDivider: View {
     @Binding var width: Double
     @Environment(\.palette) private var palette
@@ -178,12 +159,13 @@ struct PanelDivider: View {
     }
 
     var body: some View {
-        Rectangle()
-            .fill(palette.hairline)
+        Color.clear
             .frame(width: 1)
             .overlay {
                 if isFocused {
-                    Rectangle().fill(palette.accent).frame(width: 2).allowsHitTesting(false)
+                    Capsule().fill(palette.accent).frame(width: 2)
+                        .padding(.vertical, RootView.inset + Radius.window)
+                        .allowsHitTesting(false)
                 }
             }
             .overlay {
