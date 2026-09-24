@@ -437,15 +437,16 @@ struct SidebarView: View {
             "Projects",
             count: pinned.count + rest.count,
             isFirst: model.tabs.isEmpty,
-            add: { model.chooseProjectToAdd() }
-        ) {
-            ForEach(pinned, id: \.id) { item in
-                projectRow(item.project, rows: item.rows)
+            add: { model.chooseProjectToAdd() },
+            content: {
+                ForEach(pinned, id: \.id) { item in
+                    projectRow(item.project, rows: item.rows)
+                }
+                ForEach(rest, id: \.id) { item in
+                    projectRow(item.project, rows: item.rows)
+                }
             }
-            ForEach(rest, id: \.id) { item in
-                projectRow(item.project, rows: item.rows)
-            }
-        }
+        )
     }
 
     @ViewBuilder

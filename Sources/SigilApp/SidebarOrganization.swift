@@ -322,10 +322,12 @@ enum SidebarOrganization {
             }
             let name = URL(fileURLWithPath: entry.path).lastPathComponent
             let home = FileManager.default.homeDirectoryForCurrentUser.path
-            let displayPath =
-                entry.path == home ? "~"
-                : entry.path.hasPrefix(home + "/") ? "~" + entry.path.dropFirst(home.count)
-                : entry.path
+            var displayPath = entry.path
+            if entry.path == home {
+                displayPath = "~"
+            } else if entry.path.hasPrefix(home + "/") {
+                displayPath = "~" + entry.path.dropFirst(home.count)
+            }
             let taken = result.contains { $0.name == name }
             result.append(
                 SidebarProject(
