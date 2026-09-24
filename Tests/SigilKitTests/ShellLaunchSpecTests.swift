@@ -13,6 +13,15 @@ struct ShellLaunchSpecTests {
         #expect(command.arguments == ["-il"])
     }
 
+    @Test(arguments: ["/bin/tcsh", "/bin/csh"])
+    func cshFamilyShellsGetTheOnlyLoginFlagTheyAccept(shell: String) {
+        // tcsh and csh accept -l only as the sole flag; `-il` makes them exit.
+        let spec = ShellLaunchSpec(workingDirectory: URL(fileURLWithPath: "/tmp"))
+        let command = spec.hostCommand(processEnvironment: ["SHELL": shell])
+        #expect(command.executable.path == shell)
+        #expect(command.arguments == ["-l"])
+    }
+
     @Test
     func anUnusableShellFallsBackToZsh() {
         let spec = ShellLaunchSpec(workingDirectory: URL(fileURLWithPath: "/tmp"))

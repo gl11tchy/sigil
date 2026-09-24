@@ -75,6 +75,15 @@ struct TerminalLaunchSpecTests {
         #expect(command.arguments.suffix(4) == ["--cwd", cwd.path, "--resume", "abc"])
     }
 
+    @Test func grokUnderAnUnsupportedShellStillGetsAZshLoginShell() {
+        let executable = URL(fileURLWithPath: "/opt/grok/grok")
+        let spec = GrokLaunchSpec(executable: executable, workingDirectory: cwd, mode: .resume(sessionID: "abc"))
+
+        let command = spec.hostCommand(processEnvironment: ["SHELL": "/bin/tcsh"])
+        #expect(command.executable.path == "/bin/zsh")
+        #expect(command.arguments.prefix(4) == ["-lic", "exec \"$@\"", "sigil-grok", executable.path])
+    }
+
     struct BridgeEnvCase {
         let tabID: String?
         let socketPath: String?

@@ -1,0 +1,30 @@
+# a140 proof: SigilUX on audit/prov-launch 522ebf7, launched with SHELL=/bin/tcsh, 2026-09-23 20:42:53
+# A temporary ~/.zshrc in the throwaway home logged every zsh that read it (pid, flags, full command line).
+# New Grok tab: File > New Session (AXPress), Grok Build tile already selected (AXHelp "Start Grok Build"),
+# second AXPress on the tile started the session at 20:40:58. Sheet state before the press:
+#   new-session-claudeCode help=Claude Code
+#   new-session-codex help=Codex
+#   new-session-devin help=Devin
+#   new-session-cursor help=Cursor
+#   new-session-grokBuild help=Start Grok Build
+#   sheet buttons:
+#     title=missing value desc=button
+#     title=missing value desc=button
+# zsh log (shell-calls.log):
+20:39:09 zsh pid=80394 ppid=80388 flags=569XZilm login=yes argv0=sigil-grok cmd=[/bin/zsh -lic exec "$@" sigil-grok /tmp/sigil-ux/home/.grok/bin/grok --cwd /Users/Shared/sigil-ux/projects/acme-api --resume 503c3942-a825-4e45-b4e1-166048e0cc2d]
+20:39:09 zsh pid=80395 ppid=80388 flags=569XZilm login=yes argv0=sigil-grok cmd=[/bin/zsh -lic exec "$@" sigil-grok /tmp/sigil-ux/home/.grok/bin/grok --cwd /Users/Shared/sigil-ux/projects/acme-api --resume ba8051f0-aeec-41a5-ae5d-dcb1ec560300]
+20:40:56 zsh pid=85099 ppid=80388 flags=569XZil login=yes argv0=sigil-grok-models cmd=[/bin/zsh -lic exec "$@" sigil-grok-models /tmp/sigil-ux/home/.grok/bin/grok models]
+20:40:59 zsh pid=85262 ppid=80388 flags=569XZilm login=yes argv0=sigil-grok cmd=[/bin/zsh -lic exec "$@" sigil-grok /tmp/sigil-ux/home/.grok/bin/grok --cwd /Users/Shared/sigil-ux/projects/acme-api --session-id 2cf755c6-d5b9-4c5f-9085-b3ca6e380fb0]
+
+# Process tree under the SigilUX pid right after the new tab started (ps -o pid,ppid,command):
+    PID    PPID COMMAND
+  80388       1 /tmp/sigil-ux/SigilUX.app/Contents/MacOS/SigilUX -ApplePersistenceIgnoreState YES
+  80394   80388 /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /tmp/sigil-ux/harness/fake-grok.py --cwd /Users/Shared/sigil-ux/projects/acme-api --resume 503c3942-a825-4e45-b4e1-166048e0cc2d
+  80395   80388 /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /tmp/sigil-ux/harness/fake-grok.py --cwd /Users/Shared/sigil-ux/projects/acme-api --resume ba8051f0-aeec-41a5-ae5d-dcb1ec560300
+  80786   80388 /bin/tcsh
+  85262   80388 /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /tmp/sigil-ux/harness/fake-grok.py --cwd /Users/Shared/sigil-ux/projects/acme-api --session-id 2cf755c6-d5b9-4c5f-9085-b3ca6e380fb0
+
+# Reading: pid 85262 started as '/bin/zsh -lic exec "$@" sigil-grok <grok> --cwd ... --session-id ...' (zshrc log),
+# and the same pid 85262 is now the Grok CLI (the fake CLI, python fake-grok.py), a direct child of SigilUX:
+# the tab went through zsh -lic, which exec'd the CLI; it did not start the bare CLI. The two restored tabs
+# (80394, 80395) and the sheet's model list (85099, 'sigil-grok-models ... models') took the same zsh path.
