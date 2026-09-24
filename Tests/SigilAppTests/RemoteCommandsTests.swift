@@ -502,7 +502,9 @@ struct RemoteCommandsTests {
         defer { RemoteCommands.worktreeRoot = saved }
         let repository = try fixture.directory("repository")
         try git(["init", "-q"], in: repository)
-        try git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"], in: repository)
+        try git(
+            ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"], in: repository
+        )
         fixture.model.addProject(repository)
 
         #expect(fixture.settings.startsInWorktree)
