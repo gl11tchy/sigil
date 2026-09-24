@@ -8,7 +8,46 @@
 
 /* Begin PBXFileReference section */
 		C0A1000000000000000000A1 /* Sigil.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Sigil.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C0A1000000000000000000A2 /* SigilNotifications.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SigilNotifications.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		C0A1000000000000000000A3 /* SigilWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SigilWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXBuildFile section */
+		C0A1000000000000000000A4 /* SigilNotifications.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C0A1000000000000000000A2 /* SigilNotifications.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		C0A1000000000000000000A5 /* SigilWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C0A1000000000000000000A3 /* SigilWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		C0A1000000000000000000A6 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C0A1000000000000000000E2 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C0A1000000000000000000E3;
+			remoteInfo = SigilNotifications;
+		};
+		C0A1000000000000000000A7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C0A1000000000000000000E2 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C0A1000000000000000000E4;
+			remoteInfo = SigilWidgets;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		C0A1000000000000000000C4 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				C0A1000000000000000000A4 /* SigilNotifications.appex in Embed Foundation Extensions */,
+				C0A1000000000000000000A5 /* SigilWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		C0A1000000000000000000B1 /* Sigil */ = {
@@ -16,10 +55,64 @@
 			path = Sigil;
 			sourceTree = "<group>";
 		};
+		C0A1000000000000000000B2 /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		C0A1000000000000000000B3 /* SigilNotifications */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				C0A1000000000000000000B5 /* Exceptions for "SigilNotifications" folder in "SigilNotifications" target */,
+			);
+			path = SigilNotifications;
+			sourceTree = "<group>";
+		};
+		C0A1000000000000000000B4 /* SigilWidgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				C0A1000000000000000000B6 /* Exceptions for "SigilWidgets" folder in "SigilWidgets" target */,
+			);
+			path = SigilWidgets;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		C0A1000000000000000000B5 /* Exceptions for "SigilNotifications" folder in "SigilNotifications" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				SigilNotifications.entitlements,
+			);
+			target = C0A1000000000000000000E3 /* SigilNotifications */;
+		};
+		C0A1000000000000000000B6 /* Exceptions for "SigilWidgets" folder in "SigilWidgets" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				SigilWidgets.entitlements,
+			);
+			target = C0A1000000000000000000E4 /* SigilWidgets */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		C0A1000000000000000000C1 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C0A1000000000000000000C5 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C0A1000000000000000000C8 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -33,6 +126,9 @@
 			isa = PBXGroup;
 			children = (
 				C0A1000000000000000000B1 /* Sigil */,
+				C0A1000000000000000000B2 /* Shared */,
+				C0A1000000000000000000B3 /* SigilNotifications */,
+				C0A1000000000000000000B4 /* SigilWidgets */,
 				C0A1000000000000000000D2 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,6 +137,8 @@
 			isa = PBXGroup;
 			children = (
 				C0A1000000000000000000A1 /* Sigil.app */,
+				C0A1000000000000000000A2 /* SigilNotifications.appex */,
+				C0A1000000000000000000A3 /* SigilWidgets.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -55,13 +153,17 @@
 				C0A1000000000000000000C2 /* Sources */,
 				C0A1000000000000000000C1 /* Frameworks */,
 				C0A1000000000000000000C3 /* Resources */,
+				C0A1000000000000000000C4 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				C0A1000000000000000000A8 /* PBXTargetDependency */,
+				C0A1000000000000000000A9 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				C0A1000000000000000000B1 /* Sigil */,
+				C0A1000000000000000000B2 /* Shared */,
 			);
 			name = Sigil;
 			packageProductDependencies = (
@@ -70,7 +172,66 @@
 			productReference = C0A1000000000000000000A1 /* Sigil.app */;
 			productType = "com.apple.product-type.application";
 		};
+		C0A1000000000000000000E3 /* SigilNotifications */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C0A1000000000000000000F3 /* Build configuration list for PBXNativeTarget "SigilNotifications" */;
+			buildPhases = (
+				C0A1000000000000000000C6 /* Sources */,
+				C0A1000000000000000000C5 /* Frameworks */,
+				C0A1000000000000000000C7 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				C0A1000000000000000000B3 /* SigilNotifications */,
+				C0A1000000000000000000B2 /* Shared */,
+			);
+			name = SigilNotifications;
+			packageProductDependencies = (
+			);
+			productName = SigilNotifications;
+			productReference = C0A1000000000000000000A2 /* SigilNotifications.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		C0A1000000000000000000E4 /* SigilWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C0A1000000000000000000F4 /* Build configuration list for PBXNativeTarget "SigilWidgets" */;
+			buildPhases = (
+				C0A1000000000000000000C9 /* Sources */,
+				C0A1000000000000000000C8 /* Frameworks */,
+				C0A1000000000000000000CA /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				C0A1000000000000000000B4 /* SigilWidgets */,
+				C0A1000000000000000000B2 /* Shared */,
+			);
+			name = SigilWidgets;
+			packageProductDependencies = (
+			);
+			productName = SigilWidgets;
+			productReference = C0A1000000000000000000A3 /* SigilWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
+
+/* Begin PBXTargetDependency section */
+		C0A1000000000000000000A8 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C0A1000000000000000000E3 /* SigilNotifications */;
+			targetProxy = C0A1000000000000000000A6 /* PBXContainerItemProxy */;
+		};
+		C0A1000000000000000000A9 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C0A1000000000000000000E4 /* SigilWidgets */;
+			targetProxy = C0A1000000000000000000A7 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXProject section */
 		C0A1000000000000000000E2 /* Project object */ = {
@@ -81,6 +242,12 @@
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
 					C0A1000000000000000000E1 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					C0A1000000000000000000E3 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					C0A1000000000000000000E4 = {
 						CreatedOnToolsVersion = 26.0;
 					};
 				};
@@ -100,6 +267,8 @@
 			projectRoot = "";
 			targets = (
 				C0A1000000000000000000E1 /* Sigil */,
+				C0A1000000000000000000E3 /* SigilNotifications */,
+				C0A1000000000000000000E4 /* SigilWidgets */,
 			);
 		};
 /* End PBXProject section */
@@ -112,10 +281,38 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C0A1000000000000000000C7 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C0A1000000000000000000CA /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		C0A1000000000000000000C2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C0A1000000000000000000C6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C0A1000000000000000000C9 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -239,7 +436,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Config/Sigil.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Config/Sigil.release.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
@@ -270,6 +467,112 @@
 			};
 			name = Release;
 		};
+		C0A100000000000000000105 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = SigilNotifications/SigilNotifications.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = CDAQ9PW7QF;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SigilNotifications/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Sigil";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.gl11tchy.sigilremote.notifications";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		C0A100000000000000000106 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = SigilNotifications/SigilNotifications.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = CDAQ9PW7QF;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SigilNotifications/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Sigil";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.gl11tchy.sigilremote.notifications";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		C0A100000000000000000107 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = SigilWidgets/SigilWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = CDAQ9PW7QF;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SigilWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Sigil";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.gl11tchy.sigilremote.widgets";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+			};
+			name = Debug;
+		};
+		C0A100000000000000000108 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = SigilWidgets/SigilWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = CDAQ9PW7QF;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SigilWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Sigil";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.gl11tchy.sigilremote.widgets";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -287,6 +590,24 @@
 			buildConfigurations = (
 				C0A100000000000000000103 /* Debug */,
 				C0A100000000000000000104 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C0A1000000000000000000F3 /* Build configuration list for PBXNativeTarget "SigilNotifications" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C0A100000000000000000105 /* Debug */,
+				C0A100000000000000000106 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C0A1000000000000000000F4 /* Build configuration list for PBXNativeTarget "SigilWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C0A100000000000000000107 /* Debug */,
+				C0A100000000000000000108 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

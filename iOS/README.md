@@ -20,6 +20,17 @@ output view runs `Sidereal/public/output.mjs` itself, bundled as
 
 SwiftUI, iOS 26, no third-party dependencies. Dark only, like the Mac app.
 
+Alerts: once connected the app asks for notification permission and hands its
+APNs token to the Mac. With the app closed, a turn that finishes, a question
+that appears, or a session that ends arrives as a notification; the Mac seals
+the words with the pairing key, so the relay and Apple carry ciphertext, and
+`SigilNotifications` (a notification service extension) opens them. The session
+on screen runs a Live Activity while it works or asks (`SigilWidgets`): the
+Dynamic Island and a Lock Screen card, updated by the Mac's pushes when the app
+is away. Both extensions compile `Shared/`, which the app and the test binary
+compile too. Tapping a notification or the card opens that session and nothing
+else.
+
 ## Pair
 
 1. On the Mac, open Sigil → Settings → Remote and select Connect Phone.

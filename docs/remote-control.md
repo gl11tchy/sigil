@@ -78,6 +78,21 @@ struct RemoteRequest: Codable, Sendable {
   with `choices`, `yes` and `no` keys. `answer` (`text` = key) types the digit,
   or the letter and Return, only after reading the screen again and finding the
   same kind of prompt; anything else is refused.
+- Alerts: `notify` (`text` = APNs device token hex, `name` = `development` or
+  `production`; empty text stops alerts) is kept with the pairing in Keychain
+  and told to the relay as `{pushToken, pushEnvironment}` on every host
+  connect. `activity` (`tabID`, `text` = Live Activity push token; empty ends)
+  is held in memory. While no phone is on the socket, a turn that finishes, a
+  question that appears, or a process that ends becomes `{push: {data, thread}}`
+  where `data` is a `RemoteAlert` sealed with the device key in direction
+  `push`; the relay wraps it as an APNs alert with `mutable-content` and a
+  fixed fallback text, and the phone's notification extension opens it. A tab
+  with an activity token gets `{push: {activity, state: {status, since,
+  asking}, event}}`; that state travels in the clear, never a title.
+- The relay reads `APNS_KEY` (the `.p8`, PEM or base64), `APNS_KEY_ID`,
+  `APNS_TEAM_ID` and `APNS_TOPIC` (the phone's bundle id). Without all four it
+  answers `{type: "push", ok: false, reason: "off"}` and nothing else changes.
+  Sixty pushes a minute per room; a `410` from Apple forgets the token.
 - Spec: `docs/phone-companion-2-spec.md`.
 
 ## Verification and boundaries

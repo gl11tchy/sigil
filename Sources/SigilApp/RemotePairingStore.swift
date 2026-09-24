@@ -6,6 +6,9 @@ struct RemotePairing: Codable, Equatable, Sendable {
     var origin: String
     var deviceKey: String
     var ticket: String
+    /// The phone's APNs device token and environment, once it asked for alerts.
+    var pushToken: String?
+    var pushEnvironment: String?
 }
 
 protocol RemotePairingStore: AnyObject {

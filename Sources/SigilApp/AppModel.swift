@@ -1515,10 +1515,15 @@ final class AppModel {
 
     /// Output and status changes reach the phone through the remote stream.
     private func wireRemoteStream(_ tab: TerminalTab) {
-        tab.onActivityChange = { [weak self] in self?.remoteControl.noteChange() }
-        tab.controller.onRemoteOutput = { [weak self, weak tab] in
-            guard let self, let tab, self.selectedTabID == tab.id else { return }
+        tab.onActivityChange = { [weak self, weak tab] in
+            guard let self, let tab else { return }
             self.remoteControl.noteChange()
+            self.remoteControl.noteTab(tab, model: self)
+        }
+        tab.controller.onRemoteOutput = { [weak self, weak tab] in
+            guard let self, let tab else { return }
+            if self.selectedTabID == tab.id { self.remoteControl.noteChange() }
+            self.remoteControl.noteTab(tab, model: self)
         }
     }
 
@@ -1751,6 +1756,7 @@ final class AppModel {
     private func removeTab(at index: Int) {
         let id = tabs[index].id
         tabBridge?.noteTabClosed(id: id)
+        remoteControl.forgetTab(id)
         // Do not let a quick reopen overlap two Grok processes on one session.
         tabs[index].terminateAndWait()
         tabs.remove(at: index)

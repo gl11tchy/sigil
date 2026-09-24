@@ -6,8 +6,8 @@ import WebSocket from 'ws';
 import { createRelay } from '../server.mjs';
 import { importKey, seal } from '../public/crypto.mjs';
 
-async function setup(t) {
-  const relay = createRelay({ publicOrigin: 'http://localhost:3099' });
+async function setup(t, options = {}) {
+  const relay = createRelay({ publicOrigin: 'http://localhost:3099', ...options });
   relay.server.listen(0, '127.0.0.1');
   await once(relay.server, 'listening');
   const base = `http://127.0.0.1:${relay.server.address().port}`;
@@ -513,4 +513,117 @@ test('a well-formed wrong host token cannot register a ticket or replace the hos
   const notice = message(host);
   connect(base, null, 'phone', { origin: 'http://localhost:3099', ticket: ticket() });
   assert.equal((await notice).type, 'peer');
+});
+
+function fakeAPNs() {
+  const sent = [];
+  return { sent, async send(request) { sent.push(request); return { status: request.token.startsWith('dead') ? 410 : 200 }; }, close() {} };
+}
+
+test('a host registers the phone token and sends sealed alerts and activity updates through APNs', async t => {
+  const apns = fakeAPNs();
+  const { base, room, hostToken } = await setup(t, { apns });
+  const host = connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` } });
+  assert.deepEqual(await message(host), { type: 'ready' });
+  // Alerts before a token: refused, not delivered.
+  host.send(JSON.stringify({ push: { data: 'c2VhbGVk', thread: 'tab-1' } }));
+  assert.deepEqual(await message(host), { type: 'push', ok: false, reason: 'token' });
+  host.send(JSON.stringify({ pushToken: 'ab'.repeat(32), pushEnvironment: 'development' }));
+  host.send(JSON.stringify({ push: { data: 'c2VhbGVk', thread: 'tab-1' } }));
+  assert.deepEqual(await message(host), { type: 'push', ok: true, status: 200 });
+  assert.equal(apns.sent.length, 1);
+  assert.equal(apns.sent[0].environment, 'development');
+  assert.equal(apns.sent[0].token, 'ab'.repeat(32));
+  assert.equal(apns.sent[0].pushType, 'alert');
+  assert.equal(apns.sent[0].collapseId, 'tab-1');
+  assert.equal(apns.sent[0].payload.aps['mutable-content'], 1);
+  assert.equal(apns.sent[0].payload.aps['thread-id'], 'tab-1');
+  assert.equal(apns.sent[0].payload.sigil.data, 'c2VhbGVk');
+  // The relay adds nothing readable: the body is the same for every alert.
+  assert.equal(apns.sent[0].payload.aps.alert.body, 'A session needs you.');
+
+  host.send(JSON.stringify({ push: { activity: 'cd'.repeat(40), event: 'update', state: { status: 'working', since: 1700000000, asking: false, secret: 'no' } } }));
+  assert.deepEqual(await message(host), { type: 'push', ok: true, status: 200 });
+  assert.equal(apns.sent[1].pushType, 'liveactivity');
+  assert.equal(apns.sent[1].token, 'cd'.repeat(40));
+  assert.deepEqual(apns.sent[1].payload.aps['content-state'], { status: 'working', since: 1700000000, asking: false });
+  assert.equal(apns.sent[1].payload.aps.event, 'update');
+  assert.equal(apns.sent[1].payload.aps['dismissal-date'], undefined);
+  host.send(JSON.stringify({ push: { activity: 'cd'.repeat(40), event: 'end', state: { status: 'exited' } } }));
+  assert.deepEqual(await message(host), { type: 'push', ok: true, status: 200 });
+  assert.ok(apns.sent[2].payload.aps['dismissal-date'] > apns.sent[2].payload.aps.timestamp);
+
+  // An ended activity's 410 leaves the phone's alert token alone.
+  host.send(JSON.stringify({ push: { activity: 'dead' + 'cd'.repeat(38), event: 'update', state: { status: 'idle' } } }));
+  assert.deepEqual(await message(host), { type: 'push', ok: false, status: 410 });
+  host.send(JSON.stringify({ push: { data: 'c2VhbGVk' } }));
+  assert.deepEqual(await message(host), { type: 'push', ok: true, status: 200 });
+  // A dead alert token is forgotten after Apple says so.
+  host.send(JSON.stringify({ pushToken: 'dead' + 'ab'.repeat(30), pushEnvironment: 'production' }));
+  host.send(JSON.stringify({ push: { data: 'c2VhbGVk' } }));
+  assert.deepEqual(await message(host), { type: 'push', ok: false, status: 410 });
+  host.send(JSON.stringify({ push: { data: 'c2VhbGVk' } }));
+  assert.deepEqual(await message(host), { type: 'push', ok: false, reason: 'token' });
+  host.close();
+});
+
+test('push frames are validated, rate limited, and never accepted from a phone', async t => {
+  const apns = fakeAPNs();
+  const { base, room, hostToken } = await setup(t, { apns });
+  const host = connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` } });
+  assert.deepEqual(await message(host), { type: 'ready' });
+  host.send(JSON.stringify({ pushToken: 'ab'.repeat(32), pushEnvironment: 'development' }));
+  for (const bad of [
+    { push: { data: 'not base64!' } },
+    { push: { activity: 'cd'.repeat(40), event: 'update', state: { since: 1 } } },
+    { push: { activity: 'cd'.repeat(40), event: 'later', state: { status: 'idle' } } },
+    { push: 'x' },
+  ]) {
+    const ws = connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` } });
+    assert.deepEqual(await message(ws), { type: 'ready' });
+    ws.send(JSON.stringify({ pushToken: 'ab'.repeat(32), pushEnvironment: 'development' }));
+    ws.send(JSON.stringify(bad));
+    assert.equal((await once(ws, 'close'))[0], 1008);
+  }
+  for (const bad of [{ pushToken: 'xyz', pushEnvironment: 'development' }, { pushToken: 'ab'.repeat(32), pushEnvironment: 'staging' }]) {
+    const ws = connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` } });
+    assert.deepEqual(await message(ws), { type: 'ready' });
+    ws.send(JSON.stringify(bad));
+    assert.equal((await once(ws, 'close'))[0], 1008);
+  }
+  assert.equal(apns.sent.length, 0);
+
+  const live = connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` } });
+  assert.deepEqual(await message(live), { type: 'ready' });
+  live.send(JSON.stringify({ pushToken: 'ab'.repeat(32), pushEnvironment: 'development' }));
+  // Frames per second are capped at 30 by the socket; spread the pushes over three seconds.
+  let refused = 0;
+  for (let i = 0; i < 61; i++) {
+    if (i && i % 20 === 0) await new Promise(resolve => setTimeout(resolve, 1050));
+    live.send(JSON.stringify({ push: { data: 'c2VhbGVk' } }));
+    const reply = await message(live);
+    if (reply.reason === 'rate') refused++;
+  }
+  assert.equal(refused, 1);
+  assert.equal(apns.sent.length, 60);
+
+  const peerNotice = message(live);
+  const phone = connect(base, room, 'phone', { origin: 'http://localhost:3099' });
+  await peerNotice;
+  phone.send(JSON.stringify({ push: { data: 'c2VhbGVk' } }));
+  assert.equal((await once(phone, 'close'))[0], 1008);
+  live.close();
+});
+
+test('without APNs settings push frames are answered as off and nothing else changes', async t => {
+  const { base, room, hostToken } = await setup(t);
+  const host = connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` } });
+  assert.deepEqual(await message(host), { type: 'ready' });
+  host.send(JSON.stringify({ pushToken: 'ab'.repeat(32), pushEnvironment: 'production' }));
+  host.send(JSON.stringify({ push: { data: 'c2VhbGVk' } }));
+  assert.deepEqual(await message(host), { type: 'push', ok: false, reason: 'off' });
+  host.send(JSON.stringify({ pushToken: null }));
+  host.send(JSON.stringify({ push: { data: 'c2VhbGVk' } }));
+  assert.deepEqual(await message(host), { type: 'push', ok: false, reason: 'off' });
+  host.close();
 });
