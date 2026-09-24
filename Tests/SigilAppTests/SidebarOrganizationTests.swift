@@ -42,6 +42,19 @@ struct SidebarOrganizationTests {
         #expect(grouped[0].sessions.map(\.id) == ["w", "p"])
     }
 
+    @Test func anOpenFolderListsItsSigilWorktreeSessions() {
+        let folder = GrokPaths.encode(path: "/workspace/app")
+        let worktree = SigilWorktree.root.appendingPathComponent("\(folder)/ab12cd34").path
+        let all = [
+            session(id: "w", cwd: worktree, updated: 3),
+            session(id: "p", cwd: "/workspace/app", updated: 2),
+            session(id: "o", cwd: "/workspace/other", updated: 1),
+        ]
+        let project = SidebarOrganization.projects(from: all) { $0 }.first { $0.cwd == "/workspace/app" }
+        let listed = SidebarOrganization.sessions(all, in: project, samePath: ==)
+        #expect(listed.map(\.id) == ["w", "p"])
+    }
+
     @Test func sigilWorktreeFoldersShowProjectAndWorktreeName() {
         let folder = GrokPaths.encode(path: "/workspace/app")
         let worktree = SigilWorktree.root.appendingPathComponent("\(folder)/ab12cd34")
@@ -170,7 +183,6 @@ struct SidebarOrganizationTests {
         #expect(project == recents)
         #expect(project == archived)
         #expect(project != .projectChats)
-        #expect(project != .projectSearch)
         #expect(project != .projectList)
         #expect(project != .recents)
         #expect(project != .archived)
@@ -281,7 +293,8 @@ struct SidebarOrganizationTests {
         let other = session(id: "other", cwd: "/p/b", updated: 1)
         let grouped = SidebarOrganization.projects(from: [pinned, kept, other]) { $0 }
         let project = grouped.first { $0.id == "/p/a" }!
-        let rows = SidebarOrganization.listedRows(in: project, from: [kept, other])
+        let listed = Set([kept, other].map(\.directory))
+        let rows = SidebarOrganization.listedRows(in: project, listed: listed)
         #expect(rows.map(\.id) == ["kept"])
     }
 

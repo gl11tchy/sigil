@@ -1,0 +1,37 @@
+b84 recheck on pr-sidebar-cleanup, built 8fdd498 (branch HEAD, after the #94 redesign merge), 2026-09-23.
+Real app: isolated SigilUX test build. Mouse input through the harness click tool only; no keystrokes.
+Note: an AX value set alone does not reach the SwiftUI binding. The field was first focused by a mouse click, then its AX value was set.
+
+Result: PASS. A click on the edge of the 20 pt clear button clears the search.
+
+== b84 at 22:26:03, SigilUX pid 68231, built 8fdd498
+-- search field focused by a harness mouse click at 189,120; AXValue set to "zzzq"
+search field value "zzzq"
+-- list:
+  (AXStaticText text="No matches")
+  (AXStaticText text="Nothing matches “zzzq”.")
+session/project rows (AXButton with help): 0
+-- clear button:
+---- element 1
+  AXRole = "AXButton"
+  AXDescription = "Clear conversation search"
+  AXAttributedDescription = "Clear conversation search" (attributed)
+  AXTitle = <absent>
+  AXHelp = "Clear search"
+  AXValue = <absent>
+  AXIdentifier = "xmark.circle.fill"
+  AXPosition = (294, 110)
+  AXSize = 20x20
+  AXEnabled = 1
+
+-- harness mouse click at 296,112: inside the 20x20 frame (294..314, 110..130), about 11 pt from the glyph centre 304,120, outside the 12 pt glyph
+clicked 296.0,112.0
+-- after the click (22:26:15):
+search field value ""
+-- clear button:
+no element with help "Clear search"
+-- list:
+  (AXHeading text="<none>")
+session/project rows (AXButton with help): 12
+
+Screenshots: sc2-b84-1-search-zzzq.png (No matches, clear button shown), sc2-b84-2-after-clear.png (field empty, 12 rows back).

@@ -1,0 +1,54 @@
+a5 recheck on pr-sidebar-cleanup, built 8fdd498 (branch HEAD, after the #94 redesign merge), 2026-09-23.
+Real app: isolated SigilUX test build, seeded throwaway home. Read through the macOS accessibility API only.
+Help strings are shown once; the AX help attribute repeats each one two or three times.
+
+Result: PASS. The nav counts match the lists.
+- Recents nav row value "12 chats"; the Recents list has 12 rows.
+- The Home list project counts add up to 12: acme-api 3 + sigil 4 + acme-web 3 + terraform-infra 2.
+- Recents rows per project: acme-api rows 1, 2, 5 = 3; sigil rows 3, 4, 9, 10 = 4; acme-web rows 6, 7, 8 = 3; terraform-infra rows 11, 12 = 2.
+- No archived chats in the seed; the Archived nav row is hidden (no element with help "Archived conversations").
+
+######## a5 (at 22:12:35)
+== nav rows
+---- element 1
+  AXRole = "AXButton"
+  AXDescription = "Recents"
+  AXAttributedDescription = "Recents" (attributed)
+  AXTitle = <absent>
+  AXHelp = "All conversations, newest first"
+  AXValue = "12 chats"
+  AXIdentifier = <absent>
+  AXPosition = (60, 208)
+  AXSize = 272x32
+  AXEnabled = 1
+no element with help "Archived conversations"
+== Home list
+row 1: help="Summarise the acme-api service and its layout | /Users/Shared/sigil-ux/projects/acme-api | Working" value="Selected, Working"
+row 2: help="Fix the 401 on expired refresh tokens | /Users/Shared/sigil-ux/projects/acme-api | Working" value="Working"
+row 3: help="/Users/Shared/sigil-ux/projects/acme-api | 3 chats · 2 minutes ago" value="3 chats, one open, working"
+row 4: help="/Users/Shared/sigil-ux/projects/sigil | 4 chats · 5 hours ago" value="4 chats"
+row 5: help="/Users/Shared/sigil-ux/projects/acme-web | 3 chats · 1 day ago" value="3 chats"
+row 6: help="/Users/Shared/sigil-ux/projects/terraform-infra | 2 chats · 2 weeks ago" value="2 chats"
+  (AXHeading text="<none>")
+  (AXHeading text="<none>")
+session/project rows (AXButton with help): 6
+AXPress on the Recents nav row (help "All conversations, newest first")
+== Recents list (22:12:42)
+row 1: help="Summarise the acme-api service and its layout | /Users/Shared/sigil-ux/projects/acme-api | 6 messages · 2 minutes ago" value="Open in another tab, working"
+row 2: help="Fix the 401 on expired refresh tokens | /Users/Shared/sigil-ux/projects/acme-api | 6 messages · 2 minutes ago" value="Selected, working"
+row 3: help="Make the sidebar search rank folders too | /Users/Shared/sigil-ux/projects/sigil | 6 messages · 5 hours ago" value="Closed"
+row 4: help="Explain how tab restore picks the selected tab | /Users/Shared/sigil-ux/projects/sigil | 6 messages · 11 hours ago" value="Closed"
+row 5: help="Rate limit the token endpoint | /Users/Shared/sigil-ux/projects/acme-api | 6 messages · 1 day ago" value="Closed"
+row 6: help="Dark mode for the settings panel | /Users/Shared/sigil-ux/projects/acme-web | 6 messages · 1 day ago" value="Closed"
+row 7: help="Replace the date picker with a native one | /Users/Shared/sigil-ux/projects/acme-web | 6 messages · 1 day ago" value="Closed"
+row 8: help="Why does the checkout page flash on load | /Users/Shared/sigil-ux/projects/acme-web | 6 messages · 2 days ago" value="Closed"
+row 9: help="Add a keyboard shortcut for renaming | /Users/Shared/sigil-ux/projects/sigil | 6 messages · 4 days ago" value="Closed"
+row 10: help="Audit the remote relay for replay protection | /Users/Shared/sigil-ux/projects/sigil | 6 messages · 1 week ago" value="Closed"
+row 11: help="Rotate the staging database credentials | /Users/Shared/sigil-ux/projects/terraform-infra | 6 messages · 2 weeks ago" value="Closed"
+row 12: help="Cut the NAT gateway bill in half | /Users/Shared/sigil-ux/projects/terraform-infra | 6 messages · 1 month ago" value="Closed"
+  (AXHeading text="<none>")
+  (AXHeading text="<none>")
+  (AXHeading text="<none>")
+  (AXHeading text="<none>")
+  (AXHeading text="<none>")
+session/project rows (AXButton with help): 12

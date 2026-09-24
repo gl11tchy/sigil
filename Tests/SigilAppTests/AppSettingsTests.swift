@@ -75,7 +75,6 @@ struct AppSettingsTests {
         defer { defaults.reset() }
 
         let first = AppSettings(defaults: defaults.value)
-        first.sidebarMode = .projects
         first.focusedProjectPath = "/tmp/sigil"
         first.pinnedConversations = [.init(sessionID: "abc", cwd: "/tmp/sigil")]
         first.pinnedProjects = ["/tmp/sigil"]
@@ -84,7 +83,6 @@ struct AppSettingsTests {
         first.showSubagentSessions = true
 
         let second = AppSettings(defaults: defaults.value)
-        #expect(second.sidebarMode == .projects)
         #expect(second.focusedProjectPath == "/tmp/sigil")
         #expect(second.pinnedConversations == [.init(sessionID: "abc", cwd: "/tmp/sigil")])
         #expect(second.pinnedProjects == ["/tmp/sigil"])
@@ -94,15 +92,6 @@ struct AppSettingsTests {
             ])
         #expect(second.showWorktreeSessions)
         #expect(second.showSubagentSessions)
-    }
-
-    @Test @MainActor
-    func sidebarDefaultsToProjectsAndKeepsAStoredRecentsValue() {
-        let defaults = isolatedDefaults()
-        defer { defaults.reset() }
-        #expect(AppSettings(defaults: defaults.value).sidebarMode == .projects)
-        defaults.value.set("recents", forKey: "sidebar.mode")
-        #expect(AppSettings(defaults: defaults.value).sidebarMode == .recents)
     }
 
     /// The app ships as Sigil Dark. A stored "Sigil Neon" — the theme it
