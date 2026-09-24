@@ -31,6 +31,7 @@ final class AppModel {
     }
     var searchText: String = ""
     var isShowingNewSessionSheet = false
+    var isShowingTabList = false
     private(set) var pendingSessionDirectory: URL?
     /// Find-in-terminal bar for the selected tab.
     var isFindBarVisible = false

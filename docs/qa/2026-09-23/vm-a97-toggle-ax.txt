@@ -1,0 +1,21 @@
+## sidebar shown (18:00:51)
+AXButton | Description=Hide Sidebar (⌘B) | Help=Hide Sidebar (⌘B) | Selected=1 | Focused=0 | Enabled=1 | Identifier=sidebar.leading | Position=587,269 | Size=22x22
+## sidebar hidden after AXPress (18:00:53)
+AXButton | Description=Show Sidebar (⌘B) | Help=Show Sidebar (⌘B) | Focused=0 | Enabled=1 | Identifier=sidebar.leading | Position=374,269 | Size=22x22
+## sidebar shown again (18:01:27)
+AXButton | Description=Hide Sidebar (⌘B) | Help=Hide Sidebar (⌘B) | Selected=1 | Focused=0 | Enabled=1 | Identifier=sidebar.leading | Position=587,269 | Size=22x22
+
+## panel closed (18:01:28)
+  AXHelp = Show Panel (⌥⌘B)
+  AXIdentifier = sidebar.trailing
+  AXSelected: 0 attribute(s) present
+
+## panel open after AXPress (18:01:29)
+  AXHelp = Hide Panel (⌥⌘B)
+  AXIdentifier = sidebar.trailing
+  AXSelected = 1
+
+## panel closed after second AXPress (18:01:31)
+  AXHelp = Show Panel (⌥⌘B)
+  AXIdentifier = sidebar.trailing
+  AXSelected: 0 attribute(s) present

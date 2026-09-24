@@ -1,0 +1,12 @@
+a95 (06d8769): the sidebar plus has the same tooltip as the top-bar plus.
+Build: pr-views-motion HEAD 595ed1c, SigilUX window at 306,262 (900x492).
+
+System Events, buttons of group 1 of window 1 (id=plus):
+  sidebar plus (next to the search field at 341,305): id=plus | AXHelp=New Session… (⌘T) | position=546,301
+  top-bar plus: id=plus | AXHelp=New Session… (⌘T) | position=1154,269
+
+Native AX read (AXUIElement), all AXButton with id=plus:
+  AXButton | id=plus | label(AXDescription)=New Session… (⌘T) | attributedLabel=New Session… (⌘T) | title= | tooltip(AXHelp)=New Session… (⌘T)
+  AXButton | id=plus | label(AXDescription)=New Session… (⌘T) | attributedLabel=New Session… (⌘T) | title= | tooltip(AXHelp)=New Session… (⌘T)
+
+Result: the sidebar plus AXHelp is "New Session… (⌘T)"; no folder path in it.

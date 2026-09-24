@@ -13,7 +13,7 @@ By gl11tchy.
 
 ![Sigil, showing the thread list beside a running session](docs/screenshot.png)
 
-*Demo data. The conversations shown are invented; the session on the right is real.*
+*Demo data. The conversations and the session shown are invented.*
 
 ## What it adds
 
@@ -109,6 +109,7 @@ terminal itself.
 | `⌘W` | Close tab (warns while the agent is working) |
 | `⌘⇧]` / `⌘⇧[` | Next / previous tab |
 | `⌘1`…`⌘9` | Go to tab |
+| `⌃⌘T` | List open tabs and jump to one |
 | `⌘F` | Find in the terminal |
 | `⌘⇧F` | Find conversations |
 | `⌘B` | Hide or show the thread list |
@@ -238,9 +239,9 @@ Scripts/make-icon.sh
 
 The detail column is a program someone else drew, so theming only the window
 would leave two designs on screen. `Scripts/build-grok-cli.sh` builds the
-open-source [Grok Build](https://github.com/xai-org/grok-build) CLI with one
-patch on top — a `sigil-neon` TUI theme and a `GROK_THEME` override — and
-installs it as `~/.grok/bin/grok-sigil`.
+open-source [Grok Build](https://github.com/xai-org/grok-build) CLI with its
+theme patches on top — a `GROK_THEME` override and a `sigil-host` theme that
+takes its colours from the window — and installs it as `~/.grok/bin/grok-sigil`.
 
 ```sh
 brew install protobuf   # once; the build also needs Rust
@@ -248,9 +249,9 @@ Scripts/build-grok-cli.sh
 ```
 
 The app prefers `grok-sigil` when it is there and starts each tab with
-`GROK_THEME` set to the window's theme. App palettes without a named CLI
-theme send `sigil-host` plus `GROK_THEME_*` colour keys so the TUI matches
-the window. Delete the binary and the app falls back to the installed
+`GROK_THEME` set to the window's theme. Sigil Dark, Sigil Light, and the
+app palettes without a named CLI theme send `sigil-host` plus `GROK_THEME_*`
+colour keys so the TUI matches the window. Delete the binary and the app falls back to the installed
 `grok`, which ignores those variables and runs as before.
 The patches are `Scripts/grok-cli/sigil-neon.patch` and
 `Scripts/grok-cli/sigil-host.patch`.
