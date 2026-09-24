@@ -253,7 +253,7 @@ private struct TopBar: View {
                 model.requestNewSession()
             }
             Menu {
-                Button("New Session in Folder…") { model.requestNewSession() }
+                Button("New Session in Folder…") { model.requestNewSessionInFolder { model.pickDirectory() } }
                 Divider()
                 SettingsLink { Text("Settings…") }
             } label: {
