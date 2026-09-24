@@ -66,6 +66,9 @@ async function pair(page, origin, initialOutput, options = {}) {
           selectedTabID: selected, terminal: outputs[selected], capabilities: options.restart ? ['restart'] : [] };
         const payload = { challenge, sequence: request.sequence, ok: true, ticket, state, restartedTabID: request.action === 'restart' && options.restart ? 'restarted' : undefined };
         if (projects) payload.projects = projects;
+        if (request.action === 'options' && options.providers) {
+          payload.options = { providers: options.providers, provider: options.providers[0].id, models: [], model: '', efforts: [], effort: '', locations: [] };
+        }
         if (chats) payload.chats = chats;
         if (earlier !== undefined) payload.earlier = earlier;
         ws.send(JSON.stringify({ peer, data: await seal(payload, key, 'mac') }));
@@ -842,12 +845,18 @@ test('opening Chats on a touch screen does not raise the keyboard', async ({ pag
 
 test('folder paths in the project and chats sheets use the mono face', async ({ page, baseURL }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  const mac = await pair(page, baseURL, undefined, { chats: [{ id: 'saved-1', title: 'Release notes', folder: '/Users/me/Code/sigil' }] });
+  const mac = await pair(page, baseURL, undefined, {
+    chats: [{ id: 'saved-1', title: 'Release notes', folder: '/Users/me/Code/sigil' }],
+    providers: [{ id: 'grokBuild', name: 'Grok Build' }, { id: 'claudeCode', name: 'Claude Code' }],
+  });
   try {
     await page.getByRole('button', { name: 'New session' }).click();
     const project = page.locator('#project-list small').first();
     await expect(project).toHaveText('/tmp/release');
     await expect(project).toHaveCSS('font-family', /monospace/);
+    const cli = page.getByLabel('CLI');
+    await expect(cli).toHaveValue('grokBuild');
+    await cli.selectOption('claudeCode');
     await page.screenshot({ path: testInfo.outputPath('projects.png'), animations: 'disabled' });
     await page.locator('#project-cancel').click();
     await page.getByRole('button', { name: 'Browse open and saved chats' }).click();

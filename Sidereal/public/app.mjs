@@ -32,6 +32,7 @@ let sessionTabs = [], canRestart = false;
 let freshHandshake = false;
 const histories = new Map();
 let pendingEarlier = null, earlierFlight = false, searchToken = 0;
+let providerChoice = '', providerProblems = new Map();
 let findIndex = 0, findMatches = [], displayedOutput = null;
 let rawOutput = '', rawMode = false;
 let credential, bootstrap, newDeviceKey, socket, challenge, sequence = 0, selected;
@@ -464,10 +465,10 @@ function renderProjects(projects, offset = 0, truncated = false) {
   const list = $('project-list');
   const kept = offset === 0 ? [] : Array.from(list.children || []).filter(button => button.dataset.more !== 'true');
   const buttons = safe.map(project => projectButton(project.name, project.folder, () => {
-    if (!connected || busy) return;
-    const folderPath = project.folder;
+    if (!connected || busy || providerProblem()) return;
+    const folderPath = project.folder, extra = providerField();
     $('project-dialog').close();
-    void perform(() => request('new', folderPath));
+    void perform(() => request('new', folderPath, undefined, false, extra));
   }));
   if (safe.length > 0 && (safe.length === 40 || truncated)) {
     const next = offset + safe.length;
@@ -483,15 +484,53 @@ function renderProjects(projects, offset = 0, truncated = false) {
   }
   if (offset === 0 && safe.length === 0) {
     buttons.push(projectButton('Current folder', 'The folder Sigil uses for a new session', () => {
-      if (!connected || busy) return;
+      if (!connected || busy || providerProblem()) return;
+      const extra = providerField();
       $('project-dialog').close();
-      void perform(() => request('new'));
+      void perform(() => request('new', undefined, undefined, false, extra));
     }));
   }
   list.replaceChildren(...kept, ...buttons);
   const empty = $('project-empty');
   if (empty) empty.hidden = list.children.length > 0;
+  showProviderProblem();
   if (!$('project-dialog').open) $('project-dialog').showModal();
+}
+// The CLIs the Mac offers. A Mac from before the choice sends none, and New starts its default.
+function renderProviders(options) {
+  const providers = [];
+  for (const provider of (Array.isArray(options?.providers) ? options.providers : []).slice(0, 20)) {
+    if (!provider || typeof provider.id !== 'string' || typeof provider.name !== 'string') continue;
+    if (!provider.id || provider.id.length > 32 || !provider.name || provider.name.length > 96) continue;
+    const problem = typeof provider.problem === 'string' ? provider.problem.slice(0, 300) : '';
+    providers.push({ id: provider.id, name: provider.name, problem });
+  }
+  providerProblems = new Map(providers.map(provider => [provider.id, provider.problem]));
+  $('provider').replaceChildren(...providers.map(provider => {
+    const option = document.createElement('option');
+    option.value = provider.id;
+    option.textContent = provider.name;
+    return option;
+  }));
+  // Keep this page's last choice; otherwise the CLI the Mac's New Session sheet opens on.
+  const fallback = typeof options?.provider === 'string' ? options.provider : '';
+  $('provider').value = [providerChoice, fallback].find(id => providerProblems.has(id)) || providers[0]?.id || '';
+  $('provider-field').hidden = providers.length === 0;
+  showProviderProblem();
+}
+function providerField() {
+  return $('provider-field').hidden || !$('provider').value ? {} : { provider: $('provider').value };
+}
+function providerProblem() {
+  return $('provider-field').hidden ? '' : providerProblems.get($('provider').value) || '';
+}
+function showProviderProblem() {
+  const problem = providerProblem();
+  $('provider-problem').textContent = problem;
+  $('provider-problem').hidden = !problem;
+  for (const button of Array.from($('project-list').children || [])) {
+    if (button.dataset.more !== 'true') button.disabled = Boolean(problem);
+  }
 }
 function paintOutput() {
   const output = displayedOutput || '';
@@ -911,8 +950,14 @@ $('new').onclick = () => void perform(async () => {
     await request('new');
     return;
   }
+  let options;
+  try { options = (await request('options')).options; } catch (error) {
+    if (error.message !== 'Unknown action.') throw error;
+  }
+  renderProviders(options);
   renderProjects(reply.projects, 0, reply.projectsTruncated === true);
 });
+$('provider').onchange = () => { providerChoice = $('provider').value; showProviderProblem(); };
 $('project-cancel').onclick = () => $('project-dialog').close();
 $('project-dialog').addEventListener('close', () => { if (!$('new').disabled) $('new').focus(); });
 async function interrupt() {

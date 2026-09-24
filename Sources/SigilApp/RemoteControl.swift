@@ -233,11 +233,7 @@ final class RemoteControl {
                                     if command.action == "options" {
                                         await RemoteCommands.refreshModels(model: model)
                                     }
-                                    switch await RemoteCommands.prepareWorktree(command, model: model) {
-                                    case .failed(let failed): reply = failed
-                                    case .folder(let folder):
-                                        reply = RemoteCommands.execute(command, model: model, worktreeFolder: folder)
-                                    }
+                                    reply = await RemoteCommands.execute(command, model: model)
                                 }
                                 reply.ticket = session.ticket
                                 let encrypted = try RemoteCrypto.seal(

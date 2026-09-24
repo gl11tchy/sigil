@@ -77,13 +77,13 @@ struct ProviderBoundaryTests {
     }
 
     @Test(arguments: providers)
-    func remoteRestartDoesNotRequireGrokForOtherProviders(provider: CLIProvider) throws {
+    func remoteRestartDoesNotRequireGrokForOtherProviders(provider: CLIProvider) async throws {
         let fixture = try ProviderFixture()
         defer { fixture.cleanup() }
         fixture.model.settings.executablePath = "/missing/grok"
         let tab = try #require(fixture.model.newTab(in: fixture.root, provider: provider))
         tab.terminateAndWait()
-        let reply = RemoteCommands.execute(
+        let reply = await RemoteCommands.execute(
             RemoteRequest(challenge: "test", sequence: 1, action: "restart", tabID: tab.id.uuidString),
             model: fixture.model)
         #expect(reply.ok)
@@ -95,28 +95,28 @@ struct ProviderBoundaryTests {
     }
 
     @Test(arguments: providers)
-    func remoteNewStartsTheChosenProviderWithoutGrok(provider: CLIProvider) throws {
+    func remoteNewStartsTheChosenProviderWithoutGrok(provider: CLIProvider) async throws {
         let fixture = try ProviderFixture()
         defer { fixture.cleanup() }
         fixture.model.settings.executablePath = "/missing/grok"
         fixture.model.addProject(fixture.root)
-        func new(_ provider: CLIProvider?) -> RemoteReply {
-            RemoteCommands.execute(
+        func new(_ provider: CLIProvider?) async -> RemoteReply {
+            await RemoteCommands.execute(
                 RemoteRequest(
                     challenge: "test", sequence: 1, action: "new", text: fixture.root.path,
                     provider: provider?.rawValue, model: "grok-4.6"),
                 model: fixture.model)
         }
-        let grok = new(.grokBuild)
+        let grok = await new(.grokBuild)
         #expect(!grok.ok)
         #expect(grok.error == "Restore the Grok CLI on your Mac, then try again.")
-        #expect(new(provider).ok)
+        #expect(await new(provider).ok)
         let chosen = try #require(fixture.model.selectedTab)
         #expect(chosen.spec.provider == provider)
         #expect(chosen.spec.model == nil)
         // A phone that names no provider gets the Mac's default.
         fixture.model.settings.defaultProvider = provider
-        #expect(new(nil).ok)
+        #expect(await new(nil).ok)
         #expect(fixture.model.tabs.map(\.spec.provider) == [provider, provider])
         #expect(fixture.errors.titles.isEmpty)
     }
