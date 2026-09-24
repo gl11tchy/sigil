@@ -169,6 +169,25 @@ enum ScreenTests {
         try Expect.true((try? crowded.state?.validate()) == nil, "ten choices are rejected")
     }
 
+    /// The notification extension opens an alert with any paired Mac's key and
+    /// never with a reply's direction.
+    static func alertOpensWithTheRightKeyOnly() throws {
+        let right = RemoteCrypto.randomKey()
+        let wrong = RemoteCrypto.randomKey()
+        let alert = RemoteAlert(kind: .asking, tabID: "T1", title: "sigil", body: "Do you want to proceed?")
+        let sealed = try RemoteCrypto.seal(alert, key: right, direction: RemoteAlert.direction)
+        try Expect.equal(RemoteAlert.open(sealed, keys: [wrong, right]), alert, "second key opens it")
+        try Expect.equal(RemoteAlert.open(sealed, keys: [wrong]), nil, "wrong key")
+        try Expect.equal(RemoteAlert.open(sealed, keys: []), nil, "no keys")
+        let reply = try RemoteCrypto.seal(alert, key: right, direction: "mac")
+        try Expect.equal(RemoteAlert.open(reply, keys: [right]), nil, "a reply is not an alert")
+        let odd = try JSONDecoder().decode(
+            RemoteAlert.self, from: Data("{\"kind\":\"nudge\",\"tabID\":\"T\",\"title\":\"t\",\"body\":\"\"}".utf8))
+        try Expect.equal(odd.kind, .unknown("nudge"), "unknown kinds are kept")
+        try Expect.equal(odd.shownBody, "A session needs you.", "and get a plain body")
+        try Expect.equal(RemoteAlert(kind: .finished, tabID: "T", title: "t", body: "").shownBody, "Finished and waiting for you.", "finished body")
+    }
+
     static func requestCarriesWorktree() throws {
         var request = RemoteRequest(challenge: "c", sequence: 1, action: "new")
         request.worktree = true

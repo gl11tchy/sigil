@@ -7,6 +7,12 @@ enum CredentialStore {
     private static let service = "com.gl11tchy.sigilremote.pairing"
     private static let account = "mac"
 
+    /// Every pairing on this phone. One today; the list is what the notification
+    /// extension tries keys from.
+    static func loadAll() -> [PairingCredential] {
+        load().map { [$0] } ?? []
+    }
+
     static func load() -> PairingCredential? {
         var query = base
         query[kSecReturnData as String] = true

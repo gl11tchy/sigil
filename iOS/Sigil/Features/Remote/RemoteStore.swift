@@ -51,6 +51,11 @@ final class RemoteStore {
 
     let isDemo: Bool
     @ObservationIgnored private let connection = RemoteConnection()
+    /// The APNs token, once iOS gave one; sent to the Mac on every connection.
+    @ObservationIgnored private var pushToken: String?
+    /// A session a notification or widget chose before the socket was up.
+    @ObservationIgnored private var pendingTabID: String?
+    @ObservationIgnored private let liveActivity = LiveActivityController()
     /// Rows per tab from a Mac that streams them.
     @ObservationIgnored private var screens: [String: ScreenModel] = [:]
     /// Text per tab from a Mac that only answers polls.
@@ -71,6 +76,7 @@ final class RemoteStore {
     init(isDemo: Bool) {
         self.isDemo = isDemo
         connection.delegate = self
+        liveActivity.onToken = { [weak self] tabID, token in self?.sendActivityToken(token, for: tabID) }
         if isDemo {
             DemoData.seed(self)
         } else if let saved = CredentialStore.load() {
@@ -183,6 +189,9 @@ final class RemoteStore {
     /// `watch` is polled once a second, as before.
     private func startStreaming() async {
         guard isConnected, foreground else { return }
+        AlertsController.enable()
+        await registerPush()
+        if let pending = pendingTabID { open(tabID: pending) }
         do {
             _ = try await connection.request("watch")
             streaming = true
@@ -193,6 +202,45 @@ final class RemoteStore {
         } catch {
             // The connection will change phase; the next handshake tries again.
         }
+    }
+
+    // MARK: Alerts
+
+    /// iOS gave a device token. The Mac hears it now if connected, else on the next connection.
+    func setPushToken(_ token: String) {
+        guard pushToken != token else { return }
+        pushToken = token
+        if isConnected { Task { await registerPush() } }
+    }
+
+    private func registerPush() async {
+        guard let pushToken, isConnected, !isDemo else { return }
+        do {
+            _ = try await connection.request("notify", text: pushToken, name: AlertsController.pushEnvironment)
+        } catch RemoteConnectionError.mac("Unknown action.") {
+            // An older Mac: no alerts from it, nothing else changes.
+        } catch {
+            // The next connection tries again.
+        }
+    }
+
+    private func sendActivityToken(_ token: String, for tabID: String) {
+        guard isConnected, !isDemo else { return }
+        Task { _ = try? await connection.request("activity", text: token, tabID: tabID) }
+    }
+
+    /// Opens the session a notification or a widget named, now or once connected.
+    func open(tabID: String) {
+        if isConnected, let tab = tabs.first(where: { $0.id == tabID }) {
+            pendingTabID = nil
+            select(tab)
+        } else {
+            pendingTabID = tabID
+        }
+    }
+
+    private func reflectLiveActivity() {
+        liveActivity.reflect(tab: selectedTab, prompt: prompt, mac: macName)
     }
 
     // MARK: Commands
@@ -556,6 +604,7 @@ final class RemoteStore {
         }
         scheduleRefresh()
         scheduleSave()
+        reflectLiveActivity()
     }
 
     /// Output changes arrive many times a second; one repaint per burst is enough.

@@ -6,6 +6,7 @@ enum AppInfo {
 
 @main
 struct SigilApp: App {
+    @UIApplicationDelegateAdaptor(AlertsController.self) private var alerts
     @Environment(\.scenePhase) private var scenePhase
     @State private var store = RemoteStore(isDemo: Self.isDemo)
 
@@ -16,6 +17,15 @@ struct SigilApp: App {
                 .tint(Theme.accent)
                 // Sigil sits beside a terminal at night; the phone matches the Mac.
                 .preferredColorScheme(.dark)
+                .task { AlertsController.attach(store) }
+                .onOpenURL { url in
+                    // A widget or notification link only chooses a session.
+                    guard url.scheme == "sigilremote", url.host == "session",
+                        let tab = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+                            .first(where: { $0.name == "tab" })?.value
+                    else { return }
+                    store.open(tabID: tab)
+                }
         }
         .onChange(of: scenePhase) { _, phase in
             switch phase {

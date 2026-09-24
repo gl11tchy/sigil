@@ -12,7 +12,7 @@ if ! cmp -s Sigil/Resources/readable-output.js ../Sidereal/public/output.mjs; th
 fi
 
 OUT="$(mktemp -d)/Sigil-tests"
-FILES=$(find Sigil/Core/Networking Sigil/Core/Utilities Tests \
+FILES=$(find Shared Sigil/Core/Networking Sigil/Core/Utilities Tests \
   -name '*.swift' | sort)
 
 if [ -z "$FILES" ]; then

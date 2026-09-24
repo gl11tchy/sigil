@@ -10,7 +10,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
-FILES=$(find Sigil -name '*.swift' | sort)
+FILES=$(find Shared Sigil -name '*.swift' | sort)
 
 if [ -z "$FILES" ]; then
   echo "No Swift sources found." >&2
