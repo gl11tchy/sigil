@@ -626,7 +626,7 @@ final class AppModel {
         let focused = settings.focusedProjectPath
         if !focused.isEmpty,
             !SidebarOrganization.isSentinel(focused),
-            !store.sessions.contains(where: { samePath($0.cwd, focused) })
+            !store.sessions.contains(where: { inProject($0.cwd, focused) })
         {
             settings.focusedProjectPath = ""
         }
@@ -729,8 +729,8 @@ final class AppModel {
 
     private func pruningMissingProjects(_ paths: [String]) -> [String] {
         paths.filter { path in
-            store.sessions.contains { samePath($0.cwd, path) }
-                || tabs.contains { samePath($0.workingDirectory.path, path) }
+            store.sessions.contains { inProject($0.cwd, path) }
+                || tabs.contains { inProject($0.workingDirectory.path, path) }
                 || awaitsScan(sharedKey("project", path))
         }
     }

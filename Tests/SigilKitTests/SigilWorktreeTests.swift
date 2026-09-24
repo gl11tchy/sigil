@@ -39,6 +39,28 @@ struct SigilWorktreeTests {
         #expect(SigilWorktree.isInRepository(sub))
     }
 
+    @Test func createHandlesSpacesSymlinksAndChattyHooks() async throws {
+        let base = try scratch()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let repo = base.appendingPathComponent(" spaced repo ")
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: repo.appendingPathComponent("file.txt"))
+        try git(["init", "-q"], in: repo)
+        try git(["add", "."], in: repo)
+        try git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"], in: repo)
+        let hook = repo.appendingPathComponent(".git/hooks/post-checkout")
+        try Data("#!/bin/sh\nhead -c 300000 /dev/zero | tr '\\0' x\nhead -c 300000 /dev/zero | tr '\\0' y >&2\n".utf8)
+            .write(to: hook)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook.path)
+        let link = base.appendingPathComponent("link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: repo)
+
+        #expect(SigilWorktree.isInRepository(link))
+        let made = try #require(
+            await SigilWorktree.create(for: link, root: base.appendingPathComponent("wt"), name: "sp"))
+        #expect(FileManager.default.fileExists(atPath: made.appendingPathComponent("file.txt").path))
+    }
+
     @Test func createReturnsNilOutsideARepository() async throws {
         let base = try scratch()
         defer { try? FileManager.default.removeItem(at: base) }

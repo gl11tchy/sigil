@@ -158,6 +158,7 @@ struct NewSessionSheet: View {
                 Button("Cancel", role: .cancel) { dismiss() }
                     .buttonStyle(.secondary)
                     .keyboardShortcut(.cancelAction)
+                    .disabled(isCreatingWorktree)
                 Button("Start") { start(provider) }
                     .buttonStyle(.primary)
                     .keyboardShortcut(.defaultAction)
@@ -173,6 +174,7 @@ struct NewSessionSheet: View {
         .tint(Palette(theme: model.settings.theme).accent)
         .animation(reduceMotion ? nil : Motion.slide, value: provider)
         .defaultFocus($isProviderRowFocused, true)
+        .interactiveDismissDisabled(isCreatingWorktree)
         .onAppear {
             let initial = model.pendingSessionDirectory ?? model.newSessionDirectory
             directory =

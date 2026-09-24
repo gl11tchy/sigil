@@ -27,7 +27,7 @@ public enum SigilWorktree {
 
     /// True when `directory` or a folder above it holds a `.git` entry.
     public static func isInRepository(_ directory: URL) -> Bool {
-        var path = directory.standardizedFileURL.path
+        var path = GrokPaths.canonicalPath(directory.path)
         while true {
             if FileManager.default.fileExists(atPath: (path as NSString).appendingPathComponent(".git")) {
                 return true
@@ -86,31 +86,42 @@ public enum SigilWorktree {
     }
 
     private static func git(_ arguments: [String]) async throws -> GitResult {
-        try await withCheckedThrowingContinuation { continuation in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            process.arguments = arguments
-            let output = Pipe()
-            let error = Pipe()
-            process.standardOutput = output
-            process.standardError = error
-            process.standardInput = FileHandle.nullDevice
-            process.terminationHandler = { finished in
-                let out = output.fileHandleForReading.readDataToEndOfFile()
-                let err = error.fileHandleForReading.readDataToEndOfFile()
-                continuation.resume(
-                    returning: GitResult(
-                        status: finished.terminationStatus,
-                        output: String(decoding: out, as: UTF8.self)
-                            .trimmingCharacters(in: .whitespacesAndNewlines),
-                        error: String(decoding: err, as: UTF8.self)
-                            .trimmingCharacters(in: .whitespacesAndNewlines)))
-            }
-            do {
-                try process.run()
-            } catch {
-                continuation.resume(throwing: Failure(message: "Could not run git."))
-            }
+        try await Task.detached { try runGit(arguments) }.value
+    }
+
+    private static func runGit(_ arguments: [String]) throws -> GitResult {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = arguments
+        let output = Pipe()
+        let error = Pipe()
+        process.standardOutput = output
+        process.standardError = error
+        process.standardInput = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            throw Failure(message: "Could not run git.")
         }
+        // Drain both pipes while git runs, so a chatty hook cannot fill one and stall it.
+        let errorData = DataBox()
+        let drained = DispatchGroup()
+        DispatchQueue.global().async(group: drained) {
+            errorData.value = error.fileHandleForReading.readDataToEndOfFile()
+        }
+        let out = output.fileHandleForReading.readDataToEndOfFile()
+        drained.wait()
+        process.waitUntilExit()
+        var text = String(decoding: out, as: UTF8.self)
+        if text.hasSuffix("\n") { text.removeLast() }
+        return GitResult(
+            status: process.terminationStatus,
+            output: text,
+            error: String(decoding: errorData.value, as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private final class DataBox: @unchecked Sendable {
+        var value = Data()
     }
 }
