@@ -23,16 +23,15 @@ struct RightPanelTests {
     func pickingTheShowingToolClosesThePanel() {
         let (panel, notesRoot) = makePanel()
         defer { try? FileManager.default.removeItem(at: notesRoot) }
-        let directory = FileManager.default.homeDirectoryForCurrentUser
-        panel.toggle(.notes, in: directory)
+        panel.toggle(.notes)
         #expect(panel.isVisible)
         #expect(panel.mode == .notes)
 
-        panel.toggle(.shell, in: directory)
+        panel.toggle(.shell)
         #expect(panel.isVisible)
         #expect(panel.mode == .shell)
 
-        panel.toggle(.shell, in: directory)
+        panel.toggle(.shell)
         #expect(!panel.isVisible)
     }
 

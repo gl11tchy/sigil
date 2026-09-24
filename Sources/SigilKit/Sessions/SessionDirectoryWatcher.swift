@@ -124,6 +124,10 @@ final class SessionDirectoryWatcher: Sendable {
     /// Sidebar state comes from `summary.json`. Journal and lock files churn constantly.
     static func shouldScan(path: String, flags: FSEventStreamEventFlags) -> Bool {
         if requiresRestart(flags) { return true }
+        // Coalesced events name only a folder; anything below it may have changed.
+        if flags & FSEventStreamEventFlags(kFSEventStreamEventFlagMustScanSubDirs) != 0 {
+            return true
+        }
         if flags & FSEventStreamEventFlags(kFSEventStreamEventFlagItemIsDir) != 0 {
             return true
         }

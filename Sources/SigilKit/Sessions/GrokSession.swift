@@ -65,9 +65,11 @@ public struct GrokSession: Identifiable, Hashable, Sendable {
 
     /// `cwd` with the user's home replaced by `~`.
     public var displayPath: String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let home = Self.homePath
         if cwd == home { return "~" }
         if cwd.hasPrefix(home + "/") { return "~" + cwd.dropFirst(home.count) }
         return cwd
     }
+
+    private static let homePath = FileManager.default.homeDirectoryForCurrentUser.path
 }

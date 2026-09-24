@@ -53,7 +53,12 @@ struct RootView: View {
         .tint(palette.accent)
         .environment(\.palette, palette)
         .background(WindowChrome(background: palette.canvasNSColor))
-        .background(WindowCloseGuard { model.tabs.contains(where: \.shouldWarnBeforeStopping) })
+        .background(
+            WindowCloseGuard {
+                model.tabs.contains(where: \.shouldWarnBeforeStopping)
+                    || model.panel.shellHasForegroundJob
+            }
+        )
         .sheet(isPresented: $model.isShowingNewSessionSheet) {
             NewSessionSheet(model: model)
                 .environment(\.palette, Palette(theme: model.settings.theme))

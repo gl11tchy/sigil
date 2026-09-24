@@ -144,8 +144,6 @@ public enum BridgeLimits {
     /// Longest single UTF-8 message. A byte limit prevents one extended
     /// grapheme from expanding into an arbitrarily large socket frame.
     public static let maxMessageBytes = 8_000
-    /// Source compatibility for clients built against version 1 of the API.
-    public static let maxMessageCharacters = maxMessageBytes
     /// Refuses a frame that could only be a runaway or a different protocol.
     public static let maxFrameBytes = 1 << 20
 
