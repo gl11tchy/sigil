@@ -1455,6 +1455,12 @@ final class AppModel {
         isShowingNewSessionSheet = true
     }
 
+    /// ⇧⌘N: choose the folder first, then open the new-session sheet on it.
+    func requestNewSessionInFolder(choose: () -> URL?) {
+        guard let folder = choose() else { return }
+        requestNewSession(in: folder)
+    }
+
     @discardableResult
     func newTab(
         in directory: URL, model: String? = nil, effort: String? = nil,
@@ -2078,6 +2084,11 @@ final class AppModel {
         settings.fontSize = 13
         applyAppearance()
     }
+
+    /// The View menu turns each font item off where it would do nothing.
+    var canIncreaseFontSize: Bool { settings.fontSize < 32 }
+    var canDecreaseFontSize: Bool { settings.fontSize > 8 }
+    var canResetFontSize: Bool { settings.fontSize != 13 }
 
     func applyAppearance() {
         // Sheets, alerts, menus, and the Settings window are system-rendered;

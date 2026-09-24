@@ -60,6 +60,8 @@ final class RightPanel {
     /// The scratch shell, created on first use so a hidden panel costs nothing.
     private(set) var shell: TerminalController?
     private(set) var shellDirectory: URL?
+    /// The current shell has exited. The panel offers a restart.
+    private(set) var shellExited = false
     /// Replaced shells that are still stopping.
     @ObservationIgnored private var stoppingShells: [ObjectIdentifier: TerminalController] = [:]
 
@@ -98,6 +100,7 @@ final class RightPanel {
         let controller = TerminalController(theme: theme, fontSize: fontSize)
         shell = controller
         shellDirectory = directory
+        watchForExit(controller)
         controller.startShell(ShellLaunchSpec(workingDirectory: directory))
     }
 
@@ -113,9 +116,20 @@ final class RightPanel {
             old.onTerminate = { [weak self] _ in self?.stoppingShells[id] = nil }
             old.terminate()
         }
-        shell = TerminalController(theme: theme, fontSize: fontSize)
+        let controller = TerminalController(theme: theme, fontSize: fontSize)
+        shell = controller
         shellDirectory = directory
-        shell?.startShell(ShellLaunchSpec(workingDirectory: directory))
+        watchForExit(controller)
+        controller.startShell(ShellLaunchSpec(workingDirectory: directory))
+    }
+
+    /// A replaced shell that stops later does not count.
+    private func watchForExit(_ controller: TerminalController) {
+        shellExited = false
+        controller.onTerminate = { [weak self, weak controller] _ in
+            guard let self, let controller, self.shell === controller else { return }
+            self.shellExited = true
+        }
     }
 
     /// True while a command the user started holds the panel shell.
