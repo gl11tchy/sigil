@@ -565,7 +565,9 @@ final class AppModel {
     /// Drops an added folder and closes every tab in it, whatever the CLI.
     func removeProject(_ project: SidebarProject) {
         let projectTabs = tabs.filter { samePath($0.workingDirectory.path, project.cwd) }
-        if projectTabs.contains(where: \.shouldWarnBeforeStopping), !confirmStop() {
+        if let prompt = StopWorkingPrompt(action: .closeTab, stopping: projectTabs),
+            !confirmStop(prompt)
+        {
             return
         }
         unpin(project)
