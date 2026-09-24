@@ -161,6 +161,34 @@ struct SidebarSnapshotTests {
             ])
         #expect(snapshot.destinations == .init(recentsCount: 2, archivedCount: 1))
     }
+
+    @Test func snapshotListsAnAddedFolderBeforeItHasAChat() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let alpha = try fixture.directory("alpha")
+        try fixture.writeListedSession(
+            id: "a-one", cwd: alpha.path, summary: "Quartz rewrite", updatedAt: "2026-08-05T00:00:00Z")
+        fixture.settings.showWorktreeSessions = true
+        await fixture.store.reload()
+        let added = try fixture.directory("added")
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        model.addProject(added)
+
+        var snapshot = model.sidebarSnapshot()
+        expectMatchesModelLists(snapshot, model)
+        #expect(snapshot.unpinnedProjects.map(\.name) == ["added", "alpha"])
+        let addedProject = try #require(snapshot.unpinnedProjects.first)
+        #expect(addedProject.sessions.isEmpty)
+        #expect(snapshot.rowIDs.contains(addedProject.id))
+
+        // A search lists only matching chats, so the chatless folder drops out.
+        model.searchText = "quartz"
+        snapshot = model.sidebarSnapshot()
+        expectMatchesModelLists(snapshot, model)
+        #expect(!snapshot.projects.contains { $0.id == addedProject.id })
+    }
 }
 
 /// The lists SidebarView used to read one at a time from the model during a render.

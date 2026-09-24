@@ -36,6 +36,13 @@ struct SidebarProject: Identifiable, Equatable, Sendable {
     var count: Int { sessions.count }
 }
 
+/// A folder added to Projects before it has a Grok chat: by the Projects
+/// header's add button, or by starting another provider's CLI there.
+struct AddedProject: Codable, Equatable, Sendable {
+    var path: String
+    var addedAt: Date
+}
+
 /// Every list one sidebar render reads, built once per body pass so the search
 /// and the folder grouping run once instead of once per read.
 struct SidebarSnapshot: Equatable, Sendable {
@@ -394,6 +401,48 @@ enum SidebarOrganization {
                 updatedAt: list.first?.updatedAt ?? sample.updatedAt
             )
         }
+    }
+
+    /// Adds folders from `added` that have no project yet as empty projects,
+    /// and lets a newer add date lift a folder that has one. Newest first.
+    static func merging(
+        added: [AddedProject],
+        into projects: [SidebarProject],
+        canonicalPath: (String) -> String
+    ) -> [SidebarProject] {
+        var result = projects
+        for entry in added {
+            let key = canonicalPath(entry.path)
+            if let index = result.firstIndex(where: { $0.id == key }) {
+                result[index].updatedAt = max(result[index].updatedAt, entry.addedAt)
+                continue
+            }
+            let name = URL(fileURLWithPath: entry.path).lastPathComponent
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            var displayPath = entry.path
+            if entry.path == home {
+                displayPath = "~"
+            } else if entry.path.hasPrefix(home + "/") {
+                displayPath = "~" + entry.path.dropFirst(home.count)
+            }
+            let taken = result.contains { $0.name == name }
+            result.append(
+                SidebarProject(
+                    id: key,
+                    name: name.isEmpty || taken ? displayPath : name,
+                    displayPath: displayPath,
+                    cwd: entry.path,
+                    sessions: [],
+                    updatedAt: entry.addedAt
+                ))
+        }
+        return result.enumerated()
+            .sorted { lhs, rhs in
+                lhs.element.updatedAt != rhs.element.updatedAt
+                    ? lhs.element.updatedAt > rhs.element.updatedAt
+                    : lhs.offset < rhs.offset
+            }
+            .map(\.element)
     }
 
     /// O(n) index so a row can find its project without walking every folder.

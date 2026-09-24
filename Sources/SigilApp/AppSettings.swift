@@ -18,6 +18,7 @@ final class AppSettings {
         static let focusedProjectPath = "sidebar.focusedProjectPath"
         static let pinnedConversations = "sidebar.pinnedConversations"
         static let pinnedProjects = "sidebar.pinnedProjects"
+        static let addedProjects = "sidebar.addedProjects"
         static let archivedConversations = "sidebar.archivedConversations"
         static let conversationNames = "sidebar.conversationNames"
         static let isTabMessagingEnabled = "bridge.enabled"
@@ -86,6 +87,14 @@ final class AppSettings {
         didSet {
             if let data = try? JSONEncoder().encode(pinnedProjects) {
                 defaults.set(data, forKey: Key.pinnedProjects)
+            }
+        }
+    }
+    /// Folders shown in Projects before they have a Grok chat, newest first.
+    var addedProjects: [AddedProject] {
+        didSet {
+            if let data = try? JSONEncoder().encode(addedProjects) {
+                defaults.set(data, forKey: Key.addedProjects)
             }
         }
     }
@@ -178,6 +187,13 @@ final class AppSettings {
         } else {
             pinnedProjects = []
         }
+        if let data = defaults.data(forKey: Key.addedProjects),
+            let decoded = try? JSONDecoder().decode([AddedProject].self, from: data)
+        {
+            addedProjects = decoded
+        } else {
+            addedProjects = []
+        }
         if let data = defaults.data(forKey: Key.archivedConversations),
             let decoded = try? JSONDecoder().decode([OpenTabsSnapshot.Entry].self, from: data)
         {
@@ -212,6 +228,8 @@ final class AppSettings {
         if pins != pinnedConversations { pinnedConversations = pins }
         let projects: [String] = stored(Key.pinnedProjects)
         if projects != pinnedProjects { pinnedProjects = projects }
+        let added: [AddedProject] = stored(Key.addedProjects)
+        if added != addedProjects { addedProjects = added }
         let archives: [OpenTabsSnapshot.Entry] = stored(Key.archivedConversations)
         if archives != archivedConversations { archivedConversations = archives }
         let names: [ConversationName] = stored(Key.conversationNames)

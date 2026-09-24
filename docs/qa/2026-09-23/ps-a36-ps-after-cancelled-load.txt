@@ -1,0 +1,6 @@
+# 2026-09-23 19:55:31 SigilUX process tree 4s after selecting Claude Code during the load
+    PID    PPID COMMAND
+  69376       1 /tmp/sigil-ux/SigilUX.app/Contents/MacOS/SigilUX -ApplePersistenceIgnoreState YES
+  69397   69376 /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /tmp/sigil-ux/harness/fake-grok.py --cwd /Users/Shared/sigil-ux/projects/acme-api --resume 8c271d1e-ad31-40dd-a8ac-8c439b990d9e
+  69398   69376 /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /tmp/sigil-ux/harness/fake-grok.py --cwd /Users/Shared/sigil-ux/projects/sigil --resume 2711bc82-e76d-4bca-9157-79839b73ff75
+  69403   69376 /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /tmp/sigil-ux/harness/fake-grok.py --cwd /Users/Shared/sigil-ux/projects/acme-api --resume d056008d-bb5e-42ce-941f-eb4b87ebd992

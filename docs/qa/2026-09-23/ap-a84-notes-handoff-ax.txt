@@ -1,0 +1,23 @@
+# a84 notes handoff — branch audit/app-panel @ dde62c7 (merge of origin/main with #94 into 1fab58c), SigilUX debug build, 2026-09-23 22:04
+# Method: SigilUX made frontmost through System Events (window key: frontmost=true AXMain=true at every read).
+# Panel opened with View > Panel > Terminal, then AXPress on the panel header "Notes" tab (AXButton, help "Notes").
+# Focus read with the native AX API (app AXFocusedUIElement) 2.5 s after opening and 2 s after the press. No keystrokes, no mouse.
+
+== Panel closed:
+  app AXFocusedUIElement: AXRole="AXTextArea" AXDescription="Grok Build terminal"
+  text area "Grok Build terminal": AXFocused=1
+
+== BEFORE (panel open on the shell, panel.mode=shell):
+  app AXFocusedUIElement: AXRole="AXTextArea" AXDescription="Shell terminal"
+  text area "Grok Build terminal": AXFocused=0
+  text area "Shell terminal": AXFocused=1
+
+== AFTER AXPress on "Notes" (panel still open, panel.mode=notes):
+  app AXFocusedUIElement: AXRole="AXTextArea" AXDescription="Grok Build terminal"
+  text area "Grok Build terminal": AXFocused=1
+  text area "Notes for acme-api": AXFocused=0
+
+Result: PASS. Leaving the panel shell for Notes gives focus back to the session terminal.
+
+Note: an earlier run with SigilUX in the background (window not key) left focus on the AXWindow after the press.
+That is the deferred path: focusSelectedTerminal() needs a key window and sets needsTerminalFocus for windowDidBecomeKey.

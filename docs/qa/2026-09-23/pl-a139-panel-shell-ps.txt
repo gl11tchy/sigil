@@ -1,0 +1,26 @@
+# a139 proof: SigilUX on audit/prov-launch 522ebf7, launched with SHELL=/bin/tcsh (ps -E shows SHELL=/bin/tcsh), 2026-09-23 20:39:27
+# Action: View > Panel > Terminal (AXPress). Process tree under the SigilUX pid, ps -o pid,ppid,command:
+    PID    PPID COMMAND
+  80388       1 /tmp/sigil-ux/SigilUX.app/Contents/MacOS/SigilUX -ApplePersistenceIgnoreState YES
+  80394   80388 /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /tmp/sigil-ux/harness/fake-grok.py --cwd /Users/Shared/sigil-ux/projects/acme-api --resume 503c3942-a825-4e45-b4e1-166048e0cc2d
+  80395   80388 /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /tmp/sigil-ux/harness/fake-grok.py --cwd /Users/Shared/sigil-ux/projects/acme-api --resume ba8051f0-aeec-41a5-ae5d-dcb1ec560300
+  80786   80388 /bin/tcsh
+
+# SigilUX environment SHELL: SHELL=/bin/tcsh
+# tcsh blanks its own argv after start, so ps shows "/bin/tcsh" with one empty argument.
+# Kernel argc for the panel shell (pid 80786, sysctl KERN_PROCARGS2): argc=2 argv=[/bin/tcsh] []
+#   -> exactly one argument was passed; with the old ["-il"] tcsh exits at once (control below).
+# Panel shell still running 20:40:04 after the panel was hidden: 80786 Ss+  ttys005  /bin/tcsh 
+# Control outside the app (throwaway HOME, pty via script(1)):
+#   /bin/tcsh -l  -> stays running; ps shows "/bin/tcsh " (same blanked argv), argc=2
+#   /bin/tcsh -il -> exits 1 at once: "Unknown option: `-l'  Usage: tcsh [ -bcdefilmnqstvVxX ] [ argument ... ]."
+# Panel hidden again before any screenshot (View menu item now reads "Show Panel").
+
+# Stronger check, 20:42:52: a temporary ~/.login in the throwaway home logged each tcsh login shell,
+# then the panel's Restart Shell button (AXPress) started a new scratch shell:
+    PID    PPID COMMAND
+  80388       1 /tmp/sigil-ux/SigilUX.app/Contents/MacOS/SigilUX -ApplePersistenceIgnoreState YES
+  98617   80388 /bin/tcsh
+# kernel args of the new shell: argc=2 argv=[/bin/tcsh] []
+# ~/.login log line: 20:42:36 tcsh pid=98617 loginsh=1 (read ~/.login)
+#   -> loginsh=1: tcsh ran as a login shell, so its one argument is -l. The panel was hidden again at once.

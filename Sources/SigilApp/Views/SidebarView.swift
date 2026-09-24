@@ -288,11 +288,12 @@ struct SidebarView: View {
                 isPinned: model.isPinned(project),
                 showsPin: true,
                 showsArchive: true,
+                archiveLabel: archiveLabel(for: project),
                 canStart: true,
                 leave: { model.leaveProject() },
                 newChat: { model.requestNewSessionInProject(project) },
                 togglePin: { model.togglePin(project) },
-                toggleArchive: { model.archive(project) }
+                toggleArchive: { model.archiveOrRemove(project) }
             )
         }
     }
@@ -438,8 +439,12 @@ struct SidebarView: View {
         // Home folders are grouped from the listed sessions, so no row needs a filter.
         let pinned = snapshot.pinnedProjects.map { ProjectRows(project: $0, rows: $0.sessions) }
         let rest = snapshot.unpinnedProjects.map { ProjectRows(project: $0, rows: $0.sessions) }
-        if !pinned.isEmpty || !rest.isEmpty {
-            section("Projects", count: pinned.count + rest.count, isFirst: model.tabs.isEmpty) {
+        section(
+            "Projects",
+            count: pinned.count + rest.count,
+            isFirst: model.tabs.isEmpty,
+            add: { model.chooseProjectToAdd() },
+            content: {
                 ForEach(pinned, id: \.id) { item in
                     projectRow(item.project, rows: item.rows)
                 }
@@ -447,7 +452,7 @@ struct SidebarView: View {
                     projectRow(item.project, rows: item.rows)
                 }
             }
-        }
+        )
     }
 
     @ViewBuilder
@@ -604,7 +609,7 @@ struct SidebarView: View {
             longRelative: rows.first?.updatedAt.longRelative(to: now) ?? "",
             isPinned: model.isPinned(project),
             isWorking: model.isWorking(project),
-            isActive: rows.contains { model.isActive($0) },
+            isActive: rows.contains { model.isActive($0) } || model.hasSelectedTab(in: project),
             isKeyboardSelected: project.id == keyboardSelectionID,
             open: {
                 keyboardSelectionID = project.id
@@ -612,7 +617,8 @@ struct SidebarView: View {
             },
             newChat: { model.requestNewSessionInProject(project) },
             togglePin: { model.togglePin(project) },
-            archive: { model.archive(project) }
+            archive: { model.archiveOrRemove(project) },
+            archiveLabel: archiveLabel(for: project)
         )
         .id(project.id)
         .contextMenu {
@@ -620,11 +626,15 @@ struct SidebarView: View {
             Button(model.isPinned(project) ? "Unpin Project" : "Pin Project") {
                 model.togglePin(project)
             }
-            Button("Archive Project") { model.archive(project) }
+            Button(archiveLabel(for: project)) { model.archiveOrRemove(project) }
             if let session = rows.first {
                 Button("Reveal Folder in Finder") { model.revealInFinder(session) }
             }
         }
+    }
+
+    private func archiveLabel(for project: SidebarProject) -> String {
+        model.isRemovableOnly(project) ? "Remove Project" : "Archive Project"
     }
 
     private func sessionRow(
@@ -732,12 +742,13 @@ struct SidebarView: View {
         _ title: String,
         count: Int,
         isFirst: Bool,
+        add: (() -> Void)? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
         Section {
             content()
         } header: {
-            SidebarSectionLabel(title: title, count: count, isFirst: isFirst)
+            SidebarSectionLabel(title: title, count: count, isFirst: isFirst, add: add)
         }
     }
 
@@ -1271,6 +1282,7 @@ private struct SidebarSectionLabel: View {
     let title: String
     let count: Int
     let isFirst: Bool
+    var add: (() -> Void)? = nil
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -1278,19 +1290,23 @@ private struct SidebarSectionLabel: View {
             Text(title)
                 .ui(12.5, .medium)
                 .foregroundStyle(palette.ink2)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityLabel("\(title), \(count)")
             Spacer(minLength: 4)
+            // Before the count, so every section's count keeps one column.
+            if let add {
+                RowAction(systemImage: "plus", help: "Add Project", action: add)
+            }
             Text("\(count)")
                 .mono(11.5)
                 .foregroundStyle(palette.ink2)
+                .accessibilityHidden(true)
         }
         .padding(.horizontal, 16)
         .padding(.top, isFirst ? 8 : 16)
-        .padding(.bottom, 4)
+        .padding(.bottom, add == nil ? 4 : 1)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(palette.canvas)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
-        .accessibilityLabel("\(title), \(count)")
     }
 }
 
@@ -1340,6 +1356,7 @@ private struct DrillBar: View {
     var isPinned: Bool = false
     var showsPin: Bool = false
     var showsArchive: Bool = false
+    var archiveLabel = "Archive Project"
     var canStart: Bool = false
     let leave: () -> Void
     var newChat: (() -> Void)? = nil
@@ -1376,7 +1393,7 @@ private struct DrillBar: View {
             .accessibilityLabel("Back to projects")
             Spacer(minLength: 4)
             if showsArchive, let toggleArchive {
-                IconButton(systemImage: "archivebox", help: "Archive Project") {
+                IconButton(systemImage: "archivebox", help: archiveLabel) {
                     toggleArchive()
                 }
             }
@@ -1568,6 +1585,7 @@ private struct ProjectListRow: View {
     let newChat: () -> Void
     let togglePin: () -> Void
     var archive: (() -> Void)? = nil
+    var archiveLabel = "Archive Project"
 
     @Environment(\.palette) private var palette
     @Environment(\.sidebarGlide) private var glide
@@ -1590,7 +1608,7 @@ private struct ProjectListRow: View {
             if showsControls {
                 HStack(spacing: 0) {
                     if let archive {
-                        RowAction(systemImage: "archivebox", help: "Archive Project", action: archive)
+                        RowAction(systemImage: "archivebox", help: archiveLabel, action: archive)
                     }
                     RowAction(
                         systemImage: isPinned ? "pin.fill" : "pin",
@@ -1636,7 +1654,7 @@ private struct ProjectListRow: View {
         .accessibilityAction(.default, open)
         .accessibilityAction(named: "New Session", newChat)
         .accessibilityAction(named: isPinned ? "Unpin Project" : "Pin Project", togglePin)
-        .modifier(ArchiveProjectAction(archive: archive))
+        .modifier(ArchiveProjectAction(name: archiveLabel, archive: archive))
     }
 
     private var showsControls: Bool { isHovering || isKeyboardSelected }
@@ -2328,12 +2346,13 @@ private struct SessionRowActivateTrait: ViewModifier {
 }
 
 private struct ArchiveProjectAction: ViewModifier {
+    let name: String
     let archive: (() -> Void)?
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if let archive {
-            content.accessibilityAction(named: "Archive Project", archive)
+            content.accessibilityAction(named: name, archive)
         } else {
             content
         }
