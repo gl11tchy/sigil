@@ -8,6 +8,9 @@ struct RootView: View {
 
     private var palette: Palette { Palette(theme: model.settings.theme) }
 
+    /// Beautiful UI's window inset: the screen sits this far off the window edge.
+    static let inset: CGFloat = 10
+
     var body: some View {
         GeometryReader { geometry in
             let columns = WindowColumns(
@@ -28,6 +31,9 @@ struct RootView: View {
                     )
                 }
                 detail
+                    .padding(.leading, model.isSidebarVisible ? 0 : Self.inset)
+                    .padding(.trailing, model.panel.isVisible ? Self.inset / 2 : Self.inset)
+                    .padding(.vertical, Self.inset)
                 if model.panel.isVisible {
                     PanelDivider(
                         width: Binding(
@@ -36,14 +42,17 @@ struct RootView: View {
                         )
                     )
                     RightPanelView(model: model, availableWidth: columns.panel)
+                        .padding(.leading, Self.inset / 2)
+                        .padding(.trailing, Self.inset)
+                        .padding(.vertical, Self.inset)
                         .frame(width: columns.panel)
                 }
             }
         }
-        .background(palette.ground)
+        .background(palette.canvas)
         .tint(palette.accent)
         .environment(\.palette, palette)
-        .background(WindowChrome(background: palette.groundNSColor))
+        .background(WindowChrome(background: palette.canvasNSColor))
         .background(WindowCloseGuard { model.tabs.contains(where: \.shouldWarnBeforeStopping) })
         .sheet(isPresented: $model.isShowingNewSessionSheet) {
             NewSessionSheet(model: model)
@@ -84,14 +93,21 @@ struct RootView: View {
         AccessibilityNotification.Announcement(text).post()
     }
 
-    // MARK: - Detail column
+    // MARK: - The screen
 
+    /// Beautiful UI's inset screen: `page`, a 14pt radius, and a `line` border.
+    /// It holds the tab bar and the terminal; the sidebar sits outside it on
+    /// the window's own `canvas`.
     private var detail: some View {
-        VStack(spacing: 0) {
+        let shape = RoundedRectangle(cornerRadius: Radius.window, style: .continuous)
+        return VStack(spacing: 0) {
             TopBar(model: model)
-            Rectangle().fill(palette.hairline).frame(height: 1)
+            Rectangle().fill(palette.line).frame(height: 1)
             content
         }
+        .background(shape.fill(palette.page))
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(palette.line, lineWidth: 1).allowsHitTesting(false))
     }
 
     @ViewBuilder
@@ -101,25 +117,28 @@ struct RootView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             VStack(spacing: 0) {
-                ZStack(alignment: .topTrailing) {
+                ZStack(alignment: .top) {
                     ForEach(model.tabs) { tab in
                         let isSelected = tab.id == model.selectedTab?.id
-                        TerminalScreen(tab: tab, isSelected: isSelected)
+                        TerminalScreen(tab: tab, theme: model.settings.theme)
                             .opacity(isSelected ? 1 : 0)
                             .allowsHitTesting(isSelected)
                             .accessibilityHidden(!isSelected)
                     }
                     if model.isFindBarVisible, model.selectedTab != nil {
-                        TerminalFindBar(
-                            query: Bindable(model).findQuery,
-                            matchIndex: model.findMatchIndex,
-                            matchCount: model.findMatchCount,
-                            focusToken: model.findFocusToken,
-                            findNext: { model.findNextInTerminal() },
-                            findPrevious: { model.findPreviousInTerminal() },
-                            dismiss: { model.dismissFindBar() }
-                        )
-                        .padding(8)
+                        HStack {
+                            Spacer(minLength: 0)
+                            TerminalFindBar(
+                                query: Bindable(model).findQuery,
+                                matchIndex: model.findMatchIndex,
+                                matchCount: model.findMatchCount,
+                                focusToken: model.findFocusToken,
+                                findNext: { model.findNextInTerminal() },
+                                findPrevious: { model.findPreviousInTerminal() },
+                                dismiss: { model.dismissFindBar() }
+                            )
+                        }
+                        .padding(10)
                         .transition(
                             reduceMotion
                                 ? .opacity
@@ -128,16 +147,10 @@ struct RootView: View {
                         .zIndex(1)
                     }
                 }
-                .animation(
-                    .easeOut(duration: 0.16),
-                    value: model.isFindBarVisible
-                )
-                .onChange(of: model.findQuery) { _, query in
-                    model.applyFindQuery()
-                    announce(ScreenAnnouncement.findMatches(query: query, count: model.findMatchCount))
-                }
+                // Docked below the terminal, never over it: the CLI's input
+                // line and an exit reason sit at the bottom of the screen.
                 if let tab = model.selectedTab, let item = tab.bridgeInbox.first {
-                    BridgeInboxBanner(
+                    BridgeInboxCard(
                         prompt: item.prompt,
                         pendingCount: tab.bridgeInbox.count,
                         canDeliver: tab.canDeliverBridgePrompt,
@@ -147,14 +160,27 @@ struct RootView: View {
                         },
                         dismiss: { tab.dismissNextBridgePrompt() }
                     )
+                    .padding(10)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 8)))
                 }
                 if let tab = model.selectedTab, case .exited = tab.activity {
-                    ExitedBanner(
+                    ExitedCapsule(
                         activity: tab.activity,
                         close: { model.closeTab(tab.id) },
                         restart: { model.restartTab(id: tab.id) }
                     )
+                    .padding(10)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 8)))
                 }
+            }
+            .animation(
+                reduceMotion ? .easeOut(duration: 0.1) : Motion.slide,
+                value: model.isFindBarVisible
+            )
+            .animation(reduceMotion ? nil : Motion.slide, value: model.selectedTab?.bridgeInbox.count)
+            .onChange(of: model.findQuery) { _, query in
+                model.applyFindQuery()
+                announce(ScreenAnnouncement.findMatches(query: query, count: model.findMatchCount))
             }
         }
     }
@@ -208,40 +234,43 @@ enum ScreenAnnouncement {
     }
 }
 
-/// The one piece of window chrome: a 38pt band holding the sidebar toggle, what the
-/// current session is, and the new-session button. It replaces the title bar entirely.
+/// The screen's tab bar: 44pt, Beautiful UI's harness. Tab chips and a plus
+/// on the leading side; the folder, the working time, and the panel and
+/// session controls on the trailing side. It replaces the title bar entirely.
 private struct TopBar: View {
     @Bindable var model: AppModel
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack(spacing: 0) {
-            // Room for the traffic lights when the sidebar is not holding them.
+        HStack(spacing: 4) {
             if !model.isSidebarVisible {
-                Color.clear.frame(width: 68)
-            }
-
-            IconButton(
-                systemImage: "sidebar.leading",
-                help: model.isSidebarVisible ? "Hide Sidebar (⌘B)" : "Show Sidebar (⌘B)",
-                isOn: model.isSidebarVisible
-            ) {
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
-                    model.isSidebarVisible.toggle()
+                // Room for the traffic lights, which now sit over the screen.
+                Color.clear.frame(width: 66)
+                IconButton(systemImage: "sidebar.leading", help: "Show Sidebar (⌘B)") {
+                    withAnimation(reduceMotion ? nil : Motion.slide) {
+                        model.isSidebarVisible.toggle()
+                    }
                 }
             }
-            .padding(.leading, model.isSidebarVisible ? 8 : 0)
 
-            if model.tabs.count > 1 {
-                TabStripView(model: model)
-                selectedFolder
-                if TabListRows.isShown(tabCount: model.tabs.count) {
-                    TabListView(model: model)
-                }
-            } else {
-                label
+            if model.tabs.isEmpty {
                 Spacer(minLength: 8)
+            } else {
+                TabStripView(model: model)
+            }
+
+            if let tab = model.selectedTab {
+                if tab.activity == .working {
+                    WorkingLabel(since: tab.workingSince)
+                        .padding(.horizontal, 6)
+                        .transition(.opacity)
+                }
+                selectedFolder(tab)
+            }
+
+            if TabListRows.isShown(tabCount: model.tabs.count) {
+                TabListView(model: model)
             }
 
             IconButton(
@@ -249,106 +278,88 @@ private struct TopBar: View {
                 help: model.panel.isVisible ? "Hide Panel (⌥⌘B)" : "Show Panel (⌥⌘B)",
                 isOn: model.panel.isVisible
             ) {
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) { model.togglePanel() }
+                withAnimation(reduceMotion ? nil : Motion.slide) { model.togglePanel() }
             }
 
-            IconButton(systemImage: "plus", help: "New Session… (⌘T)") {
-                model.requestNewSession()
-            }
             Menu {
                 Button("New Session in Folder…") { model.requestNewSession() }
                 Divider()
                 SettingsLink { Text("Settings…") }
             } label: {
-                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 12.5, weight: .medium))
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
-            .frame(width: 20)
-            .foregroundStyle(palette.textDim)
-            .padding(.trailing, 10)
+            .frame(width: 24, height: 24)
+            .foregroundStyle(palette.ink3)
+            // A borderless menu draws its label in the tint; keep it an icon, not a link.
+            .tint(palette.ink3)
+            .help("Session actions")
             .accessibilityLabel("Session actions")
         }
-        .frame(height: 36)
-        .background(palette.ground)
+        .padding(.leading, 8)
+        .padding(.trailing, 8)
+        .frame(height: 44)
+        .animation(reduceMotion ? nil : Motion.fade, value: model.selectedTab?.activity)
     }
 
     @ViewBuilder
-    private var selectedFolder: some View {
-        if let tab = model.selectedTab,
-            let folder = SelectedSessionFolder.text(
-                tabCount: model.tabs.count,
-                folder: SelectedSessionFolder.breadcrumb(of: tab.workingDirectory)
-            )
-        {
-            folderText(folder, help: tab.workingDirectory.abbreviatedPath)
+    private func selectedFolder(_ tab: TerminalTab) -> some View {
+        if let folder = SelectedSessionFolder.text(
+            tabCount: model.tabs.count,
+            folder: SelectedSessionFolder.breadcrumb(of: tab.workingDirectory)
+        ) {
+            Text(folder)
+                .mono(11.5)
+                .foregroundStyle(palette.ink2)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 220, alignment: .trailing)
                 .layoutPriority(1)
-                .padding(.leading, 6)
+                .padding(.horizontal, 4)
+                .help(tab.workingDirectory.abbreviatedPath)
                 .accessibilityLabel("Folder \(folder)")
         }
     }
-
-    @ViewBuilder
-    private var label: some View {
-        if let tab = model.selectedTab {
-            HStack(spacing: 6) {
-                StatusDot(activity: tab.activity)
-                Text(model.title(for: tab))
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(palette.text)
-                    .lineLimit(1)
-                if let folder = SelectedSessionFolder.text(
-                    tabCount: model.tabs.count,
-                    folder: SelectedSessionFolder.breadcrumb(of: tab.workingDirectory)
-                ) {
-                    folderText(folder, help: tab.workingDirectory.abbreviatedPath)
-                }
-            }
-            .padding(.leading, 10)
-        }
-    }
-
-    private func folderText(_ folder: String, help: String) -> some View {
-        Text(folder)
-            .font(.system(size: 10, design: .monospaced))
-            .foregroundStyle(palette.textFaint)
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .help(help)
-    }
 }
 
-/// A 20pt square borderless button. Every icon control in the chrome is one of these.
-struct IconButton: View {
-    let systemImage: String
-    var help: String = ""
-    var isOn = false
-    let action: () -> Void
-
+/// Beautiful UI's loading state: the pixel loader, a shimmering label, and
+/// the elapsed time in mono.
+private struct WorkingLabel: View {
+    let since: Date?
     @Environment(\.palette) private var palette
-    @State private var isHovering = false
 
     var body: some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 11, weight: .medium))
-                .frame(width: 22, height: 22)
-                .background(
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(isOn ? palette.selected : (isHovering ? palette.raised : Color.clear))
-                )
-                .contentShape(Rectangle())
+        HStack(spacing: 6) {
+            PixelLoader(color: palette.accent)
+            ShimmerText(text: "Working")
+            if let since {
+                TimelineView(.periodic(from: since, by: 1)) { context in
+                    Text(Self.elapsed(from: since, to: context.date))
+                        .mono(11.5)
+                        .foregroundStyle(palette.ink2)
+                        .monospacedDigit()
+                }
+            }
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(isOn || isHovering ? palette.text : palette.textDim)
-        .onHover { isHovering = $0 }
-        .help(help)
-        .accessibilityLabel(help)
-        .accessibilityAddTraits(isOn ? .isSelected : [])
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Working")
+    }
+
+    /// `8s`, `1m 04s`, `12m`.
+    static func elapsed(from start: Date, to now: Date) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(start)))
+        if seconds < 60 { return "\(seconds)s" }
+        let minutes = seconds / 60
+        if minutes < 10 { return String(format: "%dm %02ds", minutes, seconds % 60) }
+        return "\(minutes)m"
     }
 }
 
-/// The draggable seam between the two columns.
+/// The draggable seam between the sidebar and the screen. It draws nothing:
+/// the screen's own border is the edge. Focus shows an accent bar.
 private struct SplitDivider: View {
     @Binding var width: Double
     let onFocusChange: (Bool) -> Void
@@ -357,14 +368,14 @@ private struct SplitDivider: View {
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        Rectangle()
-            .fill(palette.hairline)
+        Color.clear
             .frame(width: 1)
             .overlay {
                 if isFocused {
-                    Rectangle()
+                    Capsule()
                         .fill(palette.accent)
                         .frame(width: 2)
+                        .padding(.vertical, RootView.inset + Radius.window)
                         .allowsHitTesting(false)
                 }
             }
@@ -443,7 +454,9 @@ extension AppModel {
     }
 }
 
-private struct BridgeInboxBanner: View {
+/// A tab message, as Beautiful UI's approval card: the question the other
+/// tab is asking, and the two answers.
+private struct BridgeInboxCard: View {
     let prompt: String
     let pendingCount: Int
     let canDeliver: Bool
@@ -453,31 +466,44 @@ private struct BridgeInboxBanner: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(palette.accent)
+                Text("Message from another tab")
+                    .ui(13.5, .semibold)
+                    .foregroundStyle(palette.ink)
+                Spacer(minLength: 0)
+                if pendingCount > 1 {
+                    Text("1/\(pendingCount)")
+                        .mono(11.5)
+                        .foregroundStyle(palette.ink2)
+                        .accessibilityLabel("\(pendingCount) queued")
+                }
+            }
             ScrollView {
                 Text(prompt)
-                    .font(.system(size: 11))
-                    .foregroundStyle(palette.textDim)
+                    .ui(13)
+                    .foregroundStyle(palette.ink2)
+                    .lineSpacing(3)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
             }
-            .frame(maxHeight: 96)
-            HStack {
-                if pendingCount > 1 {
-                    Text("\(pendingCount) queued")
-                        .font(.system(size: 9.5, design: .monospaced))
-                        .foregroundStyle(palette.textFaint)
-                }
+            .frame(maxHeight: 110)
+            .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
                 Spacer(minLength: 0)
                 Button("Dismiss", action: dismiss)
+                    .buttonStyle(.secondary)
                 Button("Deliver", action: deliver)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.primary)
                     .disabled(!canDeliver)
             }
         }
-        .padding(10)
-        .background(palette.raised)
-        .overlay(alignment: .top) { Rectangle().fill(palette.hairline).frame(height: 1) }
+        .padding(14)
+        .frame(maxWidth: .infinity)
+        .surface(palette.surface, radius: Radius.card, elevation: .card)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Incoming tab message")
     }
@@ -503,30 +529,40 @@ private struct WindowChrome: NSViewRepresentable {
     }
 }
 
+/// No tab open: Beautiful UI's empty state, which teaches the next step.
 private struct EmptyDetailView: View {
     let newSession: () -> Void
     @Environment(\.palette) private var palette
 
     var body: some View {
-        VStack(spacing: 7) {
-            Text("No open session")
-                .font(.system(size: 12))
-                .foregroundStyle(palette.textDim)
-            HStack(spacing: 5) {
-                Text("Press")
-                KbdChip(label: "⌘T", palette: palette)
-                Text("to start one, or pick a conversation.")
+        VStack(spacing: 12) {
+            Image(systemName: "terminal")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(palette.ink3)
+                .frame(width: 40, height: 40)
+                .surface(palette.surface, radius: Radius.card, elevation: .card)
+            VStack(spacing: 4) {
+                Text("No open session")
+                    .ui(15, .semibold)
+                    .foregroundStyle(palette.ink)
+                HStack(spacing: 5) {
+                    Text("Press")
+                    KbdChip(label: "⌘T", palette: palette)
+                    Text("to start one, or pick a chat on the left.")
+                }
+                .ui(13)
+                .foregroundStyle(palette.ink2)
             }
-            .font(.system(size: 11))
-            .foregroundStyle(palette.textFaint)
             Button("New Session", action: newSession)
-                .controlSize(.small)
+                .buttonStyle(.primary)
                 .padding(.top, 4)
         }
     }
 }
 
-private struct ExitedBanner: View {
+/// An ended session, as Beautiful UI's failed task row: a mark, what
+/// happened, and the two ways on.
+private struct ExitedCapsule: View {
     let activity: TerminalTab.Activity
     let close: () -> Void
     let restart: () -> Void
@@ -538,27 +574,36 @@ private struct ExitedBanner: View {
     }
 
     var body: some View {
-        HStack(spacing: 7) {
-            Circle()
-                .fill(activity.endedInFailure ? palette.error : palette.textFaint)
-                .frame(width: 6, height: 6)
+        HStack(spacing: 10) {
+            ZStack {
+                Circle().fill(activity.endedInFailure ? palette.red : palette.hover2)
+                Image(systemName: activity.endedInFailure ? "xmark" : "stop.fill")
+                    .font(.system(size: activity.endedInFailure ? 9 : 7, weight: .bold))
+                    .foregroundStyle(activity.endedInFailure ? .white : palette.ink2)
+            }
+            .frame(width: 18, height: 18)
             Text(
                 activity.endedInFailure
-                    ? "Session ended with code \(code.map(String.init) ?? "unknown")."
-                    : "Session ended."
+                    ? "Session ended with code \(code.map(String.init) ?? "unknown")"
+                    : "Session ended"
             )
-            .font(.system(size: 11))
-            .foregroundStyle(palette.textDim)
-            Spacer()
-            Button("Restart", action: restart)
-                .controlSize(.small)
+            .ui(13, .medium)
+            .foregroundStyle(palette.ink)
+            if activity.endedInFailure {
+                StatusPill(text: "Failed", tone: .red)
+            }
+            Spacer(minLength: 12)
             Button("Close Tab", action: close)
-                .controlSize(.small)
+                .buttonStyle(SigilButtonStyle(kind: .ghost, height: 26))
+            Button("Restart", action: restart)
+                .buttonStyle(SigilButtonStyle(kind: .secondary, height: 26))
         }
-        .padding(.horizontal, 12)
-        .frame(height: 30)
-        .background(palette.sidebar)
-        .overlay(alignment: .top) { Rectangle().fill(palette.hairline).frame(height: 1) }
+        .padding(.leading, 10)
+        .padding(.trailing, 8)
+        .frame(height: 42)
+        .frame(maxWidth: .infinity)
+        .background(Capsule(style: .continuous).fill(palette.surface))
+        .overlay(Capsule(style: .continuous).strokeBorder(palette.ring, lineWidth: 1))
     }
 }
 
@@ -569,6 +614,11 @@ extension URL {
         if path == home { return "~" }
         if path.hasPrefix(home + "/") { return "~" + path.dropFirst(home.count) }
         return path
+    }
+
+    /// The folder's own name, e.g. `wt-pr-a`; the home folder is `~`.
+    var folderName: String {
+        path == FileManager.default.homeDirectoryForCurrentUser.path ? "~" : lastPathComponent
     }
 
     /// Last two path components, e.g. `scratchpad/wt-pr-a`. The home folder

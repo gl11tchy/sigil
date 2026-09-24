@@ -144,7 +144,7 @@ final class AppSettings {
             defaults.object(forKey: Key.fontSize) == nil
             ? 13
             : Self.normalizedFontSize(CGFloat(defaults.double(forKey: Key.fontSize)))
-        themeName = defaults.string(forKey: Key.themeName) ?? TerminalTheme.sigilNeon.name
+        themeName = defaults.string(forKey: Key.themeName) ?? TerminalTheme.sigilDark.name
         // A stored path is the user's choice and stays — except when it is the
         // installer's own binary and the themed build is now there. That path
         // was never chosen; it is what the default resolved to before the
@@ -219,7 +219,7 @@ final class AppSettings {
     }
 
     var theme: TerminalTheme {
-        TerminalTheme.all.first { $0.name == themeName } ?? .sigilNeon
+        TerminalTheme.all.first { $0.name == themeName } ?? .sigilDark
     }
 
     var executableURL: URL {

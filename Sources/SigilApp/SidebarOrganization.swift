@@ -39,14 +39,10 @@ struct SidebarProject: Identifiable, Equatable, Sendable {
 /// Every list one sidebar render reads, built once per body pass so the search
 /// and the folder grouping run once instead of once per read.
 struct SidebarSnapshot: Equatable, Sendable {
-    /// Row counts for Recents and Archived under the home list.
+    /// Row counts for the Recents and Archived nav items.
     struct Destinations: Equatable, Sendable {
         var recentsCount: Int
         var archivedCount: Int
-
-        var rowIDs: [String] {
-            SidebarOrganization.destinationRowIDs(recentsCount: recentsCount, archivedCount: archivedCount)
-        }
     }
 
     var listKind: SidebarListKind
@@ -63,8 +59,8 @@ struct SidebarSnapshot: Equatable, Sendable {
     var unpinned: [GrokSession]
     var pinnedProjects: [SidebarProject]
     var unpinnedProjects: [SidebarProject]
-    /// Nil off the home list, the only list that shows them.
-    var destinations: Destinations?
+    /// The nav items above the list show on every surface.
+    var destinations: Destinations
     /// Every row, in keyboard order.
     var rowIDs: [String]
 
@@ -74,7 +70,6 @@ struct SidebarSnapshot: Equatable, Sendable {
 
     /// `sessions` is already searched and filtered, and `projects` is grouped
     /// from it, so a snapshot never runs the search or the grouping again.
-    /// `archivedCount` runs only for the home list.
     init(
         listKind: SidebarListKind,
         sessions: [GrokSession],
@@ -83,7 +78,7 @@ struct SidebarSnapshot: Equatable, Sendable {
         pinnedConversations: [OpenTabsSnapshot.Entry],
         pinnedProjectPaths: [String],
         openTabRowIDs: [String],
-        archivedCount: () -> Int,
+        archivedCount: Int,
         samePath: (String, String) -> Bool,
         sessionKey: (GrokSession) -> String
     ) {
@@ -104,10 +99,9 @@ struct SidebarSnapshot: Equatable, Sendable {
             projects: projects, paths: pinnedProjectPaths, samePath: samePath)
         unpinnedProjects = SidebarOrganization.without(
             projects: projects, paths: pinnedProjectPaths, samePath: samePath)
+        destinations = Destinations(recentsCount: sessions.count, archivedCount: archivedCount)
         switch listKind {
         case .projectList:
-            let destinations = Destinations(recentsCount: listed.count, archivedCount: archivedCount())
-            self.destinations = destinations
             rowIDs = SidebarOrganization.homeRowIDs(
                 recentsCount: destinations.recentsCount,
                 archivedCount: destinations.archivedCount,
@@ -116,14 +110,11 @@ struct SidebarSnapshot: Equatable, Sendable {
                 openTabIDs: openTabRowIDs
             )
         case .search:
-            destinations = nil
             rowIDs = listed.map(sessionKey)
         case .recents, .projectChats:
-            destinations = nil
             rowIDs = (pinned + unpinned).map(sessionKey)
         case .archived:
             // Unpinned chats in the order the folder sections draw them.
-            destinations = nil
             let listedDirectories = Set(unpinned.map(\.directory))
             let grouped = (pinnedProjects + unpinnedProjects).flatMap { project in
                 SidebarOrganization.listedRows(in: project, listed: listedDirectories)
@@ -217,9 +208,11 @@ enum SidebarOrganization {
         restIDs: [String],
         openTabIDs: [String] = []
     ) -> [String] {
-        openTabIDs
+        // Recents and Archived are nav items above the lists, so the arrow
+        // keys meet them first, in the order they are drawn.
+        destinationRowIDs(recentsCount: recentsCount, archivedCount: archivedCount)
+            + openTabIDs
             + folderListRowIDs(pinnedIDs: pinnedIDs, restIDs: restIDs)
-            + destinationRowIDs(recentsCount: recentsCount, archivedCount: archivedCount)
     }
 
     /// Home lists every open tab above the folders, so the sessions in flight

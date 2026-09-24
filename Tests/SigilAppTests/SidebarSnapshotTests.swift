@@ -46,7 +46,7 @@ struct SidebarSnapshotTests {
         let gammaProject = try #require(model.sidebarProjects.first { $0.name == "gamma" })
         model.pin(gammaProject)
 
-        // Home: the pinned folder, then folders by newest chat, then the destinations.
+        // Home: the nav items, then the pinned folder, then folders by newest chat.
         var snapshot = model.sidebarSnapshot()
         expectMatchesModelLists(snapshot, model)
         #expect(snapshot.listKind == .projectList)
@@ -56,8 +56,8 @@ struct SidebarSnapshotTests {
         #expect(
             snapshot.rowIDs
                 == [
-                    gammaProject.id, alphaProject.id, betaProject.id,
                     SidebarOrganization.recentsID, SidebarOrganization.archivedID,
+                    gammaProject.id, alphaProject.id, betaProject.id,
                 ])
         #expect(!snapshot.isListEmpty)
 
@@ -68,7 +68,7 @@ struct SidebarSnapshotTests {
         #expect(snapshot.listKind == .recents)
         #expect(snapshot.pinned.map(\.id) == ["a-old", "b-live"])
         #expect(snapshot.unpinned.map(\.id) == ["a-new", "g-one"])
-        #expect(snapshot.destinations == nil)
+        #expect(snapshot.destinations == .init(recentsCount: 4, archivedCount: 2))
         #expect(snapshot.rowIDs == (try keys(["a-old", "b-live", "a-new", "g-one"])))
 
         // Archived: grouped by folder, the pinned folder first.
@@ -154,7 +154,11 @@ struct SidebarSnapshotTests {
         let tab = try #require(model.selectedTab)
         let snapshot = model.sidebarSnapshot()
         expectMatchesModelLists(snapshot, model)
-        #expect(snapshot.rowIDs.first == SidebarOrganization.openTabRowID(tab.id))
+        #expect(
+            Array(snapshot.rowIDs.prefix(3)) == [
+                SidebarOrganization.recentsID, SidebarOrganization.archivedID,
+                SidebarOrganization.openTabRowID(tab.id),
+            ])
         #expect(snapshot.destinations == .init(recentsCount: 2, archivedCount: 1))
     }
 }
@@ -186,11 +190,8 @@ private func expectMatchesModelLists(
         snapshot.isListEmpty
             == (kind == .projectList ? model.sidebarProjects.isEmpty : listed.isEmpty),
         sourceLocation: sourceLocation)
-    if kind == .projectList {
-        #expect(
-            snapshot.destinations == .init(recentsCount: listed.count, archivedCount: model.archivedCount),
-            sourceLocation: sourceLocation)
-    } else {
-        #expect(snapshot.destinations == nil, sourceLocation: sourceLocation)
-    }
+    #expect(
+        snapshot.destinations
+            == .init(recentsCount: model.sidebarSessions.count, archivedCount: model.archivedCount),
+        sourceLocation: sourceLocation)
 }

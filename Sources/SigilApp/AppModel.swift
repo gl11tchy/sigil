@@ -531,7 +531,7 @@ final class AppModel {
             pinnedConversations: settings.pinnedConversations,
             pinnedProjectPaths: settings.pinnedProjects,
             openTabRowIDs: tabs.map { SidebarOrganization.openTabRowID($0.id) },
-            archivedCount: { archivedCount },
+            archivedCount: archivedCount,
             samePath: samePath,
             sessionKey: sessionKey
         )
@@ -539,10 +539,6 @@ final class AppModel {
 
     /// Folder a new chat should start in: the open project, else the current tab.
     var newSessionDirectory: URL {
-        newSessionDirectory(focusedProject: focusedProject)
-    }
-
-    func newSessionDirectory(focusedProject: SidebarProject?) -> URL {
         if let project = focusedProject {
             return URL(fileURLWithPath: project.cwd)
         }
