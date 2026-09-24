@@ -116,61 +116,62 @@ struct RootView: View {
             EmptyDetailView { model.requestNewSession() }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            ZStack(alignment: .top) {
-                ForEach(model.tabs) { tab in
-                    let isSelected = tab.id == model.selectedTab?.id
-                    TerminalScreen(tab: tab, theme: model.settings.theme)
-                        .opacity(isSelected ? 1 : 0)
-                        .allowsHitTesting(isSelected)
-                        .accessibilityHidden(!isSelected)
-                }
-                if model.isFindBarVisible, model.selectedTab != nil {
-                    HStack {
-                        Spacer(minLength: 0)
-                        TerminalFindBar(
-                            query: Bindable(model).findQuery,
-                            matchIndex: model.findMatchIndex,
-                            matchCount: model.findMatchCount,
-                            focusToken: model.findFocusToken,
-                            findNext: { model.findNextInTerminal() },
-                            findPrevious: { model.findPreviousInTerminal() },
-                            dismiss: { model.dismissFindBar() }
-                        )
+            VStack(spacing: 0) {
+                ZStack(alignment: .top) {
+                    ForEach(model.tabs) { tab in
+                        let isSelected = tab.id == model.selectedTab?.id
+                        TerminalScreen(tab: tab, theme: model.settings.theme)
+                            .opacity(isSelected ? 1 : 0)
+                            .allowsHitTesting(isSelected)
+                            .accessibilityHidden(!isSelected)
                     }
-                    .padding(10)
-                    .transition(
-                        reduceMotion
-                            ? .opacity
-                            : .opacity.combined(with: .offset(y: -6))
+                    if model.isFindBarVisible, model.selectedTab != nil {
+                        HStack {
+                            Spacer(minLength: 0)
+                            TerminalFindBar(
+                                query: Bindable(model).findQuery,
+                                matchIndex: model.findMatchIndex,
+                                matchCount: model.findMatchCount,
+                                focusToken: model.findFocusToken,
+                                findNext: { model.findNextInTerminal() },
+                                findPrevious: { model.findPreviousInTerminal() },
+                                dismiss: { model.dismissFindBar() }
+                            )
+                        }
+                        .padding(10)
+                        .transition(
+                            reduceMotion
+                                ? .opacity
+                                : .opacity.combined(with: .offset(y: -6))
+                        )
+                        .zIndex(1)
+                    }
+                }
+                // Docked below the terminal, never over it: the CLI's input
+                // line and an exit reason sit at the bottom of the screen.
+                if let tab = model.selectedTab, let item = tab.bridgeInbox.first {
+                    BridgeInboxCard(
+                        prompt: item.prompt,
+                        pendingCount: tab.bridgeInbox.count,
+                        canDeliver: tab.canDeliverBridgePrompt,
+                        deliver: {
+                            tab.deliverNextBridgePrompt()
+                            tab.controller.focus()
+                        },
+                        dismiss: { tab.dismissNextBridgePrompt() }
                     )
-                    .zIndex(1)
+                    .padding(10)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 8)))
                 }
-                VStack(spacing: 8) {
-                    Spacer(minLength: 0)
-                    if let tab = model.selectedTab, let item = tab.bridgeInbox.first {
-                        BridgeInboxCard(
-                            prompt: item.prompt,
-                            pendingCount: tab.bridgeInbox.count,
-                            canDeliver: tab.canDeliverBridgePrompt,
-                            deliver: {
-                                tab.deliverNextBridgePrompt()
-                                tab.controller.focus()
-                            },
-                            dismiss: { tab.dismissNextBridgePrompt() }
-                        )
-                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 8)))
-                    }
-                    if let tab = model.selectedTab, case .exited = tab.activity {
-                        ExitedCapsule(
-                            activity: tab.activity,
-                            close: { model.closeTab(tab.id) },
-                            restart: { model.restartTab(id: tab.id) }
-                        )
-                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 8)))
-                    }
+                if let tab = model.selectedTab, case .exited = tab.activity {
+                    ExitedCapsule(
+                        activity: tab.activity,
+                        close: { model.closeTab(tab.id) },
+                        restart: { model.restartTab(id: tab.id) }
+                    )
+                    .padding(10)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 8)))
                 }
-                .padding(14)
-                .zIndex(2)
             }
             .animation(
                 reduceMotion ? .easeOut(duration: 0.1) : Motion.slide,
@@ -315,7 +316,6 @@ private struct TopBar: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(maxWidth: 220, alignment: .trailing)
-                .fixedSize(horizontal: true, vertical: false)
                 .layoutPriority(1)
                 .padding(.horizontal, 4)
                 .help(tab.workingDirectory.abbreviatedPath)
@@ -502,8 +502,8 @@ private struct BridgeInboxCard: View {
             }
         }
         .padding(14)
-        .frame(maxWidth: 520)
-        .surface(palette.surface, radius: Radius.card, elevation: .overlay)
+        .frame(maxWidth: .infinity)
+        .surface(palette.surface, radius: Radius.card, elevation: .card)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Incoming tab message")
     }
@@ -601,10 +601,9 @@ private struct ExitedCapsule: View {
         .padding(.leading, 10)
         .padding(.trailing, 8)
         .frame(height: 42)
-        .frame(maxWidth: 520)
+        .frame(maxWidth: .infinity)
         .background(Capsule(style: .continuous).fill(palette.surface))
-        .overlay(Capsule(style: .continuous).strokeBorder(palette.ringOverlay, lineWidth: 1))
-        .shadow(color: .black.opacity(palette.isDark ? 0.34 : 0.10), radius: 14, y: 8)
+        .overlay(Capsule(style: .continuous).strokeBorder(palette.ring, lineWidth: 1))
     }
 }
 

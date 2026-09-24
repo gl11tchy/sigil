@@ -16,5 +16,10 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET' || url.origin !== self.location.origin || url.search || !SHELL.includes(url.pathname)) return;
+  // Fonts are immutable: serve the cached copy and skip the network.
+  if (url.pathname.startsWith('/fonts/')) {
+    event.respondWith(caches.match(url.pathname).then(hit => hit || fetch(event.request)));
+    return;
+  }
   event.respondWith(fetch(event.request).catch(() => caches.match(url.pathname)));
 });

@@ -27,8 +27,8 @@ hex in `Palette.swift`, `Site/public/style.css`, and `Sidereal/public/style.css`
 
 | Token        | Dark       | Light      | Used for                                         |
 |--------------|------------|------------|--------------------------------------------------|
-| `page`       | `#17181A`  | `#FAFAFB`  | The window, the sidebar, the page behind cards.  |
-| `canvas`     | `#1C1D1F`  | `#F1F2F3`  | The inset screen that holds tabs and the terminal.|
+| `canvas`     | `#1C1D1F`  | `#F1F2F3`  | The window and the sidebar: the frame.           |
+| `page`       | `#17181A`  | `#FAFAFB`  | The inset screen that holds tabs and the terminal.|
 | `surface`    | `#232427`  | `#FFFFFF`  | Cards, popovers, sheets, the selected segment.   |
 | `inset`      | `#1F2022`  | `#F7F8F9`  | Wells inside a card: a segmented track, a code block.|
 | `hover`      | `#2A2B2E`  | `#F4F5F6`  | Pointer or keyboard over a row or control.       |
@@ -86,8 +86,9 @@ Fixed scale, no fluid sizes. Product UI is read at one DPI.
 | Step   | Size | Line | Used for                                       |
 |--------|------|------|------------------------------------------------|
 | title  | 15   | 20   | Sheet and page titles. 600.                     |
-| body   | 13   | 18   | Rows, tabs, buttons, fields. 400; 500 when selected.|
-| small  | 12   | 16   | Section labels, secondary lines.                 |
+| row    | 14   | 20   | Sidebar rows and nav items. 400; 500 when selected.|
+| body   | 13   | 18   | Buttons, fields, settings rows, card text.       |
+| small  | 12.5 | 16   | Section labels, tab chips (500), secondary lines.|
 | mono   | 11.5 | 16   | Paths, times, counts in rows.                    |
 | micro  | 10.5 | 14   | Key caps.                                        |
 
@@ -104,62 +105,73 @@ date. Tooltips and accessibility labels spell it out.
 | `chip`    | 6     | Tab chips, tool chips, key caps, status pills (small).|
 | `control` | 8     | Rows, buttons, fields, icon buttons.            |
 | `card`    | 10    | Cards, popovers, sheets, banners.               |
-| `window`  | 14    | The canvas and the right panel.                 |
+| `window`  | 14    | The screen and the right panel.                 |
 | pill      | full  | Segmented tracks, floating action bars, capsules.|
 
-Spacing is a 4pt scale: 2, 4, 6, 8, 12, 16, 20, 24, 32.
+Spacing is a 4pt scale: 2, 4, 6, 8, 12, 16, 20, 24, 32, plus Beautiful UI's
+10pt window inset.
 
 ## The window (Mac)
 
-The window is `page`. The sidebar sits directly on it, with no border. The
-working area is the **canvas**: a `window`-radius rectangle in `canvas`, inset
-8pt from the top, right, and bottom edges, with the `card` ring. It holds, top
-to bottom:
+The window is `canvas`, as in Beautiful UI's harness. The sidebar sits
+directly on it, with no border. The working area is the **screen**: a
+`window`-radius rectangle in `page` with a 1px `line` border and no shadow,
+inset 10pt from the top, right, and bottom edges. It holds, top to bottom:
 
-1. **Tab bar**, 40pt. Tab chips (28pt tall, `chip` radius, 13pt Inter). The
-   selected tab is `hover2` with `ink`; others are `ink2` with a `hover` fill
-   under the pointer. A plus follows the last chip. Folder breadcrumb (mono,
-   `ink2`), panel toggle, and the session menu sit at the trailing edge.
+1. **Tab bar**, 44pt. Tab chips (28pt tall, `chip` radius, 12.5pt Inter 500).
+   The selected chip is `hover` in dark mode and `hover2` in light mode, where
+   `hover` is nearly the page itself; others show a fill only under the
+   pointer. Each chip's close glyph stays visible in `ink3` with a 20×24
+   target. A plus follows the last chip. The working label, the folder (mono,
+   `ink2`), the tab list, the panel toggle, and the session menu sit at the
+   trailing edge.
 2. A `line` rule.
 3. **The terminal**, filling the rest, painted in the terminal theme's ground.
-   The app's own themes (Sigil Dark, Sigil Light) paint it `canvas`, so the
-   screen and its frame are one surface.
+   The app's own themes (Sigil Dark, Sigil Light) paint it `page`, so the
+   terminal and its screen are one surface.
+4. **Docked cards**, below the terminal and never over it, so the CLI's input
+   line and an exit reason stay readable: the tab message (Beautiful UI's
+   approval card: question, text, Dismiss and Deliver) and the ended session
+   (a failed task row as a capsule: red mark, reason, Close, Restart).
 
-With the sidebar hidden, the canvas moves to the window's leading edge and
+With the sidebar hidden, the screen moves to the window's leading edge and
 the tab bar reserves room for the traffic lights.
 
-The **right panel** (⌥⌘B) is a second canvas beside the first, 8pt apart. Its
-header is a segmented control — Shell, Notes — on an `inset` pill track, the
-selected segment `surface` with the `button` ring.
+The **right panel** (⌥⌘B) is a second screen beside the first, 10pt apart.
+Its header is a segmented control — Terminal, Notes — on a pill track, the
+selected segment lifted with the `button` ring.
 
-Floating things inside the canvas are cards on `surface` with the `overlay`
-shadow: the find bar (a pill, like Beautiful UI's selection actions), the tab
-message (an approval card: question, text, Dismiss and Deliver), and the
-ended-session capsule (a failed task row: red mark, reason, Restart, Close).
+The find bar floats at the top right of the terminal as a `surface` pill with
+the `overlay` shadow, like Beautiful UI's selection actions.
 
 ## The sidebar
 
-Beautiful UI's sidebar nav, holding Sigil's lists.
+Beautiful UI's sidebar nav, holding Sigil's lists. Rows are 32pt with 14pt
+Inter, 8pt side padding, and the `control` radius, as measured in the harness.
 
 - **Header row** beside the traffic lights: the collapse button at the
   trailing edge.
 - **Search field**: `field` fill, `control` radius, 32pt, magnifier in `ink3`,
   placeholder "Search chats" in `ink2`, and a `⌘⇧F` key cap while empty.
   Focus draws a 1px `accent` ring.
-- **Nav items**, 30pt, 16pt icon + label, trailing mono count or key cap:
-  New session `⌘T`, Recents (count), Archived (count).
-- **Sections**: a sentence-case label in 12pt `ink2` with a trailing mono
+- **Nav items**: 18pt icon + label, trailing mono count or key cap —
+  New session `⌘T`, Home, Recents (count), Archived (count). The one you are
+  in is selected.
+- **Sections**: a sentence-case label in 12.5pt `ink2` with a trailing mono
   count — "Open 3", "Projects 12", "Pinned 2", "Today 4".
-- **Rows**: one line, 30pt, 13pt Inter title in `ink`, trailing metadata in
-  mono `ink2` — the compact time, or `project · time` in lists that span
-  projects. The open conversation is `hover2` with a 500-weight title.
-  Hover shows the row's actions (archive, pin, close) in place of the
-  metadata. Pinned rows keep a small pin mark in `ink3`.
-- **Gliding hover**: one `hover` fill follows the pointer from row to row with
-  a 140ms ease-out-strong slide. Reduced motion swaps the slide for an instant
-  move.
+- **Rows**: one line, title in `ink`, trailing metadata in mono `ink2` — the
+  compact time, or `project · time` in lists that span projects. A search
+  result adds the matched context as a second mono line. Hover shows the
+  row's actions (archive, pin, close) in place of the metadata. Pinned rows
+  keep a small pin mark in `ink3`.
+- **Selected**: the open conversation is `hover2` in dark mode; in light mode
+  it lifts to `surface` with the `button` ring, because a grey fill vanishes
+  on the light canvas. The title goes to 500.
+- **Gliding hover**: one fill follows the pointer from row to row with a
+  140ms ease-out-strong slide — `hover` in dark mode, `hover2` in light mode,
+  where `hover` is lighter than the canvas. Reduced motion moves it instantly.
 - Multi-selection draws a 1px `accent` ring over the row's fill, and a
-  keyboard highlight draws `hover` plus a `lineStrong` ring.
+  keyboard highlight draws the hover fill plus a `lineStrong` ring.
 
 ## State vocabulary
 

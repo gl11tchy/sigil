@@ -62,7 +62,10 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
     if (!asset) { res.writeHead(404).end(); return; }
     try {
       const data = await readFile(new URL(`public/${asset[0]}`, import.meta.url));
-      res.writeHead(200, { 'Content-Type': asset[1].startsWith('font/') ? asset[1] : `${asset[1]}; charset=utf-8` }).end(data);
+      const font = asset[1].startsWith('font/');
+      // Fonts never change under one name and weigh ~500 KB; let the phone keep them.
+      if (font) res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+      res.writeHead(200, { 'Content-Type': font ? asset[1] : `${asset[1]}; charset=utf-8` }).end(data);
     } catch { res.writeHead(500).end(); }
   });
   server.requestTimeout = 10000;
