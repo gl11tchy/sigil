@@ -9,6 +9,10 @@ const assets = new Map([
   ['/style.css', ['style.css', 'text/css']],
   ['/icon.svg', ['icon.svg', 'image/svg+xml']],
   ['/screenshot.png', ['screenshot.png', 'image/png']],
+  ...['Inter-Regular', 'Inter-Medium', 'Inter-SemiBold', 'JetBrainsMono-Regular', 'JetBrainsMono-Medium']
+    .map(name => [`/fonts/${name}.woff2`, [`fonts/${name}.woff2`, 'font/woff2']]),
+  ...['Inter-OFL', 'JetBrainsMono-OFL']
+    .map(name => [`/fonts/${name}.txt`, [`fonts/${name}.txt`, 'text/plain']]),
 ]);
 
 export function createSite({ publicOrigin } = {}) {
@@ -36,6 +40,8 @@ export function createSite({ publicOrigin } = {}) {
       const data = await readFile(new URL(`public/${asset[0]}`, import.meta.url));
       const type = asset[1].startsWith('text/') || asset[1] === 'image/svg+xml'
         ? `${asset[1]}; charset=utf-8` : asset[1];
+      // Fonts never change under one name; let browsers keep them.
+      if (asset[1].startsWith('font/')) res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
       res.writeHead(200, { 'Content-Type': type, 'Content-Length': data.byteLength }).end(data);
     } catch { res.writeHead(500).end(); }
   });

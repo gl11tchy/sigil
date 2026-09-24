@@ -613,11 +613,9 @@ extension TerminalController {
         min(max(size, minFontSize), maxFontSize)
     }
 
+    /// JetBrains Mono when the app bundle carries it, else SF Mono.
     private static func monospacedFont(size: CGFloat) -> NSFont {
-        if let font = NSFont(name: "SF Mono", size: size) { return font }
-        if let font = NSFont(name: "SFMono-Regular", size: size) { return font }
-        if let font = NSFont(name: "Menlo", size: size) { return font }
-        return NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        Typeface.terminalFont(size: size)
     }
 
     private static func nsColor(_ color: SwiftTerm.Color) -> NSColor {
