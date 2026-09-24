@@ -750,7 +750,7 @@ test('Forget this Mac asks first and Cancel keeps the pairing', async ({ page, b
     const dialog = page.locator('#forget-dialog');
     await page.locator('#connection-toggle').click();
     // Forget reads as destructive and sits apart from the buttons above it.
-    await expect(page.locator('#forget')).toHaveCSS('color', 'rgb(255, 95, 158)');
+    await expect(page.locator('#forget')).toHaveCSS('color', 'rgb(199, 42, 53)');
     const gap = await page.evaluate(() => {
       const buttons = [...document.querySelectorAll('.connection-panel button')].filter(button => !button.hidden);
       const index = buttons.findIndex(button => button.id === 'forget');
@@ -760,7 +760,7 @@ test('Forget this Mac asks first and Cancel keeps the pairing', async ({ page, b
     await page.locator('#forget').click();
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText('Forget this Mac?');
-    await expect(page.locator('#forget-accept')).toHaveCSS('color', 'rgb(255, 95, 158)');
+    await expect(page.locator('#forget-accept')).toHaveCSS('color', 'rgb(199, 42, 53)');
     await page.screenshot({ path: testInfo.outputPath('forget-confirm.png'), animations: 'disabled' });
     await page.locator('#forget-cancel').click();
     await expect(dialog).toBeHidden();

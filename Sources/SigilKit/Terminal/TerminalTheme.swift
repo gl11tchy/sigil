@@ -35,31 +35,52 @@ public struct TerminalTheme: Sendable, Hashable, Identifiable {
     public var cursor: SwiftTerm.Color { Self.color(hex.cursor) }
     public var selection: SwiftTerm.Color { Self.color(hex.selection) }
 
-    /// Themes the app offers, `sigilNeon` first — it is what the app ships as.
+    /// Themes the app offers. The app's own two come first: they are what it
+    /// ships as, and the only ones whose terminal is the window's own `page`.
     public static let all: [TerminalTheme] = [
-        .sigilNeon, .grokNight, .grokDay, .grokEmber,
+        .sigilDark, .sigilLight, .grokNight, .grokDay, .grokEmber,
         .githubDark, .linear, .notion, .discord, .slack, .spotify,
         .vsCode, .cursorDark, .xDark, .raycast, .chatGPT, .figma,
         .macOS, .obsidian, .telegram, .twitch,
     ]
-    /// The app's own theme: a neutral near-black ground with two neon accents.
-    /// The CLI is asked to render in the matching `sigil-neon` TUI theme, so the
-    /// window and the program inside it are one design instead of two.
-    public static let sigilNeon = make(
-        name: "Sigil Neon",
+    /// The app's own dark theme, built from the Beautiful UI tokens in
+    /// `Palette`: the terminal ground is `page`, text is `ink`, the cursor and
+    /// the selection are the accent. The CLI paints its TUI from the same
+    /// colours through `sigil-host`, so the window and the program are one design.
+    public static let sigilDark = make(
+        name: "Sigil Dark",
         isDark: true,
         ansi: [
-            0x14161A, 0xFF5F9E, 0x4EF0C4, 0xFFC46B,
-            0x5AD9FF, 0xA98BFF, 0x5FE0E8, 0xC9CFD9,
-            0x505864, 0xFF87B7, 0x7CFFB2, 0xFFD79B,
-            0x8AE4FF, 0xC3AEFF, 0x8AEDF2, 0xE6E9EF,
+            0x313236, 0xEE5C61, 0x3CBB72, 0xF09A2E,
+            0x3D9AFF, 0xC571D8, 0x16A6C7, 0xA5A8AD,
+            0x6C6F75, 0xFE8A89, 0x75D697, 0xF7C56D,
+            0x7EC0FF, 0xD9A3E6, 0x73C8E1, 0xF2F3F4,
         ],
-        background: 0x08090B,
-        foreground: 0xC9CFD9,
-        cursor: 0x4EF0C4,
-        selection: 0x1F242C,
-        accent: 0x4EF0C4,
-        cliTheme: "sigil-neon"
+        background: 0x17181A,
+        foreground: 0xF2F3F4,
+        cursor: 0x3D9AFF,
+        selection: 0x223C5A,
+        accent: 0x3D9AFF,
+        user: 0xA5A8AD,
+        link: 0x7EC0FF
+    )
+    /// The light twin of `sigilDark`.
+    public static let sigilLight = make(
+        name: "Sigil Light",
+        isDark: false,
+        ansi: [
+            0x1F2124, 0xBE2130, 0x007836, 0xA76200,
+            0x005ECC, 0x9637AB, 0x007690, 0x62656B,
+            0x9A9DA3, 0xD7333D, 0x028C43, 0xBE7200,
+            0x0070DD, 0xA94BBE, 0x0089A6, 0x111214,
+        ],
+        background: 0xFAFAFB,
+        foreground: 0x1F2124,
+        cursor: 0x0285FF,
+        selection: 0xCDE5FC,
+        accent: 0x0285FF,
+        user: 0x62656B,
+        link: 0x0066D2
     )
     public static let grokNight = make(
         name: "Grok Night",
@@ -375,6 +396,9 @@ extension TerminalTheme {
         var cursor: UInt32
         var selection: UInt32
         var accent: UInt32
+        /// The human's turn and links in the TUI, when not the ANSI defaults.
+        var user: UInt32?
+        var link: UInt32?
     }
 
     fileprivate static func make(
@@ -386,6 +410,8 @@ extension TerminalTheme {
         cursor: UInt32,
         selection: UInt32,
         accent: UInt32,
+        user: UInt32? = nil,
+        link: UInt32? = nil,
         cliTheme: String = "sigil-host"
     ) -> TerminalTheme {
         TerminalTheme(
@@ -397,7 +423,9 @@ extension TerminalTheme {
                 foreground: foreground,
                 cursor: cursor,
                 selection: selection,
-                accent: accent
+                accent: accent,
+                user: user,
+                link: link
             ),
             cliTheme: cliTheme
         )
@@ -413,16 +441,15 @@ extension TerminalTheme {
 }
 
 extension TerminalTheme {
-    /// Raw `0xRRGGBB` values. The app chrome derives its colours from these so the
-    /// window reads as one surface instead of a sidebar bolted onto a terminal.
+    /// Raw `0xRRGGBB` values.
     public var backgroundHex: UInt32 { hex.background }
+    public var ansiHex: [UInt32] { hex.ansi }
     public var foregroundHex: UInt32 { hex.foreground }
     public var cursorHex: UInt32 { hex.cursor }
     public var selectionHex: UInt32 { hex.selection }
 
-    /// The one accent the app chrome is allowed. It comes off the sigil mark, and
-    /// marks state only: the open conversation, a session doing work, a focused
-    /// field. The terminal itself never uses it.
+    /// The theme's accent, handed to the CLI as `GROK_THEME_ACCENT`. The app
+    /// chrome uses `Palette.accent`, whatever the terminal theme.
     public var accentHex: UInt32 { hex.accent }
 
     /// The name of the CLI theme that matches this one. It reaches the CLI as
@@ -439,10 +466,10 @@ extension TerminalTheme {
             "GROK_THEME_BG": hexString(hex.background),
             "GROK_THEME_FG": hexString(hex.foreground),
             "GROK_THEME_ACCENT": hexString(hex.accent),
-            "GROK_THEME_USER": hexString(ansi[5]),
+            "GROK_THEME_USER": hexString(hex.user ?? ansi[5]),
             "GROK_THEME_ERROR": hexString(ansi[1]),
             "GROK_THEME_WARN": hexString(ansi[3]),
-            "GROK_THEME_LINK": hexString(ansi[6]),
+            "GROK_THEME_LINK": hexString(hex.link ?? ansi[6]),
             "GROK_THEME_OK": hexString(ansi[2]),
             "GROK_THEME_SELECT": hexString(hex.selection),
             "GROK_THEME_DARK": isDark ? "1" : "0",
