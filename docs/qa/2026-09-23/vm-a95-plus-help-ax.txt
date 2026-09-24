@@ -1,0 +1,5 @@
+## plus buttons, AXHelp (18:03:38)
+AXButton | Description=New Session in /Users/Shared/sigil-ux/projects/acme-api (⌘T) | Help=New Session in /Users/Shared/sigil-ux/projects/acme-api (⌘T) | Focused=0 | Enabled=1 | Identifier=plus | Position=546,301 | Size=22x22
+AXButton | Description=New Session… (⌘T) | Help=New Session… (⌘T) | Focused=0 | Enabled=1 | Identifier=plus | Position=1154,269 | Size=22x22
+## first row: sidebar search-row plus (SidebarView.swift:176-181), which also calls model.requestNewSession() and opens the same chooser sheet; its help still names a folder.
+## second row: top-bar plus (RootView.swift:253), the button a95 changed: "New Session… (⌘T)".

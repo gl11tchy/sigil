@@ -40,6 +40,36 @@ struct AppSettingsTests {
     }
 
     @Test @MainActor
+    func aChosenStockGrokPathSurvivesARelaunch() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bin = root.appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        for name in ["grok", "grok-sigil"] {
+            let file = bin.appendingPathComponent(name)
+            try Data("#!/bin/sh\nexit 0\n".utf8).write(to: file)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
+        }
+        let oldGrokHome = ProcessInfo.processInfo.environment["GROK_HOME"]
+        setenv("GROK_HOME", root.path, 1)
+        defer {
+            if let oldGrokHome { setenv("GROK_HOME", oldGrokHome, 1) } else { unsetenv("GROK_HOME") }
+        }
+        let defaults = isolatedDefaults()
+        defer { defaults.reset() }
+        let stock = bin.appendingPathComponent("grok").path
+        let themed = bin.appendingPathComponent("grok-sigil").path
+
+        // The stock path an older default stored still moves to the themed build.
+        defaults.value.set(stock, forKey: "grok.executablePath")
+        #expect(AppSettings(defaults: defaults.value).executablePath == themed)
+
+        // Once the user picks the stock CLI, a relaunch keeps it.
+        AppSettings(defaults: defaults.value).executablePath = stock
+        #expect(AppSettings(defaults: defaults.value).executablePath == stock)
+    }
+
+    @Test @MainActor
     func settingsRememberModePinsAndFocusedFolder() {
         let defaults = isolatedDefaults()
         defer { defaults.reset() }

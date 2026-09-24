@@ -18,6 +18,8 @@ struct PaletteTests {
         // The same three sit on the selected row and on the terminal ground.
         #expect(Palette.contrast(palette.textFaintHex, palette.selectedHex) >= 4.5)
         #expect(Palette.contrast(palette.textDimHex, palette.groundHex) >= 4.5)
+        // A background tab's resting close glyph is textFaint on the ground.
+        #expect(Palette.contrast(palette.textFaintHex, palette.groundHex) >= 3)
     }
 
     /// The accent marks state, so it has to be legible as a mark, not just present.

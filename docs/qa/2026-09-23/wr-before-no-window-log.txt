@@ -1,0 +1,13 @@
+# Side finding while launching the audit/app-panel build (7d58b29) with launch.sh, 2026-09-23
+# The saved window state came from the previous SigilUX build (branch audit/prov-settings, no WindowCloseGuard).
+# AppKit restored the old window identifier, SwiftUI returned no window, and the app ran with zero windows.
+# A reopen Apple event sent to the pid did not open one either. Relaunching with -ApplePersistenceIgnoreState YES opened the window.
+# Window identifier of this build: SwiftUI.ModifiedContent<...<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._BackgroundModifier<SigilApp.WindowCloseGuard>>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1
+
+2026-09-23 18:25:24.242 Df SigilUX[89086:2109193] [com.apple.AppKit:AutomaticTermination] void _NSDisableAutomaticTerminationAndLog(NSString *) Restoring windows
+2026-09-23 18:25:24.246 Df SigilUX[89086:2109193] [com.apple.AppKit:StateRestoration] -[NSApplication _reopenWindowsAsNecessaryIncludingRestorableState:withFullFidelity:completionHandler:] shouldRestoreState=1 hasPersistentStateToRestore=1 shouldStillRestoreStateAfterPrompting=1
+2026-09-23 18:25:24.248 Df SigilUX[89086:2109193] [com.apple.AppKit:StateRestoration] -[NSApplication(NSPersistentUIRestorationSupport) _restoreWindowWithRestoration:completionHandler:] restoration=<NSPersistentUIWindowRestoration: 0xc910ca030> savedIdentifier=SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1
+2026-09-23 18:25:24.248 Df SigilUX[89086:2109193] [com.apple.AppKit:StateRestoration] -[NSApplication(NSWindowRestoration) restoreWindowWithIdentifier:state:completionHandler:] identifier=SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1 className=SwiftUI.AppWindowsController
+2026-09-23 18:25:24.248 Df SigilUX[89086:2109193] [com.apple.AppKit:StateRestoration] -[NSApplication(NSWindowRestoration) restoreWindowWithIdentifier:state:completionHandler:] restorerIsValid=YES restorer=SwiftUI.AppWindowsController
+2026-09-23 18:25:24.248 Df SigilUX[89086:2109193] [com.apple.AppKit:StateRestoration] -[NSApplication(NSPersistentUIRestorationSupport) _restoreWindowWithRestoration:completionHandler:]_block_invoke restoration=<NSPersistentUIWindowRestoration: 0xc910ca030> window=0x0 savedIdentifier=SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1 error=(null)
+2026-09-23 18:25:24.251 Df SigilUX[89086:2109193] [com.apple.AppKit:AutomaticTermination] void _NSEnableAutomaticTerminationAndLog(NSString *) Restoring windows

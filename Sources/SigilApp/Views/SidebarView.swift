@@ -62,7 +62,7 @@ struct SidebarView: View {
         let snapshot = model.sidebarSnapshot()
         VStack(spacing: 0) {
             Color.clear.frame(height: 36)
-            searchRow(newSessionDirectory: model.newSessionDirectory(focusedProject: snapshot.focusedProject))
+            searchRow
             modeArea(focusedProject: snapshot.focusedProject)
             list(snapshot)
             if let counts = snapshot.destinations, !counts.rowIDs.isEmpty { destinations(counts) }
@@ -139,7 +139,7 @@ struct SidebarView: View {
 
     // MARK: - Search
 
-    private func searchRow(newSessionDirectory: URL) -> some View {
+    private var searchRow: some View {
         HStack(spacing: 6) {
             HStack(spacing: 5) {
                 Image(systemName: "magnifyingglass")
@@ -188,7 +188,7 @@ struct SidebarView: View {
             )
             IconButton(
                 systemImage: "plus",
-                help: "New Session in \(newSessionDirectory.abbreviatedPath) (⌘T)"
+                help: "New Session… (⌘T)"
             ) {
                 model.requestNewSession()
             }

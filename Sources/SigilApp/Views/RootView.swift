@@ -44,6 +44,7 @@ struct RootView: View {
         .tint(palette.accent)
         .environment(\.palette, palette)
         .background(WindowChrome(background: palette.groundNSColor))
+        .background(WindowCloseGuard { model.tabs.contains(where: \.shouldWarnBeforeStopping) })
         .sheet(isPresented: $model.isShowingNewSessionSheet) {
             NewSessionSheet(model: model)
                 .environment(\.palette, Palette(theme: model.settings.theme))
@@ -103,7 +104,7 @@ struct RootView: View {
                 ZStack(alignment: .topTrailing) {
                     ForEach(model.tabs) { tab in
                         let isSelected = tab.id == model.selectedTab?.id
-                        TerminalScreen(tab: tab)
+                        TerminalScreen(tab: tab, isSelected: isSelected)
                             .opacity(isSelected ? 1 : 0)
                             .allowsHitTesting(isSelected)
                             .accessibilityHidden(!isSelected)
@@ -128,7 +129,7 @@ struct RootView: View {
                     }
                 }
                 .animation(
-                    reduceMotion ? .easeOut(duration: 0.1) : .easeOut(duration: 0.16),
+                    .easeOut(duration: 0.16),
                     value: model.isFindBarVisible
                 )
                 .onChange(of: model.findQuery) { _, query in
@@ -223,9 +224,10 @@ private struct TopBar: View {
 
             IconButton(
                 systemImage: "sidebar.leading",
-                help: model.isSidebarVisible ? "Hide Sidebar (⌘B)" : "Show Sidebar (⌘B)"
+                help: model.isSidebarVisible ? "Hide Sidebar (⌘B)" : "Show Sidebar (⌘B)",
+                isOn: model.isSidebarVisible
             ) {
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) {
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
                     model.isSidebarVisible.toggle()
                 }
             }
@@ -244,12 +246,13 @@ private struct TopBar: View {
 
             IconButton(
                 systemImage: "sidebar.trailing",
-                help: model.panel.isVisible ? "Hide Panel (⌥⌘B)" : "Show Panel (⌥⌘B)"
+                help: model.panel.isVisible ? "Hide Panel (⌥⌘B)" : "Show Panel (⌥⌘B)",
+                isOn: model.panel.isVisible
             ) {
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) { model.togglePanel() }
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) { model.togglePanel() }
             }
 
-            IconButton(systemImage: "plus", help: "New Session in \(model.newSessionDirectory.abbreviatedPath) (⌘T)") {
+            IconButton(systemImage: "plus", help: "New Session… (⌘T)") {
                 model.requestNewSession()
             }
             Menu {
@@ -291,7 +294,7 @@ private struct TopBar: View {
             HStack(spacing: 6) {
                 StatusDot(activity: tab.activity)
                 Text(model.title(for: tab))
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(palette.text)
                     .lineLimit(1)
                 if let folder = SelectedSessionFolder.text(
@@ -319,6 +322,7 @@ private struct TopBar: View {
 struct IconButton: View {
     let systemImage: String
     var help: String = ""
+    var isOn = false
     let action: () -> Void
 
     @Environment(\.palette) private var palette
@@ -331,15 +335,16 @@ struct IconButton: View {
                 .frame(width: 22, height: 22)
                 .background(
                     RoundedRectangle(cornerRadius: 5)
-                        .fill(isHovering ? palette.raised : Color.clear)
+                        .fill(isOn ? palette.selected : (isHovering ? palette.raised : Color.clear))
                 )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(isHovering ? palette.text : palette.textDim)
+        .foregroundStyle(isOn || isHovering ? palette.text : palette.textDim)
         .onHover { isHovering = $0 }
         .help(help)
         .accessibilityLabel(help)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }
 
@@ -505,7 +510,7 @@ private struct EmptyDetailView: View {
     var body: some View {
         VStack(spacing: 7) {
             Text("No open session")
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 12))
                 .foregroundStyle(palette.textDim)
             HStack(spacing: 5) {
                 Text("Press")

@@ -61,7 +61,6 @@ struct TabListView: View {
     @Bindable var model: AppModel
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isOpen = false
     @State private var isHovering = false
     @State private var highlighted: UUID?
     @FocusState private var listFocused: Bool
@@ -93,14 +92,14 @@ struct TabListView: View {
         .buttonStyle(.plain)
         .foregroundStyle(isHovering ? palette.text : palette.textDim)
         .onHover { isHovering = $0 }
-        .keyboardShortcut("t", modifiers: [.command, .control])
         .help("Tabs (⌃⌘T)")
         .accessibilityLabel("Tabs (⌃⌘T)")
-        .popover(isPresented: $isOpen, arrowEdge: .top) {
+        .popover(isPresented: $model.isShowingTabList, arrowEdge: .top) {
             tabList
                 .frame(width: 360)
                 .frame(height: listHeight)
         }
+        .onDisappear { model.isShowingTabList = false }
     }
 
     private var listHeight: CGFloat {
@@ -128,7 +127,10 @@ struct TabListView: View {
             .focusable()
             .focused($listFocused)
             .defaultFocus($listFocused, true)
-            .onAppear { focusList() }
+            .onAppear {
+                focusList()
+                if let highlighted { proxy.scrollTo(highlighted, anchor: .center) }
+            }
             .onKeyPress(.upArrow) {
                 move(-1)
                 return .handled
@@ -151,7 +153,7 @@ struct TabListView: View {
             }
             .onChange(of: highlighted) { _, id in
                 guard let id else { return }
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.12)) {
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
                     proxy.scrollTo(id, anchor: .center)
                 }
             }
@@ -161,18 +163,13 @@ struct TabListView: View {
     }
 
     private func toggle() {
-        if isOpen {
-            isOpen = false
-            return
-        }
-        highlighted = TabListRows.highlightedID(
-            current: nil, selected: model.selectedTabID, entries: entries)
-        isOpen = true
+        model.isShowingTabList.toggle()
     }
 
+    /// The list opens on the selected tab, whether the button or the menu opened it.
     private func focusList() {
         highlighted = TabListRows.highlightedID(
-            current: highlighted, selected: model.selectedTabID, entries: entries)
+            current: nil, selected: model.selectedTabID, entries: entries)
         listFocused = true
     }
 
@@ -196,7 +193,7 @@ struct TabListView: View {
     private func choose(_ id: UUID) {
         guard let chosen = TabListRows.selectedID(afterChoosing: id, in: entries) else { return }
         model.select(chosen)
-        isOpen = false
+        model.isShowingTabList = false
     }
 }
 
@@ -228,6 +225,13 @@ private struct TabListRow: View {
             .background(
                 RoundedRectangle(cornerRadius: 6)
                     .fill(fill)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(
+                                isHighlighted ? palette.hairline : Color.clear,
+                                lineWidth: 1
+                            )
+                    )
             )
         }
         .buttonStyle(.plain)

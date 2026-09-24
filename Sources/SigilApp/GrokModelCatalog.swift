@@ -38,11 +38,19 @@ enum GrokModelCatalog: Sendable {
     }
 
     /// Runs `grok models`. Empty when the CLI is missing, slow, or prints no rows.
-    static func load(executable: URL) async -> [String] {
+    static func load(
+        executable: URL,
+        shellPath: String = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+    ) async -> [String] {
         let path = executable.path
-        return await Task.detached(priority: .utility) {
-            runModels(at: path)
-        }.value
+        let task = Task.detached(priority: .utility) {
+            await runModels(at: path, shellPath: shellPath)
+        }
+        return await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
     }
 
     /// Same login-shell launch a Grok tab uses, so Finder-started Sigil sees
@@ -79,33 +87,128 @@ enum GrokModelCatalog: Sendable {
         }
     }
 
-    private static func runModels(at path: String) -> [String] {
+    /// Never blocks a cooperative thread: stdout drains on its own reader,
+    /// exit arrives through the termination handler, and a profile helper
+    /// that inherited stdout cannot hold the result past a short grace.
+    private static func runModels(at path: String, shellPath: String) async -> [String] {
         guard FileManager.default.isExecutableFile(atPath: path) else { return [] }
-        let command = launch(
-            executable: path,
-            shellPath: ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        )
+        let command = launch(executable: path, shellPath: shellPath)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: command.executable)
         process.arguments = command.arguments
         let output = Pipe()
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
+        let captured = CapturedOutput()
+        let reader = DispatchGroup()
+        reader.enter()
+        DispatchQueue.global(qos: .utility).async {
+            defer { reader.leave() }
+            captured.drain(output.fileHandleForReading)
+        }
+        let exit = OnceSignal()
+        process.terminationHandler = { _ in exit.finish(true) }
         do {
             try process.run()
+            try? output.fileHandleForWriting.close()
         } catch {
+            try? output.fileHandleForWriting.close()
+            captured.stop()
             return []
         }
-        let deadline = Date().addingTimeInterval(3)
-        while process.isRunning, Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.02)
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 3) { exit.finish(false) }
+        let exited = await withTaskCancellationHandler {
+            await exit.wait()
+        } onCancel: {
+            exit.finish(false)
         }
-        if process.isRunning {
-            stop(process)
+        guard exited else {
+            captured.stop()
+            DispatchQueue.global(qos: .utility).async { stop(process) }
             return []
         }
-        let data = output.fileHandleForReading.readDataToEndOfFile()
+        let drained = OnceSignal()
+        reader.notify(queue: .global(qos: .utility)) { drained.finish(true) }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.5) { drained.finish(false) }
+        _ = await drained.wait()
+        captured.stop()
         guard process.terminationStatus == 0 else { return [] }
-        return parse(String(decoding: data, as: UTF8.self))
+        return parse(String(decoding: captured.data, as: UTF8.self))
+    }
+}
+
+/// Resolves once, with the first value any caller reports.
+private final class OnceSignal: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: Bool?
+    private var continuation: CheckedContinuation<Bool, Never>?
+
+    func finish(_ value: Bool) {
+        lock.lock()
+        guard result == nil else {
+            lock.unlock()
+            return
+        }
+        result = value
+        let waiting = continuation
+        continuation = nil
+        lock.unlock()
+        waiting?.resume(returning: value)
+    }
+
+    func wait() async -> Bool {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if let result {
+                lock.unlock()
+                continuation.resume(returning: result)
+                return
+            }
+            self.continuation = continuation
+            lock.unlock()
+        }
+    }
+}
+
+/// Reads stdout as it arrives. `stop()` ends the read even when a child
+/// that inherited the pipe keeps it open; the reader then closes the handle.
+private final class CapturedOutput: @unchecked Sendable {
+    private let lock = NSLock()
+    private var buffer = Data()
+    private var stopped = false
+
+    func drain(_ handle: FileHandle) {
+        defer { try? handle.close() }
+        var chunk = [UInt8](repeating: 0, count: 16_384)
+        var descriptor = pollfd(fd: handle.fileDescriptor, events: Int16(POLLIN), revents: 0)
+        while !isStopped {
+            let ready = poll(&descriptor, 1, 50)
+            if ready == 0 || (ready < 0 && errno == EINTR) { continue }
+            guard ready > 0 else { return }
+            let count = read(handle.fileDescriptor, &chunk, chunk.count)
+            if count < 0, errno == EINTR || errno == EAGAIN { continue }
+            guard count > 0 else { return }
+            lock.lock()
+            buffer.append(contentsOf: chunk[0..<count])
+            lock.unlock()
+        }
+    }
+
+    func stop() {
+        lock.lock()
+        stopped = true
+        lock.unlock()
+    }
+
+    private var isStopped: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return stopped
+    }
+
+    var data: Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return buffer
     }
 }
