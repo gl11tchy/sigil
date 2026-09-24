@@ -80,6 +80,27 @@ struct SettingsView: View {
 
     private var general: some View {
         SettingsPage(minHeight: 620) {
+            SettingsSection(
+                title: "New sessions",
+                footer:
+                    "In a git repository, a new session gets its own worktree and branch. Turn this off to work in the project folder."
+            ) {
+                SettingsRow(label: "Default CLI") {
+                    Picker("Default CLI", selection: Bindable(model.settings).defaultProvider) {
+                        ForEach(CLIProvider.allCases) { provider in
+                            Text(provider.name).tag(provider)
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                SettingsDivider()
+                SettingsToggle(
+                    "Start in a new worktree",
+                    isOn: Bindable(model.settings).startsInWorktree
+                )
+            }
+
             SettingsSection(title: "Grok CLI") {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {

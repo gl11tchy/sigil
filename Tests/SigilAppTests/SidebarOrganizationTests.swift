@@ -30,6 +30,26 @@ struct SidebarOrganizationTests {
         #expect(grouped.map(\.name) == ["unique", "/workspace/a/web", "/workspace/b/web"])
     }
 
+    @Test func sigilWorktreeSessionsGroupUnderTheirProject() {
+        let folder = GrokPaths.encode(path: "/workspace/app")
+        let worktree = SigilWorktree.root.appendingPathComponent("\(folder)/ab12cd34").path
+        let inWorktree = session(id: "w", cwd: worktree, updated: 3)
+        let inProject = session(id: "p", cwd: "/workspace/app", updated: 2)
+        let grouped = SidebarOrganization.projects(from: [inWorktree, inProject]) { $0 }
+        #expect(grouped.count == 1)
+        #expect(grouped[0].cwd == "/workspace/app")
+        #expect(grouped[0].name == "app")
+        #expect(grouped[0].sessions.map(\.id) == ["w", "p"])
+    }
+
+    @Test func sigilWorktreeFoldersShowProjectAndWorktreeName() {
+        let folder = GrokPaths.encode(path: "/workspace/app")
+        let worktree = SigilWorktree.root.appendingPathComponent("\(folder)/ab12cd34")
+        #expect(worktree.sigilWorktreeLabel == "app/ab12cd34")
+        #expect(worktree.breadcrumbPath == "app/ab12cd34")
+        #expect(URL(fileURLWithPath: "/workspace/app").sigilWorktreeLabel == nil)
+    }
+
     @Test func addedFoldersJoinProjectsByDate() {
         let web = session(id: "a", cwd: "/workspace/a/web", updated: 20)
         let api = session(id: "b", cwd: "/workspace/api", updated: 10)

@@ -109,7 +109,7 @@ final class TerminalTab: Identifiable {
     var title: String {
         if let sessionTitle, !sessionTitle.isEmpty { return sessionTitle }
         let name = workingDirectory.lastPathComponent
-        let folder = name.isEmpty ? workingDirectory.path : name
+        let folder = workingDirectory.sigilWorktreeLabel ?? (name.isEmpty ? workingDirectory.path : name)
         // Two tabs of one provider must not share a title.
         if spec.provider != .grokBuild { return "\(spec.provider.name) · \(folder)" }
         return folder
