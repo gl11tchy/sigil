@@ -175,7 +175,8 @@ struct NewSessionSheet: View {
         .defaultFocus($isProviderRowFocused, true)
         .onAppear {
             let initial = model.pendingSessionDirectory ?? model.newSessionDirectory
-            directory = SigilWorktree.projectPath(of: initial.path)
+            directory =
+                SigilWorktree.projectPath(of: initial.path)
                 .map { URL(fileURLWithPath: $0) }
                 .flatMap { isDirectory($0) ? $0 : nil } ?? initial
             modelName = model.settings.model.trimmingCharacters(in: .whitespacesAndNewlines)
