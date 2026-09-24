@@ -8,6 +8,14 @@ import { pairingFromText } from '../public/pairing.mjs';
 const source = (await readFile(new URL('../public/app.mjs', import.meta.url), 'utf8'))
   .replace(/^import .* from '\.\/.*\.mjs';\n/gm, '');
 const settle = () => new Promise(resolve => setImmediate(resolve));
+// Answers New's CLI list as a Mac from before the choice does.
+async function skipOptions(socket) {
+  const request = socket.sent.at(-1);
+  assert.equal(request.action, 'options');
+  socket.receive({ data: JSON.stringify({
+    challenge: request.challenge, sequence: request.sequence, ok: false, error: 'Unknown action.' }) });
+  await settle();
+}
 
 // Run the real handlers; only browser services and encryption are replaced.
 async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { device: true } } } = {}) {
@@ -744,6 +752,7 @@ test('a new chat asks which project and cancel does not start one', async () => 
     state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
   }) });
   await settle();
+  await skipOptions(socket);
   assert.equal(page.element('project-dialog').open, true);
   assert.equal(page.element('project-list').children.length, 2);
   const labels = page.element('project-list').children.map(button => button.children.map(node => node.textContent).join(' '));
@@ -761,10 +770,74 @@ test('a new chat asks which project and cancel does not start one', async () => 
     state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
   }) });
   await settle();
+  await skipOptions(socket);
   page.element('project-list').children[0].onclick();
   await settle();
   assert.equal(socket.sent.at(-1).action, 'new');
   assert.equal(socket.sent.at(-1).text, '/work/widget');
+  assert.equal(socket.sent.at(-1).provider, undefined);
+  assert.equal(page.element('provider-field').hidden, true);
+});
+
+test('New offers the Mac\'s CLIs and starts the chosen one', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  const providers = [
+    { id: 'grokBuild', name: 'Grok Build', takesModel: true },
+    { id: 'claudeCode', name: 'Claude Code', takesModel: false },
+    { id: 'kimi', name: 'Kimi Code', takesModel: false, problem: 'Set up Kimi Code sign-in in Sigil on your Mac, then try again.' },
+  ];
+  async function openNew() {
+    page.element('new').onclick();
+    await settle();
+    const projects = socket.sent.at(-1);
+    assert.equal(projects.action, 'projects');
+    socket.receive({ data: JSON.stringify({
+      challenge: projects.challenge, sequence: projects.sequence, ok: true,
+      projects: [{ name: 'Widget', folder: '/work/widget' }],
+    }) });
+    await settle();
+    const options = socket.sent.at(-1);
+    assert.equal(options.action, 'options');
+    socket.receive({ data: JSON.stringify({
+      challenge: options.challenge, sequence: options.sequence, ok: true,
+      options: { providers, provider: 'grokBuild', models: [], model: '', efforts: [], effort: '', locations: [] },
+    }) });
+    await settle();
+    assert.equal(page.element('project-dialog').open, true);
+  }
+  await openNew();
+  assert.equal(page.element('provider-field').hidden, false);
+  assert.deepEqual(page.element('provider').children.map(option => [option.value, option.textContent]),
+    providers.map(provider => [provider.id, provider.name]));
+  assert.equal(page.element('provider').value, 'grokBuild');
+  assert.equal(page.element('provider-problem').hidden, true);
+
+  page.element('provider').value = 'kimi';
+  page.element('provider').onchange();
+  assert.equal(page.element('provider-problem').hidden, false);
+  assert.match(page.element('provider-problem').textContent, /Kimi Code sign-in/);
+  assert.equal(page.element('project-list').children[0].disabled, true);
+  page.element('project-list').children[0].onclick();
+  await settle();
+  assert.equal(socket.sent.filter(item => item.action === 'new').length, 0);
+
+  page.element('provider').value = 'claudeCode';
+  page.element('provider').onchange();
+  assert.equal(page.element('provider-problem').hidden, true);
+  assert.equal(page.element('project-list').children[0].disabled, false);
+  page.element('project-list').children[0].onclick();
+  await settle();
+  const created = socket.sent.at(-1);
+  assert.equal(created.action, 'new');
+  assert.equal(created.text, '/work/widget');
+  assert.equal(created.provider, 'claudeCode');
+  socket.reply(created);
+  await settle();
+
+  // The next New keeps this page's choice over the Mac's default.
+  await openNew();
+  assert.equal(page.element('provider').value, 'claudeCode');
 });
 
 test('a snapshot with no overlap keeps the previous tail', async () => {
@@ -953,6 +1026,7 @@ test('an empty project list can still start a session in the current folder', as
     state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
   }) });
   await settle();
+  await skipOptions(socket);
   assert.equal(page.element('project-dialog').open, true);
   const choice = page.element('project-list').children[0];
   assert.ok(choice);
@@ -975,6 +1049,7 @@ test('a full project page can ask for the next page', async () => {
     state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
   }) });
   await settle();
+  await skipOptions(socket);
   const more = [...page.element('project-list').children].find(button => button.dataset.more === 'true');
   assert.ok(more);
   more.onclick();
@@ -995,6 +1070,7 @@ test('a shortened project page can still ask for the rest', async () => {
     state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
   }) });
   await settle();
+  await skipOptions(socket);
   const more = [...page.element('project-list').children].find(button => button.dataset.more === 'true');
   assert.ok(more);
   more.onclick();
@@ -1014,6 +1090,7 @@ test('a project click does nothing while the next page is loading', async () => 
     state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
   }) });
   await settle();
+  await skipOptions(socket);
   const more = [...page.element('project-list').children].find(button => button.dataset.more === 'true');
   more.onclick();
   await settle();

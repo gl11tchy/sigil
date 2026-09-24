@@ -52,6 +52,8 @@
   <dialog id="project-dialog" class="sheet" aria-labelledby="project-heading">
     <div class="sheet-heading"><h2 id="project-heading">Choose a project</h2><button id="project-cancel" type="button">Cancel</button></div>
     <p id="project-error" class="sheet-error" role="alert" hidden></p>
+    <div id="provider-field" hidden><label for="provider">CLI</label><div class="provider-picker"><select id="provider" aria-describedby="provider-problem"></select><span class="chevron" aria-hidden="true"></span></div></div>
+    <p id="provider-problem" hidden></p>
     <div id="project-list"></div>
     <p id="project-empty" hidden>No projects yet.</p>
   </dialog>
