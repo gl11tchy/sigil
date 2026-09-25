@@ -53,6 +53,10 @@ enum TestMain {
         run("wrapped rows join without a break") { try ScreenTests.wrappedRowsJoinWithoutABreak() }
         run("raw spans count UTF-16 units") { try ScreenTests.rawSpansCountUTF16Units() }
         run("readable spans follow kept lines") { try ScreenTests.readableSpansFollowKeptLines() }
+        run("ground and scrollbar go quiet") { try ScreenTests.groundAndScrollbarGoQuiet() }
+        run("panel rows become panels") { try ScreenTests.panelRowsBecomePanels() }
+        run("readable lines dedent") { try ScreenTests.readableLinesDedent() }
+        run("wrapped lines hang after their marker") { try ScreenTests.wrappedLinesHangAfterTheirMarker() }
         run("colours resolve through the palette") { try ScreenTests.coloursResolveThroughThePalette() }
         run("decodes an event with a screen") { try ScreenTests.decodesAnEventWithAScreen() }
         run("rejects a malformed screen") { try ScreenTests.rejectsAMalformedScreen() }

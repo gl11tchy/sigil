@@ -18,27 +18,42 @@ struct OutputView: UIViewRepresentable {
     @Binding var atBottom: Bool
     /// Bumped by the "Latest" button to jump to the end.
     let scrollToEnd: Int
+    /// The composer floats over the output's bottom; the last line scrolls clear of it.
+    var composerHeight: CGFloat = 0
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeUIView(context: Context) -> UITextView {
-        let view = UITextView()
+        // TextKit 2, so panel paragraphs can draw their own full-width background.
+        let view = OutputTextView(usingTextLayoutManager: true)
+        view.textLayoutManager?.delegate = context.coordinator
         view.isEditable = false
         view.isSelectable = true
         view.backgroundColor = .clear
         view.alwaysBounceVertical = true
-        view.textContainerInset = UIEdgeInsets(top: 12, left: 12, bottom: 16, right: 12)
+        view.textContainerInset = UIEdgeInsets(top: 12, left: 16, bottom: 16, right: 16)
+        view.textContainer.lineFragmentPadding = 0
         view.adjustsFontForContentSizeCategory = true
         view.dataDetectorTypes = []
         view.delegate = context.coordinator
         view.accessibilityLabel = "Session output"
+        view.insetChanged = { [weak coordinator = context.coordinator] view in
+            if coordinator?.parent.atBottom == true { coordinator?.scrollToBottom(view) }
+        }
         return view
     }
 
     func updateUIView(_ view: UITextView, context: Context) {
         let coordinator = context.coordinator
         coordinator.parent = self
-        view.backgroundColor = UInt32(background, radix: 16).map(Self.color) ?? .clear
+        // A full-screen program's own ground wins over the terminal theme's.
+        view.backgroundColor =
+            StyledOutput.rgb(styled.ground, palette: palette).map(Self.color)
+            ?? UInt32(background, radix: 16).map(Self.color) ?? .clear
+        if view.contentInset.bottom != composerHeight {
+            view.contentInset.bottom = composerHeight
+            view.verticalScrollIndicatorInsets.bottom = composerHeight
+        }
         let changed = coordinator.revision != revision || coordinator.highlight != highlight
         // A repaint drops a selection the reader is making; the next poll repaints instead.
         let selecting = view.selectedRange.length > 0 && coordinator.highlight == highlight
@@ -50,7 +65,7 @@ struct OutputView: UIViewRepresentable {
             coordinator.highlight = highlight
             coordinator.text = text
             view.attributedText = Self.attributed(
-                styled, palette: palette, foreground: foreground, highlight: highlight)
+                styled, palette: palette, foreground: foreground, background: background, highlight: highlight)
             view.layoutIfNeeded()
             if wasAtBottom || coordinator.first {
                 coordinator.scrollToBottom(view)
@@ -68,19 +83,14 @@ struct OutputView: UIViewRepresentable {
     }
 
     nonisolated static func attributed(
-        _ styled: StyledText, palette: [String], foreground: String = "", highlight: String
+        _ styled: StyledText, palette: [String], foreground: String = "", background: String = "", highlight: String
     ) -> NSAttributedString {
         let text = styled.text
         let defaultText = UInt32(foreground, radix: 16).map(Self.color) ?? UIColor.label
-        let base = UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-        let font = UIFontMetrics(forTextStyle: .footnote).scaledFont(for: base)
-        let bold = UIFontMetrics(forTextStyle: .footnote).scaledFont(
-            for: UIFont.monospacedSystemFont(ofSize: 13, weight: .bold))
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = 2
+        let font = Self.font(bold: false)
+        let bold = Self.font(bold: true)
         let result = NSMutableAttributedString(
-            string: text,
-            attributes: [.font: font, .foregroundColor: defaultText, .paragraphStyle: paragraph])
+            string: text, attributes: [.font: font, .foregroundColor: defaultText])
         let length = (text as NSString).length
         for span in styled.spans {
             guard span.location >= 0, span.length > 0, span.location + span.length <= length else { continue }
@@ -109,6 +119,8 @@ struct OutputView: UIViewRepresentable {
             }
             if !attributes.isEmpty { result.addAttributes(attributes, range: range) }
         }
+        let base = StyledOutput.rgb(styled.ground, palette: palette) ?? UInt32(background, radix: 16)
+        Self.shapeParagraphs(result, panels: styled.panels, palette: palette, base: base, font: font)
         if !highlight.isEmpty {
             let source = text as NSString
             var range = NSRange(location: 0, length: source.length)
@@ -124,13 +136,80 @@ struct OutputView: UIViewRepresentable {
         return result
     }
 
+    /// The Mac terminal's face, JetBrains Mono, sized with the reader's text size.
+    nonisolated static func font(bold: Bool) -> UIFont {
+        let base =
+            UIFont(name: bold ? "JetBrainsMono-Bold" : "JetBrainsMono-Regular", size: 13)
+            ?? UIFont.monospacedSystemFont(ofSize: 13, weight: bold ? .bold : .regular)
+        return UIFontMetrics(forTextStyle: .footnote).scaledFont(for: base)
+    }
+
+    /// Each line wraps under the text after its indent and list marker, and a
+    /// panel line carries its colour and padding for `PanelLayoutFragment`.
+    nonisolated private static func shapeParagraphs(
+        _ result: NSMutableAttributedString, panels: [StyledPanel], palette: [String], base: UInt32?, font: UIFont
+    ) {
+        let source = result.string as NSString
+        var styles: [ParagraphKey: NSParagraphStyle] = [:]
+        var widths: [String: CGFloat] = [:]
+        var next = 0
+        source.enumerateSubstrings(in: NSRange(location: 0, length: source.length), options: .byParagraphs) {
+            line, range, enclosing, _ in
+            while next < panels.count, panels[next].location < range.location { next += 1 }
+            let panel = next < panels.count && panels[next].location == range.location ? panels[next] : nil
+            let prefix = StyledOutput.hangingPrefix(line ?? "")
+            var indent: CGFloat = 0
+            if prefix > 0 {
+                let head = source.substring(with: NSRange(location: range.location, length: prefix))
+                indent = widths[head] ?? (head as NSString).size(withAttributes: [.font: font]).width
+                widths[head] = indent
+            }
+            let key = ParagraphKey(indent: indent, top: panel?.top == true, bottom: panel?.bottom == true)
+            let style = styles[key] ?? key.style
+            styles[key] = style
+            result.addAttribute(.paragraphStyle, value: style, range: enclosing)
+            if let panel, let rgb = StyledOutput.rgb(panel.color, palette: palette) {
+                result.addAttribute(
+                    .outputPanel, value: OutputPanel(color: Self.panelColor(rgb, over: base), top: panel.top, bottom: panel.bottom),
+                    range: enclosing)
+            }
+        }
+    }
+
+    private struct ParagraphKey: Hashable {
+        var indent: CGFloat
+        var top: Bool
+        var bottom: Bool
+
+        var style: NSParagraphStyle {
+            let style = NSMutableParagraphStyle()
+            style.lineSpacing = 2
+            style.headIndent = indent
+            if top { style.paragraphSpacingBefore = PanelLayoutFragment.padding }
+            if bottom { style.paragraphSpacing = PanelLayoutFragment.padding }
+            return style
+        }
+    }
+
     nonisolated private static func color(_ rgb: UInt32) -> UIColor {
         UIColor(
             red: CGFloat((rgb >> 16) & 0xFF) / 255, green: CGFloat((rgb >> 8) & 0xFF) / 255,
             blue: CGFloat(rgb & 0xFF) / 255, alpha: 1)
     }
 
-    final class Coordinator: NSObject, UITextViewDelegate {
+    /// Half clear, mixed to read as `rgb` over the view's background: the selection
+    /// highlight sits behind the text and must show through a panel.
+    nonisolated private static func panelColor(_ rgb: UInt32, over base: UInt32?) -> UIColor {
+        guard let base else { return color(rgb) }
+        func channel(_ shift: UInt32) -> CGFloat {
+            let top = CGFloat((rgb >> shift) & 0xFF) / 255
+            let under = CGFloat((base >> shift) & 0xFF) / 255
+            return min(max(2 * top - under, 0), 1)
+        }
+        return UIColor(red: channel(16), green: channel(8), blue: channel(0), alpha: 0.5)
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate, NSTextLayoutManagerDelegate {
         var parent: OutputView
         var revision = -1
         var highlight = ""
@@ -147,12 +226,33 @@ struct OutputView: UIViewRepresentable {
             view.contentSize.height - view.contentOffset.y - view.bounds.height + view.adjustedContentInset.bottom < 60
         }
 
+        /// TextKit 2 guesses the height of lines it has not laid out; laying out
+        /// the end corrects the guess, so this repeats until the end holds still.
         func scrollToBottom(_ view: UITextView) {
-            let y = max(
-                -view.adjustedContentInset.top,
-                view.contentSize.height - view.bounds.height + view.adjustedContentInset.bottom)
-            view.setContentOffset(CGPoint(x: 0, y: y), animated: false)
+            var y = CGFloat.nan
+            for _ in 0..<4 {
+                let end = max(
+                    -view.adjustedContentInset.top,
+                    view.contentSize.height - view.bounds.height + view.adjustedContentInset.bottom)
+                if end == y { break }
+                y = end
+                view.setContentOffset(CGPoint(x: 0, y: y), animated: false)
+                view.layoutIfNeeded()
+            }
             report(view)
+        }
+
+        func textLayoutManager(
+            _ textLayoutManager: NSTextLayoutManager, textLayoutFragmentFor location: NSTextLocation,
+            in textElement: NSTextElement
+        ) -> NSTextLayoutFragment {
+            if let paragraph = textElement as? NSTextParagraph, paragraph.attributedString.length > 0,
+                let panel = paragraph.attributedString.attribute(.outputPanel, at: 0, effectiveRange: nil)
+                    as? OutputPanel
+            {
+                return PanelLayoutFragment(textElement: textElement, range: textElement.elementRange, panel: panel)
+            }
+            return NSTextLayoutFragment(textElement: textElement, range: textElement.elementRange)
         }
 
         func scrollToFirstMatch(_ view: UITextView, _ query: String) {
@@ -175,5 +275,76 @@ struct OutputView: UIViewRepresentable {
                 DispatchQueue.main.async { self.parent.atBottom = bottom }
             }
         }
+    }
+}
+
+/// Reports inset changes: the composer and the home indicator arrive after the
+/// first layout, and a reader at the end stays at the end.
+final class OutputTextView: UITextView {
+    var insetChanged: ((UITextView) -> Void)?
+
+    override func adjustedContentInsetDidChange() {
+        super.adjustedContentInsetDidChange()
+        insetChanged?(self)
+    }
+}
+
+extension NSAttributedString.Key {
+    static let outputPanel = NSAttributedString.Key("SigilOutputPanel")
+}
+
+/// A line the program painted across its width, and where it sits in its run.
+final class OutputPanel: NSObject {
+    let color: UIColor
+    let top: Bool
+    let bottom: Bool
+
+    init(color: UIColor, top: Bool, bottom: Bool) {
+        self.color = color
+        self.top = top
+        self.bottom = bottom
+    }
+}
+
+/// Draws a panel line's background across the full width, rounding and padding
+/// the ends of a run, so a prompt or a code block reads as one block.
+final class PanelLayoutFragment: NSTextLayoutFragment {
+    static let padding: CGFloat = 6
+    static let bleed: CGFloat = 10
+    static let radius: CGFloat = 10
+
+    private let panel: OutputPanel
+
+    init(textElement: NSTextElement, range: NSTextRange?, panel: OutputPanel) {
+        self.panel = panel
+        super.init(textElement: textElement, range: range)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    private var panelRect: CGRect {
+        let frame = layoutFragmentFrame
+        let width = textLayoutManager?.textContainer?.size.width ?? frame.width
+        let lines = textLineFragments
+        let top = panel.top ? (lines.first?.typographicBounds.minY ?? 0) - Self.padding : 0
+        let bottom = panel.bottom ? (lines.last?.typographicBounds.maxY ?? frame.height) + Self.padding : frame.height
+        return CGRect(x: -frame.minX - Self.bleed, y: top, width: width + 2 * Self.bleed, height: bottom - top)
+    }
+
+    override var renderingSurfaceBounds: CGRect { super.renderingSurfaceBounds.union(panelRect) }
+
+    override func draw(at point: CGPoint, in context: CGContext) {
+        var corners: UIRectCorner = []
+        if panel.top { corners.formUnion([.topLeft, .topRight]) }
+        if panel.bottom { corners.formUnion([.bottomLeft, .bottomRight]) }
+        let path = UIBezierPath(
+            roundedRect: panelRect.offsetBy(dx: point.x, dy: point.y), byRoundingCorners: corners,
+            cornerRadii: CGSize(width: Self.radius, height: Self.radius))
+        context.saveGState()
+        context.setFillColor(panel.color.cgColor)
+        context.addPath(path.cgPath)
+        context.fillPath()
+        context.restoreGState()
+        super.draw(at: point, in: context)
     }
 }
