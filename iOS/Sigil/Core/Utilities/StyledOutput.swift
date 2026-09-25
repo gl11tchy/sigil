@@ -49,8 +49,6 @@ struct PreparedScreen: Equatable {
 
 /// Builds the output the session screen draws, with the terminal's colours.
 enum StyledOutput {
-    /// Spaces this long inside a readable line (a right-aligned status) become two.
-    static let longGap = 8
     /// A wrapped line never hangs deeper than this, so it keeps room to read.
     static let maxHang = 16
     /// Characters that open a list item; a wrapped item lines up after them.
@@ -151,7 +149,8 @@ enum StyledOutput {
         for (index, line) in screen.lines.enumerated() {
             let spans = Self.spans(for: line.runs, in: line.text, at: 0)
             let row = Row(text: line.text, spans: spans, panel: screen.panels[index]).plain(ground: screen.ground)
-            if index > 0, line.wrapped, var last = rows.popLast() {
+            // A continuation in another panel keeps its own line, so each keeps its colour.
+            if index > 0, line.wrapped, rows.last?.panel == row.panel, var last = rows.popLast() {
                 last.append(row)
                 rows.append(last)
             } else {
@@ -203,7 +202,6 @@ enum StyledOutput {
         }
         Self.bridgePanels(&rows)
         Self.dedent(&rows)
-        for index in rows.indices where rows[index].panel < 0 { rows[index].collapseGaps() }
         return assemble(rows, ground: screen.ground)
     }
 
@@ -280,8 +278,8 @@ enum StyledOutput {
                 panels.append(
                     StyledPanel(
                         location: offset, length: length, color: row.panel,
-                        top: index == 0 || rows[index - 1].panel < 0,
-                        bottom: index == rows.count - 1 || rows[index + 1].panel < 0))
+                        top: index == 0 || rows[index - 1].panel != row.panel,
+                        bottom: index == rows.count - 1 || rows[index + 1].panel != row.panel))
             }
             text += row.text
             offset += length
@@ -338,23 +336,6 @@ enum StyledOutput {
                 span.length = to - from
                 return span
             }
-        }
-
-        mutating func collapseGaps() {
-            let units = Array(text.utf16)
-            let space = UInt16(UInt8(ascii: " "))
-            var gaps: [Range<Int>] = []
-            var index = indent
-            while index < units.count {
-                guard units[index] == space else {
-                    index += 1
-                    continue
-                }
-                let start = index
-                while index < units.count, units[index] == space { index += 1 }
-                if index < units.count, index - start >= StyledOutput.longGap { gaps.append((start + 2)..<index) }
-            }
-            for gap in gaps.reversed() { remove(gap) }
         }
     }
 

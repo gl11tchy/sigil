@@ -226,11 +226,19 @@ struct OutputView: UIViewRepresentable {
             view.contentSize.height - view.contentOffset.y - view.bounds.height + view.adjustedContentInset.bottom < 60
         }
 
+        /// TextKit 2 guesses the height of lines it has not laid out; laying out
+        /// the end corrects the guess, so this repeats until the end holds still.
         func scrollToBottom(_ view: UITextView) {
-            let y = max(
-                -view.adjustedContentInset.top,
-                view.contentSize.height - view.bounds.height + view.adjustedContentInset.bottom)
-            view.setContentOffset(CGPoint(x: 0, y: y), animated: false)
+            var y = CGFloat.nan
+            for _ in 0..<4 {
+                let end = max(
+                    -view.adjustedContentInset.top,
+                    view.contentSize.height - view.bounds.height + view.adjustedContentInset.bottom)
+                if end == y { break }
+                y = end
+                view.setContentOffset(CGPoint(x: 0, y: y), animated: false)
+                view.layoutIfNeeded()
+            }
             report(view)
         }
 

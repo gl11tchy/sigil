@@ -55,7 +55,7 @@ enum TestMain {
         run("readable spans follow kept lines") { try ScreenTests.readableSpansFollowKeptLines() }
         run("ground and scrollbar go quiet") { try ScreenTests.groundAndScrollbarGoQuiet() }
         run("panel rows become panels") { try ScreenTests.panelRowsBecomePanels() }
-        run("readable lines dedent and close gaps") { try ScreenTests.readableLinesDedentAndCloseGaps() }
+        run("readable lines dedent") { try ScreenTests.readableLinesDedent() }
         run("wrapped lines hang after their marker") { try ScreenTests.wrappedLinesHangAfterTheirMarker() }
         run("colours resolve through the palette") { try ScreenTests.coloursResolveThroughThePalette() }
         run("decodes an event with a screen") { try ScreenTests.decodesAnEventWithAScreen() }

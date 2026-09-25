@@ -145,6 +145,15 @@ enum ScreenTests {
             StyledPanel(location: 51, length: 11, color: code, top: true, bottom: true),
         ], "one panel run per block, ends marked")
         try Expect.true(raw.spans.allSatisfy { $0.bg == -1 }, "the view paints panels; spans carry no background")
+        // Touching panels of two colours stay two panels, even across a soft wrap.
+        var wrapped = grokRow(2, "  let y = 2", panel: code)
+        wrapped.wrapped = true
+        let touching = StyledOutput.raw([grokRow(0, "  header"), grokRow(1, "  ❯ ask", panel: prompt), wrapped])
+        try Expect.equal(
+            touching.text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) },
+            ["header", "❯ ask", "let y = 2"], "a continuation in another panel keeps its line")
+        try Expect.equal(touching.panels.map(\.color), [prompt, code], "each keeps its colour")
+        try Expect.true(touching.panels.allSatisfy { $0.top && $0.bottom }, "each panel has both ends")
         // A short inline background is not a panel.
         let chip = [ScreenLine(index: 0, text: "run `make` now", runs: [[4, 6, 7, 8, 0]]), ScreenLine(index: 1, text: "done")]
         let styledChip = StyledOutput.raw(chip)
@@ -153,8 +162,8 @@ enum ScreenTests {
         try Expect.equal(styledChip.spans[0].bg, 8, "the chip keeps its background")
     }
 
-    static func readableLinesDedentAndCloseGaps() throws {
-        // A header, indented less than the rest, with a right-aligned status.
+    static func readableLinesDedent() throws {
+        // A header, indented less than the rest, with a status after a long gap.
         let header = ScreenLine(
             index: 0, text: "  top" + String(repeating: " ", count: 19) + "9:00" + String(repeating: " ", count: 12),
             runs: [[0, 5, 7, ground, 0], [5, 19, -1, ground, 0], [24, 4, 8, ground, 0], [28, 12, -1, ground, 0]])
@@ -166,13 +175,13 @@ enum ScreenTests {
         let prepared = StyledOutput.prepare(lines)
         let styled = StyledOutput.readable(ScreenModel.text(of: prepared.lines), screen: prepared)
         let out = styled.text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        try Expect.equal(out[0], "top  9:00", "a shallower header goes to the margin; its gap closes")
+        try Expect.equal(out[0], "top" + String(repeating: " ", count: 19) + "9:00", "a shallower header goes to the margin; inner spacing stays")
         try Expect.equal(out[1], "❯ ask", "the shared indent goes")
         try Expect.equal(out[2], "line 2", "body dedented")
         try Expect.equal(Array(out.suffix(3)), ["let a", "", "let b"], "code dedented")
         try Expect.equal(styled.spans.first, StyledSpan(location: 0, length: 3, fg: 7, bg: -1, flags: 0), "span follows the dedent")
         let status = styled.spans.first { $0.fg == 8 }
-        try Expect.equal(status?.location, 5, "span after the gap moves with it")
+        try Expect.equal(status?.location, 22, "span after the gap moves with the dedent")
         let block = styled.panels.filter { $0.color == code }
         try Expect.equal(block.count, 3, "a blank line inside a code block joins it")
         try Expect.true(block[0].top && !block[0].bottom && block[2].bottom, "one run")
