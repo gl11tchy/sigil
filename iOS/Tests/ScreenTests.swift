@@ -93,6 +93,106 @@ enum ScreenTests {
         try Expect.equal(styled2.spans.map(\.fg), [1, 2], "each row styles its own line")
     }
 
+    /// A Grok-like screen, 40 columns: ground under every cell, a scrollbar thumb
+    /// drawn in its own colour, a two-row prompt panel and a one-row code block.
+    private static let ground = RemoteScreen.trueColorBase + 0x141414
+    private static let thumb = RemoteScreen.trueColorBase + 0x191919
+    private static let prompt = RemoteScreen.trueColorBase + 0x242424
+    private static let code = RemoteScreen.trueColorBase + 0x1c1c1c
+
+    private static func grokRow(_ index: Int, _ content: String, panel: Int? = nil, thumbed: Bool = false) -> ScreenLine {
+        let width = 40
+        let padded = content + String(repeating: " ", count: width - 1 - content.count) + (thumbed ? "█" : " ")
+        var runs: [[Int]] = []
+        if let panel {
+            runs = [[0, 2, -1, ground, 0], [2, content.count - 2, 7, panel, 0], [content.count, 37 - content.count, -1, panel, 0], [37, 2, -1, ground, 0]]
+        } else {
+            runs = [[0, content.count, 7, ground, 0], [content.count, 39 - content.count, -1, ground, 0]]
+        }
+        runs.append(thumbed ? [39, 1, thumb, thumb, 0] : [39, 1, -1, ground, 0])
+        return ScreenLine(index: index, text: padded, runs: runs)
+    }
+
+    static func groundAndScrollbarGoQuiet() throws {
+        let lines = [grokRow(0, "  hello", thumbed: true), grokRow(1, ""), grokRow(2, "")]
+        let prepared = StyledOutput.prepare(lines)
+        try Expect.equal(prepared.ground, ground, "the ground is found")
+        try Expect.equal(prepared.lines[0].text, "  hello", "thumb blanked and trailing blanks cut")
+        try Expect.equal(prepared.lines[0].runs, [[0, 7, 7, ground, 0]], "runs clipped to the text")
+        let raw = StyledOutput.raw(lines)
+        try Expect.equal(raw.text, "  hello", "blank rows under the cursor still go")
+        try Expect.equal(raw.ground, ground, "the view gets the ground")
+        try Expect.equal(raw.spans, [StyledSpan(location: 0, length: 7, fg: 7, bg: -1, flags: 0)], "no ground stripes")
+        // Without a ground, a row's own background stays.
+        let plain = StyledOutput.raw([ScreenLine(index: 0, text: "ok then", runs: [[0, 2, -1, 4, 0]])])
+        try Expect.equal(plain.ground, -1, "no ground on a plain shell")
+        try Expect.equal(plain.spans[0].bg, 4, "inline background kept")
+    }
+
+    static func panelRowsBecomePanels() throws {
+        let lines = [
+            grokRow(0, "  header"),
+            grokRow(1, "  ❯ ask a question", panel: prompt),
+            grokRow(2, "    that wraps", panel: prompt),
+            grokRow(3, "  reply"),
+            grokRow(4, "  let x = 1", panel: code),
+        ]
+        let raw = StyledOutput.raw(lines)
+        try Expect.equal(raw.text, "  header\n  ❯ ask a question\n    that wraps\n  reply\n  let x = 1", "text")
+        try Expect.equal(raw.panels, [
+            StyledPanel(location: 9, length: 18, color: prompt, top: true, bottom: false),
+            StyledPanel(location: 28, length: 14, color: prompt, top: false, bottom: true),
+            StyledPanel(location: 51, length: 11, color: code, top: true, bottom: true),
+        ], "one panel run per block, ends marked")
+        try Expect.true(raw.spans.allSatisfy { $0.bg == -1 }, "the view paints panels; spans carry no background")
+        // A short inline background is not a panel.
+        let chip = [ScreenLine(index: 0, text: "run `make` now", runs: [[4, 6, 7, 8, 0]]), ScreenLine(index: 1, text: "done")]
+        let styledChip = StyledOutput.raw(chip)
+        try Expect.equal(styledChip.panels, [], "inline chip")
+        try Expect.equal(styledChip.ground, -1, "a colour on some rows is not the ground")
+        try Expect.equal(styledChip.spans[0].bg, 8, "the chip keeps its background")
+    }
+
+    static func readableLinesDedentAndCloseGaps() throws {
+        // A header, indented less than the rest, with a right-aligned status.
+        let header = ScreenLine(
+            index: 0, text: "  top" + String(repeating: " ", count: 19) + "9:00" + String(repeating: " ", count: 12),
+            runs: [[0, 5, 7, ground, 0], [5, 19, -1, ground, 0], [24, 4, 8, ground, 0], [28, 12, -1, ground, 0]])
+        let lines = [
+            header,
+            grokRow(1, "     ❯ ask", panel: prompt),
+        ] + (2..<12).map { grokRow($0, "     line \($0)") }
+            + [grokRow(12, "     let a", panel: code), grokRow(13, ""), grokRow(14, "     let b", panel: code)]
+        let prepared = StyledOutput.prepare(lines)
+        let styled = StyledOutput.readable(ScreenModel.text(of: prepared.lines), screen: prepared)
+        let out = styled.text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        try Expect.equal(out[0], "top  9:00", "a shallower header goes to the margin; its gap closes")
+        try Expect.equal(out[1], "❯ ask", "the shared indent goes")
+        try Expect.equal(out[2], "line 2", "body dedented")
+        try Expect.equal(Array(out.suffix(3)), ["let a", "", "let b"], "code dedented")
+        try Expect.equal(styled.spans.first, StyledSpan(location: 0, length: 3, fg: 7, bg: -1, flags: 0), "span follows the dedent")
+        let status = styled.spans.first { $0.fg == 8 }
+        try Expect.equal(status?.location, 5, "span after the gap moves with it")
+        let block = styled.panels.filter { $0.color == code }
+        try Expect.equal(block.count, 3, "a blank line inside a code block joins it")
+        try Expect.true(block[0].top && !block[0].bottom && block[2].bottom, "one run")
+
+        let short = StyledOutput.prepare([header] + (1..<5).map { grokRow($0, "     line \($0)") })
+        let few = StyledOutput.readable(ScreenModel.text(of: short.lines), screen: short).text
+        try Expect.equal(few.split(separator: "\n").last.map(String.init), "line 4", "one header does not hold a short screen")
+    }
+
+    static func wrappedLinesHangAfterTheirMarker() throws {
+        try Expect.equal(StyledOutput.hangingPrefix("• item text"), 2, "bullet")
+        try Expect.equal(StyledOutput.hangingPrefix("   ◆ hook failed"), 5, "indented diamond")
+        try Expect.equal(StyledOutput.hangingPrefix("12. step"), 4, "numbered")
+        try Expect.equal(StyledOutput.hangingPrefix("  ⎿  result"), 5, "tool result")
+        try Expect.equal(StyledOutput.hangingPrefix("✅ DONE — ok"), 2, "emoji marker")
+        try Expect.equal(StyledOutput.hangingPrefix("-rw-r--r-- file"), 0, "a dash without a space is text")
+        try Expect.equal(StyledOutput.hangingPrefix("    plain"), 4, "indent only")
+        try Expect.equal(StyledOutput.hangingPrefix(String(repeating: " ", count: 30) + "x"), 16, "capped")
+    }
+
     static func coloursResolveThroughThePalette() throws {
         let palette = (0..<16).map { String(format: "%02x%02x%02x", $0, $0, $0) }
         try Expect.equal(StyledOutput.rgb(-1, palette: palette), nil, "default")

@@ -11,6 +11,7 @@ struct SessionScreen: View {
     @State private var findText = ""
     @State private var atBottom = true
     @State private var scrollToEnd = 0
+    @State private var composerHeight: CGFloat = 0
     @FocusState private var findFocused: Bool
 
     var body: some View {
@@ -19,7 +20,11 @@ struct SessionScreen: View {
                 .background(Theme.background)
                 .safeAreaInset(edge: .top, spacing: 0) { banners }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    if store.selectedTab != nil, !store.isRevoked { ComposerBar() }
+                    if store.selectedTab != nil, !store.isRevoked {
+                        ComposerBar()
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
+                            .onDisappear { composerHeight = 0 }
+                    }
                 }
                 .overlay(alignment: .bottomTrailing) { latestButton }
                 .navigationBarTitleDisplayMode(.inline)
@@ -86,7 +91,8 @@ struct SessionScreen: View {
             OutputView(
                 styled: store.styledOutput, palette: store.palette, foreground: store.themeForeground,
                 background: store.themeBackground, revision: store.outputRevision, highlight: finding ? findText : "",
-                onNearTop: { store.loadEarlier() }, atBottom: $atBottom, scrollToEnd: scrollToEnd
+                onNearTop: { store.loadEarlier() }, atBottom: $atBottom, scrollToEnd: scrollToEnd,
+                composerHeight: composerHeight
             )
             .ignoresSafeArea(.container, edges: .bottom)
             .privacySensitive()

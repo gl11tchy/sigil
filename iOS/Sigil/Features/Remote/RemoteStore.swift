@@ -730,14 +730,15 @@ final class RemoteStore {
         var fg = ""
         var bg = ""
         if let id = selectedTabID, let screen = screens[id] {
-            let lines = screen.lines
+            let prepared = StyledOutput.prepare(screen.lines)
             colours = screen.palette
             fg = screen.foreground
             bg = screen.background
             if rawMode {
-                next = StyledOutput.raw(lines)
+                next = StyledOutput.raw(prepared)
             } else {
-                next = StyledOutput.readable(formatter.format(ScreenModel.text(of: lines)), lines: lines)
+                next = StyledOutput.readable(
+                    formatter.format(ScreenModel.text(of: prepared.lines)), screen: prepared)
             }
         } else {
             let raw = selectedTabID.flatMap { histories[$0]?.text } ?? ""
