@@ -12,7 +12,8 @@ struct ScannerSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                // Black behind the camera; the canvas behind everything else.
+                (access == .authorized ? Color.black : Theme.canvas).ignoresSafeArea()
                 switch access {
                 case .authorized:
                     QRCameraView { code in
@@ -26,27 +27,50 @@ struct ScannerSheet: View {
                     .accessibilityLabel("Camera viewfinder")
                     viewfinder
                 case .notDetermined:
-                    ProgressView()
+                    PixelLoader(color: Theme.ink3)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("In progress")
                 default:
                     ContentUnavailableView {
-                        Label("Camera access is off", systemImage: "camera.fill")
+                        Label {
+                            Text("Camera access is off")
+                                .typeStep(.title)
+                                .foregroundStyle(Theme.ink)
+                        } icon: {
+                            Image(systemName: "camera.fill")
+                                .foregroundStyle(Theme.ink3)
+                        }
                     } description: {
                         Text("Turn on the camera for Sigil in Settings, or paste the pairing link instead.")
+                            .typeStep(.body)
+                            .foregroundStyle(Theme.ink2)
                     } actions: {
                         Button("Open Settings") {
                             if let url = URL(string: UIApplication.openSettingsURLString) {
                                 UIApplication.shared.open(url)
                             }
                         }
+                        .buttonStyle(.primary)
                     }
                 }
             }
-            .navigationTitle("Scan the code in Sigil")
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Theme.canvas, for: .navigationBar)
+            .toolbarBackgroundVisibility(.visible, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text(title)
+                        .typeStep(.title)
+                        .foregroundStyle(Theme.ink)
+                        .accessibilityAddTraits(.isHeader)
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                        .buttonStyle(.bar)
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .task {
                 if access == .notDetermined {
@@ -57,20 +81,23 @@ struct ScannerSheet: View {
         }
     }
 
+    private let title = "Scan the code in Sigil"
+
     private var viewfinder: some View {
         VStack(spacing: Theme.Space.large) {
             Spacer()
-            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                .strokeBorder(.white.opacity(0.85), lineWidth: 3)
+            // The web companion's viewfinder: a 2pt accent ring at the window radius.
+            RoundedRectangle(cornerRadius: Theme.Radius.window, style: .continuous)
+                .strokeBorder(Theme.accent, lineWidth: 2)
                 .frame(width: 240, height: 240)
                 .accessibilityHidden(true)
             Text(rejected ?? "Point the camera at the code on your Mac.")
-                .font(.callout)
+                .typeStep(.body, weight: rejected == nil ? .medium : .regular)
                 .multilineTextAlignment(.center)
-                .foregroundStyle(Theme.primaryText)
+                .foregroundStyle(rejected == nil ? Theme.ink : Theme.redInk)
                 .padding(.horizontal, Theme.Space.medium)
                 .padding(.vertical, Theme.Space.small)
-                .chromeGlass(.regular, in: Capsule())
+                .surface(Theme.surface, radius: Theme.Radius.card, elevation: .overlay)
                 .accessibilityAddTraits(.updatesFrequently)
             Spacer()
         }

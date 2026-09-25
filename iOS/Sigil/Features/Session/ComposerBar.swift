@@ -3,28 +3,37 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-/// The chrome under the output: attachments, terminal keys, the message field and send.
+/// The chrome under the output, as Beautiful UI's prompt bar: the approval card and the
+/// terminal keys above, then one card with attachments, the message field, and a row of
+/// controls ending in the round send button.
 struct ComposerBar: View {
     @Environment(RemoteStore.self) private var store
+    /// The most the approval card and the keys may take; past it they scroll.
+    var upperLimit: CGFloat = .infinity
     @State private var showingKeys = false
     @State private var showingPhotos = false
     @State private var showingFiles = false
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var preparing = false
     @FocusState private var focused: Bool
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var status: TabStatus? { store.selectedTab?.status }
     private var ended: Bool { status == .exited }
-    private var isEmpty: Bool {
-        store.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && store.selectedAttachments.isEmpty
-    }
 
     var body: some View {
         @Bindable var store = store
-        VStack(spacing: Theme.Space.small) {
-            if !store.selectedAttachments.isEmpty { attachmentRow }
-            if let prompt = store.prompt, !ended { answerBar(prompt) }
-            if showingKeys { keysRow }
+        ComposerStack(spacing: Theme.Space.small, cap: upperLimit) {
+            let prompt = ended ? nil : store.prompt
+            if prompt != nil || showingKeys {
+                // The approval card and the keys take at most part of the page and scroll
+                // there, so the message field, Stop and Send always stay on screen.
+                ViewThatFits(in: .vertical) {
+                    upperStack(prompt)
+                    ScrollView { upperStack(prompt) }
+                }
+                .layoutValue(key: ComposerStack.Capped.self, value: true)
+            }
             if ended, store.canRestart {
                 Button {
                     store.restart()
@@ -32,85 +41,60 @@ struct ComposerBar: View {
                     Label("Restart session", systemImage: "arrow.clockwise")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.floatingGlass(tint: Theme.accentDeep, prominent: true))
+                .buttonStyle(.primary)
                 .disabled(!store.isConnected || store.busy)
             }
-            HStack(alignment: .bottom, spacing: Theme.Space.small) {
-                Menu {
-                    Button {
-                        showingPhotos = true
-                    } label: {
-                        Label("Photo library", systemImage: "photo.on.rectangle")
-                    }
-                    Button {
-                        showingFiles = true
-                    } label: {
-                        Label("Files", systemImage: "folder")
-                    }
-                    Divider()
-                    Button {
-                        Theme.withMotion { showingKeys.toggle() }
-                    } label: {
-                        Label(showingKeys ? "Hide keys" : "Show keys", systemImage: "keyboard")
-                    }
-                } label: {
-                    Image(systemName: preparing ? "hourglass" : "plus")
-                        .font(.body.weight(Theme.emphasis(.semibold)))
-                        .foregroundStyle(Theme.primaryText)
-                        .frame(width: 40, height: 40)
-                        .chromeGlass(.regular.interactive(), in: Circle())
-                }
-                .minTappableArea()
-                .accessibilityLabel("Attach or show keys")
-                .disabled(ended || preparing)
-
+            VStack(spacing: 0) {
+                if !store.selectedAttachments.isEmpty { attachmentRow }
                 TextField(
-                    ended ? "Session ended" : "Message", text: $store.draft, axis: .vertical
+                    ended ? "Session ended" : "Message", text: $store.draft,
+                    prompt: Text(ended ? "Session ended" : "Message").foregroundStyle(Theme.ink2),
+                    axis: .vertical
                 )
+                .typeStep(.field)
+                .foregroundStyle(Theme.ink)
                 .lineLimit(1...6)
                 .focused($focused)
                 .submitLabel(.return)
                 .disabled(ended || store.selectedTab == nil)
-                .padding(.horizontal, Theme.Space.medium)
-                .padding(.vertical, 10)
-                .frame(minHeight: 40)
-                .chromeGlass(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .padding(.horizontal, 14)
+                .padding(.top, Theme.Space.medium)
+                .padding(.bottom, Theme.Space.tight)
+                .frame(minHeight: 38)
                 .privacySensitive()
 
-                if status == .working, isEmpty {
-                    Button {
-                        store.interrupt()
-                    } label: {
-                        Image(systemName: "stop.fill")
-                            .font(.body.weight(Theme.emphasis(.semibold)))
-                            .foregroundStyle(.white)
-                            .frame(width: 40, height: 40)
-                            .chromeGlass(.regular.tint(Theme.danger).interactive(), in: Circle(), fallback: Theme.danger)
-                    }
-                    .buttonStyle(.icon)
-                    .accessibilityLabel("Stop")
-                    .disabled(!store.isConnected)
-                } else {
-                    Button {
-                        store.sendDraft()
-                    } label: {
-                        Image(systemName: store.busy ? "ellipsis" : "arrow.up")
-                            .font(.body.weight(Theme.emphasis(.bold)))
-                            .foregroundStyle(.white)
-                            .frame(width: 40, height: 40)
-                            .chromeGlass(
-                                .regular.tint(store.canSend ? Theme.accentDeep : Theme.controlBackground).interactive(),
-                                in: Circle(), fallback: store.canSend ? Theme.accentDeep : Theme.controlBackground)
-                    }
-                    .buttonStyle(.icon)
-                    .accessibilityLabel(store.busy ? "Sending" : "Send")
-                    .disabled(!store.canSend)
+                HStack(spacing: 0) {
+                    attachMenu
+                    Spacer(minLength: 0)
+                    if status == .working { stopButton }
+                    sendButton
                 }
+                .padding(Theme.Space.s2)
             }
+            .surface(Theme.surface, radius: Theme.Radius.card, elevation: .card)
+            // Focus draws a 1px accent ring over the card's own, as the web prompt bar does.
+            .overlay {
+                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                    .strokeBorder(Theme.accent, lineWidth: 1)
+                    .opacity(focused ? 1 : 0)
+                    .allowsHitTesting(false)
+            }
+            .themeAnimation(Theme.Motion.fade, value: focused)
         }
-        .padding(.horizontal, Theme.Space.medium)
+        .padding(.horizontal, Theme.Space.s8)
         .padding(.top, Theme.Space.small)
         .padding(.bottom, Theme.Space.small)
+        // The output runs on under the bar; the page fill hides it beside and below the cards,
+        // after a short fade so a line scrolling under does not end on a hard edge.
+        .background {
+            Theme.page
+                .overlay(alignment: .top) {
+                    LinearGradient(colors: [Theme.page.opacity(0), Theme.page], startPoint: .top, endPoint: .bottom)
+                        .frame(height: Theme.Space.s12)
+                        .offset(y: -Theme.Space.s12)
+                        .allowsHitTesting(false)
+                }
+        }
         .photosPicker(
             isPresented: $showingPhotos, selection: $photoItems, maxSelectionCount: RemoteFile.maxAttachments,
             matching: .images)
@@ -125,116 +109,205 @@ struct ComposerBar: View {
         }
     }
 
+    private func upperStack(_ prompt: RemotePrompt?) -> some View {
+        VStack(spacing: Theme.Space.small) {
+            if let prompt { answerBar(prompt) }
+            if showingKeys { keysRow }
+        }
+    }
+
+    /// A quiet icon control at the leading edge of the controls row. The menu stays native.
+    private var attachMenu: some View {
+        Menu {
+            Button {
+                showingPhotos = true
+            } label: {
+                Label("Photo library", systemImage: "photo.on.rectangle")
+            }
+            Button {
+                showingFiles = true
+            } label: {
+                Label("Files", systemImage: "folder")
+            }
+            Divider()
+            Button {
+                Theme.withMotion { showingKeys.toggle() }
+            } label: {
+                Label(showingKeys ? "Hide keys" : "Show keys", systemImage: "keyboard")
+            }
+        } label: {
+            Image(systemName: preparing ? "hourglass" : "plus")
+                .font(Theme.glyph)
+                .foregroundStyle(showingKeys ? Theme.ink : Theme.ink3)
+                .frame(width: 32, height: 32)
+                // Keys showing reads as an expanded toggle: the pressed fill stays.
+                .background(
+                    showingKeys ? Theme.hover2 : .clear,
+                    in: RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                )
+                .frame(width: Theme.tapTarget, height: Theme.tapTarget)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Attach or show keys")
+        .disabled(ended || preparing)
+    }
+
+    /// While a turn runs, the web companion's Stop: the word in `redInk` on the red tint,
+    /// beside the send button rather than in its place.
+    private var stopButton: some View {
+        Button("Stop") {
+            store.interrupt()
+        }
+        .buttonStyle(SigilButtonStyle(kind: .destructive, height: 34))
+        .frame(minHeight: Theme.tapTarget)
+        .contentShape(Rectangle())
+        .padding(.trailing, Theme.Space.s4)
+        .accessibilityLabel("Stop")
+        .disabled(!store.isConnected)
+    }
+
+    /// The round accent button at the trailing edge.
+    private var sendButton: some View {
+        Button {
+            store.sendDraft()
+        } label: {
+            Image(systemName: store.busy ? "ellipsis" : "arrow.up")
+        }
+        .buttonStyle(SendButtonStyle())
+        .accessibilityLabel(store.busy ? "Sending" : "Send")
+        .disabled(!store.canSend)
+    }
+
+    /// Attachments sit inside the card above the text, as chips on the `hover` fill.
     private var attachmentRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: Theme.Space.tight) {
+            HStack(spacing: Theme.Space.s6) {
                 ForEach(store.selectedAttachments) { item in
-                    HStack(spacing: Theme.Space.tight) {
-                        if let preview = item.preview, let image = UIImage(data: preview) {
+                    let image = item.preview.flatMap { UIImage(data: $0) }
+                    HStack(spacing: Theme.Space.small) {
+                        if let image {
                             Image(uiImage: image)
                                 .resizable()
                                 .scaledToFill()
-                                .frame(width: 28, height: 28)
-                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                .frame(width: 32, height: 32)
+                                .background(Theme.inset)
+                                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous))
                                 .accessibilityHidden(true)
                         } else {
                             Image(systemName: "doc")
-                                .foregroundStyle(Theme.secondaryText)
+                                .font(Theme.glyph)
+                                .foregroundStyle(Theme.ink3)
                                 .accessibilityHidden(true)
                         }
                         Text(item.name)
-                            .font(.caption)
+                            .typeStep(.small)
+                            .foregroundStyle(Theme.ink)
                             .lineLimit(1)
                             .frame(maxWidth: 140)
                         Button {
                             store.removeAttachment(item)
                         } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(Theme.secondaryText)
+                            Image(systemName: "xmark")
+                                .font(Theme.glyph)
                         }
                         .buttonStyle(.icon)
                         .accessibilityLabel("Remove \(item.name)")
                     }
-                    .padding(.leading, Theme.Space.tight)
-                    .chromeGlass(.regular, in: Capsule())
+                    .padding(.leading, image == nil ? Theme.Space.medium : Theme.Space.s6)
+                    .frame(minHeight: Theme.tapTarget)
+                    .background(Theme.hover, in: RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
                     .privacySensitive()
                 }
             }
+            .padding([.horizontal, .top], Theme.Space.s8)
         }
     }
 
-    /// Yes, No and one button per numbered row of the question on screen.
+    /// Beautiful UI's approval card: the question, then one button per answer. Yes is the
+    /// primary button; No and each numbered row of the question on screen are secondary.
     private func answerBar(_ prompt: RemotePrompt) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Space.tight) {
+        VStack(alignment: .leading, spacing: Theme.Space.small) {
             if !prompt.question.isEmpty {
                 Text(prompt.question)
-                    .font(.footnote)
-                    .foregroundStyle(Theme.secondaryText)
+                    .typeStep(.body, weight: .medium)
+                    .foregroundStyle(Theme.ink)
                     .lineLimit(2)
                     .padding(.horizontal, Theme.Space.tight)
             }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: Theme.Space.tight) {
-                    answerButton("Yes", key: prompt.yes, tint: Theme.success)
-                    answerButton("No", key: prompt.no, tint: Theme.danger)
-                    ForEach(prompt.choices) { choice in
-                        answerButton("\(choice.key)  \(Self.shortLabel(choice.label))", key: choice.key, tint: nil)
-                    }
+            // The answers wrap onto more lines, so a long one is never cut at the card's edge.
+            FlowLayout(spacing: Theme.Space.s6) {
+                answerButton("Yes", key: prompt.yes, primary: true)
+                answerButton("No", key: prompt.no)
+                ForEach(prompt.choices) { choice in
+                    answerButton(
+                        "\(choice.key)  \(Self.shortLabel(choice.label))", key: choice.key,
+                        number: choice.key, text: Self.shortLabel(choice.label))
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentCard(padding: Theme.Space.s8)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(prompt.question.isEmpty ? "Approval question" : prompt.question)
     }
 
-    private func answerButton(_ title: String, key: String, tint: Color?) -> some View {
+    /// `number` draws a menu row's key in mono before its text; `title` stays the spoken label.
+    private func answerButton(
+        _ title: String, key: String, primary: Bool = false, number: String? = nil, text: String? = nil
+    ) -> some View {
         Button {
             store.answer(key)
         } label: {
-            Text(title)
-                .font(.subheadline.weight(Theme.emphasis(.semibold)))
-                .foregroundStyle(tint == nil ? Theme.primaryText : .white)
-                .lineLimit(1)
-                .padding(.horizontal, Theme.Space.medium)
-                .frame(minWidth: 44, minHeight: 36)
-                .chromeGlass(
-                    tint.map { .regular.tint($0).interactive() } ?? .regular.interactive(),
-                    in: Capsule(), fallback: tint ?? Theme.cardBackground)
+            if let number, let text {
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s6) {
+                    Text(number)
+                        .font(Theme.font(.mono, weight: .medium))
+                        .foregroundStyle(Theme.ink2)
+                    // An answer wider than the card wraps inside its button, never ending in "…".
+                    Text(text)
+                        .lineLimit(nil)
+                        .multilineTextAlignment(.leading)
+                }
+                .padding(.vertical, Theme.Space.s8)
+            } else {
+                Text(title)
+            }
         }
-        .buttonStyle(.icon)
+        .buttonStyle(SigilButtonStyle(kind: primary ? .primary : .secondary))
         .disabled(!store.isConnected || store.busy)
         .accessibilityLabel(title)
     }
 
-    /// A menu row shortened for a button. The key hint a CLI appends, like "(esc)", goes.
+    /// A menu row as a button's text. The key hint a CLI appends, like "(esc)", goes; the
+    /// rest stays whole, since the answers wrap.
     static func shortLabel(_ label: String) -> String {
-        var trimmed = label.trimmingCharacters(in: .whitespaces)
+        let trimmed = label.trimmingCharacters(in: .whitespaces)
         if trimmed.hasSuffix(")"), let open = trimmed.lastIndex(of: "(") {
-            trimmed = trimmed[..<open].trimmingCharacters(in: .whitespaces)
+            return trimmed[..<open].trimmingCharacters(in: .whitespaces)
         }
-        return trimmed.count > 30 ? String(trimmed.prefix(29)) + "…" : trimmed
+        return trimmed
     }
 
+    /// The terminal keys, four to a row like the web companion's narrow grid;
+    /// two to a row at accessibility sizes, so each word keeps its width.
     private var keysRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: Theme.Space.tight) {
-                ForEach(
-                    [RemoteKey.escape, .tab, .up, .down, .left, .right, .backspace, .enter]
-                ) { key in
-                    Button {
-                        store.send(key: key)
-                    } label: {
-                        Text(Self.label(key))
-                            .font(Theme.mono.weight(Theme.emphasis(.medium)))
-                            .foregroundStyle(Theme.primaryText)
-                            .padding(.horizontal, Theme.Space.small)
-                            .frame(minWidth: 44, minHeight: 36)
-                            .chromeGlass(.regular.interactive(), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    }
-                    .buttonStyle(.icon)
-                    .accessibilityLabel(Self.spoken(key))
-                    .disabled(!store.isConnected || ended)
+        LazyVGrid(
+            columns: Array(
+                repeating: GridItem(.flexible(), spacing: Theme.Space.s6),
+                count: dynamicTypeSize.isAccessibilitySize ? 2 : 4),
+            spacing: Theme.Space.s6
+        ) {
+            ForEach(
+                [RemoteKey.escape, .tab, .up, .down, .left, .right, .backspace, .enter]
+            ) { key in
+                Button {
+                    store.send(key: key)
+                } label: {
+                    Text(Self.label(key))
                 }
+                .buttonStyle(TerminalKeyStyle())
+                .accessibilityLabel(Self.spoken(key))
+                .disabled(!store.isConnected || ended)
             }
         }
     }
@@ -340,5 +413,155 @@ enum PhotoPrep {
             // Send the original if it still fits.
             return forceJPEG ? nil : Attachment(name: name, data: data, preview: thumb)
         }.value
+    }
+}
+
+/// The web companion's send button: a 34pt `accentFill` circle under a white arrow, in a
+/// 44pt hit area, 6% darker while pressed. Disabled, it is `hover2` under an `ink2` arrow,
+/// which stays legible on either page where the accent at 40% would not.
+private struct SendButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        SendButtonBody(configuration: configuration)
+    }
+}
+
+private struct SendButtonBody: View {
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let configuration: ButtonStyleConfiguration
+
+    var body: some View {
+        configuration.label
+            .font(Theme.glyph)
+            .fontWeight(Theme.emphasis(.semibold))
+            .foregroundStyle(isEnabled ? Color.white : Theme.ink2)
+            .frame(width: 34, height: 34)
+            .background(isEnabled ? Theme.accentFill : Theme.hover2, in: Circle())
+            .overlay(Circle().fill(Color.black.opacity(configuration.isPressed ? 0.06 : 0)))
+            .minTappableArea()
+            .contentShape(Rectangle())
+            .animation(Theme.animation(Theme.Motion.fade, reduceMotion: reduceMotion), value: configuration.isPressed)
+    }
+}
+
+/// Lays its views out in rows, left to right, starting a new row when the next
+/// one would not fit. A view wider than the row gets the row to itself.
+private struct FlowLayout: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = rows(for: proposal.width ?? .infinity, subviews)
+        let width = rows.map { $0.width }.max() ?? 0
+        let height = rows.map { $0.height }.reduce(0, +) + spacing * CGFloat(max(0, rows.count - 1))
+        return CGSize(width: proposal.width.map { min($0, width) } ?? width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in rows(for: bounds.width, subviews) {
+            var x = bounds.minX
+            for (index, size) in zip(row.indices, row.sizes) {
+                subviews[index].place(
+                    at: CGPoint(x: x, y: y + (row.height - size.height) / 2), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + spacing
+        }
+    }
+
+    private struct Row {
+        var indices: [Int] = []
+        var sizes: [CGSize] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+
+    private func rows(for maxWidth: CGFloat, _ subviews: Subviews) -> [Row] {
+        var rows: [Row] = []
+        var row = Row()
+        for index in subviews.indices {
+            var size = subviews[index].sizeThatFits(.unspecified)
+            if size.width > maxWidth {
+                size = subviews[index].sizeThatFits(ProposedViewSize(width: maxWidth, height: nil))
+            }
+            let needed = row.indices.isEmpty ? size.width : row.width + spacing + size.width
+            if !row.indices.isEmpty, needed > maxWidth {
+                rows.append(row)
+                row = Row()
+            }
+            row.width = row.indices.isEmpty ? size.width : row.width + spacing + size.width
+            row.height = max(row.height, size.height)
+            row.indices.append(index)
+            row.sizes.append(size)
+        }
+        if !row.indices.isEmpty { rows.append(row) }
+        return rows
+    }
+}
+
+/// A vertical stack, centred, whose `Capped` view is at most `cap` tall and never taller
+/// than the other views leave; it scrolls past that. The other views keep their own height.
+private struct ComposerStack: Layout {
+    var spacing: CGFloat
+    var cap: CGFloat
+
+    struct Capped: LayoutValueKey {
+        static let defaultValue = false
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let sizes = sizes(width: proposal.width, total: .infinity, subviews)
+        let height = sizes.map(\.height).reduce(0, +) + spacing * CGFloat(max(0, sizes.count - 1))
+        return CGSize(width: proposal.width ?? sizes.map(\.width).max() ?? 0, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for (subview, size) in zip(subviews, sizes(width: bounds.width, total: bounds.height, subviews)) {
+            subview.place(
+                at: CGPoint(x: bounds.midX, y: y), anchor: .top,
+                proposal: ProposedViewSize(width: bounds.width, height: size.height))
+            y += size.height + spacing
+        }
+    }
+
+    private func sizes(width: CGFloat?, total: CGFloat, _ subviews: Subviews) -> [CGSize] {
+        var sizes = subviews.map { $0.sizeThatFits(ProposedViewSize(width: width, height: nil)) }
+        let others = subviews.indices.filter { !subviews[$0][Capped.self] }.map { sizes[$0].height }.reduce(0, +)
+        let left = total - others - spacing * CGFloat(max(0, subviews.count - 1))
+        for index in subviews.indices where subviews[index][Capped.self] {
+            sizes[index].height = max(0, min(sizes[index].height, cap, left))
+        }
+        return sizes
+    }
+}
+
+/// A terminal key: mono 500 on a `surface` key lifted by the `button` ring, `hover2` while pressed.
+private struct TerminalKeyStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        TerminalKey(configuration: configuration)
+    }
+}
+
+private struct TerminalKey: View {
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let configuration: ButtonStyleConfiguration
+
+    var body: some View {
+        configuration.label
+            .font(Theme.jetBrainsMono(13, Theme.emphasis(.medium), relativeTo: .footnote))
+            .foregroundStyle(Theme.ink)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .padding(.horizontal, Theme.Space.s8)
+            .frame(maxWidth: .infinity, minHeight: Theme.tapTarget)
+            .surface(
+                configuration.isPressed ? Theme.hover2 : Theme.surface,
+                radius: Theme.Radius.control, elevation: .button
+            )
+            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+            .opacity(isEnabled ? 1 : 0.4)
+            .animation(Theme.animation(Theme.Motion.fade, reduceMotion: reduceMotion), value: configuration.isPressed)
     }
 }

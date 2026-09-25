@@ -19,7 +19,8 @@ struct OutputView: UIViewRepresentable {
     /// Bumped by the "Latest" button to jump to the end.
     let scrollToEnd: Int
     /// The composer floats over the output's bottom; the last line scrolls clear of it.
-    var composerHeight: CGFloat = 0
+    /// Its top edge, in the window's space; the view insets whatever lies below.
+    var coverTop: CGFloat?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -30,8 +31,11 @@ struct OutputView: UIViewRepresentable {
         view.isEditable = false
         view.isSelectable = true
         view.backgroundColor = .clear
+        // Selection and its handles in Beautiful UI's accent.
+        view.tintColor = UIColor(Theme.accent)
         view.alwaysBounceVertical = true
-        view.textContainerInset = UIEdgeInsets(top: 12, left: 16, bottom: 16, right: 16)
+        // The page already sits 8pt in from the screen's edges.
+        view.textContainerInset = UIEdgeInsets(top: 12, left: 12, bottom: 16, right: 12)
         view.textContainer.lineFragmentPadding = 0
         view.adjustsFontForContentSizeCategory = true
         view.dataDetectorTypes = []
@@ -50,10 +54,7 @@ struct OutputView: UIViewRepresentable {
         view.backgroundColor =
             StyledOutput.rgb(styled.ground, palette: palette).map(Self.color)
             ?? UInt32(background, radix: 16).map(Self.color) ?? .clear
-        if view.contentInset.bottom != composerHeight {
-            view.contentInset.bottom = composerHeight
-            view.verticalScrollIndicatorInsets.bottom = composerHeight
-        }
+        (view as? OutputTextView)?.coverTop = coverTop
         let changed = coordinator.revision != revision || coordinator.highlight != highlight
         // A repaint drops a selection the reader is making; the next poll repaints instead.
         let selecting = view.selectedRange.length > 0 && coordinator.highlight == highlight
@@ -127,14 +128,17 @@ struct OutputView: UIViewRepresentable {
             while true {
                 let found = source.range(of: highlight, options: [.caseInsensitive], range: range)
                 guard found.location != NSNotFound, found.length > 0 else { break }
-                result.addAttributes(
-                    [.backgroundColor: UIColor.systemBlue.withAlphaComponent(0.35)], range: found)
+                result.addAttributes([.backgroundColor: Self.match], range: found)
                 let next = found.location + found.length
                 range = NSRange(location: next, length: source.length - next)
             }
         }
         return result
     }
+
+    /// A find match: Beautiful UI's accent, half clear. Fixed rather than
+    /// adaptive, because the ground under it is the terminal theme's, not the phone's.
+    nonisolated private static let match = color(0x3D9AFF).withAlphaComponent(0.35)
 
     /// The Mac terminal's face, JetBrains Mono, sized with the reader's text size.
     nonisolated static func font(bold: Bool) -> UIFont {
@@ -282,6 +286,23 @@ struct OutputView: UIViewRepresentable {
 /// first layout, and a reader at the end stays at the end.
 final class OutputTextView: UITextView {
     var insetChanged: ((UITextView) -> Void)?
+    /// Where the composer starts, in the window. The view runs on under it to the
+    /// page's foot, so all of that is inset, not just the composer's own height.
+    var coverTop: CGFloat? {
+        didSet { if coverTop != oldValue { setNeedsLayout() } }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        var covered: CGFloat = 0
+        if let coverTop, window != nil, let superview {
+            covered = max(0, superview.convert(frame, to: nil).maxY - coverTop)
+        }
+        if contentInset.bottom != covered {
+            contentInset.bottom = covered
+            verticalScrollIndicatorInsets.bottom = covered
+        }
+    }
 
     override func adjustedContentInsetDidChange() {
         super.adjustedContentInsetDidChange()

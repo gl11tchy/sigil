@@ -22,6 +22,8 @@ enum TestMain {
 
         run("tap target is 44") { try ThemeTests.tapTargetIs44() }
         run("space scale is ordered") { try ThemeTests.spaceScaleIsOrdered() }
+        run("radii and spacing match Beautiful UI") { try ThemeTests.metricsMatchBeautifulUI() }
+        run("appearance follows the terminal ground") { try ThemeTests.appearanceFollowsTheGround() }
         run("emphasis steps up for bold text") { try ThemeTests.emphasisStepsUp() }
 
         run("crypto round trip") { try ProtocolTests.cryptoRoundTrip() }

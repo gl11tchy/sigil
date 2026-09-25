@@ -28,6 +28,41 @@ enum ThemeTests {
         )
     }
 
+    /// DESIGN.md: radii are chip 6, control 8, card 10, window 14, and every
+    /// named gap sits on the 4pt scale.
+    static func metricsMatchBeautifulUI() throws {
+        try Expect.equal(ThemeMetrics.Radius.chip, 6.0, "chip radius")
+        try Expect.equal(ThemeMetrics.Radius.control, 8.0, "control radius")
+        try Expect.equal(ThemeMetrics.Radius.card, 10.0, "card radius")
+        try Expect.equal(ThemeMetrics.Radius.window, 14.0, "window radius")
+        try Expect.equal(ThemeMetrics.Space.scale, [2, 4, 6, 8, 12, 16, 20, 24, 32], "space scale")
+        let named = [
+            ThemeMetrics.Space.tight, ThemeMetrics.Space.small, ThemeMetrics.Space.medium,
+            ThemeMetrics.Space.large, ThemeMetrics.Space.huge,
+        ]
+        for gap in named {
+            try Expect.true(ThemeMetrics.Space.scale.contains(gap), "\(gap) is on the 4pt scale")
+        }
+    }
+
+    /// The chrome follows the terminal theme: Sigil Dark and Sigil Light, a
+    /// few others, and no theme at all.
+    static func appearanceFollowsTheGround() throws {
+        let table: [(String, Bool?)] = [
+            ("17181a", true),
+            ("FAFAFB", false),
+            ("002b36", true),
+            ("fdf6e3", false),
+            ("777777", false),
+            ("", nil),
+            ("zzzzzz", nil),
+            ("fff", nil),
+        ]
+        for (ground, expected) in table {
+            try Expect.equal(ThemeMetrics.isDark(ground: ground), expected, "isDark(ground: \(ground))")
+        }
+    }
+
     static func emphasisStepsUp() throws {
         let table: [(Int, Bool, Int)] = [
             (0, false, 0),
