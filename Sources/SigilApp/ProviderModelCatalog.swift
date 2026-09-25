@@ -18,6 +18,15 @@ struct ProviderModelMenu: Equatable, Sendable {
         /// Cursor and Devin name effort and speed inside the model id, so each
         /// pair maps to one listed id. Empty for CLIs that take flags.
         var variants: [Variant: String] = [:]
+
+        /// Whether the switch changes anything at `effort`. Cursor and Devin
+        /// list some efforts at one speed only.
+        func offersFastMode(effort: String) -> Bool {
+            hasFastMode
+                && (variants.isEmpty
+                    || (variants[Variant(effort: effort, fast: true)] != nil
+                        && variants[Variant(effort: effort, fast: false)] != nil))
+        }
     }
 
     /// What the sheet holds for one CLI.
@@ -35,7 +44,8 @@ struct ProviderModelMenu: Equatable, Sendable {
     func model(_ id: String) -> Model? { models.first { $0.id == id } }
 
     /// Keeps a choice inside what its model offers. An unlisted model becomes
-    /// the CLI default; a missing effort becomes the default, else medium.
+    /// the CLI default; a missing effort becomes the default, else medium; the
+    /// speed follows the ids listed for that effort.
     func normalized(_ choice: Choice) -> Choice {
         guard let model = model(choice.model) ?? model("") else { return Choice() }
         var result = choice
@@ -44,6 +54,11 @@ struct ProviderModelMenu: Equatable, Sendable {
             result.effort = ["", "medium"].first(where: model.efforts.contains) ?? model.efforts.first ?? ""
         }
         if !model.hasFastMode { result.fast = false }
+        if model.variants[Variant(effort: result.effort, fast: result.fast)] == nil,
+            model.variants[Variant(effort: result.effort, fast: !result.fast)] != nil
+        {
+            result.fast.toggle()
+        }
         return result
     }
 
@@ -81,7 +96,9 @@ enum ProviderModelCatalog {
     /// Claude Code takes these aliases. Fast mode runs Opus.
     static let claude = ProviderModelMenu(
         models: ["", "fable", "opus", "sonnet", "haiku"].map {
-            .init(id: $0, efforts: ["", "low", "medium", "high", "xhigh", "max"], hasFastMode: $0.isEmpty || $0 == "opus")
+            .init(
+                id: $0, efforts: ["", "low", "medium", "high", "xhigh", "max"],
+                hasFastMode: $0.isEmpty || $0 == "opus")
         })
 
     /// The menu before the CLI's list arrives, or when it cannot be read. Nil
@@ -90,8 +107,10 @@ enum ProviderModelCatalog {
         switch provider {
         case .claudeCode: claude
         case .codex:
-            ProviderModelMenu(models: [.init(id: "", efforts: ["", "low", "medium", "high", "xhigh"], hasFastMode: true)])
-        case .cursor, .devin: ProviderModelMenu(models: [.init(id: "", efforts: [""], hasFastMode: false)])
+            ProviderModelMenu(
+                models: [.init(id: "", efforts: ["", "low", "medium", "high", "xhigh"], hasFastMode: false)])
+        case .cursor, .devin:
+            ProviderModelMenu(models: [.init(id: "", efforts: [""], hasFastMode: false)])
         case .kimi, .grokBuild: nil
         }
     }
@@ -130,12 +149,12 @@ enum ProviderModelCatalog {
             let supportedReasoningLevels: [Level]?
             let additionalSpeedTiers: [String]?
         }
-        guard let data = json(in: output) else { return nil }
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         guard
-            let entries = (try? decoder.decode(Listing.self, from: data))?.models
-                ?? (try? decoder.decode([Entry].self, from: data))
+            let entries = jsonCandidates(in: output).compactMap({
+                (try? decoder.decode(Listing.self, from: $0))?.models ?? (try? decoder.decode([Entry].self, from: $0))
+            }).first
         else { return nil }
         let models: [ProviderModelMenu.Model] = entries.filter { $0.visibility == "list" }.map {
             .init(
@@ -143,10 +162,10 @@ enum ProviderModelCatalog {
                 hasFastMode: $0.additionalSpeedTiers?.contains("fast") == true)
         }
         guard let first = models.first else { return nil }
-        // The CLI default can be any of them, so it offers only the efforts all share.
+        // The CLI default can be any of them, so it offers only what all share.
         let shared = models.reduce(first.efforts) { common, model in common.filter(model.efforts.contains) }
         return ProviderModelMenu(
-            models: [.init(id: "", efforts: shared, hasFastMode: models.contains(where: \.hasFastMode))] + models)
+            models: [.init(id: "", efforts: shared, hasFastMode: models.allSatisfy(\.hasFastMode))] + models)
     }
 
     /// `cursor-agent models`: `id - Label` rows. Effort and speed are part of each id.
@@ -178,7 +197,8 @@ enum ProviderModelCatalog {
         }
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-        guard let data = json(in: output), let listing = try? decoder.decode(Listing.self, from: data),
+        guard
+            let listing = jsonCandidates(in: output).compactMap({ try? decoder.decode(Listing.self, from: $0) }).first,
             !listing.families.isEmpty
         else { return nil }
         let models = listing.families.map { family in
@@ -238,9 +258,16 @@ enum ProviderModelCatalog {
             id: id, efforts: efforts, hasFastMode: Set(variants.keys.map(\.fast)).count == 2, variants: variants)
     }
 
-    /// The JSON value in a command's output, past anything a login shell printed first.
-    private static func json(in output: String) -> Data? {
-        guard let start = output.firstIndex(where: { $0 == "{" || $0 == "[" }) else { return nil }
-        return Data(output[start...].utf8)
+    /// Where a command's JSON may start: the first bracket, then each line that
+    /// opens with one, so a login shell's `[oh-my-zsh]` banner does not hide it.
+    private static func jsonCandidates(in output: String) -> LazyMapSequence<[String.Index], Data> {
+        var starts: [String.Index] = []
+        var atLineStart = true
+        for index in output.indices {
+            let character = output[index]
+            if atLineStart || starts.isEmpty, character == "{" || character == "[" { starts.append(index) }
+            atLineStart = character.isNewline
+        }
+        return starts.lazy.map { Data(output[$0...].utf8) }
     }
 }

@@ -176,7 +176,7 @@ struct NewSessionSheet: View {
                                 .labelsHidden()
                                 .toggleStyle(.switch)
                                 .controlSize(.small)
-                                .disabled(selected?.hasFastMode != true)
+                                .disabled(selected?.offersFastMode(effort: current.effort) != true)
                         }
                     }
                 }

@@ -72,8 +72,10 @@ struct NewSessionSheetTests {
                 == (model: "opus", effort: "max", fastMode: true))
         // Fast mode runs Opus, so another alias drops it.
         #expect(
-            claude.launch(.init(model: "sonnet", effort: "", fast: true)) == (model: "sonnet", effort: "", fastMode: false))
-        #expect(try #require(menu(.codex)).hasFastMode)
+            claude.launch(.init(model: "sonnet", effort: "", fast: true))
+                == (model: "sonnet", effort: "", fastMode: false))
+        // Until Codex lists its models, its default may be one without a fast tier.
+        #expect(try !#require(menu(.codex)).hasFastMode)
         // Before its list loads, Cursor offers only its own default.
         #expect(try #require(menu(.cursor)).models.map(\.id) == [""])
         let loaded = ProviderModelMenu(models: [.init(id: "", efforts: [""], hasFastMode: false)])
@@ -88,10 +90,11 @@ struct NewSessionSheetTests {
               {"slug":"codex-auto-review","visibility":"hide","supported_reasoning_levels":[{"effort":"low"}]}
             ]}
             """
-        let menu = try #require(ProviderModelCatalog.codexMenu("Last login: today\n" + output))
+        let menu = try #require(ProviderModelCatalog.codexMenu("[oh-my-zsh] Update available\n" + output))
         #expect(menu.models.map(\.id) == ["", "gpt-6-astra", "gpt-5.5"])
         #expect(menu.model("")?.efforts == ["", "low", "medium"])
-        #expect(menu.model("")?.hasFastMode == true)
+        // The CLI default may be gpt-5.5, which has no fast tier.
+        #expect(menu.model("")?.hasFastMode == false)
         #expect(menu.model("gpt-6-astra")?.efforts == ["", "low", "medium", "max"])
         #expect(menu.model("gpt-5.5")?.hasFastMode == false)
         // An effort the new model lacks falls back to the CLI default, and fast turns off.
@@ -128,8 +131,13 @@ struct NewSessionSheetTests {
         #expect(
             menu.launch(.init(model: "claude-opus-5-5", effort: "", fast: true))
                 == (model: "claude-opus-5-5-medium-fast", effort: "", fastMode: false))
-        #expect(menu.launch(.init(model: "claude-opus-5-5", effort: "high", fast: true)).model == "claude-opus-5-5-high")
-        #expect(menu.launch(.init(model: "gpt-5.6-luna", effort: "", fast: false)).model == "gpt-5.6-luna-high-fast")
+        #expect(
+            menu.normalized(.init(model: "claude-opus-5-5", effort: "high", fast: true))
+                == .init(model: "claude-opus-5-5", effort: "high", fast: false))
+        #expect(menu.model("claude-opus-5-5")?.offersFastMode(effort: "medium") == true)
+        #expect(menu.model("claude-opus-5-5")?.offersFastMode(effort: "high") == false)
+        #expect(
+            menu.launch(.init(model: "gpt-5.6-luna", effort: "", fast: false)).model == "gpt-5.6-luna-high-fast")
         #expect(menu.launch(.init()) == (model: "", effort: "", fastMode: false))
         #expect(ProviderModelCatalog.cursorMenu("No models available") == nil)
     }
@@ -144,7 +152,7 @@ struct NewSessionSheetTests {
               {"slug":"gpt-5.2","variants":[{"model_uid":"MODEL_GPT_5_2_LOW"},{"model_uid":"MODEL_GPT_5_2_HIGH"}]}
             ]}
             """
-        let menu = try #require(ProviderModelCatalog.devinMenu(output))
+        let menu = try #require(ProviderModelCatalog.devinMenu("[1] 4242\n" + output))
         #expect(menu.models.map(\.id) == ["", "claude-opus-5.5", "gpt-5.5", "claude-fable-5", "fusion", "gpt-5.2"])
         #expect(menu.model("claude-opus-5.5")?.efforts == ["", "medium", "high"])
         #expect(menu.model("claude-opus-5.5")?.hasFastMode == true)
@@ -154,7 +162,8 @@ struct NewSessionSheetTests {
         #expect(menu.model("gpt-5.2")?.efforts == [""])
         #expect(menu.launch(.init(model: "claude-opus-5.5", effort: "", fast: false)).model == "claude-opus-5.5")
         // Fast with the default effort takes the fast twin of the first listed variant.
-        #expect(menu.launch(.init(model: "claude-opus-5.5", effort: "", fast: true)).model == "claude-opus-5-5-medium-fast")
+        #expect(
+            menu.launch(.init(model: "claude-opus-5.5", effort: "", fast: true)).model == "claude-opus-5-5-medium-fast")
         #expect(menu.launch(.init(model: "gpt-5.5", effort: "high", fast: true)).model == "gpt-5-5-high-priority")
         #expect(menu.launch(.init(model: "gpt-5.5", effort: "none", fast: true)).model == "gpt-5-5-none")
         #expect(menu.launch(.init(model: "fusion", effort: "", fast: false)).model == "fusion")
