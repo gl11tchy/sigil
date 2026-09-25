@@ -31,6 +31,8 @@ public struct GrokLaunchSpec: Sendable, Hashable {
     public var mode: Mode
     public var model: String?
     public var reasoningEffort: String?
+    /// Asks a CLI that has a fast mode to use it. Off leaves the CLI's own setting.
+    public var fastMode: Bool
     /// Anything the user typed into the advanced field, already split into arguments.
     public var extraArguments: [String]
     /// The CLI theme this tab renders in, passed as `GROK_THEME`. It matches the
@@ -56,6 +58,7 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         mode: Mode,
         model: String? = nil,
         reasoningEffort: String? = nil,
+        fastMode: Bool = false,
         extraArguments: [String] = [],
         themeName: String? = nil,
         themeVariables: [String: String] = [:],
@@ -76,6 +79,7 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         self.mode = mode
         self.model = model
         self.reasoningEffort = reasoningEffort
+        self.fastMode = fastMode
         self.extraArguments = extraArguments
         self.themeName = themeName
         self.themeVariables = themeVariables
@@ -101,7 +105,7 @@ public struct GrokLaunchSpec: Sendable, Hashable {
 
     /// Command-line arguments for the CLI, in the order `grok` documents them.
     public func arguments() -> [String] {
-        guard provider == .grokBuild else { return extraArguments }
+        guard provider == .grokBuild else { return optionArguments() + extraArguments }
         var args = ["--cwd", workingDirectory.path]
         switch mode {
         case .new(let sessionID):
@@ -116,6 +120,29 @@ public struct GrokLaunchSpec: Sendable, Hashable {
             args += ["--reasoning-effort", reasoningEffort]
         }
         args += extraArguments
+        return args
+    }
+
+    /// Model, effort and fast mode in another CLI's own flags. Cursor and Devin
+    /// name effort and speed inside the model id. Kimi takes none of them here.
+    private func optionArguments() -> [String] {
+        let model = model?.nilIfBlank
+        let effort = reasoningEffort?.nilIfBlank
+        var args: [String] = []
+        switch provider {
+        case .claudeCode:
+            if let model { args += ["--model", model] }
+            if let effort { args += ["--effort", effort] }
+            if fastMode { args += ["--settings", #"{"fastMode":true}"#] }
+        case .codex:
+            if let model { args += ["--model", model] }
+            if let effort { args += ["-c", "model_reasoning_effort=\"\(effort)\""] }
+            if fastMode { args += ["-c", #"service_tier="fast""#] }
+        case .cursor, .devin:
+            if let model { args += ["--model", model] }
+        case .kimi, .grokBuild:
+            break
+        }
         return args
     }
 

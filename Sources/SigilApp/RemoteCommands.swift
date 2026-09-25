@@ -141,8 +141,8 @@ enum RemoteCommands {
                 provider = model.settings.defaultProvider
             }
             if let problem = startProblem(provider, model: model) { return failure(request, problem) }
-            // Other CLIs do not take Grok's model or effort flags.
-            let takesModel = NewSessionLaunch.showsModelAndEffort(provider)
+            // The phone lists Grok's models and efforts only.
+            let takesModel = provider == .grokBuild
             let chosenModel = takesModel ? request.model.map(GrokModelCatalog.normalized) : ""
             let chosenEffort = takesModel ? request.effort : ""
             guard chosenModel.map(isModelName) ?? true, chosenEffort.map(AppSettings.effortOptions.contains) ?? true
@@ -418,7 +418,7 @@ enum RemoteCommands {
         return RemoteNewSessionOptions(
             providers: CLIProvider.allCases.map {
                 .init(
-                    id: $0.rawValue, name: $0.name, takesModel: NewSessionLaunch.showsModelAndEffort($0),
+                    id: $0.rawValue, name: $0.name, takesModel: $0 == .grokBuild,
                     problem: startProblem($0, model: model))
             },
             provider: settings.defaultProvider.rawValue,
