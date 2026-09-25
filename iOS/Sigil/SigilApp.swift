@@ -14,9 +14,11 @@ struct SigilApp: App {
         WindowGroup {
             RootView()
                 .environment(store)
-                .tint(Theme.accent)
-                // Sigil sits beside a terminal at night; the phone matches the Mac.
-                .preferredColorScheme(.dark)
+                // Native controls draw words in the tint, so it is the text accent.
+                .tint(Theme.accentInk)
+                // The chrome follows the Mac's terminal theme, as the Mac's own
+                // appearance does; before a theme arrives, the system's.
+                .preferredColorScheme(appearance)
                 .task { AlertsController.attach(store) }
                 .onOpenURL { url in
                     // A widget or notification link only chooses a session.
@@ -34,6 +36,10 @@ struct SigilApp: App {
             default: break
             }
         }
+    }
+
+    private var appearance: ColorScheme? {
+        ThemeMetrics.isDark(ground: store.appearanceGround).map { $0 ? .dark : .light }
     }
 
     /// Offline demo mode, so every screen can be screenshotted with no Mac.

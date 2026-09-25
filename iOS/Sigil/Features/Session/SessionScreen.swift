@@ -12,20 +12,39 @@ struct SessionScreen: View {
     @State private var atBottom = true
     @State private var scrollToEnd = 0
     @State private var composerHeight: CGFloat = 0
+    /// The composer's top in the window, so the output can inset all that lies below it.
+    @State private var composerTop: CGFloat?
+    /// The screen's bottom safe area; the page keeps at least 8pt clear of the edge.
+    @State private var bottomInset: CGFloat = 0
+    /// The page's height above the keyboard; the approval card and keys take at most 40% of it.
+    @State private var pageHeight: CGFloat?
     @FocusState private var findFocused: Bool
 
     var body: some View {
         NavigationStack {
             content
-                .background(Theme.background)
-                .safeAreaInset(edge: .top, spacing: 0) { banners }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     if store.selectedTab != nil, !store.isRevoked {
-                        ComposerBar()
-                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
-                            .onDisappear { composerHeight = 0 }
+                        ComposerBar(upperLimit: pageHeight.map { $0 * 0.4 } ?? .infinity)
+                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                                composerHeight = $0.height
+                                composerTop = $0.minY
+                            }
+                            .onDisappear {
+                                composerHeight = 0
+                                composerTop = nil
+                            }
                     }
                 }
+                .page()
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { pageHeight = $0 }
+                .padding(.top, Theme.Space.s8)
+                .padding(.horizontal, Theme.Space.s8)
+                // The web companion's `max(8px, env(safe-area-inset-bottom))`.
+                .padding(.bottom, max(0, Theme.Space.s8 - bottomInset))
+                .background(Theme.canvas)
+                .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { bottomInset = $0 }
+                .safeAreaInset(edge: .top, spacing: 0) { banners }
                 .overlay(alignment: .bottomTrailing) { latestButton }
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { toolbar }
@@ -54,36 +73,36 @@ struct SessionScreen: View {
     private var content: some View {
         if store.isRevoked {
             ContentUnavailableView {
-                Label("Pairing ended", systemImage: "link.badge.plus")
+                EmptyLabel(title: "Pairing ended", symbol: "link.badge.plus")
             } description: {
-                Text("This Mac disconnected the phone, or the code expired. Scan a new code in Sigil.")
+                EmptyDetail(text: "This Mac disconnected the phone, or the code expired. Scan a new code in Sigil.")
             } actions: {
                 Button("Pair again") { store.forget() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.primary)
             }
         } else if store.tabs.isEmpty {
             ContentUnavailableView {
-                Label(store.isConnected ? "No open sessions" : "Reconnecting", systemImage: "terminal")
+                EmptyLabel(title: store.isConnected ? "No open sessions" : "Reconnecting", symbol: "terminal")
             } description: {
-                Text(
-                    store.isConnected
+                EmptyDetail(
+                    text: store.isConnected
                         ? "Start a session in one of your projects."
                         : "Keep Sigil open and your Mac awake.")
             } actions: {
                 if store.isConnected {
                     Button("New session") { startNewSession() }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.primary)
                 }
             }
         } else if store.output.isEmpty {
             ContentUnavailableView {
-                Label(emptyTitle, systemImage: emptySymbol)
+                EmptyLabel(title: emptyTitle, symbol: emptySymbol, status: store.selectedTab?.status)
             } description: {
-                Text(emptyDetail)
+                EmptyDetail(text: emptyDetail)
             } actions: {
                 if store.selectedTab?.status == .exited, store.canRestart {
                     Button("Restart") { store.restart() }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.primary)
                         .disabled(!store.isConnected || store.busy)
                 }
             }
@@ -92,8 +111,9 @@ struct SessionScreen: View {
                 styled: store.styledOutput, palette: store.palette, foreground: store.themeForeground,
                 background: store.themeBackground, revision: store.outputRevision, highlight: finding ? findText : "",
                 onNearTop: { store.loadEarlier() }, atBottom: $atBottom, scrollToEnd: scrollToEnd,
-                composerHeight: composerHeight
+                coverTop: composerTop
             )
+            // Under the composer to the page's foot; the page clips it to its corners.
             .ignoresSafeArea(.container, edges: .bottom)
             .privacySensitive()
         }
@@ -125,57 +145,66 @@ struct SessionScreen: View {
 
     @ViewBuilder
     private var banners: some View {
-        VStack(spacing: Theme.Space.tight) {
+        VStack(spacing: Theme.Space.small) {
             if finding { findBar }
             if !store.isConnected, !store.isRevoked, !store.isDemo {
-                HStack(spacing: Theme.Space.tight) {
-                    ProgressView().controlSize(.small)
+                HStack(spacing: Theme.Space.small) {
+                    PixelLoader(color: Theme.ink3)
                     Text(reconnectingText)
-                        .font(.footnote)
+                        .typeStep(.body)
+                        .foregroundStyle(Theme.ink)
                     Spacer(minLength: 0)
-                    Button("Retry") { store.reconnect() }
-                        .font(.footnote.weight(Theme.emphasis(.semibold)))
-                        .buttonStyle(.icon)
+                    Button {
+                        store.reconnect()
+                    } label: {
+                        Text("Retry").foregroundStyle(Theme.accentInk)
+                    }
+                    .buttonStyle(.ghost)
                 }
-                .padding(.horizontal, Theme.Space.medium)
-                .chromeGlass(.regular, in: Capsule())
+                .padding(.leading, Theme.Space.medium)
+                .surface(radius: Theme.Radius.card, elevation: .raised)
                 .accessibilityElement(children: .combine)
             }
             if let error = store.errorMessage, !store.isRevoked {
                 Button {
                     store.errorMessage = nil
                 } label: {
-                    HStack(alignment: .firstTextBaseline, spacing: Theme.Space.tight) {
-                        Image(systemName: Theme.cautionSymbol)
-                            .foregroundStyle(Theme.caution)
+                    // A failure, as the web companion's page error: `redInk` on the red tint.
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Space.small) {
+                        Image(systemName: Theme.dangerSymbol)
+                            .font(Theme.font(.body))
+                            .foregroundStyle(Theme.red)
                         Text(error)
-                            .font(.footnote)
-                            .foregroundStyle(Theme.primaryText)
+                            .typeStep(.body)
+                            .foregroundStyle(Theme.redInk)
                             .multilineTextAlignment(.leading)
                         Spacer(minLength: 0)
                         Image(systemName: "xmark")
-                            .font(.caption2.weight(Theme.emphasis(.semibold)))
-                            .foregroundStyle(Theme.secondaryText)
+                            .font(Theme.font(.small, weight: .semibold))
+                            .foregroundStyle(Theme.redInk)
                     }
-                    .padding(.horizontal, Theme.Space.medium)
-                    .padding(.vertical, Theme.Space.small)
-                    .chromeGlass(.regular, in: RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+                    .padding(Theme.Space.medium)
+                    .background(
+                        Theme.redTint, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint("Dismisses the message")
             }
         }
-        .padding(.horizontal, Theme.Space.medium)
+        .padding(.horizontal, Theme.Space.s8)
         .padding(.top, Theme.Space.tight)
-        .themeAnimation(.snappy, value: store.errorMessage)
+        .themeAnimation(Theme.Motion.slide, value: store.errorMessage)
     }
 
     private var findBar: some View {
         HStack(spacing: Theme.Space.tight) {
             Image(systemName: "magnifyingglass")
-                .foregroundStyle(Theme.secondaryText)
+                .font(Theme.glyph)
+                .foregroundStyle(Theme.ink3)
                 .accessibilityHidden(true)
-            TextField("Find in output", text: $findText)
+            TextField("Find in output", text: $findText, prompt: Text("Find in output").foregroundStyle(Theme.ink2))
+                .typeStep(.field)
+                .foregroundStyle(Theme.ink)
                 .focused($findFocused)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -185,13 +214,16 @@ struct SessionScreen: View {
                 findText = ""
             } label: {
                 Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(Theme.secondaryText)
+                    .font(Theme.glyph)
             }
             .buttonStyle(.icon)
             .accessibilityLabel("Close find")
         }
-        .padding(.leading, Theme.Space.medium)
-        .chromeGlass(.regular, in: Capsule())
+        .padding(.leading, Theme.Space.large)
+        .surface(in: Capsule(), elevation: .overlay)
+        // A field's focus ring, drawn over the pill's own.
+        .overlay { Capsule().strokeBorder(findFocused ? Theme.accent : .clear, lineWidth: 1) }
+        .themeAnimation(Theme.Motion.fade, value: findFocused)
     }
 
     @ViewBuilder
@@ -201,13 +233,16 @@ struct SessionScreen: View {
                 scrollToEnd += 1
             } label: {
                 Image(systemName: "arrow.down")
-                    .font(.body.weight(Theme.emphasis(.semibold)))
-                    .frame(width: 22, height: 22)
+                    .font(Theme.glyph)
+                    .foregroundStyle(Theme.ink)
+                    .frame(width: 40, height: 40)
+                    .surface(in: Circle(), elevation: .raised)
             }
-            .buttonStyle(.floatingGlass())
+            .buttonStyle(.icon)
             .accessibilityLabel("Jump to latest output")
-            .padding(.trailing, Theme.Space.medium)
-            .padding(.bottom, Theme.Space.small)
+            // Over the output, 12pt in from the page's corner and clear of the composer.
+            .padding(.trailing, Theme.Space.s20)
+            .padding(.bottom, max(0, Theme.Space.s8 - bottomInset) + composerHeight + Theme.Space.s12)
         }
     }
 
@@ -219,33 +254,37 @@ struct SessionScreen: View {
             } label: {
                 Label("Sessions", systemImage: "sidebar.left")
             }
+            .tint(Theme.ink3)
             .disabled(store.isRevoked)
         }
+        .sharedBackgroundVisibility(.hidden)
         ToolbarItem(placement: .principal) {
             Button {
                 showingSessions = true
             } label: {
-                VStack(spacing: 1) {
+                VStack(spacing: 0) {
                     Text(store.selectedTab?.title ?? AppInfo.displayName)
-                        .font(.subheadline.weight(Theme.emphasis(.semibold)))
-                        .foregroundStyle(Theme.primaryText)
+                        .typeStep(.title)
+                        .foregroundStyle(Theme.ink)
                         .lineLimit(1)
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(store.isConnected ? Theme.color(for: store.selectedTab?.status ?? .idle) : Theme.caution)
-                            .frame(width: 6, height: 6)
+                    HStack(spacing: Theme.Space.s6) {
+                        statusMark
                         Text(statusText)
-                            .font(.caption2)
-                            .foregroundStyle(Theme.secondaryText)
+                            .typeStep(.small)
+                            .foregroundStyle(statusInk)
+                            .lineLimit(1)
                     }
                 }
-                .frame(maxWidth: 240)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("\(store.selectedTab?.title ?? "No session"), \(statusText)")
+            .accessibilityShowsLargeContentViewer {
+                Text("\(store.selectedTab?.title ?? AppInfo.displayName), \(statusText)")
+            }
             .accessibilityHint("Shows your sessions")
             .privacySensitive()
         }
+        .sharedBackgroundVisibility(.hidden)
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
                 Button {
@@ -293,7 +332,26 @@ struct SessionScreen: View {
             } label: {
                 Label("More", systemImage: "ellipsis")
             }
+            .tint(Theme.ink3)
         }
+        .sharedBackgroundVisibility(.hidden)
+    }
+
+    /// The state vocabulary beside the status line: the pixel loader while
+    /// starting or working, an `ink3` dot once ended, nothing when idle, and an
+    /// `orange` dot while the phone cannot reach the Mac.
+    @ViewBuilder
+    private var statusMark: some View {
+        if !store.isConnected {
+            StatusDot(color: Theme.orange)
+        } else if let status = store.selectedTab?.status, status != .idle {
+            ActivityMark(status: status)
+        }
+    }
+
+    private var statusInk: Color {
+        if !store.isConnected { return Theme.orangeInk }
+        return store.selectedTab?.status == .working ? Theme.ink : Theme.ink2
     }
 
     private var statusText: String {
@@ -316,5 +374,63 @@ struct SessionScreen: View {
 
     private func startNewSession() {
         showingProjects = true
+    }
+}
+
+extension View {
+    /// Sets the view on the page, as the web companion's `main`: a `page` fill
+    /// in a closed `window`-radius rectangle with a 1px `line` ring. The output
+    /// and the composer sit inside it, and it clips both to its corners.
+    fileprivate func page() -> some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.window, style: .continuous)
+        return frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Theme.page, in: shape)
+            .clipShape(shape)
+            .overlay {
+                shape.strokeBorder(Theme.line, lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
+    }
+}
+
+/// An empty state's heading in Inter: the title in `ink` under a quiet `ink3`
+/// glyph, or under the pixel loader while the session starts or works.
+private struct EmptyLabel: View {
+    let title: String
+    let symbol: String
+    var status: TabStatus?
+
+    var body: some View {
+        Label {
+            if status == .working {
+                ShimmerText(text: title, step: .title)
+            } else {
+                Text(title)
+                    .typeStep(.title)
+                    .foregroundStyle(Theme.ink)
+            }
+        } icon: {
+            switch status {
+            case .working?:
+                PixelLoader(color: Theme.accent).scaleEffect(2).frame(width: 32, height: 32)
+            case .starting?:
+                PixelLoader(color: Theme.ink3).scaleEffect(2).frame(width: 32, height: 32)
+            default:
+                Image(systemName: symbol)
+                    .font(Theme.inter(32, relativeTo: .largeTitle))
+                    .foregroundStyle(Theme.ink3)
+            }
+        }
+    }
+}
+
+/// An empty state's explanation: body text in `ink2`.
+private struct EmptyDetail: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .typeStep(.body)
+            .foregroundStyle(Theme.ink2)
     }
 }

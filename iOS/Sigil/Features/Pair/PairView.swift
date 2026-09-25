@@ -10,6 +10,9 @@ struct PairView: View {
     @State private var link = ""
     @State private var problem: String?
     @FocusState private var linkFocused: Bool
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// The step number's key: 22pt at the default text size, as on the web companion.
+    @ScaledMetric(relativeTo: .body) private var stepBadge: CGFloat = 22
 
     private var waiting: Bool { store.phase == .connecting }
 
@@ -21,37 +24,58 @@ struct PairView: View {
                     steps
                     if waiting {
                         HStack(spacing: Theme.Space.smallText) {
-                            ProgressView()
+                            PixelLoader(color: Theme.accent)
                             Text("Connecting to your Mac…")
-                                .foregroundStyle(Theme.secondaryText)
+                                .typeStep(.body)
+                                .foregroundStyle(Theme.ink2)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentCard()
                         .accessibilityElement(children: .combine)
                     }
                     if let message = problem ?? store.errorMessage {
-                        Label(message, systemImage: Theme.cautionSymbol)
-                            .foregroundStyle(Theme.primaryText)
-                            .symbolRenderingMode(.multicolor)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentCard()
+                        // A failure: `redInk` words on the red tint, as the web companion's error.
+                        Label {
+                            Text(message)
+                                .typeStep(.body)
+                                .foregroundStyle(Theme.redInk)
+                        } icon: {
+                            Image(systemName: Theme.dangerSymbol)
+                                .font(Theme.glyph)
+                                .foregroundStyle(Theme.red)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(Theme.Space.medium)
+                        .background(
+                            Theme.redTint, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
                     }
                     if pasting { pasteField }
                 }
                 .padding(Theme.Space.large)
             }
             .flowsUnderChrome()
-            .background(Theme.groupedBackground)
+            .background(Theme.canvas)
             .safeAreaInset(edge: .bottom) { actions }
-            .navigationTitle(embedded ? "Pair another Mac" : AppInfo.displayName)
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Theme.canvas, for: .navigationBar)
+            .toolbarBackgroundVisibility(.visible, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text(title)
+                        .typeStep(.title)
+                        .foregroundStyle(Theme.ink)
+                        .accessibilityAddTraits(.isHeader)
+                }
                 if embedded {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Cancel") {
                             store.cancelPairing()
                             dismiss()
                         }
+                        .buttonStyle(.bar)
                     }
+                    .sharedBackgroundVisibility(.hidden)
                 }
             }
             .onChange(of: store.activeMacID) { _, id in
@@ -71,13 +95,18 @@ struct PairView: View {
         }
     }
 
+    private var title: String { embedded ? "Pair another Mac" : AppInfo.displayName }
+
     private var header: some View {
         VStack(alignment: .leading, spacing: Theme.Space.smallText) {
+            // The web companion's welcome heading: 24pt Inter 600, tracked in -0.02em.
             Text("Pick up where you left off.")
-                .font(Theme.display(30))
-                .foregroundStyle(Theme.primaryText)
+                .font(Theme.inter(24, Theme.emphasis(.semibold), relativeTo: .title))
+                .tracking(-0.48)
+                .foregroundStyle(Theme.ink)
             Text("Your Mac sessions, on your phone. Read the output, reply, and send photos.")
-                .foregroundStyle(Theme.secondaryText)
+                .typeStep(.row)
+                .foregroundStyle(Theme.ink2)
         }
     }
 
@@ -86,10 +115,17 @@ struct PairView: View {
             step(1, "On your Mac, open Sigil → Settings → Remote.")
             step(2, "Select Connect Phone.")
             step(3, "Scan the code here. It expires in five minutes.")
-            Divider()
-            Label("Keep Sigil open and your Mac awake.", systemImage: "desktopcomputer")
-                .font(.subheadline)
-                .foregroundStyle(Theme.secondaryText)
+            Rectangle()
+                .fill(Theme.lineSoft)
+                .frame(height: 1)
+            Label {
+                Text("Keep Sigil open and your Mac awake.")
+                    .typeStep(.small)
+                    .foregroundStyle(Theme.ink2)
+            } icon: {
+                Image(systemName: "desktopcomputer")
+                    .foregroundStyle(Theme.ink3)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentCard()
@@ -98,11 +134,13 @@ struct PairView: View {
     private func step(_ number: Int, _ text: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Space.smallText) {
             Text("\(number)")
-                .font(Theme.numeric)
-                .foregroundStyle(Theme.accent)
-                .frame(minWidth: 18, alignment: .leading)
+                .font(Theme.font(.mono, weight: .medium))
+                .foregroundStyle(Theme.ink)
+                .frame(minWidth: stepBadge, minHeight: stepBadge)
+                .background(Theme.hover2, in: RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous))
             Text(text)
-                .foregroundStyle(Theme.primaryText)
+                .typeStep(.body)
+                .foregroundStyle(Theme.ink)
         }
         .accessibilityElement(children: .combine)
     }
@@ -117,20 +155,28 @@ struct PairView: View {
                 .autocorrectionDisabled()
                 .keyboardType(.URL)
                 .submitLabel(.go)
+                .foregroundStyle(Theme.ink)
                 .focused($linkFocused)
-                .padding(Theme.Space.small)
-                .background(Theme.controlBackground, in: RoundedRectangle(cornerRadius: Theme.Radius.control))
+                .padding(.horizontal, Theme.Space.medium)
+                .padding(.vertical, Theme.Space.small)
+                .frame(minHeight: Theme.tapTarget)
+                .fieldBackground(isFocused: linkFocused)
                 .onSubmit { submit(link) }
                 .privacySensitive()
             Button("Pair") { submit(link) }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.primary)
                 .disabled(link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || waiting)
         }
         .contentCard()
     }
 
     private var actions: some View {
-        HStack(spacing: Theme.Space.small) {
+        // Side by side; stacked at accessibility sizes, so each label keeps a full line.
+        let layout =
+            dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: Theme.Space.small))
+            : AnyLayout(HStackLayout(spacing: Theme.Space.small))
+        return layout {
             Button {
                 problem = nil
                 scanning = true
@@ -138,7 +184,7 @@ struct PairView: View {
                 Label("Scan code", systemImage: "qrcode.viewfinder")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.floatingGlass(tint: Theme.accentDeep, prominent: true))
+            .buttonStyle(.primary)
             .disabled(waiting)
 
             // Pasting into the field below never triggers the clipboard permission prompt.
@@ -150,11 +196,14 @@ struct PairView: View {
                 Label("Paste link", systemImage: "doc.on.clipboard")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.floatingGlass())
+            .buttonStyle(.secondary)
             .disabled(waiting)
         }
         .padding(.horizontal, Theme.Space.large)
+        .padding(.top, Theme.Space.small)
         .padding(.bottom, Theme.Space.small)
+        // Opaque chrome: the steps scroll under the canvas, not under the buttons' gap.
+        .background(Theme.canvas)
     }
 
     private func submit(_ text: String) {

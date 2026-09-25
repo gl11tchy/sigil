@@ -51,6 +51,9 @@ final class RemoteStore {
     /// The terminal theme's default text and background, as `RRGGBB`; empty when unknown.
     private(set) var themeForeground = ""
     private(set) var themeBackground = ""
+    /// The last theme background this Mac sent, for light or dark. It outlives a tab
+    /// with no screen yet, so the look does not flip; empty until the first one.
+    private(set) var appearanceGround = ""
 
     let isDemo: Bool
     @ObservationIgnored private let connection = RemoteConnection()
@@ -139,6 +142,7 @@ final class RemoteStore {
         projects = []
         sessionOptions = nil
         errorMessage = nil
+        appearanceGround = ""
         refreshOutput()
     }
 
@@ -752,6 +756,7 @@ final class RemoteStore {
             output = next.text
             outputRevision += 1
         }
+        if !bg.isEmpty, bg != appearanceGround { appearanceGround = bg }
     }
 
     /// The Mac's name goes into the pairing, so the picker can show it before connecting.
@@ -953,12 +958,21 @@ enum DemoData {
             if row.hasPrefix("  $") { runs = [[2, row.count - 2, 6, -1, 0]] }
             return RemoteScreenRow(i: offset, t: row, w: nil, s: runs)
         }
+        // Sigil Dark, or Sigil Light with -demoLight, so both appearances can be shot.
+        if ProcessInfo.processInfo.arguments.contains("-demoLight") {
+            return RemoteScreen(
+                tab: "demo-1", gen: 1, alt: nil, first: 0, end: rows.count, rows: rows,
+                palette: [
+                    "1f2124", "be2130", "007836", "a76200", "005ecc", "9637ab", "007690", "62656b",
+                    "9a9da3", "d7333d", "028c43", "be7200", "0070dd", "a94bbe", "0089a6", "111214",
+                ], fg: "1f2124", bg: "fafafb")
+        }
         return RemoteScreen(
             tab: "demo-1", gen: 1, alt: nil, first: 0, end: rows.count, rows: rows,
             palette: [
-                "1c1c1e", "ff6b6b", "5ad27a", "ffd166", "5aa6ff", "d78bff", "5fd8e0", "e6e6e6",
-                "6b6b70", "ff8a8a", "7ee89a", "ffe08a", "8ac0ff", "e8a8ff", "8ae6ee", "ffffff",
-            ], fg: "e6e6e6", bg: "0b0b0d")
+                "313236", "ee5c61", "3cbb72", "f09a2e", "3d9aff", "c571d8", "16a6c7", "a5a8ad",
+                "6c6f75", "fe8a89", "75d697", "f7c56d", "7ec0ff", "d9a3e6", "73c8e1", "f2f3f4",
+            ], fg: "f2f3f4", bg: "17181a")
     }
 
     static let chats = [
