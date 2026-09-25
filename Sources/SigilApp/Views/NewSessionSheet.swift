@@ -8,22 +8,21 @@ enum NewSessionLaunch: Equatable {
         case start(CLIProvider)
     }
 
-    static func showsModelAndEffort(_ provider: CLIProvider) -> Bool {
+    /// The Model, Effort and Fast mode rows for `provider`. Nil for Kimi,
+    /// whose model comes from its own config.
+    @MainActor
+    static func menu(
+        for provider: CLIProvider, grokModels: [String], grokModel: String, loaded: ProviderModelMenu?
+    ) -> ProviderModelMenu? {
         provider == .grokBuild
-    }
-
-    /// Other CLIs do not take Grok's model or effort flags.
-    static func fields(
-        provider: CLIProvider, model: String, effort: String
-    ) -> (model: String, effort: String) {
-        guard showsModelAndEffort(provider) else { return ("", "") }
-        return (model, effort)
+            ? .grok(listed: grokModels, saved: grokModel, efforts: AppSettings.effortOptions)
+            : loaded ?? ProviderModelCatalog.fallback(provider)
     }
 
     /// The Grok path whose model list the sheet loads. Nil for other
-    /// providers, which have no model menu, so `grok models` never runs.
+    /// providers, which list their own models, so `grok models` never runs.
     static func modelListPath(provider: CLIProvider, executablePath: String) -> String? {
-        showsModelAndEffort(provider) ? executablePath : nil
+        provider == .grokBuild ? executablePath : nil
     }
 
     static func action(selected: CLIProvider, tapped: CLIProvider) -> Action {
@@ -47,9 +46,10 @@ struct NewSessionSheet: View {
 
     @State private var directory: URL = FileManager.default.homeDirectoryForCurrentUser
     @State private var provider: CLIProvider
-    @State private var modelName = ""
-    @State private var effort = ""
-    @State private var models = GrokModelCatalog.fallback
+    /// Each CLI keeps its own choice while the sheet is open.
+    @State private var choices: [CLIProvider: ProviderModelMenu.Choice] = [:]
+    @State private var grokModels = GrokModelCatalog.fallback
+    @State private var menus: [CLIProvider: ProviderModelMenu] = [:]
     @State private var startsInWorktree: Bool
     @State private var isCreatingWorktree = false
     @FocusState private var focusedProvider: CLIProvider?
@@ -139,13 +139,14 @@ struct NewSessionSheet: View {
                         .fixedSize()
                     }
                 }
-                if NewSessionLaunch.showsModelAndEffort(provider) {
+                if let menu = menu(for: provider) {
+                    let current = choice(for: provider)
+                    let selected = menu.model(current.model)
                     divider
                     SheetRow(label: "Model") {
-                        Picker("Model", selection: $modelName) {
+                        Picker("Model", selection: choiceBinding(\.model)) {
                             Text("CLI default").tag("")
-                            ForEach(GrokModelCatalog.choices(listed: models, saved: modelName), id: \.self) {
-                                name in
+                            ForEach(menu.models.map(\.id).filter { !$0.isEmpty }, id: \.self) { name in
                                 Text(name).monospaced().tag(name)
                             }
                         }
@@ -153,16 +154,30 @@ struct NewSessionSheet: View {
                         .pickerStyle(.menu)
                         .fixedSize()
                     }
-                    divider
-                    SheetRow(label: "Effort") {
-                        Picker("Effort", selection: $effort) {
-                            ForEach(AppSettings.effortOptions, id: \.self) { option in
-                                Text(AppSettings.effortLabel(option)).tag(option)
+                    if menu.hasEffort {
+                        let efforts = selected?.efforts ?? [""]
+                        divider
+                        SheetRow(label: "Effort") {
+                            Picker("Effort", selection: choiceBinding(\.effort)) {
+                                ForEach(efforts, id: \.self) { option in
+                                    Text(AppSettings.effortLabel(option)).tag(option)
+                                }
                             }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .fixedSize()
+                            .disabled(efforts.count < 2)
                         }
-                        .labelsHidden()
-                        .pickerStyle(.menu)
-                        .fixedSize()
+                    }
+                    if menu.hasFastMode {
+                        divider
+                        SheetRow(label: "Fast mode") {
+                            Toggle("Fast mode", isOn: choiceBinding(\.fast))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                                .disabled(selected?.hasFastMode != true)
+                        }
                     }
                 }
             }
@@ -203,18 +218,47 @@ struct NewSessionSheet: View {
                 .map { URL(fileURLWithPath: $0) }
                 .flatMap { isDirectory($0) ? $0 : nil } ?? initial
             recents = Self.recentDirectories(in: model)
-            modelName = model.settings.model.trimmingCharacters(in: .whitespacesAndNewlines)
-            effort = model.settings.effort
+            // Settings holds Grok's defaults. The other CLIs start on their own.
+            choices[.grokBuild] = .init(
+                model: model.settings.model.trimmingCharacters(in: .whitespacesAndNewlines),
+                effort: model.settings.effort)
         }
         .task(
             id: NewSessionLaunch.modelListPath(
                 provider: provider, executablePath: model.settings.executablePath)
         ) {
-            guard NewSessionLaunch.showsModelAndEffort(provider) else { return }
+            guard provider == .grokBuild else { return }
             if let found = await GrokModelCatalog.menuModels(executable: model.settings.executableURL) {
-                models = found
+                grokModels = found
             }
         }
+        .task(id: provider) {
+            let current = provider
+            guard menus[current] == nil, let found = await ProviderModelCatalog.load(current) else { return }
+            menus[current] = found
+        }
+    }
+
+    private func menu(for provider: CLIProvider) -> ProviderModelMenu? {
+        NewSessionLaunch.menu(
+            for: provider, grokModels: grokModels, grokModel: choices[.grokBuild]?.model ?? "",
+            loaded: menus[provider])
+    }
+
+    /// The stored choice, kept inside what the current menu offers.
+    private func choice(for provider: CLIProvider) -> ProviderModelMenu.Choice {
+        let stored = choices[provider] ?? .init()
+        return menu(for: provider)?.normalized(stored) ?? stored
+    }
+
+    private func choiceBinding<Value>(_ field: WritableKeyPath<ProviderModelMenu.Choice, Value>) -> Binding<Value> {
+        Binding(
+            get: { choice(for: provider)[keyPath: field] },
+            set: { value in
+                var next = choice(for: provider)
+                next[keyPath: field] = value
+                choices[provider] = menu(for: provider)?.normalized(next) ?? next
+            })
     }
 
     private var divider: some View {
@@ -282,8 +326,7 @@ struct NewSessionSheet: View {
 
     private func start(_ provider: CLIProvider) {
         guard canStart, model.canSignIn(provider) else { return }
-        let fields = NewSessionLaunch.fields(
-            provider: provider, model: modelName, effort: effort)
+        let launch = menu(for: provider)?.launch(choice(for: provider)) ?? (model: "", effort: "", fastMode: false)
         let project = directory
         let useWorktree = startsInWorktree && isRepository
         isCreatingWorktree = useWorktree
@@ -300,7 +343,8 @@ struct NewSessionSheet: View {
                 }
             }
             if model.newTab(
-                in: folder, model: fields.model, effort: fields.effort, provider: provider
+                in: folder, model: launch.model, effort: launch.effort, fastMode: launch.fastMode,
+                provider: provider
             ) != nil {
                 dismiss()
             }

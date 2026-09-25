@@ -1586,7 +1586,7 @@ final class AppModel {
 
     @discardableResult
     func newTab(
-        in directory: URL, model: String? = nil, effort: String? = nil,
+        in directory: URL, model: String? = nil, effort: String? = nil, fastMode: Bool = false,
         provider: CLIProvider = .grokBuild
     ) -> TerminalTab? {
         guard provider != .grokBuild || settings.executableExists else {
@@ -1600,12 +1600,15 @@ final class AppModel {
         guard canSignIn(provider), let providerEnvironment = providerEnvironment(for: provider) else {
             return nil
         }
+        // Settings holds Grok's defaults. Another CLI keeps its own unless the caller names one.
+        let isGrok = provider == .grokBuild
         let spec = GrokLaunchSpec(
-            executable: provider == .grokBuild ? settings.executableURL : nil,
+            executable: isGrok ? settings.executableURL : nil,
             workingDirectory: directory,
             mode: .new(sessionID: UUID()),
-            model: (model ?? settings.model).nilIfEmpty,
-            reasoningEffort: (effort ?? settings.effort).nilIfEmpty,
+            model: (model ?? (isGrok ? settings.model : "")).nilIfEmpty,
+            reasoningEffort: (effort ?? (isGrok ? settings.effort : "")).nilIfEmpty,
+            fastMode: fastMode,
             themeName: settings.theme.grokThemeName,
             themeVariables: settings.theme.grokThemeEnvironment,
             providerEnvironment: providerEnvironment,

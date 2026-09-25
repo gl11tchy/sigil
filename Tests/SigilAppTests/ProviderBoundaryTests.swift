@@ -143,6 +143,21 @@ struct ProviderBoundaryTests {
         #expect(other.controller.isRunning)
     }
 
+    @Test func anotherCLIGetsOnlyTheModelEffortAndSpeedItWasGiven() throws {
+        let fixture = try ProviderFixture()
+        defer { fixture.cleanup() }
+        fixture.model.settings.model = "grok-4.7"
+        fixture.model.settings.effort = "xhigh"
+        let plain = try #require(fixture.model.newTab(in: fixture.root, provider: .claudeCode))
+        #expect(plain.spec.arguments().isEmpty)
+        let chosen = try #require(
+            fixture.model.newTab(in: fixture.root, model: "opus", effort: "max", fastMode: true, provider: .claudeCode))
+        #expect(chosen.spec.arguments() == ["--model", "opus", "--effort", "max", "--settings", #"{"fastMode":true}"#])
+        let grok = try #require(fixture.model.newTab(in: fixture.root))
+        #expect(grok.spec.model == "grok-4.7")
+        #expect(grok.spec.reasoningEffort == "xhigh")
+    }
+
     @Test func kimiAccountSignInPassesNoKey() throws {
         let fixture = try ProviderFixture()
         defer { fixture.cleanup() }

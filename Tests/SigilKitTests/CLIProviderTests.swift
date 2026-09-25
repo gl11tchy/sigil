@@ -9,7 +9,6 @@ struct CLIProviderTests {
         let spec = GrokLaunchSpec(
             workingDirectory: URL(fileURLWithPath: "/tmp/project with spaces"),
             mode: .new(sessionID: UUID()),
-            model: "grok-only-model", reasoningEffort: "high",
             themeName: "sigil-host", themeVariables: ["GROK_THEME_BG": "000000"],
             bridgeTabID: "grok-tab", bridgeSocketPath: "/tmp/grok.sock",
             provider: provider
@@ -31,6 +30,46 @@ struct CLIProviderTests {
         let command = spec.hostCommand(processEnvironment: ["SHELL": "/bin/zsh"])
         #expect(command.executable.path == "/bin/zsh")
         #expect(command.arguments.last == provider.command)
+    }
+
+    @Test(arguments: [
+        (CLIProvider.claudeCode, ["--model", "opus", "--effort", "high", "--settings", #"{"fastMode":true}"#]),
+        (.codex, ["--model", "gpt-5.5", "-c", #"model_reasoning_effort="high""#, "-c", #"service_tier="fast""#]),
+        (.cursor, ["--model", "gpt-5.5"]),
+        (.devin, ["--model", "gpt-5.5"]),
+        (.kimi, []),
+    ])
+    func eachProviderGetsModelEffortAndFastInItsOwnFlags(provider: CLIProvider, expected: [String]) {
+        let model = provider == .claudeCode ? "opus" : "gpt-5.5"
+        let spec = GrokLaunchSpec(
+            workingDirectory: URL(fileURLWithPath: "/tmp/project"), mode: .continueLatest,
+            model: model, reasoningEffort: "high", fastMode: true,
+            extraArguments: ["--verbose"], provider: provider
+        )
+        #expect(spec.arguments() == expected + ["--verbose"])
+        let command = spec.hostCommand(processEnvironment: ["SHELL": "/bin/zsh"])
+        #expect(Array(command.arguments.suffix(expected.count + 2)) == [provider.command] + expected + ["--verbose"])
+    }
+
+    @Test(arguments: [CLIProvider.claudeCode, .codex])
+    func blankChoicesAndFastOffLeaveTheCLIDefaults(provider: CLIProvider) {
+        let spec = GrokLaunchSpec(
+            workingDirectory: URL(fileURLWithPath: "/tmp/project"), mode: .continueLatest,
+            model: " ", reasoningEffort: "", provider: provider
+        )
+        #expect(spec.arguments().isEmpty)
+    }
+
+    @Test func grokKeepsItsOwnFlagsAndIgnoresFastMode() {
+        let spec = GrokLaunchSpec(
+            executable: URL(fileURLWithPath: "/tmp/grok"),
+            workingDirectory: URL(fileURLWithPath: "/tmp/project"), mode: .continueLatest,
+            model: "grok-4.7", reasoningEffort: "high", fastMode: true
+        )
+        #expect(
+            spec.arguments() == [
+                "--cwd", "/tmp/project", "--continue", "--model", "grok-4.7", "--reasoning-effort", "high",
+            ])
     }
 
     @Test func claudeCodesLocalInstallFolderIsOnTheFallbackPath() {

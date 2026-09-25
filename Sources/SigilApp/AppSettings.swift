@@ -289,10 +289,14 @@ final class AppSettings {
     nonisolated static func effortLabel(_ value: String) -> String {
         switch value {
         case "": "CLI default"
+        case "none": "None"
+        case "minimal": "Minimal"
         case "low": "Low"
         case "medium": "Medium"
         case "high": "High"
-        case "xhigh": "Extra high"
+        case "xhigh", "extra-high": "Extra high"
+        case "max": "Max"
+        case "ultra": "Ultra"
         default: value
         }
     }

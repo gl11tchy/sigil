@@ -105,9 +105,16 @@ enum GrokModelCatalog: Sendable {
     private static func runModels(at path: String, shellPath: String) async -> [String] {
         guard FileManager.default.isExecutableFile(atPath: path) else { return [] }
         let command = launch(executable: path, shellPath: shellPath)
+        guard let output = await output(of: command.executable, arguments: command.arguments) else { return [] }
+        return parse(output)
+    }
+
+    /// Standard output of a short list command. Nil when it fails, runs past
+    /// three seconds, or the caller is cancelled.
+    static func output(of executable: String, arguments: [String]) async -> String? {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: command.executable)
-        process.arguments = command.arguments
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
         let output = Pipe()
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
@@ -126,7 +133,7 @@ enum GrokModelCatalog: Sendable {
         } catch {
             try? output.fileHandleForWriting.close()
             captured.stop()
-            return []
+            return nil
         }
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 3) { exit.finish(false) }
         let exited = await withTaskCancellationHandler {
@@ -137,15 +144,15 @@ enum GrokModelCatalog: Sendable {
         guard exited else {
             captured.stop()
             DispatchQueue.global(qos: .utility).async { stop(process) }
-            return []
+            return nil
         }
         let drained = OnceSignal()
         reader.notify(queue: .global(qos: .utility)) { drained.finish(true) }
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.5) { drained.finish(false) }
         _ = await drained.wait()
         captured.stop()
-        guard process.terminationStatus == 0 else { return [] }
-        return parse(String(decoding: captured.data, as: UTF8.self))
+        guard process.terminationStatus == 0 else { return nil }
+        return String(decoding: captured.data, as: UTF8.self)
     }
 }
 
