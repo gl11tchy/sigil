@@ -74,6 +74,8 @@ final class RemoteStore {
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
+    /// Lets a cache read land only if nothing replaced the screen meanwhile.
+    @ObservationIgnored private var restoreGate = RestoreGate()
     @ObservationIgnored private var searchToken = 0
     @ObservationIgnored private var chatQuery = ""
     @ObservationIgnored private var lastChunkAt = Date.distantPast
@@ -127,6 +129,7 @@ final class RemoteStore {
 
     /// Everything that belongs to the Mac on screen. Drafts stay: tab ids never collide across Macs.
     private func clearMacState() {
+        restoreGate.invalidate()
         tabs = []
         selectedTabID = nil
         screens = [:]
@@ -683,6 +686,8 @@ final class RemoteStore {
             drafts[next] = drafts[previous]
             attachments[next] = attachments[previous]
         }
+        // Live, even with no tabs: a cache still being read must not replace it.
+        restoreGate.invalidate()
         tabs = state.tabs
         selectedTabID = state.selectedTabID
         canRestart = state.canRestart
@@ -771,13 +776,13 @@ final class RemoteStore {
     // MARK: Cache
 
     /// Read and decoded off the main actor. It lands only on the screen it was read
-    /// for: the same Mac and tab, before anything live replaced them.
+    /// for: the same Mac, before anything live or another Mac replaced it.
     private func restoreCache(for credential: PairingCredential) {
-        let tab = selectedTabID
+        let ticket = restoreGate.begin(macID: credential.id)
         Task { [weak self] in
             guard
                 let cached = await ScreenCache.restore(for: credential, if: {
-                    self?.activeMacID == credential.id && self?.selectedTabID == tab && self?.tabs.isEmpty == true
+                    self.map { $0.restoreGate.isCurrent(ticket, activeMacID: $0.activeMacID) } ?? false
                 }),
                 let self
             else { return }

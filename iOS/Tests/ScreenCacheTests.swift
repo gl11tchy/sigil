@@ -11,6 +11,8 @@ enum ScreenCacheTests {
         ("cache: each Mac keeps its own file", eachMacKeepsItsOwnFile),
         ("cache: a corrupt or truncated file is ignored", corruptOrTruncatedFileIsIgnored),
         ("cache: restore lands only while current", restoreLandsOnlyWhileCurrent),
+        ("cache: only the newest restore of the Mac on screen is current", onlyTheNewestRestoreIsCurrent),
+        ("cache: live state with no tabs keeps a late restore off screen", liveEmptyStateBeatsALateRestore),
     ]
 
     /// Holds the writer's queue once everything queued before it has run.
@@ -216,5 +218,86 @@ enum ScreenCacheTests {
         let dropped = await stale.value
         try Expect.equal(dropped, nil, "a cache for a screen that moved on is dropped")
         try Expect.equal(screen.checks, [true], "checked once, after the read")
+    }
+
+    /// The store's steps, in its order: `activate` begins a restore, `clearMacState`
+    /// and every live state invalidate, and the check names the Mac on screen.
+    static func onlyTheNewestRestoreIsCurrent() throws {
+        var gate = RestoreGate()
+
+        // Launch on Mac A.
+        let launch = gate.begin(macID: "A")
+        try Expect.true(gate.isCurrent(launch, activeMacID: "A"), "a restore for the Mac on screen is current")
+        try Expect.true(!gate.isCurrent(launch, activeMacID: "B"), "never current while another Mac is on screen")
+        try Expect.true(!gate.isCurrent(launch, activeMacID: nil), "never current with no Mac on screen")
+        // A's first live state, whatever its tabs.
+        gate.invalidate()
+        try Expect.true(!gate.isCurrent(launch, activeMacID: "A"), "live state makes the restore stale")
+
+        // Switch A to B and back to A before either read finishes.
+        let firstA = gate.begin(macID: "A")
+        gate.invalidate()
+        let b = gate.begin(macID: "B")
+        try Expect.true(!gate.isCurrent(firstA, activeMacID: "B"), "switching away drops A's restore")
+        try Expect.true(gate.isCurrent(b, activeMacID: "B"), "B's restore is current")
+        gate.invalidate()
+        let secondA = gate.begin(macID: "A")
+        try Expect.true(!gate.isCurrent(firstA, activeMacID: "A"), "A's first restore stays stale once A is back")
+        try Expect.true(!gate.isCurrent(b, activeMacID: "A"), "B's restore is stale")
+        try Expect.true(gate.isCurrent(secondA, activeMacID: "A"), "only A's newest restore is current")
+
+        // Forget A: its state is cleared, then B or nothing comes on screen.
+        gate.invalidate()
+        try Expect.true(!gate.isCurrent(secondA, activeMacID: nil), "a forgotten Mac's restore is dropped")
+        let next = gate.begin(macID: "B")
+        try Expect.true(!gate.isCurrent(secondA, activeMacID: "B"), "a forgotten Mac's restore never reaches the next Mac")
+        try Expect.true(gate.isCurrent(next, activeMacID: "B"), "the next Mac's restore is current")
+
+        // Pair another Mac while B's read is in flight: B is cleared, then C is saved with no restore.
+        gate.invalidate()
+        try Expect.true(!gate.isCurrent(next, activeMacID: nil), "pairing another Mac drops the restore")
+        try Expect.true(!gate.isCurrent(next, activeMacID: "C"), "the new Mac never shows B's cache")
+        // Or the pairing is cancelled: B comes back with a restore of its own.
+        let back = gate.begin(macID: "B")
+        try Expect.true(!gate.isCurrent(next, activeMacID: "B"), "the restore from before pairing stays stale")
+        try Expect.true(gate.isCurrent(back, activeMacID: "B"), "the restore after cancelling is current")
+    }
+
+    @MainActor
+    private final class Shown {
+        var gate = RestoreGate()
+        var activeMacID: String?
+    }
+
+    /// A Mac whose sessions all closed sends an empty tab list. A cache read that
+    /// finishes after it must not bring yesterday's sessions back.
+    static func liveEmptyStateBeatsALateRestore() async throws {
+        let (writer, folder) = try makeWriter()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let previous = mac()
+        let a = mac()
+        writer.save(snapshot("yesterday"), for: a)
+
+        // Switching from the previous Mac queues its last save; A's read waits behind it.
+        let shown = Shown()
+        let held = Gate(on: writer.queue)
+        writer.save(snapshot("previous"), for: previous)
+        shown.gate.invalidate()
+        shown.activeMacID = a.id
+        let ticket = shown.gate.begin(macID: a.id)
+        let late = Task { @MainActor in
+            await writer.restore(for: a) { shown.gate.isCurrent(ticket, activeMacID: shown.activeMacID) }
+        }
+        await Task.yield()
+        // A's watch reply lands first, with no tabs and nothing selected.
+        shown.gate.invalidate()
+        held.release()
+        let dropped = await late.value
+        try Expect.equal(dropped, nil, "a late restore never replaces live state, even an empty one")
+
+        // With nothing live meanwhile, the same cache lands.
+        let fresh = shown.gate.begin(macID: a.id)
+        let restored = await writer.restore(for: a) { shown.gate.isCurrent(fresh, activeMacID: shown.activeMacID) }
+        try Expect.equal(restored, snapshot("yesterday"), "a restore with nothing live lands")
     }
 }
