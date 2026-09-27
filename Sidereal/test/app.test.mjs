@@ -32,7 +32,11 @@ async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { devic
       showModal() { this.open = true; }, close() { this.open = false; },
       scrollHeight: 0, scrollTop: 0, clientHeight: 0,
       querySelector(selector) { return element(`${id}-${selector}`); },
-      replaceChildren(...children) { this.children = children; },
+      // A fragment hands over its nodes, and the text is the text of the new children.
+      replaceChildren(...children) {
+        this.children = children.flatMap(child => child.parts ?? [child]);
+        this.textContent = this.children.map(child => child.textContent).join('');
+      },
     });
     return elements.get(id);
   };
@@ -42,7 +46,7 @@ async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { devic
   };
   const document = {
     hidden: false, getElementById: element,
-    createDocumentFragment: () => ({ append(node) { this.parts = [...(this.parts || []), node]; } }),
+    createDocumentFragment: () => ({ parts: [], append(node) { this.parts.push(node); } }),
     createTextNode: text => ({ textContent: text }),
     createElement: () => ({
       textContent: '', dataset: {}, hidden: false, children: [],
