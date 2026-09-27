@@ -976,13 +976,14 @@ function updateLatest() {
   const terminal = $('terminal');
   $('latest').hidden = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
 }
-function resizeMessage() {
+function resizeMessage(atBottom) {
   const terminal = $('terminal');
-  const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
+  const scrollTop = terminal.scrollTop;
+  atBottom ??= terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
   const message = $('message');
   message.style.height = 'auto';
   message.style.height = `${message.scrollHeight + 2}px`;
-  if (atBottom) terminal.scrollTop = terminal.scrollHeight;
+  terminal.scrollTop = atBottom ? terminal.scrollHeight : scrollTop;
   updateLatest();
 }
 function updateViewport() {
@@ -994,8 +995,7 @@ function updateViewport() {
   document.body.dataset.compact = String(viewport.height < 600);
   document.documentElement.style.setProperty('--viewport-height', `${viewport.height}px`);
   document.documentElement.style.setProperty('--viewport-top', `${viewport.offsetTop}px`);
-  if (atBottom) terminal.scrollTop = terminal.scrollHeight;
-  updateLatest();
+  resizeMessage(atBottom);
 }
 window.visualViewport?.addEventListener('resize', updateViewport);
 window.visualViewport?.addEventListener('scroll', updateViewport);

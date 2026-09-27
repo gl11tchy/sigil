@@ -303,6 +303,68 @@ test('loading earlier output keeps the text the reader was on in place', async (
   } finally { mac.close(); }
 });
 
+for (const position of ['history', 'latest']) {
+  test(`resizing a draft from desktop to phone and back preserves ${position} position`, async ({ page, baseURL }, testInfo) => {
+    await page.setViewportSize({ width: 1512, height: 844 });
+    // Short terminal lines do not rewrap, so this isolates composer reflow from text wrapping.
+    const output = Array.from({ length: 100 }, (_, index) => `Output line ${index + 1}`).join('\n');
+    const mac = await pair(page, baseURL, output);
+    try {
+      await page.evaluate(() => document.fonts.ready);
+      const draft = 'Keep this unsent draft fully visible when the desktop window changes to a narrow phone screen.';
+      const message = page.locator('#message');
+      await message.fill(draft);
+      await message.focus();
+      await message.evaluate(el => el.setSelectionRange(5, 12));
+      const terminal = page.locator('#terminal');
+      await terminal.evaluate((el, position) => {
+        el.scrollTop = position === 'history' ? 220 : el.scrollHeight;
+        el.dispatchEvent(new Event('scroll'));
+      }, position);
+      const initialTop = await terminal.evaluate(el => el.scrollTop);
+      const height = () => message.evaluate(el => ({ client: el.clientHeight, scroll: el.scrollHeight }));
+      const desktop = await height();
+      expect(desktop.scroll).toBeLessThanOrEqual(desktop.client);
+      for (const width of [390, 1512]) {
+        await page.setViewportSize({ width, height: 844 });
+        await expect.poll(async () => { const size = await height(); return size.scroll - size.client; }).toBeLessThanOrEqual(1);
+        if (width === 390) await expect.poll(async () => (await height()).client).toBeGreaterThan(desktop.client);
+        else await expect.poll(async () => Math.abs((await height()).client - desktop.client)).toBeLessThanOrEqual(1);
+        await expect(message).toHaveValue(draft);
+        await expect(message).toBeFocused();
+        expect(await message.evaluate(el => [el.selectionStart, el.selectionEnd])).toEqual([5, 12]);
+        const scroll = await terminal.evaluate(el => ({ top: el.scrollTop, fromBottom: el.scrollHeight - el.scrollTop - el.clientHeight }));
+        if (position === 'history') expect(Math.abs(scroll.top - initialTop)).toBeLessThanOrEqual(1);
+        else expect(scroll.fromBottom).toBeLessThanOrEqual(1);
+        await page.screenshot({ path: testInfo.outputPath(`draft-${width}.png`) });
+      }
+      expect(mac.actions.filter(action => ['input', 'key'].includes(action.action))).toEqual([]);
+      expect(mac.errors).toEqual([]);
+    } finally { mac.close(); }
+  });
+}
+
+test('reflowing a tall draft preserves manual reading just above the follow threshold', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const output = Array.from({ length: 100 }, (_, index) => `Output line ${index + 1}`).join('\n');
+  const mac = await pair(page, baseURL, output);
+  try {
+    await page.evaluate(() => document.fonts.ready);
+    const draft = 'A tall unsent draft\n'.repeat(6);
+    await page.locator('#message').fill(draft);
+    const before = await page.locator('#terminal').evaluate(el => {
+      el.scrollTop = el.scrollHeight - el.clientHeight - 70;
+      return el.scrollTop;
+    });
+    // A keyboard/browser viewport event also remeasures an already tall editor.
+    await page.evaluate(() => visualViewport.dispatchEvent(new Event('resize')));
+    expect(await page.locator('#terminal').evaluate(el => el.scrollTop)).toBe(before);
+    await expect(page.locator('#message')).toHaveValue(draft);
+    await expect(page.locator('#message')).toBeFocused();
+    expect(mac.actions.filter(action => ['input', 'key'].includes(action.action))).toEqual([]);
+  } finally { mac.close(); }
+});
+
 test('the visual viewport keeps the composer above an on-screen keyboard', async ({ page, baseURL }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   // Desktop browser runners cannot open an OS keyboard. Model its visual-only resize.
