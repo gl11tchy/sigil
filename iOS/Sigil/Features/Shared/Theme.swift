@@ -827,7 +827,9 @@ struct ActivityMark: View {
             case .working: PixelLoader(color: Theme.accent)
             case .starting: PixelLoader(color: Theme.ink3)
             case .idle: if hasUnseenActivity { UnreadDot() } else { Color.clear }
-            case .exited, .unknown: StatusDot(color: Theme.ink3)
+            case .waitingForApproval: StatusDot(color: Theme.orange)
+            case .failed: StatusDot(color: Theme.red)
+            case .interrupted, .disconnected, .exited, .unknown: StatusDot(color: Theme.ink3)
             }
         }
         .frame(width: 10, height: 10)

@@ -24,4 +24,8 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 
-SIGIL_RELAY_PORT=$PORT bash scripts/test.sh
+if [ "$#" -gt 0 ]; then
+  SIGIL_RELAY_PORT=$PORT "$@"
+else
+  SIGIL_RELAY_PORT=$PORT bash scripts/test.sh
+fi

@@ -108,7 +108,11 @@ enum StatusWords {
         if state.asking { return "Asking" }
         switch state.status {
         case "working": return "Working"
-        case "idle": return "Done"
+        case "idle": return "Ready"
+        case "failed": return "Failed"
+        case "interrupted": return "Stopped"
+        case "disconnected": return "Disconnected"
+        case "waitingForApproval": return "Needs approval"
         case "exited": return "Ended"
         case "starting": return "Starting"
         default: return state.status.capitalized
@@ -119,7 +123,7 @@ enum StatusWords {
         if state.asking { return "\(attributes.provider) is waiting for your answer" }
         switch state.status {
         case "working": return "\(attributes.provider) is working"
-        case "idle": return "\(attributes.provider) finished and is waiting"
+        case "idle": return "\(attributes.provider) is waiting"
         case "exited": return "\(attributes.provider) ended"
         default: return "\(attributes.provider) · \(attributes.mac)"
         }

@@ -1,3 +1,6 @@
+#if os(iOS)
+@testable import Sigil
+#endif
 import Foundation
 
 enum ThemeTests {

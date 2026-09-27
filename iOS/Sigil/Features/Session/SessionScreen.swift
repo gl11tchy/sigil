@@ -100,7 +100,7 @@ struct SessionScreen: View {
             } description: {
                 EmptyDetail(text: emptyDetail)
             } actions: {
-                if store.selectedTab?.status == .exited, store.canRestart {
+                if store.selectedTab?.acceptsInput == false, store.canRestart {
                     Button("Restart") { store.restart() }
                         .buttonStyle(.primary)
                         .disabled(!store.isConnected || store.busy)
@@ -124,6 +124,11 @@ struct SessionScreen: View {
         case .exited: return "Session ended"
         case .working: return "Working…"
         case .starting: return "Starting session…"
+        case .waitingForApproval: return "Needs approval"
+        case .interrupted: return "Session stopped"
+        case .failed: return "Session failed"
+        case .disconnected: return "Disconnected"
+        case .unknown: return "Status unknown"
         default: return "Ready when you are."
         }
     }
@@ -136,9 +141,12 @@ struct SessionScreen: View {
         switch store.selectedTab?.status {
         case .exited:
             return store.canRestart
-                ? "Restart resumes a Grok chat. Other providers start a new conversation."
+                ? "Resume this conversation."
                 : "Restart this session in Sigil on your Mac."
         case .working, .starting: return "Output will appear here."
+        case .unknown: return "Check the terminal for progress."
+        case .failed: return "Check the terminal for the error."
+        case .disconnected: return "Reconnect to check this session."
         default: return "Send a message to this session."
         }
     }

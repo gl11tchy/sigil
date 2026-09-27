@@ -1,3 +1,6 @@
+#if os(iOS)
+@testable import Sigil
+#endif
 import Foundation
 
 enum OutputTests {
@@ -37,8 +40,12 @@ enum OutputTests {
     /// so these are cases from Sidereal/test/output.test.mjs.
     @MainActor
     static func readableOutputMatchesCompanion() throws {
+        #if os(iOS)
+        let formatter = ReadableOutput.bundled()
+        #else
         let script = try String(contentsOfFile: "Sigil/Resources/readable-output.js", encoding: .utf8)
         let formatter = ReadableOutput(script: script)
+        #endif
         try Expect.true(formatter.isAvailable, "script loaded")
         let footer = "\n" + String(repeating: "─", count: 70)
             + "\n│ ❯ Build anything\n                 Grok 4.6\n(xhigh) · always-approve\n\n→:expand | Ctrl+e:collapse thinking | Ctrl+x:shortcuts"

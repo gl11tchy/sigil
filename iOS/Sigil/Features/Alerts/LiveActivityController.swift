@@ -24,7 +24,7 @@ final class LiveActivityController {
             return
         }
         let state = SessionActivityAttributes.ContentState(
-            status: tab.status.raw, since: Int(Date().timeIntervalSince1970), asking: prompt != nil)
+            status: tab.status.raw, since: Int(Date().timeIntervalSince1970), asking: prompt?.verified == true)
         if let activity, activity.attributes.tabID == tab.id {
             // Keep `since` when the status did not change, so the timer does not restart.
             let previous = activity.content.state
@@ -38,7 +38,7 @@ final class LiveActivityController {
             return
         }
         if activity != nil { end() }
-        guard tab.status == .working || prompt != nil else { return }
+        guard tab.status == .working || prompt?.verified == true else { return }
         let attributes = SessionActivityAttributes(
             tabID: tab.id, title: tab.title, provider: tab.providerName ?? "Session", mac: mac ?? "Mac", macID: macID)
         do {

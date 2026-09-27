@@ -35,6 +35,8 @@ final class RemoteStore {
     var rawMode = false
     var drafts: [String: String] = [:]
     private(set) var attachments: [String: [Attachment]] = [:]
+    @ObservationIgnored private var draftsByMac: [String: [String: String]] = [:]
+    @ObservationIgnored private var attachmentsByMac: [String: [String: [Attachment]]] = [:]
 
     private(set) var chatList = ChatList()
     private(set) var loadingChats = false
@@ -56,7 +58,7 @@ final class RemoteStore {
     private(set) var appearanceGround = ""
 
     let isDemo: Bool
-    @ObservationIgnored private let connection = RemoteConnection()
+    @ObservationIgnored private let connection: RemoteConnection
     /// The APNs token, once iOS gave one; sent to the Mac on every connection.
     @ObservationIgnored private var pushToken: String?
     /// A session a notification or widget chose before the socket was up.
@@ -83,14 +85,15 @@ final class RemoteStore {
     @ObservationIgnored private var streaming = false
     @ObservationIgnored private var credential: PairingCredential?
 
-    init(isDemo: Bool) {
+    init(isDemo: Bool, restoreSavedPairings: Bool = true, connection: RemoteConnection? = nil) {
         self.isDemo = isDemo
-        connection.delegate = self
+        self.connection = connection ?? RemoteConnection()
+        self.connection.delegate = self
         liveActivity.onToken = { [weak self] tabID, token in self?.sendActivityToken(token, for: tabID) }
         liveActivity.onEnd = { [weak self] tabID in self?.forgetActivityToken(for: tabID) }
         if isDemo {
             DemoData.seed(self)
-        } else {
+        } else if restoreSavedPairings {
             let list = CredentialStore.loadList()
             macs = list.macs
             if let saved = list.selected { activate(saved) }
@@ -100,6 +103,8 @@ final class RemoteStore {
     /// Shows one Mac: its cached screen first, then its live connection.
     private func activate(_ saved: PairingCredential) {
         activeMacID = saved.id
+        drafts = draftsByMac[saved.id] ?? [:]
+        attachments = attachmentsByMac[saved.id] ?? [:]
         hasPairing = true
         credential = saved
         macAddress = saved.origin.host
@@ -125,10 +130,17 @@ final class RemoteStore {
         activate(next)
     }
 
-    /// Everything that belongs to the Mac on screen. Drafts stay: tab ids never collide across Macs.
+    /// Preserve unsent work under its pairing, never a bare tab ID from another Mac.
     private func clearMacState() {
+        if let activeMacID {
+            draftsByMac[activeMacID] = drafts
+            attachmentsByMac[activeMacID] = attachments
+        }
+        drafts = [:]
+        attachments = [:]
         tabs = []
         selectedTabID = nil
+        pendingTabID = nil
         screens = [:]
         histories = [:]
         prompt = nil
@@ -158,7 +170,7 @@ final class RemoteStore {
     var selectedAttachments: [Attachment] { selectedTabID.flatMap { attachments[$0] } ?? [] }
 
     var canSend: Bool {
-        guard isConnected, !busy, let tab = selectedTab, tab.status != .exited else { return false }
+        guard isConnected, !busy, let tab = selectedTab, tab.acceptsInput else { return false }
         return !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !selectedAttachments.isEmpty
     }
 
@@ -221,6 +233,8 @@ final class RemoteStore {
             ScreenCache.delete(for: credential)
             CredentialStore.delete(id: credential.id)
             macs.removeAll { $0.id == credential.id }
+            draftsByMac[credential.id] = nil
+            attachmentsByMac[credential.id] = nil
         } else {
             CredentialStore.delete()
             macs = []
@@ -275,6 +289,12 @@ final class RemoteStore {
     /// `watch` is polled once a second, as before.
     private func startStreaming() async {
         guard isConnected, foreground else { return }
+        // Legacy events have no freshness counter. Poll authenticated replies instead.
+        guard connection.supportsOrderedEvents else {
+            streaming = false
+            startPolling()
+            return
+        }
         AlertsController.enable()
         await registerPush()
         await replayActivityTokens()
@@ -335,7 +355,11 @@ final class RemoteStore {
     /// Opens the session a notification or a widget named, on the Mac it names,
     /// now or once connected.
     func open(tabID: String, macID: String? = nil) {
-        if let macID, macID != activeMacID, macs.contains(where: { $0.id == macID }) {
+        if let macID, macID != activeMacID {
+            guard macs.contains(where: { $0.id == macID }) else {
+                errorMessage = "Pair this Mac again before opening its session."
+                return
+            }
             switchTo(macID: macID)
         }
         if isConnected, let tab = tabs.first(where: { $0.id == tabID }) {
@@ -359,13 +383,21 @@ final class RemoteStore {
 
     func interrupt() {
         guard isConnected, let id = selectedTabID else { return }
-        Task { await run { _ = try await $0.request("key", text: RemoteKey.interrupt.rawValue, tabID: id) } }
+        let epoch = connection.commandEpoch
+        Task { await run {
+            try $0.requireCurrentConnection(epoch)
+            _ = try await $0.request("key", text: RemoteKey.interrupt.rawValue, tabID: id)
+        } }
     }
 
     /// Keys queue behind each other in the connection, so quick taps are never dropped.
     func send(key: RemoteKey) {
         guard isConnected, let id = selectedTabID else { return }
-        Task { await run { _ = try await $0.request("key", text: key.rawValue, tabID: id) } }
+        let epoch = connection.commandEpoch
+        Task { await run {
+            try $0.requireCurrentConnection(epoch)
+            _ = try await $0.request("key", text: key.rawValue, tabID: id)
+        } }
     }
 
     func restart() {
@@ -391,13 +423,27 @@ final class RemoteStore {
         perform { _ = try await $0.request("archive", tabID: tab.id) }
     }
 
-    /// Answers the approval question with one of its keys. The Mac checks the
-    /// question is still on screen before it types.
+    /// Structured responses require an authoritative interaction. Terminal hints
+    /// only type the chosen character; they never claim stale-response protection.
     func answer(_ key: String) {
         guard let id = selectedTabID, let prompt,
             prompt.choices.contains(where: { $0.key == key }) || key == prompt.yes || key == prompt.no
         else { return }
-        perform { _ = try await $0.request("answer", text: key, tabID: id, name: prompt.id) }
+        if prompt.verified {
+            guard let instance = prompt.id, !instance.isEmpty, let session = prompt.sessionID, !session.isEmpty,
+                selectedTab?.capabilities?.structuredApproval == true
+            else { return }
+            perform { _ = try await $0.request("answer", text: key, tabID: id, name: instance) }
+        } else {
+            let epoch = connection.commandEpoch
+            perform {
+                _ = try await $0.request("key", text: key, tabID: id)
+                if prompt.style == .yesNo {
+                    try $0.requireCurrentConnection(epoch)
+                    _ = try await $0.request("key", text: "enter", tabID: id)
+                }
+            }
+        }
     }
 
     /// A nil provider lets the Mac start its default CLI, as Macs before provider choice always do.
@@ -530,7 +576,7 @@ final class RemoteStore {
     }
 
     func open(_ chat: RemoteChat) {
-        perform { _ = try await $0.request("open", text: chat.folder, name: chat.id) }
+        perform { _ = try await $0.request("open", text: chat.folder, name: chat.id, provider: chat.provider) }
     }
 
     func loadEarlier() {
@@ -616,22 +662,28 @@ final class RemoteStore {
             errorMessage = "Keep the message under 8 KB."
             return
         }
+        let epoch = connection.commandEpoch
         perform { connection in
+            try connection.requireCurrentConnection(epoch)
             for file in files {
-                try await self.upload(file, to: target, over: connection)
+                try await self.upload(file, to: target, over: connection, epoch: epoch)
+                try connection.requireCurrentConnection(epoch)
                 // The Mac has pasted this file, so a retry must not send it again.
                 self.attachments[target]?.removeAll { $0.id == file.id }
             }
             if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                try connection.requireCurrentConnection(epoch)
                 _ = try await connection.request("input", text: payload, tabID: target)
             }
             try await Task.sleep(for: .milliseconds(100))
+            try connection.requireCurrentConnection(epoch)
             _ = try await connection.request("key", text: RemoteKey.enter.rawValue, tabID: target)
+            try connection.requireCurrentConnection(epoch)
             if self.drafts[target] == text { self.drafts[target] = "" }
         }
     }
 
-    private func upload(_ file: Attachment, to tabID: String, over connection: RemoteConnection) async throws {
+    private func upload(_ file: Attachment, to tabID: String, over connection: RemoteConnection, epoch: Int) async throws {
         let transfer = RemoteFile.transferID()
         let name = RemoteFile.safeName(file.name)
         for chunk in RemoteFile.chunks(of: file.data) {
@@ -639,6 +691,7 @@ final class RemoteStore {
             let wait = lastChunkAt.addingTimeInterval(0.05).timeIntervalSinceNow
             if wait > 0 { try await Task.sleep(for: .seconds(wait)) }
             lastChunkAt = Date()
+            try connection.requireCurrentConnection(epoch)
             _ = try await connection.request(
                 "file", text: chunk.base64, tabID: tabID, name: name, index: chunk.index, count: chunk.count,
                 transfer: transfer)
@@ -651,8 +704,12 @@ final class RemoteStore {
         guard isConnected, !busy else { return }
         busy = true
         errorMessage = nil
+        let epoch = connection.commandEpoch
         Task {
-            await run(work)
+            await run {
+                try $0.requireCurrentConnection(epoch)
+                try await work($0)
+            }
             busy = false
         }
     }
@@ -666,28 +723,34 @@ final class RemoteStore {
     /// reply, whose screen goes before what is loaded instead of replacing it.
     fileprivate func apply(
         _ state: RemoteState, earlier: String?, olderRows: Bool, restartedFrom oldID: String?,
-        restartedTo newID: String?
+        restartedTo newID: String?, restartedSession: ProviderSessionReference? = nil
     ) {
         let ids = Set(state.tabs.map(\.id))
         let complete = state.tabListIsComplete
-        // A Sigil restart gives every tab a new id. Carry the draft to the tab the Mac selected.
-        let allTabsNew = freshHandshake && !tabs.isEmpty && !tabs.contains { ids.contains($0.id) }
+        // A tab UUID can change after restart. Only a unique provider-native
+        // conversation and canonical project match can inherit unsent work.
+        if freshHandshake, complete {
+            for previous in tabs where !ids.contains(previous.id) {
+                let matches = state.tabs.filter { $0.hasSameConversation(as: previous) }
+                guard matches.count == 1, let next = matches.first else { continue }
+                if (drafts[next.id] ?? "").isEmpty { drafts[next.id] = drafts[previous.id] }
+                if (attachments[next.id] ?? []).isEmpty { attachments[next.id] = attachments[previous.id] }
+            }
+        }
         freshHandshake = false
-        if let oldID, let newID {
+        if let oldID, let newID,
+            let previous = tabs.first(where: { $0.id == oldID }), let reference = previous.sessionReference,
+            reference == (restartedSession ?? state.tabs.first(where: { $0.id == newID })?.sessionReference)
+        {
             if let draft = drafts[oldID] { drafts[newID] = draft }
             if let files = attachments[oldID] { attachments[newID] = files }
         }
-        if let previous = selectedTabID, let next = state.selectedTabID, previous != next, complete, allTabsNew,
-            (drafts[next] ?? "").isEmpty, (attachments[next] ?? []).isEmpty
-        {
-            drafts[next] = drafts[previous]
-            attachments[next] = attachments[previous]
-        }
         tabs = state.tabs
         selectedTabID = state.selectedTabID
-        canRestart = state.canRestart
+        canRestart = state.canRestart && (selectedTab?.capabilities == nil || selectedTab?.canResume == true)
         supportsSessionOps = state.supportsSessionOps
         prompt = state.prompt
+        // Never retain an approval while displaying a different or disconnected tab.
         if let name = state.mac, !name.isEmpty {
             macName = name
             rememberMacName(name)
@@ -854,10 +917,12 @@ extension RemoteStore: RemoteConnectionDelegate {
             streaming = false
             if foreground { Task { await startStreaming() } }
         case .connecting:
+            prompt = nil
             freshHandshake = true
             streaming = false
             pollTask?.cancel()
         case .offline, .revoked:
+            prompt = nil
             streaming = false
             pollTask?.cancel()
         }
@@ -869,7 +934,7 @@ extension RemoteStore: RemoteConnectionDelegate {
         apply(
             state, earlier: action == "earlier" && tabID == state.selectedTabID ? (reply.earlier ?? "") : nil,
             olderRows: action == "rows" && tabID == state.selectedTabID,
-            restartedFrom: restarted == nil ? nil : tabID, restartedTo: restarted)
+            restartedFrom: restarted == nil ? nil : tabID, restartedTo: restarted, restartedSession: reply.restartedSession)
         if let restarted, let tabID, restarted != tabID {
             drafts[tabID] = nil
         }
@@ -883,12 +948,15 @@ extension RemoteStore: RemoteConnectionDelegate {
     func connection(_ connection: RemoteConnection, didSave credential: PairingCredential) {
         var kept = credential
         if let known = macs.first(where: { $0.id == credential.id }), kept.name == nil { kept.name = known.name }
-        if !CredentialStore.save(kept) {
+        var list = CredentialStore.loadList()
+        // An unavailable Keychain must not drop pairings already held in memory.
+        for mac in macs { list.upsert(mac, select: false) }
+        list.upsert(kept)
+        if !CredentialStore.save(list) {
             errorMessage = "Could not save this pairing. It ends when the app closes."
         }
         self.credential = kept
-        macs = CredentialStore.loadList().macs
-        if !macs.contains(where: { $0.id == kept.id }) { macs.append(kept) }
+        macs = list.macs
         activeMacID = kept.id
         hasPairing = true
         macAddress = kept.origin.host
@@ -921,7 +989,7 @@ enum DemoData {
                 .init(label: "Yes", key: "1"),
                 .init(label: "Yes, and don't ask again for scripts/test.sh", key: "2"),
                 .init(label: "No, and tell Claude what to do differently (esc)", key: "3"),
-            ], yes: "1", no: "3")
+            ], yes: "1", no: "3", operation: "Run scripts/test.sh in the selected project.")
     }
 
     /// Terminal rows with the colours a real session has: a bold prompt, green
