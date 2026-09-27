@@ -253,8 +253,14 @@ struct OutputView: UIViewRepresentable {
                     background: output.background, highlight: "")
                 let range = NSRange(location: edit.range.lowerBound, length: edit.range.count)
                 let storage = view.textStorage
-                if let content = view.textLayoutManager?.textContentManager {
+                if let manager = view.textLayoutManager, let content = manager.textContentManager {
                     content.performEditingTransaction { storage.replaceCharacters(in: range, with: lines) }
+                    // TextKit can leave a line after the edit where it was; place them again.
+                    if let start = content.location(content.documentRange.location, offsetBy: range.location),
+                        let rest = NSTextRange(location: start, end: content.documentRange.endLocation)
+                    {
+                        manager.invalidateLayout(for: rest)
+                    }
                 } else {
                     storage.replaceCharacters(in: range, with: lines)
                 }
