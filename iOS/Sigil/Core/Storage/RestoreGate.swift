@@ -29,11 +29,18 @@ struct RestoreGate {
         return ticket
     }
 
-    /// The screen changed under any restore in flight: live state arrived, or the Mac's state was cleared.
+    /// The Mac's state was cleared: every restore in flight is stale, and the screen waits no more.
     mutating func invalidate() {
         generation += 1
         awaited = nil
     }
+
+    /// Live state arrived: every restore in flight is stale. The screen still waits,
+    /// until `endWait` once the live output is drawn, so it never shows the tabs without it.
+    mutating func supersede() { generation += 1 }
+
+    /// The output on screen is drawn: the screen waits no more.
+    mutating func endWait() { awaited = nil }
 
     /// The restore landed, found nothing or ran out of time: the screen waits no more.
     mutating func finish(_ ticket: Ticket) {

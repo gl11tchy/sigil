@@ -695,7 +695,8 @@ final class RemoteStore {
             attachments[next] = attachments[previous]
         }
         // Live, even with no tabs: a cache still being read must not replace it.
-        restoreGate.invalidate()
+        // A launch wait holds until `show` draws this state's output.
+        restoreGate.supersede()
         tabs = state.tabs
         selectedTabID = state.selectedTabID
         canRestart = state.canRestart
@@ -784,6 +785,7 @@ final class RemoteStore {
             outputRevision += 1
         }
         if !bg.isEmpty, bg != appearanceGround { appearanceGround = bg }
+        restoreGate.endWait()
     }
 
     /// The Mac's name goes into the pairing, so the picker can show it before connecting.
@@ -834,8 +836,10 @@ final class RemoteStore {
     private func landCache(
         _ cached: CachedScreen?, styled: (StyledText, OutputSnapshot, Int)?, ticket: RestoreGate.Ticket
     ) {
+        // A stale restore leaves the wait to what replaced it.
+        guard restoreGate.isCurrent(ticket, activeMacID: activeMacID) else { return }
         defer { restoreGate.finish(ticket) }
-        guard let cached, restoreGate.isCurrent(ticket, activeMacID: activeMacID) else { return }
+        guard let cached else { return }
         tabs = cached.tabs
         selectedTabID = cached.selectedTabID
         macName = cached.mac

@@ -226,7 +226,7 @@ enum ScreenCacheTests {
     }
 
     /// The store's steps, in its order: `activate` begins a restore, `clearMacState`
-    /// and every live state invalidate, and the check names the Mac on screen.
+    /// invalidates, every live state supersedes, and the check names the Mac on screen.
     static func onlyTheNewestRestoreIsCurrent() throws {
         var gate = RestoreGate()
 
@@ -236,7 +236,7 @@ enum ScreenCacheTests {
         try Expect.true(!gate.isCurrent(launch, activeMacID: "B"), "never current while another Mac is on screen")
         try Expect.true(!gate.isCurrent(launch, activeMacID: nil), "never current with no Mac on screen")
         // A's first live state, whatever its tabs.
-        gate.invalidate()
+        gate.supersede()
         try Expect.true(!gate.isCurrent(launch, activeMacID: "A"), "live state makes the restore stale")
 
         // Switch A to B and back to A before either read finishes.
@@ -295,8 +295,10 @@ enum ScreenCacheTests {
         }
         await Task.yield()
         // A's watch reply lands first, with no tabs and nothing selected.
-        shown.gate.invalidate()
-        try Expect.true(!shown.gate.isAwaiting, "live state ends the wait at once")
+        shown.gate.supersede()
+        try Expect.true(shown.gate.isAwaiting, "live state keeps the wait until its output is drawn")
+        shown.gate.endWait()
+        try Expect.true(!shown.gate.isAwaiting, "drawing the live output ends the wait")
         held.release()
         let dropped = await late.value
         try Expect.equal(dropped, nil, "a late restore never replaces live state, even an empty one")
@@ -411,11 +413,13 @@ enum ScreenCacheTests {
         try Expect.true(!gate.isAwaiting, "the restore landing ends the wait")
         try Expect.true(gate.isCurrent(launch, activeMacID: "A"), "ending the wait does not make the restore stale")
 
-        // Live state comes first: the wait ends and the restore is stale.
+        // Live state comes first: the restore is stale, and the wait ends once the live output is drawn.
         let second = gate.begin(macID: "A", awaited: true)
-        gate.invalidate()
-        try Expect.true(!gate.isAwaiting, "live state ends the wait")
-        try Expect.true(!gate.isCurrent(second, activeMacID: "A"), "and the late restore stays off screen")
+        gate.supersede()
+        try Expect.true(!gate.isCurrent(second, activeMacID: "A"), "the late restore stays off screen")
+        try Expect.true(gate.isAwaiting, "live state keeps the wait until its output is drawn")
+        gate.endWait()
+        try Expect.true(!gate.isAwaiting, "drawing the live output ends the wait")
 
         // A switch to another Mac during the launch wait, as a notification opens it:
         // the store keeps waiting, for the new Mac's cache only.
