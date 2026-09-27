@@ -5,6 +5,58 @@ import Testing
 @testable import SigilKit
 
 struct SessionDirectoryWatcherTests {
+    @Test func nativePolicyIncludesOnlyTranscriptsAndExactAdjacentIndex() {
+        let contents = SessionDirectoryWatcher.Contents.nativeHistory(
+            root: URL(fileURLWithPath: "/codex/sessions"),
+            titleIndex: URL(fileURLWithPath: "/codex/session_index.jsonl"))
+        let flags = FSEventStreamEventFlags(kFSEventStreamEventFlagItemIsFile)
+        for path in ["/codex/sessions/2026/09/27/session.jsonl", "/codex/session_index.jsonl"] {
+            #expect(SessionDirectoryWatcher.shouldScan(path: path, flags: flags, contents: contents))
+            #expect(!SessionDirectoryWatcher.shouldScan(path: path, flags: flags))
+        }
+        for path in [
+            "/codex/history.jsonl", "/codex/log/session_index.jsonl", "/codex/sessions-other/session.jsonl",
+            "/codex/sessions/session.jsonl.lock", "/codex/sessions/summary.json",
+        ] {
+            #expect(!SessionDirectoryWatcher.shouldScan(path: path, flags: flags, contents: contents))
+        }
+        let directory = FSEventStreamEventFlags(kFSEventStreamEventFlagItemIsDir)
+        for path in ["/codex", "/codex/sessions", "/codex/sessions/2026/09"] {
+            #expect(SessionDirectoryWatcher.shouldScan(path: path, flags: directory, contents: contents))
+        }
+        #expect(!SessionDirectoryWatcher.shouldScan(path: "/codex/log", flags: directory, contents: contents))
+        let coalesced = SessionDirectoryWatcher.decision(
+            paths: ["/codex"], flags: [FSEventStreamEventFlags(kFSEventStreamEventFlagMustScanSubDirs)],
+            contents: contents)
+        #expect(coalesced.scan && !coalesced.restart)
+        let restarted = SessionDirectoryWatcher.decision(
+            paths: ["/codex"], flags: [FSEventStreamEventFlags(kFSEventStreamEventFlagRootChanged)],
+            contents: contents)
+        #expect(restarted.scan && restarted.restart)
+    }
+
+    @Test func nativePolicyMatchesCanonicalEventsThroughConfiguredSymlink() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "Sigil-watch-policy-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let actual = root.appendingPathComponent("actual")
+        let alias = root.appendingPathComponent("alias")
+        try FileManager.default.createDirectory(at: actual, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: actual)
+        let contents = SessionDirectoryWatcher.Contents.nativeHistory(
+            root: alias.appendingPathComponent("sessions"),
+            titleIndex: alias.appendingPathComponent("session_index.jsonl"))
+        let flags = FSEventStreamEventFlags(kFSEventStreamEventFlagItemIsFile)
+        #expect(
+            SessionDirectoryWatcher.shouldScan(
+                path: actual.appendingPathComponent("sessions/record.jsonl").resolvingSymlinksInPath().path,
+                flags: flags, contents: contents))
+        #expect(
+            SessionDirectoryWatcher.shouldScan(
+                path: actual.appendingPathComponent("session_index.jsonl").resolvingSymlinksInPath().path,
+                flags: flags, contents: contents))
+    }
+
     @Test func summaryWritesAndDirectoryEventsRefresh() {
         #expect(
             SessionDirectoryWatcher.shouldScan(

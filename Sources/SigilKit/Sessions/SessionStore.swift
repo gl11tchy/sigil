@@ -50,7 +50,7 @@ public final class SessionStore {
     @ObservationIgnored private var eventPump: Task<Void, Never>?
     @ObservationIgnored private let timing: SessionStoreTiming
     @ObservationIgnored private let scanOperation: ScanOperation
-    @ObservationIgnored private let includesNativeHistory: Bool
+    @ObservationIgnored private let nativeRoots: [(CLIProvider, URL)]
 
     public convenience init() {
         self.init(root: GrokPaths.sessionsRoot, includesNativeHistory: true)
@@ -58,9 +58,18 @@ public final class SessionStore {
 
     public convenience init(root: URL, includesNativeHistory: Bool = false) {
         self.init(
+            root: root, timing: SessionStoreTiming(),
+            nativeRoots: includesNativeHistory ? NativeSessionScanner.roots : [])
+    }
+
+    /// Capture the same roots for the watcher and detached scans. Explicit roots
+    /// also keep filesystem tests isolated from the user's provider history.
+    convenience init(root: URL, timing: SessionStoreTiming, nativeRoots: [(CLIProvider, URL)] = []) {
+        let nativeRoots = nativeRoots.map { ($0.0, SessionDirectoryWatcher.canonicalURL($0.1)) }
+        self.init(
             root: root,
-            timing: SessionStoreTiming(),
-            includesNativeHistory: includesNativeHistory,
+            timing: timing,
+            nativeRoots: nativeRoots,
             scanOperation: { root, cache, ignoringCache in
                 await Task.detached(priority: .userInitiated) {
                     var result = SessionScanner.scan(
@@ -68,35 +77,17 @@ public final class SessionStore {
                         cache: cache.filter { $0.value.session.provider == .grokBuild },
                         ignoringCache: ignoringCache
                     )
-                    if includesNativeHistory {
-                        for (provider, nativeRoot) in NativeSessionScanner.roots {
-                            let native = NativeSessionScanner.scan(
-                                provider: provider, root: nativeRoot, cache: cache, ignoringCache: ignoringCache)
-                            result.sessions += native.sessions
-                            result.cache.merge(native.cache) { _, new in new }
-                            result.loadError =
-                                [result.loadError, native.loadError].compactMap { $0 }.joined(separator: "\n")
-                                .nilIfBlank
-                        }
-                        result.sessions.sort(by: SessionScanner.isNewer)
+                    for (provider, nativeRoot) in nativeRoots {
+                        let native = NativeSessionScanner.scan(
+                            provider: provider, root: nativeRoot, cache: cache, ignoringCache: ignoringCache)
+                        result.sessions += native.sessions
+                        result.cache.merge(native.cache) { _, new in new }
+                        result.loadError =
+                            [result.loadError, native.loadError].compactMap { $0 }.joined(separator: "\n")
+                            .nilIfBlank
                     }
+                    if !nativeRoots.isEmpty { result.sessions.sort(by: SessionScanner.isNewer) }
                     return result
-                }.value
-            }
-        )
-    }
-
-    convenience init(root: URL, timing: SessionStoreTiming) {
-        self.init(
-            root: root,
-            timing: timing,
-            scanOperation: { root, cache, ignoringCache in
-                await Task.detached(priority: .userInitiated) {
-                    SessionScanner.scan(
-                        root: root,
-                        cache: cache,
-                        ignoringCache: ignoringCache
-                    )
                 }.value
             }
         )
@@ -105,13 +96,13 @@ public final class SessionStore {
     init(
         root: URL,
         timing: SessionStoreTiming,
-        includesNativeHistory: Bool = false,
+        nativeRoots: [(CLIProvider, URL)] = [],
         scanOperation: @escaping ScanOperation
     ) {
         self.root = root
         self.timing = timing
         self.scanOperation = scanOperation
-        self.includesNativeHistory = includesNativeHistory
+        self.nativeRoots = nativeRoots
         let stream: AsyncStream<Bool>
         let continuation: AsyncStream<Bool>.Continuation
         (stream, continuation) = AsyncStream<Bool>.makeStream(
@@ -300,14 +291,23 @@ public final class SessionStore {
     /// rescan constantly. The retry loop starts the watcher once it appears.
     private func refreshWatcher() {
         guard isStarted else { return }
-        if includesNativeHistory {
-            for (_, nativeRoot) in NativeSessionScanner.roots {
+        if !nativeRoots.isEmpty {
+            for (provider, nativeRoot) in nativeRoots {
                 let path = nativeRoot.path
-                guard nativeWatchers[path] == nil, FileManager.default.fileExists(atPath: path) else { continue }
+                // Codex names live next to sessions, so watch their common parent
+                // with a scoped filter rather than accepting all Codex home churn.
+                let titleIndex =
+                    provider == .codex
+                    ? nativeRoot.deletingLastPathComponent().appendingPathComponent("session_index.jsonl") : nil
+                let watchRoot = titleIndex == nil ? nativeRoot : nativeRoot.deletingLastPathComponent()
+                guard nativeWatchers[path] == nil, FileManager.default.fileExists(atPath: watchRoot.path) else {
+                    continue
+                }
                 let watcher = SessionDirectoryWatcher()
                 let continuation = eventContinuation
                 if watcher.start(
-                    path: path, latency: timing.watcherLatency,
+                    path: watchRoot.path, latency: timing.watcherLatency,
+                    contents: .nativeHistory(root: nativeRoot, titleIndex: titleIndex),
                     handler: { requiresRestart in continuation.yield(requiresRestart) })
                 {
                     nativeWatchers[path] = watcher
