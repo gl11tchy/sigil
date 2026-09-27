@@ -9,8 +9,32 @@ struct RootView: View {
     var body: some View {
         if let model = launch.model {
             WindowContent(model: model)
+                .background(FirstKeyView())
         } else {
             LaunchCanvas(isSlow: launch.isSlow)
+        }
+    }
+}
+
+/// AppKit gives a window its first key view as the window first shows. A
+/// window that showed with only the launch canvas got none and kept no first
+/// responder, so this makes the same pick once the content is in.
+private struct FirstKeyView: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { Picker(frame: .zero) }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    final class Picker: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            // Not shown yet: AppKit picks when it shows, as it always has.
+            guard let window, window.isVisible else { return }
+            DispatchQueue.main.async { [weak window] in
+                guard let window, window.firstResponder === window,
+                    let content = window.contentView
+                else { return }
+                window.selectKeyView(following: content)
+            }
         }
     }
 }

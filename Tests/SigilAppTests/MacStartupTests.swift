@@ -277,6 +277,95 @@ struct MacStartupTests {
         #expect(wired === model)
         #expect(appeared == 1)
     }
+
+    /// The window takes focus as a blocking launch's did: the sidebar search
+    /// when the window shows, then the restored tab's terminal once the
+    /// window is key. A test window need not become key, so one that reports
+    /// key stands in for it, with the notification AppKit posts.
+    @Test(arguments: [false, true], [false, true])
+    func theWindowFocusesAsABlockingLaunchDid(restoredTab: Bool, key: Bool) async throws {
+        let blocking = try await startupFocus(waitsForShell: false, restoredTab: restoredTab, key: key)
+        let waiting = try await startupFocus(waitsForShell: true, restoredTab: restoredTab, key: key)
+
+        let settled: KeyboardFocus = restoredTab ? .sessionTerminal : .sidebar
+        #expect(blocking == (key ? [settled] : [.sidebar, settled]))
+        #expect(waiting == blocking)
+    }
+
+    /// Shows the real window with the window's key state, lets the launch
+    /// finish, and reads where focus lands; for a window that was not key,
+    /// again once it becomes key.
+    private func startupFocus(
+        waitsForShell: Bool, restoredTab: Bool, key: Bool
+    ) async throws -> [KeyboardFocus] {
+        let fixture = try ModelFixture(script: "#!/bin/sh\nread line\n")
+        defer { fixture.cleanup() }
+        if restoredTab {
+            let cwd = try fixture.directory("project")
+            try fixture.createSession(id: "restored", cwd: cwd)
+            fixture.settings.openTabs = OpenTabsSnapshot(
+                tabs: [.init(sessionID: "restored", cwd: cwd.path)],
+                selectedSessionID: "restored",
+                selectedCWD: cwd.path
+            )
+        }
+        let gate = DispatchSemaphore(value: 0)
+        defer { gate.signal() }
+        _ = NSApplication.shared
+        let launch = AppLaunch(
+            environment: waitsForShell ? [:] : ["GROK_HOME": fixture.grokHome.path],
+            probe: { _ in
+                gate.wait()
+                return nil
+            },
+            adopt: { _ in },
+            makeModel: { fixture.model() })
+        let window = StandInKeyWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 640),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView = NSHostingView(rootView: SigilApp.mainWindow(launch: launch) {})
+        window.reportsKey = key
+        window.orderFront(nil)
+        if key { NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window) }
+
+        gate.signal()
+        let model = await ready(launch)
+        defer { model.closeAllTabsAndWait() }
+        #expect(
+            await waitUntil {
+                restoredTab
+                    ? model.selectedTab?.controller.view.window === window
+                    : holds(WindowCloseGuard.GuardView.self, window.contentView!)
+            })
+        func focus() async -> KeyboardFocus {
+            // Focus moves on the main queue's next turns; let them run.
+            try? await Task.sleep(for: .milliseconds(300))
+            return KeyboardFocus.classify(
+                window.firstResponder, in: window,
+                sessionView: model.selectedTab?.controller.view,
+                panelShellView: model.panel.shell?.view,
+                sidebarHasFocus: model.isSidebarFocused || model.isSidebarDividerFocused)
+        }
+        var seen = [await focus()]
+        if !key {
+            window.reportsKey = true
+            NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
+            seen.append(await focus())
+        }
+        return seen
+    }
+}
+
+/// A window that reports key when told to: the test process is not the
+/// active app, and a locked screen keys no window at all.
+private final class StandInKeyWindow: NSWindow {
+    var reportsKey = false
+    override var isKeyWindow: Bool { reportsKey }
 }
 
 /// True when `view`, or a view anywhere under it, is a `T`.
