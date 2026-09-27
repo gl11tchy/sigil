@@ -23,7 +23,9 @@ struct AppShellTests {
     @Test func theWindowKeepsTheNameEarlierBuildsSavedItUnder() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
-        let window = SigilApp.mainWindow(model: fixture.model()) {}
+        let launch = AppLaunch(
+            environment: ["GROK_HOME": fixture.grokHome.path], makeModel: { fixture.model() })
+        let window = SigilApp.mainWindow(launch: launch) {}
 
         #expect(
             String(reflecting: type(of: window))

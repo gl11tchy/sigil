@@ -205,7 +205,7 @@ struct PanelDivider: View {
             .overlay {
                 if isFocused {
                     Capsule().fill(palette.accent).frame(width: 2)
-                        .padding(.vertical, RootView.inset + Radius.window)
+                        .padding(.vertical, WindowContent.inset + Radius.window)
                         .allowsHitTesting(false)
                 }
             }

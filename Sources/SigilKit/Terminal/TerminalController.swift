@@ -428,6 +428,10 @@ public final class TerminalController {
     // MARK: - Find
 
     private var search = ScrollbackSearch()
+    /// The rows as Find last read them, kept until the buffer changes.
+    private var findText: ScrollbackSearch.Text?
+    /// Full reads of the buffer rows. Tests use this to prove unchanged output is not read again.
+    private(set) var bufferRowReads = 0
 
     /// Number of hits for the current find query.
     public var findMatchCount: Int { search.matchCount }
@@ -438,35 +442,55 @@ public final class TerminalController {
     /// Sets a plain-text query and selects the newest hit at or above the
     /// bottom of the viewport, so the view stays on the output being read.
     public func setFindQuery(_ query: String) {
+        guard !query.isEmpty else {
+            clearFind()
+            return
+        }
         let terminal = terminalView.getTerminal()
         let viewportBottom = terminal.buffer.yDisp + terminal.rows - 1
-        search.setQuery(query, in: findBufferRows(), startingAtOrAbove: viewportBottom)
+        search.setQuery(query, in: currentFindText(), startingAtOrAbove: viewportBottom)
         applyFindSelection()
     }
 
     /// Drops the query, the hits, and the selection used to show them.
     public func clearFind() {
         search.clear()
+        findText = nil
         terminalView.selectNone()
     }
 
     /// Advances to the next hit, wrapping to the first.
     public func findNext() {
-        search.updateRows(findBufferRows())
+        refreshFindHits()
         search.findNext()
         applyFindSelection()
     }
 
     /// Moves to the previous hit, wrapping to the last.
     public func findPrevious() {
-        search.updateRows(findBufferRows())
+        refreshFindHits()
         search.findPrevious()
         applyFindSelection()
+    }
+
+    /// Searches again only when output or a resize changed the buffer.
+    private func refreshFindHits() {
+        guard !search.query.isEmpty else { return }
+        search.update(currentFindText())
+    }
+
+    private func currentFindText() -> ScrollbackSearch.Text {
+        let generation = terminalView.contentGeneration
+        if let findText, findText.version == generation { return findText }
+        let text = ScrollbackSearch.Text(findBufferRows(), version: generation)
+        findText = text
+        return text
     }
 
     /// One searchable row plus a Character-to-cell map. SwiftTerm stores wide
     /// characters and extended graphemes differently from Swift String offsets.
     private func findBufferRows() -> [ScrollbackSearch.Row] {
+        bufferRowReads += 1
         var rows: [ScrollbackSearch.Row] = []
         var row = 0
         while let terminalRow = terminalRow(at: row, preserveWrappedWidth: true) {

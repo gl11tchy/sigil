@@ -1,7 +1,87 @@
 import SigilKit
 import SwiftUI
 
+/// The window. Until the launch has read the login shell's GROK_HOME there is
+/// no model, so it shows only its own background.
 struct RootView: View {
+    let launch: AppLaunch
+
+    var body: some View {
+        if let model = launch.model {
+            WindowContent(model: model)
+                .background(FirstKeyView())
+        } else {
+            LaunchCanvas(isSlow: launch.isSlow)
+        }
+    }
+}
+
+/// AppKit gives a window its first key view as the window first shows. A
+/// window that showed with only the launch canvas got none and kept no first
+/// responder, so this makes the same pick once the content is in and shown.
+private struct FirstKeyView: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { Picker(frame: .zero) }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    final class Picker: NSView {
+        private var visibility: NSKeyValueObservation?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            visibility = nil
+            guard let window else { return }
+            guard window.isVisible else {
+                // Pick when it shows. On a first show AppKit has picked by
+                // then; a window hidden or minimized since the canvas has not.
+                visibility = window.observe(\.isVisible) { [weak self] window, _ in
+                    MainActor.assumeIsolated {
+                        if window.isVisible { self?.pick() }
+                    }
+                }
+                return
+            }
+            pick()
+        }
+
+        private func pick() {
+            visibility = nil
+            DispatchQueue.main.async { [weak window] in
+                guard let window, window.firstResponder === window,
+                    let content = window.contentView
+                else { return }
+                // Content that came in while the window was hidden is not in
+                // the key view loop until the loop is rebuilt.
+                window.recalculateKeyViewLoop()
+                window.selectKeyView(following: content)
+            }
+        }
+    }
+}
+
+/// The window's canvas and chrome while the launch waits for the login shell.
+/// A wait past half a second adds a small spinner and nothing else.
+private struct LaunchCanvas: View {
+    let isSlow: Bool
+    private let theme = AppSettings.storedTheme()
+
+    var body: some View {
+        let palette = Palette(theme: theme)
+        ZStack {
+            palette.canvas
+            if isSlow {
+                ProgressView()
+                    .controlSize(.small)
+                    .environment(\.colorScheme, theme.isDark ? .dark : .light)
+                    .accessibilityLabel("Starting Sigil")
+            }
+        }
+        .background(WindowChrome(background: palette.canvasNSColor))
+        .ignoresSafeArea(.container, edges: .top)
+    }
+}
+
+struct WindowContent: View {
     @Bindable var model: AppModel
     @AppStorage("window.sidebarWidth") private var sidebarWidth: Double = 272
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -381,7 +461,7 @@ private struct SplitDivider: View {
                     Capsule()
                         .fill(palette.accent)
                         .frame(width: 2)
-                        .padding(.vertical, RootView.inset + Radius.window)
+                        .padding(.vertical, WindowContent.inset + Radius.window)
                         .allowsHitTesting(false)
                 }
             }
