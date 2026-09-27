@@ -601,7 +601,27 @@ $('copy-output').onclick = async () => {
 };
 $('connection').addEventListener('toggle', () => { if ($('connection').open) $('copy-output').textContent = 'Copy output'; });
 
-async function request(action, text, tabID = selected, pairing = false, extra = {}) {
+// The saved search that has not been sent yet.
+let waitingSearch = null;
+function request(action, text, tabID = selected, pairing = false, extra = {}) {
+  if (action !== 'chats') return enqueue(() => transmit(action, text, tabID, pairing, extra));
+  // Typing can outrun the Mac. Last in line, the waiting search takes the newest query;
+  // behind a later command it is skipped at its turn. Its callers see a stale token.
+  const waiting = waitingSearch;
+  if (waiting?.tail === outgoing && waiting.generation === generation && waiting.epoch === commandEpoch) {
+    Object.assign(waiting, { text, tabID });
+    return waiting.reply;
+  }
+  if (waiting) waiting.stale = true;
+  const search = waitingSearch = { text, tabID, generation, epoch: commandEpoch };
+  search.reply = enqueue(async () => {
+    if (waitingSearch === search) waitingSearch = null;
+    return search.stale ? { stale: true } : transmit(action, search.text, search.tabID, pairing, extra);
+  });
+  search.tail = outgoing;
+  return search.reply;
+}
+async function enqueue(send) {
   const current = generation;
   const epoch = commandEpoch;
   const previous = outgoing;
@@ -612,7 +632,7 @@ async function request(action, text, tabID = selected, pairing = false, extra = 
     if (current !== generation || epoch !== commandEpoch) {
       throw new Error("Connection changed. Check the terminal before sending again.");
     }
-    return await transmit(action, text, tabID, pairing, extra);
+    return await send();
   } finally { release(); }
 }
 async function transmit(action, text, tabID, pairing, extra = {}) {
