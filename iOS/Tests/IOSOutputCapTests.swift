@@ -14,10 +14,20 @@ enum IOSOutputCapTests {
     typealias Fixtures = IOSOutputFixtures
 
     /// The edits are ordered last first and never overlap, so each range still
-    /// holds when its turn comes.
-    private static func checkOrder(_ edits: [StyledEdit], _ label: String) throws {
+    /// holds when its turn comes. Each replaces whole lines of `old` with whole
+    /// lines, as the view styles a line by all of its text.
+    private static func checkOrder(_ edits: [StyledEdit], in old: StyledText, _ label: String) throws {
         for (later, earlier) in zip(edits, edits.dropFirst()) {
             try Expect.true(earlier.range.upperBound <= later.range.lowerBound, "\(label): edits run last first")
+        }
+        let units = Array(old.text.utf16)
+        let starts = { (index: Int) in index == 0 || index == units.count || units[index - 1] == 0x0A }
+        for edit in edits where !edit.isEmpty {
+            let lines = edit.replacement.text.utf16
+            try Expect.true(
+                starts(edit.range.lowerBound) && starts(edit.range.upperBound)
+                    && (lines.isEmpty || lines.last == 0x0A || edit.range.upperBound == units.count),
+                "\(label): edit \(edit.range) replaces whole lines")
         }
     }
 
@@ -50,7 +60,7 @@ enum IOSOutputCapTests {
                 let old = shown[mode]
                 shown[mode] = next
                 let edits = try Expect.notNil(old.edits(to: next), "\(label): the ground held")
-                try checkOrder(edits, label)
+                try checkOrder(edits, in: old, label)
                 try Expect.true(IOSOutputEditTests.same(old.applying(edits), next), "\(label): the edits equal a full rebuild")
                 let replaced = edits.reduce(0) { $0 + $1.range.count + $1.replacement.text.utf16.count }
                 // A row is at most 40 units; the rows that left, the rows that came, and a line either side.
@@ -94,7 +104,7 @@ enum IOSOutputCapTests {
                 let old = shown[mode]
                 shown[mode] = next
                 let edits = try Expect.notNil(old.edits(to: next), "\(label): text-only output always edits")
-                try checkOrder(edits, label)
+                try checkOrder(edits, in: old, label)
                 try Expect.true(IOSOutputEditTests.same(old.applying(edits), next), "\(label): the edits equal a full rebuild")
                 let replaced = edits.reduce(0) { $0 + $1.range.count + $1.replacement.text.utf16.count }
                 try Expect.true(
@@ -129,7 +139,7 @@ enum IOSOutputCapTests {
                         try Expect.true(one == nil, "\(label): no edits only where no edit")
                         continue
                     }
-                    try checkOrder(edits, label)
+                    try checkOrder(edits, in: old, label)
                     try Expect.true(IOSOutputEditTests.same(old.applying(edits), next), "\(label): the edits equal a full rebuild")
                     let edit = try Expect.notNil(one, "\(label): an edit exists")
                     let size = { (edit: StyledEdit) in edit.range.count + edit.replacement.text.utf16.count }

@@ -214,8 +214,10 @@ extension StyledText {
             }
         }
         guard let cut = found else { return nil }
-        // The first line of `next` as it was: cut above it and keep it.
-        if cut >= kept, old[(cut - kept)..<cut].elementsEqual(next[..<kept]) { return (cut - kept, 0) }
+        // The first line of `next` as it was, a whole line: cut above it and keep it.
+        if cut >= kept, isLineStart(old, cut - kept), old[(cut - kept)..<cut].elementsEqual(next[..<kept]) {
+            return (cut - kept, 0)
+        }
         return (cut, kept)
     }
 
