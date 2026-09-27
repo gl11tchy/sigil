@@ -37,10 +37,14 @@ struct SelectedTabCommandsTests {
         #expect(!model.canDeliverSelectedTabMessage)
 
         tab.enqueueBridgePrompt("question")
-        #expect(await waitUntil { model.canDeliverSelectedTabMessage })
+        #expect(!model.canDeliverSelectedTabMessage)
+        try await fixture.completeTurn(tab)
+        #expect(tab.activity == .idle)
+        #expect(model.canDeliverSelectedTabMessage)
 
         model.deliverSelectedTabMessage()
         #expect(tab.bridgeInbox.isEmpty)
+        #expect(tab.activity == .working)
     }
 
     @Test func deliverTabMessageKeepsTheMessageOnAnEndedTab() async throws {

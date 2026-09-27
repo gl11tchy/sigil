@@ -2067,9 +2067,10 @@ private struct SessionRow: View {
 
     private var rowHelpText: String {
         let messages =
-            session.messageCount == 1 ? "1 message" : "\(session.messageCount) messages"
+            session.provider == .grokBuild
+            ? (session.messageCount == 1 ? "1 message" : "\(session.messageCount) messages") + " · " : ""
         return "\(title)\n\(session.displayPath)\n"
-            + "\(messages) · \(session.updatedAt.longRelative(to: now))"
+            + "\(messages)\(session.updatedAt.longRelative(to: now))"
     }
 
     private var rowAccessibilityValue: String {

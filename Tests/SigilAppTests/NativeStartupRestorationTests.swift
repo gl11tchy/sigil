@@ -14,7 +14,7 @@ struct NativeStartupRestorationTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let shell = root.appendingPathComponent("test-shell")
+        let shell = root.appendingPathComponent("zsh")
         try "#!/bin/sh\nprintf 'NATIVE_READY\\n'\nwhile IFS= read -r line; do :; done\n"
             .write(to: shell, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: shell.path)
@@ -60,6 +60,10 @@ struct NativeStartupRestorationTests {
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(store.sessions.count == 1)
+        for _ in 0..<100 where model.selectedTab?.controller.remoteSnapshot().contains("NATIVE_READY") != true {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(model.selectedTab?.controller.remoteSnapshot().contains("NATIVE_READY") == true)
         #expect(model.tabs.count == 1)
         #expect(model.selectedTab?.sessionReference == session.reference)
         #expect(settings.openTabs.tabs.first?.provider == provider)

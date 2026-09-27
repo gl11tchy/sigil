@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Only provider-confirmed successful completion enters idle. A live process,
@@ -37,6 +38,7 @@ public struct ProviderLifecycleJournal: Sendable {
     private let notBefore: Date
     private var offset: UInt64
     private var inode: UInt64?
+    private var trailingAnchor = Data()
     private var remainder = Data()
     private var discardingLine = false
     private var validatedCodexIdentity = false
@@ -49,39 +51,51 @@ public struct ProviderLifecycleJournal: Sendable {
         self.provider = provider
         self.sessionID = sessionID
         self.notBefore = Date(timeIntervalSince1970: floor(notBefore.timeIntervalSince1970 * 1000) / 1000)
-        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
-        offset = (attributes?[.size] as? NSNumber)?.uint64Value ?? 0
-        inode = (attributes?[.systemFileNumber] as? NSNumber)?.uint64Value
-        if provider == .codex, let handle = try? FileHandle(forReadingFrom: url) {
+        offset = 0
+        inode = nil
+        if let handle = try? FileHandle(forReadingFrom: url) {
             defer { try? handle.close() }
-            if let data = try? handle.read(upToCount: NativeSessionScanner.prefixLimit) {
-                validatedCodexIdentity =
-                    NativeSessionScanner.parse(
-                        provider: .codex, data: data, file: url, modified: Date())?.nativeSessionID == sessionID
+            if let identity = Self.identity(handle), let anchor = try? Self.anchor(handle, behind: identity.size) {
+                offset = identity.size
+                inode = identity.inode
+                trailingAnchor = anchor
+            }
+            if provider == .codex {
+                try? handle.seek(toOffset: 0)
+                if let data = try? handle.read(upToCount: NativeSessionScanner.prefixLimit) {
+                    validatedCodexIdentity =
+                        NativeSessionScanner.parse(
+                            provider: .codex, data: data, file: url, modified: Date())?.nativeSessionID == sessionID
+                }
             }
         }
     }
 
     public mutating func poll() -> [SessionLifecycleState] {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-            let size = (attributes[.size] as? NSNumber)?.uint64Value,
-            let currentInode = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value
-        else { return [] }
-        if (inode != nil && inode != currentInode) || size < offset {
-            offset = size
-            inode = currentInode
-            remainder.removeAll()
-            activeTurnID = nil
-            discardingLine = false
-            return [.unknown]
-        }
-        inode = currentInode
-        guard size > offset, let handle = try? FileHandle(forReadingFrom: url) else { return [] }
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return [] }
         defer { try? handle.close() }
+        // Inspect the opened file, not path metadata that could race replacement.
+        guard let current = Self.identity(handle) else { return [] }
         do {
+            let replaced = inode != nil && inode != current.inode
+            var rewritten = current.size < offset
+            if !rewritten { rewritten = try Self.anchor(handle, behind: offset) != trailingAnchor }
+            if replaced || rewritten {
+                offset = current.size
+                inode = current.inode
+                trailingAnchor = try Self.anchor(handle, behind: offset)
+                remainder.removeAll()
+                activeTurnID = nil
+                discardingLine = false
+                validatedCodexIdentity = false
+                return [.unknown]
+            }
+            inode = current.inode
+            guard current.size > offset else { return [] }
             try handle.seek(toOffset: offset)
             let data = try handle.read(upToCount: 256 * 1024) ?? Data()
             offset += UInt64(data.count)
+            trailingAnchor = Data((trailingAnchor + data).suffix(64))
             remainder.append(data)
             var events: [SessionLifecycleState] = []
             while let end = remainder.firstIndex(of: 0x0A) {
@@ -102,10 +116,32 @@ public struct ProviderLifecycleJournal: Sendable {
         } catch { return [] }
     }
 
+    private static func identity(_ handle: FileHandle) -> (size: UInt64, inode: UInt64)? {
+        var info = stat()
+        guard fstat(handle.fileDescriptor, &info) == 0, info.st_size >= 0 else { return nil }
+        return (UInt64(info.st_size), info.st_ino)
+    }
+
+    /// Detect truncate-and-rewrite even when inode and final size look unchanged.
+    /// Checking only the prior boundary keeps each poll bounded independently of history size.
+    private static func anchor(_ handle: FileHandle, behind offset: UInt64) throws -> Data {
+        let count = Int(min(offset, 64))
+        try handle.seek(toOffset: offset - UInt64(count))
+        let data = try handle.read(upToCount: count) ?? Data()
+        guard data.count == count else { throw CocoaError(.fileReadUnknown) }
+        return data
+    }
+
     private mutating func parse(_ data: Data) -> SessionLifecycleState? {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let timestamp = eventTimestamp(object), timestamp >= notBefore
-        else { return nil }
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        if provider == .codex, object["type"] as? String == "session_meta" {
+            // An appended session header is a new writer/identity boundary, not
+            // evidence that the previous owned turn completed.
+            validatedCodexIdentity = false
+            activeTurnID = nil
+            return .unknown
+        }
+        guard let timestamp = eventTimestamp(object), timestamp >= notBefore else { return nil }
         if provider == .grokBuild {
             guard let params = object["params"] as? [String: Any], params["sessionId"] as? String == sessionID,
                 let update = params["update"] as? [String: Any], let type = update["sessionUpdate"] as? String

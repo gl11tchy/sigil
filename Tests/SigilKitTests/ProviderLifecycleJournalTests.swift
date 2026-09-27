@@ -46,6 +46,26 @@ struct ProviderLifecycleJournalTests {
         #expect(reader.poll().isEmpty)
     }
 
+    @Test func sameInodeRewriteBeyondTheOldSizeInvalidatesTurnEvidence() throws {
+        let fixture = try JournalFixture()
+        defer { fixture.cleanup() }
+        var reader = ProviderLifecycleJournal(
+            url: fixture.file, provider: .grokBuild, sessionID: session, notBefore: now)
+        let start = try grok(type: "agent_message_chunk", turn: "old")
+        try fixture.append(start)
+        #expect(reader.poll() == [.working])
+        let before = try FileManager.default.attributesOfItem(atPath: fixture.file.path)[.systemFileNumber] as? NSNumber
+        let handle = try FileHandle(forWritingTo: fixture.file)
+        try handle.truncate(atOffset: 0)
+        try handle.write(contentsOf: Data(repeating: 0x78, count: start.count + 20) + Data([0x0A]))
+        try handle.close()
+        try fixture.append(try grok(type: "turn_completed", turn: "old"))
+        let after = try FileManager.default.attributesOfItem(atPath: fixture.file.path)[.systemFileNumber] as? NSNumber
+        #expect(before == after)
+        #expect(reader.poll() == [.unknown])
+        #expect(reader.poll().isEmpty)
+    }
+
     @Test func partialOversizedAndMalformedRecordsDoNotManufactureCompletion() throws {
         let fixture = try JournalFixture()
         defer { fixture.cleanup() }
@@ -78,6 +98,33 @@ struct ProviderLifecycleJournalTests {
         #expect(wrong.poll().isEmpty)
         try fixture.append(try codex(type: "task_complete", turn: "one"))
         #expect(reader.poll() == [.idle])
+    }
+
+    @Test func appendedNativeMetadataInvalidatesExistingWriterEvidence() throws {
+        let meta = Data(
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"\(session)\",\"cwd\":\"/tmp\",\"cli_version\":\"0.157.1\"}}\n"
+                .utf8)
+        let fixture = try JournalFixture(initial: meta)
+        defer { fixture.cleanup() }
+        var reader = ProviderLifecycleJournal(url: fixture.file, provider: .codex, sessionID: session, notBefore: now)
+        try fixture.append(try codex(type: "task_started", turn: "one"))
+        #expect(reader.poll() == [.working])
+        try fixture.append(meta)
+        try fixture.append(try codex(type: "task_complete", turn: "one"))
+        #expect(reader.poll() == [.unknown])
+    }
+
+    @Test func mixedNativeMetadataCannotValidateALifecycleReader() throws {
+        let other = "22222222-2222-4222-8222-222222222222"
+        let metadata = [session, other].map {
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"\($0)\",\"cwd\":\"/tmp\",\"cli_version\":\"0.157.1\"}}\n"
+        }.joined()
+        let fixture = try JournalFixture(initial: Data(metadata.utf8))
+        defer { fixture.cleanup() }
+        var reader = ProviderLifecycleJournal(url: fixture.file, provider: .codex, sessionID: other, notBefore: now)
+        try fixture.append(try codex(type: "task_started", turn: "one"))
+        try fixture.append(try codex(type: "task_complete", turn: "one"))
+        #expect(reader.poll().isEmpty)
     }
 
     @Test func realProcessJournalWritesAreObservedWithoutTitleOrOutputSignals() throws {

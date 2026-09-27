@@ -4285,7 +4285,7 @@ struct AppModelTests {
 
     @Test @MainActor
     func archivingAProjectClosesATabNotYetInTheStore() async throws {
-        let fixture = try ModelFixture()
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /bin/sleep 30\n")
         defer { fixture.cleanup() }
         let projectDir = try fixture.directory("acme-api")
         try fixture.writeListedSession(id: "a", cwd: projectDir.path, summary: "A")
@@ -4298,15 +4298,24 @@ struct AppModelTests {
         let fresh = try #require(model.newTab(in: projectDir))
         #expect(model.store.sessions.map(\.id) == ["a"])
         #expect(model.tabs.map(\.id) == [fresh.id])
+        #expect(fresh.activity == .unknown)
+        #expect(fresh.shouldWarnBeforeStopping)
+        var prompts: [StopWorkingPrompt] = []
+        model.confirmStopWorking = {
+            prompts.append($0)
+            return true
+        }
 
         model.archive(project)
+        #expect(prompts.count == 1)
+        #expect(prompts.first?.action == .archive)
         #expect(model.tabs.isEmpty)
         #expect(model.store.sessions.first { $0.id == "a" }.map(model.isArchived) == true)
     }
 
     @Test @MainActor
     func sidebarDismissClosesAnOpenTabAndDeletesAClosedChat() throws {
-        let fixture = try ModelFixture()
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /bin/sleep 30\n")
         defer { fixture.cleanup() }
         let cwd = try fixture.directory("project")
         let model = fixture.model()
@@ -4315,8 +4324,17 @@ struct AppModelTests {
         let tab = try #require(model.newTab(in: cwd))
         let sessionID = try #require(tab.sessionID)
         let open = makeSession(id: sessionID, cwd: cwd)
+        #expect(tab.activity == .unknown)
+        #expect(tab.shouldWarnBeforeStopping)
+        var prompts: [StopWorkingPrompt] = []
+        model.confirmStopWorking = {
+            prompts.append($0)
+            return true
+        }
         #expect(model.sidebarDismiss(for: open) == .closeTab(tab.id))
         model.performSidebarDismiss(open)
+        #expect(prompts.count == 1)
+        #expect(prompts.first?.action == .closeTab)
         #expect(model.tabs.isEmpty)
 
         let closed = makeSession(id: "closed-id", cwd: cwd)
@@ -4328,7 +4346,13 @@ struct AppModelTests {
         #expect(AppModel.describe(.starting) == "starting")
         #expect(AppModel.describe(.working) == "working")
         #expect(AppModel.describe(.idle) == "idle")
-        #expect(AppModel.describe(.exited(code: 2)) == "exited 2")
+        #expect(AppModel.describe(.waitingForApproval) == "waitingForApproval")
+        #expect(AppModel.describe(.interrupted) == "interrupted")
+        #expect(AppModel.describe(.failed) == "failed")
+        #expect(AppModel.describe(.disconnected) == "disconnected")
+        #expect(AppModel.describe(.unknown) == "unknown")
+        #expect(AppModel.describe(.exited(code: 2)) == "failed 2")
+        #expect(AppModel.describe(.exited(code: 0)) == "exited 0")
         #expect(AppModel.describe(.exited(code: nil)) == "exited")
     }
 

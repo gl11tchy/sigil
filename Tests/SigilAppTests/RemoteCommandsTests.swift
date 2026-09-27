@@ -777,8 +777,18 @@ struct RemoteSessionOpsTests {
         defer { fixture.cleanup() }
         let folder = try fixture.directory("ops-folder")
         fixture.settings.defaultProvider = .claudeCode
-        setenv("SHELL", "/bin/sh", 1)
+        let shell = fixture.root.appendingPathComponent("zsh")
+        try "#!/bin/sh\nprintf 'ISOLATED_PROVIDER_READY\\n'\nwhile IFS= read -r line; do :; done\n"
+            .write(to: shell, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: shell.path)
+        let oldShell = ProcessInfo.processInfo.environment["SHELL"]
+        setenv("SHELL", shell.path, 1)
+        defer { if let oldShell { setenv("SHELL", oldShell, 1) } else { unsetenv("SHELL") } }
         let tab = try #require(fixture.model.newTab(in: folder, provider: .claudeCode))
+        for _ in 0..<100 where !tab.controller.remoteSnapshot().contains("ISOLATED_PROVIDER_READY") {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(tab.controller.remoteSnapshot().contains("ISOLATED_PROVIDER_READY"))
         let id = tab.id.uuidString
 
         #expect(await fixture.command("rename", tabID: id, name: "  Phone name  ").ok)

@@ -351,7 +351,7 @@ final class AppModel {
     /// than the opening exchange.
     private func isReal(_ session: GrokSession, in index: SidebarIndex?) -> Bool {
         !session.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || session.messageCount > 2
+            || session.messageCount > 2 || session.hasObservedMessages
             || (index.map { customName(for: session, in: $0) != nil } ?? hasCustomName(session))
     }
 
@@ -521,7 +521,7 @@ final class AppModel {
 
     func archive(_ project: SidebarProject) {
         let projectTabs = tabs.filter {
-            inProject($0.workingDirectory.path, project.cwd)
+            $0.capabilities.archive && inProject($0.workingDirectory.path, project.cwd)
         }
         if let prompt = StopWorkingPrompt(action: .archive, stopping: projectTabs),
             !confirmStop(prompt)

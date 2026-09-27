@@ -126,17 +126,38 @@ enum NativeSessionScanner {
         var created: Date?
         var supported = false
         var isSubagent = false
+        var hasObservedMessages = false
         for line in data.split(separator: 0x0A) where line.count <= prefixLimit {
             guard let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
                 let type = object["type"] as? String
             else { continue }
             if provider == .codex {
                 guard let payload = object["payload"] as? [String: Any] else { continue }
+                if type == "event_msg", payload["type"] as? String == "user_message" {
+                    hasObservedMessages =
+                        hasObservedMessages || !(payload["message"] as? String ?? "").isEmpty
+                        || !(payload["images"] as? [Any] ?? []).isEmpty
+                }
+                if type == "response_item", payload["type"] as? String == "message",
+                    let role = payload["role"] as? String, ["user", "assistant"].contains(role),
+                    let blocks = payload["content"] as? [[String: Any]]
+                {
+                    hasObservedMessages =
+                        hasObservedMessages
+                        || blocks.contains { block in
+                            if block["type"] as? String == "input_image" { return true }
+                            guard let text = block["text"] as? String, !text.isEmpty else { return false }
+                            return role == "assistant"
+                                || (!text.hasPrefix("<environment_context>") && !text.hasPrefix("# AGENTS.md"))
+                        }
+                }
                 if type == "session_meta" {
                     guard let id = payload["id"] as? String, UUID(uuidString: id) != nil,
                         let path = payload["cwd"] as? String, path.hasPrefix("/"),
                         let version = payload["cli_version"] as? String, supportedCodexVersion(version)
                     else { return nil }
+                    if let nativeID, nativeID != id { return nil }
+                    if let cwd, cwd != path { return nil }
                     nativeID = id
                     cwd = path
                     supported = true
@@ -159,11 +180,21 @@ enum NativeSessionScanner {
                         }.first ?? ""
                 }
             } else {
+                if ["user", "assistant"].contains(type), object["isMeta"] as? Bool != true,
+                    let message = object["message"] as? [String: Any]
+                {
+                    if let text = message["content"] as? String {
+                        hasObservedMessages = hasObservedMessages || !text.isEmpty
+                    } else if let blocks = message["content"] as? [[String: Any]] {
+                        hasObservedMessages = hasObservedMessages || !blocks.isEmpty
+                    }
+                }
                 if let id = object["sessionId"] as? String, UUID(uuidString: id) != nil,
                     let path = object["cwd"] as? String, path.hasPrefix("/"),
                     let version = object["version"] as? String, version.hasPrefix("2.")
                 {
                     if let nativeID, nativeID != id { return nil }
+                    if let cwd, cwd != path { return nil }
                     nativeID = id
                     cwd = path
                     supported = true
@@ -175,10 +206,15 @@ enum NativeSessionScanner {
                 } else if type == "summary", title.isEmpty {
                     title = object["summary"] as? String ?? ""
                 } else if type == "user", title.isEmpty, object["isMeta"] as? Bool != true,
-                    let message = object["message"] as? [String: Any], let text = message["content"] as? String,
-                    !text.hasPrefix("<")
+                    let message = object["message"] as? [String: Any]
                 {
-                    title = text
+                    let blocks = message["content"] as? [[String: Any]] ?? []
+                    let text =
+                        message["content"] as? String ?? blocks.compactMap { block -> String? in
+                            guard block["type"] as? String == "text" else { return nil }
+                            return block["text"] as? String
+                        }.first ?? ""
+                    if !text.hasPrefix("<") { title = text }
                 }
                 if type == "assistant", let message = object["message"] as? [String: Any] {
                     model = message["model"] as? String ?? model
@@ -190,7 +226,7 @@ enum NativeSessionScanner {
             id: nativeID, cwd: cwd, summary: String(title.prefix(240)).replacingOccurrences(of: "\n", with: " "),
             createdAt: created ?? modified, updatedAt: modified, messageCount: 0,
             modelID: model, agentName: nil, reasoningEffort: nil, kind: isSubagent ? "subagent" : nil,
-            directory: file, provider: provider)
+            directory: file, provider: provider, hasObservedMessages: hasObservedMessages)
     }
 
     /// Codex's append-only name index is also version-sensitive. It only supplies
@@ -222,7 +258,8 @@ enum NativeSessionScanner {
             id: session.nativeSessionID, cwd: session.cwd, summary: name,
             createdAt: session.createdAt, updatedAt: session.updatedAt, messageCount: session.messageCount,
             modelID: session.modelID, agentName: session.agentName, reasoningEffort: session.reasoningEffort,
-            kind: session.kind, directory: session.directory, provider: session.provider)
+            kind: session.kind, directory: session.directory, provider: session.provider,
+            hasObservedMessages: session.hasObservedMessages)
     }
 
     private static func supportedCodexVersion(_ version: String) -> Bool {

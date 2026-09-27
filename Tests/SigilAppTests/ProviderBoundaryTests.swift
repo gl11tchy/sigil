@@ -127,26 +127,94 @@ struct ProviderBoundaryTests {
         #expect(fixture.errors.titles.isEmpty)
     }
 
-    @Test(arguments: providers)
-    func grokProjectArchiveLeavesOtherProvidersRunning(provider: CLIProvider) throws {
+    @Test(arguments: [CLIProvider.codex, .devin, .cursor, .kimi])
+    func projectArchiveOnlyStopsArchiveCapableTabsAfterConfirmation(provider: CLIProvider) throws {
         let fixture = try ProviderFixture()
         defer { fixture.cleanup() }
         let grok = try #require(fixture.model.newTab(in: fixture.root))
         let other = try #require(fixture.model.newTab(in: fixture.root, provider: provider))
+        #expect(grok.activity == .unknown)
+        #expect(grok.capabilities.archive)
+        #expect(!other.capabilities.archive)
         other.noteTurnStarted()
-        var warnings = 0
-        fixture.model.confirmStopWorking = { _ in
-            warnings += 1
-            return false
+        var prompts: [StopWorkingPrompt] = []
+        var confirm = false
+        fixture.model.confirmStopWorking = {
+            prompts.append($0)
+            return confirm
         }
         let project = SidebarProject(
             id: fixture.root.path, name: "project", displayPath: fixture.root.path,
             cwd: fixture.root.path, sessions: [], updatedAt: .now)
         fixture.model.archive(project)
-        #expect(warnings == 0)
+        #expect(prompts.count == 1)
+        #expect(prompts.last?.count == 1)
+        #expect(prompts.last?.action == .archive)
+        #expect(fixture.model.tabs.map(\.id) == [grok.id, other.id])
+        #expect(grok.controller.isRunning)
+        #expect(other.controller.isRunning)
+
+        confirm = true
+        fixture.model.archive(project)
+        #expect(prompts.count == 2)
+        #expect(prompts.last?.count == 1)
         #expect(fixture.model.tabs.map(\.id) == [other.id])
         #expect(!grok.controller.isRunning)
         #expect(other.controller.isRunning)
+    }
+
+    @Test(arguments: [CLIProvider.claudeCode, .codex])
+    func projectArchiveIncludesKnownNativeSessionsAndHonorsCancellation(provider: CLIProvider) throws {
+        let fixture = try ProviderFixture()
+        defer { fixture.cleanup() }
+        let grok = try #require(fixture.model.newTab(in: fixture.root))
+        let sessionID = UUID().uuidString.lowercased()
+        let transcript = fixture.root.appendingPathComponent("\(sessionID).jsonl")
+        let record: [String: Any] =
+            provider == .codex
+            ? [
+                "type": "session_meta",
+                "payload": ["id": sessionID, "cwd": fixture.root.path, "cli_version": "0.157.1"],
+            ]
+            : [
+                "type": "user", "sessionId": sessionID, "cwd": fixture.root.path, "version": "2.1.283",
+                "message": ["content": "fixture"],
+            ]
+        try JSONSerialization.data(withJSONObject: record).write(to: transcript)
+        let session = GrokSession(
+            id: sessionID, cwd: fixture.root.path, summary: "Native conversation",
+            createdAt: Date(), updatedAt: Date(), messageCount: 0, modelID: nil,
+            agentName: nil, reasoningEffort: nil, directory: transcript, provider: provider)
+        fixture.model.open(session)
+        let native = try #require(fixture.model.selectedTab)
+        #expect(native.sessionReference == session.reference)
+        #expect(native.capabilities.archive)
+        native.noteTurnStarted()
+        let unsupported = try #require(fixture.model.newTab(in: fixture.root, provider: .devin))
+        unsupported.noteTurnStarted()
+        var prompts: [StopWorkingPrompt] = []
+        var confirm = false
+        fixture.model.confirmStopWorking = {
+            prompts.append($0)
+            return confirm
+        }
+        let project = SidebarProject(
+            id: fixture.root.path, name: "project", displayPath: fixture.root.path,
+            cwd: fixture.root.path, sessions: [session], updatedAt: .now)
+
+        fixture.model.archive(project)
+        #expect(prompts.count == 1)
+        #expect(prompts.last?.count == 2)
+        #expect(fixture.model.tabs.map(\.id) == [grok.id, native.id, unsupported.id])
+        #expect(grok.controller.isRunning && native.controller.isRunning && unsupported.controller.isRunning)
+
+        confirm = true
+        fixture.model.archive(project)
+        #expect(prompts.count == 2)
+        #expect(prompts.last?.count == 2)
+        #expect(fixture.model.tabs.map(\.id) == [unsupported.id])
+        #expect(!grok.controller.isRunning && !native.controller.isRunning)
+        #expect(unsupported.controller.isRunning)
     }
 
     @Test func anotherCLIGetsOnlyTheModelEffortAndSpeedItWasGiven() throws {

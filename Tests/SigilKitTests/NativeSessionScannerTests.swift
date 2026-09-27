@@ -65,6 +65,40 @@ struct NativeSessionScannerTests {
                 == nil)
     }
 
+    @Test func claudeBlockContentSuppliesTitleAndMeaningfulHistory() throws {
+        let data = Data(
+            """
+            {"type":"user","sessionId":"\(id)","cwd":"/tmp","version":"2.1.283","message":{"content":[{"type":"image"},{"type":"text","text":"Fix the image layout"}]}}
+            """.utf8)
+        let parsed = try #require(
+            NativeSessionScanner.parse(provider: .claudeCode, data: data, file: file, modified: Date()))
+        #expect(parsed.summary == "Fix the image layout")
+        #expect(parsed.hasObservedMessages)
+        #expect(parsed.messageCount == 0)
+    }
+
+    @Test func mixedCodexMetadataCannotRenameOrRetargetAnotherConversation() {
+        let other = "22222222-2222-4222-8222-222222222222"
+        let first = codexFixture()
+        let mixedID = first + Data([0x0A]) + codexFixture(nativeID: other)
+        #expect(NativeSessionScanner.parse(provider: .codex, data: mixedID, file: file, modified: Date()) == nil)
+        let changedFolder = String(decoding: first, as: UTF8.self).replacingOccurrences(
+            of: "/tmp/project", with: "/tmp/other")
+        let mixedFolder = first + Data([0x0A]) + Data(changedFolder.utf8)
+        #expect(NativeSessionScanner.parse(provider: .codex, data: mixedFolder, file: file, modified: Date()) == nil)
+        let duplicate = first + Data([0x0A]) + first
+        #expect(
+            NativeSessionScanner.parse(provider: .codex, data: duplicate, file: file, modified: Date())?.nativeSessionID
+                == id)
+        let claude = """
+            {"type":"user","sessionId":"\(id)","cwd":"/tmp/first","version":"2.1.283"}
+            {"type":"user","sessionId":"\(id)","cwd":"/tmp/second","version":"2.1.283"}
+            """
+        #expect(
+            NativeSessionScanner.parse(provider: .claudeCode, data: Data(claude.utf8), file: file, modified: Date())
+                == nil)
+    }
+
     @Test func unreadableOrFutureHistoryKeepsCachedConversationsWithoutWritingCLIData() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

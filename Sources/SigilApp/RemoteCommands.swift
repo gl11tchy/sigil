@@ -10,7 +10,7 @@ struct RemoteState: Codable, Sendable {
         var provider: String?
         var providerName: String?
         var folder: String?
-        /// Only a saved Grok chat can be archived; other tabs can only close.
+        /// Only recognized history with the archive capability can be archived.
         var canArchive: Bool?
         var sessionID: String?
         var capabilities: ProviderCapabilities?
@@ -78,6 +78,7 @@ struct RemoteReply: Codable, Sendable {
     var state: RemoteState?
     var ticket: String?
     var restartedTabID: String?
+    var restartedSession: ProviderSessionReference?
     var chats: [RemoteChat]?
     var projects: [RemoteProject]?
     var earlier: String?
@@ -283,6 +284,7 @@ enum RemoteCommands {
                 return failure(request, "Could not restart this session. Check Sigil on your Mac.")
             }
             reply.restartedTabID = model.tabs[index].id.uuidString
+            reply.restartedSession = model.tabs[index].sessionReference
         case "input":
             guard let tab, tab.controller.isRunning else { return failure(request, "This session is not running.") }
             guard let text = request.text, !text.isEmpty, text.utf8.count <= 8_192,
@@ -352,7 +354,7 @@ enum RemoteCommands {
         if !model.settings.showEmptySessions {
             let named =
                 !session.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || session.messageCount > 2
+                || session.messageCount > 2 || session.hasObservedMessages
                 || model.hasCustomName(session)
             if !named && !model.isOpen(session) { return false }
         }
