@@ -637,12 +637,12 @@ function paintText(output, marked = []) {
   text(cursor, output.length);
   $('terminal').replaceChildren(fragment);
 }
-// A range over one match in the painted text nodes.
-function findRange(index) {
+// A range in the painted text nodes over one match, or from its start to the end of match `last`.
+function findRange(index, last = index) {
   const range = document.createRange?.();
   if (!range || !findPieces.length) return null;
   range.setStart(...findPoint(findMatches[index].start, false));
-  range.setEnd(...findPoint(findMatches[index].end, true));
+  range.setEnd(...findPoint(findMatches[last].end, true));
   return range;
 }
 // The text node and offset at a place in the painted text: in the last piece that starts at or
@@ -679,7 +679,7 @@ function showVisibleMatches() {
   const frame = terminal.getBoundingClientRect();
   const top = frame.top + terminal.clientTop, bottom = top + height;
   const left = frame.left + terminal.clientLeft, right = left + width;
-  // Matches are in document order, so their boxes run top to bottom, and left to right on a line.
+  // Matches are in document order, so their boxes run top to bottom.
   const first = (low, high, test) => {
     while (low < high) {
       const middle = (low + high) >> 1;
@@ -702,8 +702,17 @@ function showVisibleMatches() {
           const middle = (low + next) >> 1;
           if (findMatches[middle].start > end) next = middle; else low = middle + 1;
         }
-        const low = first(index, next, box => box.right > left - x);
-        for (let at = low, high = first(low, next, box => box.left >= right + x); at < high; at++) shown.push(at);
+        // Right-to-left text runs backwards on a line, so a span of its matches is left out only
+        // when the box around all of it is out of the columns, and shown whole when inside them.
+        const columns = (low, high) => {
+          const box = findRange(low, high - 1).getBoundingClientRect();
+          if (box.right <= left - x || box.left >= right + x) return;
+          if (high - low > 1 && (box.left < left - x || box.right > right + x)) {
+            const middle = (low + high) >> 1;
+            columns(low, middle); columns(middle, high);
+          } else for (let at = low; at < high; at++) shown.push(at);
+        };
+        columns(index, next);
       } else for (let at = index; at < next; at++) shown.push(at);
       index = next;
     }

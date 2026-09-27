@@ -452,6 +452,40 @@ for (const api of [true, false]) {
       } finally { mac.close(); }
     });
 
+    test('Find highlights only the columns in view on a long right-to-left raw line', async ({ page, baseURL }) => {
+      // Hebrew runs right to left, so the first match is at the right end of the line. Columns found
+      // as if boxes ran left to right highlighted none in view at either end and every one mid-line.
+      const line = 'שלום עולם '.repeat(400);
+      const matches = count(line, 'שלום').map(match => [match.index, match.index + 4]);
+      const mac = await pair(page, baseURL, { terminal: () => line });
+      try {
+        await expect(page.locator('#terminal')).toHaveText(line);
+        await toggleRaw(page);
+        await expect(page.locator('#terminal')).toHaveAttribute('data-raw', 'true');
+        await page.getByRole('button', { name: 'Find in output' }).click();
+        const typeTime = await timed(page, 'find-query', 'שלום');
+        await expect(page.locator('#find-count')).toHaveText(`1 of ${matches.length}`);
+        expect(typeTime).toBeLessThan(1000);
+        await frames(page);
+        expect((await findState(page)).current).toEqual({ start: 0, end: 4, text: 'שלום', visible: true });
+        for (const at of [0, 0.5, 1]) {
+          await page.locator('#terminal').evaluate((el, at) => { el.scrollLeft = at * (el.scrollWidth - el.clientWidth); }, at);
+          await expect.poll(async () => {
+            const state = await coverage(page, matches);
+            return [state.visible > 0, state.missing, state.far, state.shown < 200];
+          }).toEqual([true, 0, 0, true]);
+        }
+        // Previous wraps to the last match, at the left end of the line, and brings it into view.
+        const wrapTime = await timed(page, 'find-previous');
+        await expect(page.locator('#find-count')).toHaveText(`${matches.length} of ${matches.length}`);
+        expect(wrapTime).toBeLessThan(400);
+        await frames(page);
+        const [start, end] = matches.at(-1);
+        expect((await findState(page)).current).toEqual({ start, end, text: 'שלום', visible: true });
+        expect(await coverage(page, matches)).toMatchObject({ missing: 0, far: 0 });
+      } finally { mac.close(); }
+    });
+
     test('Find scrolls to the matches on a raw line of 80,000 px with no ASCII words', async ({ page, baseURL }) => {
       // In WebKit, a text node that wide on one line gives empty boxes: Previous did not scroll, and
       // every match on the line was highlighted, which took seconds.
