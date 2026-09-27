@@ -268,6 +268,12 @@ final class AppSettings {
         TerminalTheme.all.first { $0.name == themeName } ?? .sigilDark
     }
 
+    /// `theme` as saved, for the window a launch shows before the model exists.
+    static func storedTheme(defaults: UserDefaults = .standard) -> TerminalTheme {
+        let name = defaults.string(forKey: Key.themeName) ?? TerminalTheme.sigilDark.name
+        return TerminalTheme.all.first { $0.name == name } ?? .sigilDark
+    }
+
     var executableURL: URL {
         URL(fileURLWithPath: Self.normalizedExecutablePath(executablePath))
     }
