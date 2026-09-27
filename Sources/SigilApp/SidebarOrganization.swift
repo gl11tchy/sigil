@@ -43,6 +43,30 @@ struct AddedProject: Codable, Equatable, Sendable {
     var addedAt: Date
 }
 
+/// Saved records (pins, archives, names) grouped by chat id, in stored order,
+/// built once per list pass. A lookup hashes the chat's id and compares
+/// folders only for records with that id: the records an
+/// `id == id && samePath` scan compares, so it finds the same first record.
+struct ConversationIndex<Record> {
+    private var byID: [String: [(cwd: String, record: Record)]] = [:]
+
+    init(_ records: [Record], sessionID: (Record) -> String, cwd: (Record) -> String) {
+        for record in records {
+            byID[sessionID(record), default: []].append((cwd(record), record))
+        }
+    }
+
+    /// The first stored record for the chat `sessionID` in `cwd`.
+    func first(sessionID: String, cwd: String, samePath: (String, String) -> Bool) -> Record? {
+        guard !byID.isEmpty, let records = byID[sessionID] else { return nil }
+        return records.first { samePath($0.cwd, cwd) }?.record
+    }
+
+    func contains(sessionID: String, cwd: String, samePath: (String, String) -> Bool) -> Bool {
+        first(sessionID: sessionID, cwd: cwd, samePath: samePath) != nil
+    }
+}
+
 /// Every list one sidebar render reads, built once per body pass so the search
 /// and the folder grouping run once instead of once per read.
 struct SidebarSnapshot: Equatable, Sendable {
@@ -321,9 +345,31 @@ enum SidebarOrganization {
         entries: [OpenTabsSnapshot.Entry],
         samePath: (String, String) -> Bool
     ) -> [GrokSession] {
-        entries.compactMap { entry in
-            sessions.first { $0.id == entry.sessionID && samePath($0.cwd, entry.cwd) }
+        firstMatches(for: entries.map { ($0.sessionID, $0.cwd) }, in: sessions, samePath: samePath)
+            .compactMap { $0 }
+    }
+
+    /// For each chat key, the first of `sessions` with its id in the same
+    /// folder, as a `first(where:)` scan per key finds it, in one pass over
+    /// `sessions`. Folders are compared only when the ids match.
+    private static func firstMatches(
+        for keys: [(sessionID: String, cwd: String)],
+        in sessions: [GrokSession],
+        samePath: (String, String) -> Bool
+    ) -> [GrokSession?] {
+        var matches = [GrokSession?](repeating: nil, count: keys.count)
+        guard !keys.isEmpty else { return matches }
+        let positions = Dictionary(grouping: keys.indices) { keys[$0].sessionID }
+        var unmatched = keys.count
+        for session in sessions {
+            guard let candidates = positions[session.id] else { continue }
+            for position in candidates where matches[position] == nil && samePath(session.cwd, keys[position].cwd) {
+                matches[position] = session
+                unmatched -= 1
+            }
+            if unmatched == 0 { break }
         }
+        return matches
     }
 
     /// `sessions` in `project`'s folder or its Sigil worktrees, or all of them
@@ -346,11 +392,8 @@ enum SidebarOrganization {
     ) -> [GrokSession] {
         let pinned = matching(sessions: sessions, entries: entries, samePath: samePath)
         guard let project else { return pinned }
-        return pinned.filter { session in
-            project.sessions.contains {
-                $0.id == session.id && samePath($0.cwd, session.cwd)
-            }
-        }
+        let inProject = firstMatches(for: pinned.map { ($0.id, $0.cwd) }, in: project.sessions, samePath: samePath)
+        return zip(pinned, inProject).compactMap { session, match in match == nil ? nil : session }
     }
 
     static func without(
@@ -358,8 +401,9 @@ enum SidebarOrganization {
         entries: [OpenTabsSnapshot.Entry],
         samePath: (String, String) -> Bool
     ) -> [GrokSession] {
-        sessions.filter { session in
-            !contains(entries, session: session, samePath: samePath)
+        let pins = ConversationIndex(entries, sessionID: \.sessionID, cwd: \.cwd)
+        return sessions.filter { session in
+            !pins.contains(sessionID: session.id, cwd: session.cwd, samePath: samePath)
         }
     }
 

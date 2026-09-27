@@ -19,6 +19,9 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
     var onInput: (() -> Void)?
     /// Builds the VoiceOver value when an assistive client asks, not on every output tick.
     var accessibilityText: (() -> String)?
+    /// Moves on every child write and every resize, the only ways Sigil changes
+    /// the buffer. Find reuses its last read of the rows while this is unchanged.
+    fileprivate(set) var contentGeneration = 0
     private var isForwardingBracketedPaste = false
     /// Held strongly here: `terminalDelegate` is weak.
     private lazy var clipboardGuard = ClipboardGuard(view: self)
@@ -138,6 +141,7 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
 
     override func dataReceived(slice: ArraySlice<UInt8>) {
         super.dataReceived(slice: slice)
+        contentGeneration &+= 1
         onChildOutput?()
     }
 
@@ -195,6 +199,8 @@ private final class ClipboardGuard: @preconcurrency TerminalViewDelegate {
     func clipboardCopy(source: TerminalView, content: Data) {}
 
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
+        // A resize reflows wrapped rows. Every resize path in SwiftTerm ends here.
+        view.contentGeneration &+= 1
         view.sizeChanged(source: source, newCols: newCols, newRows: newRows)
     }
 
