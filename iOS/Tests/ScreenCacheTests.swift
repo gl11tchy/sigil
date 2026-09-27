@@ -417,10 +417,29 @@ enum ScreenCacheTests {
         try Expect.true(!gate.isAwaiting, "live state ends the wait")
         try Expect.true(!gate.isCurrent(second, activeMacID: "A"), "and the late restore stays off screen")
 
-        // A switch to another Mac never waits, and an old restore cannot end a newer wait.
+        // A switch to another Mac during the launch wait, as a notification opens it:
+        // the store keeps waiting, for the new Mac's cache only.
+        let bHasCache = true, bHasNone = false
+        _ = gate.begin(macID: "A", awaited: true)
+        var waiting = gate.isAwaiting
+        gate.invalidate()
+        let other = gate.begin(macID: "B", awaited: waiting && bHasCache)
+        try Expect.true(gate.isAwaiting, "a switch during the launch wait keeps waiting for B's cache")
+        gate.finish(other)
+        try Expect.true(!gate.isAwaiting, "B's restore ends it")
+        _ = gate.begin(macID: "A", awaited: true)
+        waiting = gate.isAwaiting
+        gate.invalidate()
+        _ = gate.begin(macID: "B", awaited: waiting && bHasNone)
+        try Expect.true(!gate.isAwaiting, "with no cache for B the switch does not wait")
+
+        // A switch after the wait ended never waits, and an old restore cannot end a newer wait.
         let third = gate.begin(macID: "A", awaited: true)
-        _ = gate.begin(macID: "B")
-        try Expect.true(!gate.isAwaiting, "switching Macs ends the wait and does not start one")
+        gate.finish(third)
+        waiting = gate.isAwaiting
+        gate.invalidate()
+        _ = gate.begin(macID: "B", awaited: waiting && bHasCache)
+        try Expect.true(!gate.isAwaiting, "a later switch does not start a wait")
         let fourth = gate.begin(macID: "A", awaited: true)
         gate.finish(third)
         try Expect.true(gate.isAwaiting, "a stale restore does not end the newer wait")

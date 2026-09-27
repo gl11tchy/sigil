@@ -100,18 +100,19 @@ final class RemoteStore {
         } else {
             let list = CredentialStore.loadList()
             macs = list.macs
-            if let saved = list.selected { activate(saved, launching: true) }
+            if let saved = list.selected { activate(saved, awaitCache: true) }
         }
     }
 
     /// Shows one Mac: its cached screen first, then its live connection.
-    private func activate(_ saved: PairingCredential, launching: Bool = false) {
+    /// `awaitCache` holds the screen for a cache on disk, as at launch.
+    private func activate(_ saved: PairingCredential, awaitCache: Bool = false) {
         activeMacID = saved.id
         hasPairing = true
         credential = saved
         macAddress = saved.origin.host
         macName = saved.name
-        restoreCache(for: saved, launching: launching)
+        restoreCache(for: saved, awaitCache: awaitCache)
         connection.resume(saved)
     }
 
@@ -127,9 +128,11 @@ final class RemoteStore {
         saveCacheNow()
         connection.stop()
         liveActivity.end()
+        // A notification or a widget can open another Mac at launch: keep the launch wait for its cache.
+        let waiting = restoreGate.isAwaiting
         clearMacState()
         CredentialStore.select(id: macID)
-        activate(next)
+        activate(next, awaitCache: waiting)
     }
 
     /// Everything that belongs to the Mac on screen. Drafts stay: tab ids never collide across Macs.
@@ -798,9 +801,9 @@ final class RemoteStore {
     /// the screen it was read for: the same Mac, before anything live or another Mac
     /// replaced it. At launch, with a cache on disk, the screen waits for it rather
     /// than showing an empty Mac, but never longer than `RestoreGate.patience`.
-    private func restoreCache(for credential: PairingCredential, launching: Bool) {
+    private func restoreCache(for credential: PairingCredential, awaitCache: Bool) {
         let ticket = restoreGate.begin(
-            macID: credential.id, awaited: launching && ScreenCache.hasCache(for: credential))
+            macID: credential.id, awaited: awaitCache && ScreenCache.hasCache(for: credential))
         if awaitingCache {
             Task { [weak self] in
                 try? await Task.sleep(for: RestoreGate.patience)
