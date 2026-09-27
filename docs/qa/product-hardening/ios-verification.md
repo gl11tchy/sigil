@@ -1,15 +1,17 @@
 # Native iPhone verification
 
 Verified locally on 2026-09-27 with Xcode 26.6 and the iOS 26.5 simulator runtime.
+The tested shipping source is commit `98c1b52`, after PR120 integration and the final cache/restart repairs.
 
 ## Commands and results
 
 - `iOS/scripts/relay-e2e.sh` baseline: 46 passed.
 - `DERIVED_DATA=/tmp/sigil-native-baseline-derived iOS/scripts/build.sh` baseline: the complete unsigned simulator app built.
-- `iOS/scripts/ci.sh` after the changes: Xcode preflight, typecheck, 57 shared-logic/real-relay tests, and 15 app-hosted simulator tests passed. No native tests were skipped.
-- `shellcheck iOS/scripts/ci.sh iOS/scripts/native-test.sh iOS/scripts/relay-e2e.sh` passed.
+- `iOS/scripts/ci.sh` after integrating PR120 and the final race repairs: Xcode preflight, typecheck, 85 shared-logic/real-relay tests, 18 app-hosted simulator tests, and 7 native TextKit tests passed. No native tests were skipped.
+- `shellcheck iOS/scripts/ci.sh iOS/scripts/native-test.sh iOS/scripts/native-output-test.sh iOS/scripts/relay-e2e.sh` and `plutil -lint iOS/Sigil.xcodeproj/project.pbxproj` passed.
 
-The final local result bundle is `.build/native-verification/native-20260927-111821-9739.xcresult`.
+The final local result bundle is `.build/native-verification/native-20260927-115627-55478.xcresult`.
+The full local gate log is `/tmp/sigil-native-post-pr120-final2-ci.log`. These results supersede the pre-PR120 57 shared/relay and 15 app-hosted counts.
 CI uploads its own result bundles as `iPhone-native-verification` artifacts.
 
 The native gate discovers an installed compatible simulator runtime, creates a fresh simulator, and removes it after testing. It builds the actual `Sigil` scheme and checks these embedded executables:
@@ -18,7 +20,11 @@ The native gate discovers an installed compatible simulator runtime, creates a f
 - `Sigil.app/PlugIns/SigilNotifications.appex/SigilNotifications`
 - `Sigil.app/PlugIns/SigilWidgets.appex/SigilWidgets`
 
-The tests use the real relay, encryption, native connection, and app store. The Mac endpoint is a deterministic protocol fixture, not a paid provider session. Coverage includes pairing, two Macs with identical tab IDs, session selection, text and terminal keys, unverified choices, reconnect without retry, malformed replies, old-handshake replay, event replay, connection changes during input, draft identity, and notification freshness/receipt bounds.
+The tests use the real relay, encryption, native connection, and app store. The Mac endpoint is a deterministic protocol fixture, not a paid provider session. Coverage includes pairing, two Macs with identical tab IDs, session selection, text and terminal keys, unverified choices, reconnect without retry, malformed replies, old-handshake replay, event replay, connection changes during input, draft identity, and notification freshness/receipt bounds. A held disk-cache test proves that exact native identity preserves a returning Mac's draft and attachments before its cache arrives, while stale cached output cannot replace live output.
+
+Restart regressions reproduce and fix complete and capped replacement events arriving before their receipt. Distinct edits and attachment IDs survive, retired files cannot reappear, and mismatched or same-ID receipts do not destroy unsent work. The dispatch is bound to its Mac, connection epoch, and original native identity.
+
+PR120's off-main output, cache, Find, scrolling, and cover tests remain intact. The standalone TextKit harness runs separately from the shipping app's XCTest bundle, avoiding competing app entry points. Native fixture setup respects the relay's real 20-room-per-minute limit: only an explicit HTTP 429 room-allocation refusal can be retried, within a 75-second setup deadline. Protocol workflow waits and command no-retry rules are unchanged.
 
 The screenshot contains synthetic demo data. An app-hosted test focuses the editable composer at accessibility text size and checks that its frame stays above the keyboard layout guide. The image captures the app window, not the system keyboard window.
 

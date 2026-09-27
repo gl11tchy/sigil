@@ -56,7 +56,7 @@ signed-device testing.
 Pairing keys and tickets use the device-only Keychain, shared with the notification
 extension. A failed update does not delete an existing Keychain item. If a pairing
 cannot be saved, the app says it will end when the app closes and retains existing
-in-memory pairings.
+in-memory pairings. Unsent drafts and attachments are not saved to disk.
 
 The latest selected screen and tab list are cached per Mac as JSON under
 Application Support. On iOS, the files use complete file protection until first

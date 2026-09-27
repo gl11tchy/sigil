@@ -48,3 +48,54 @@ Evidence: `tasks/remote-hardening-verify.md`.
 
 Release follow-up: open the PR, clear CI and automated review, squash merge, install
 the merged Mac build, then deploy the matching stamped relay/PWA and verify production.
+
+# Product correctness and continuity — 2026-09-27
+
+Skills: using-agent-skills, planning-and-task-breakdown, git-workflow-and-versioning,
+code-review-and-quality, security-and-hardening, incremental-implementation,
+test-driven-development, write-swift.
+
+## Baseline and scope
+
+Start at `be13238`, equal to fresh `origin/main`; its CI succeeded. Preserve the
+terminal-first interface, existing providers and all CLI-owned history. Deliver
+one integration PR; do not merge, install over the running app, or deploy.
+Prior completed plans above remain historical evidence, not current acceptance.
+
+## Ordered work and ownership
+
+1. Approval identity and dispatch: exact operation and choices, host-owned
+   interaction lifetime, consume-before-dispatch, conservative raw controls where
+   no provider request broker exists. Verify detector, real PTY dispatch, races,
+   replacement, duplicate and wrong-session tests. Approval worker owns prompt,
+   interaction, terminal revision and approval command code.
+2. Provider contracts and lifecycle: small native identity/capability model,
+   version-isolated history readers, genuine CLI resume, no title/silence success.
+   Verify installed help, official sources, fixtures and process tests. Provider
+   worker owns SigilKit provider/history and TerminalTab lifecycle.
+3. Integrate continuity and remote: parent owns AppModel, web companion,
+   notifications, reconnect freshness, target-bound uploads and documentation.
+   Verify preserved snapshots, unsupported actions, relay and browser journeys.
+4. Native product gate: native worker owns complete simulator app + embedded
+   extensions, actual native tests, shared relay tests and CI. Include phone
+   operation context and capability consumption with shared wire contracts.
+5. After integration: benchmark at least 900 conversations and concurrent tabs,
+   independent review, repair findings, run full local CI commands, then push
+   one branch and open one PR. Record all verification boundaries accurately.
+
+## Shared contracts
+
+- Provider-native identity contains provider, native session ID and project path.
+- Grok IDs remain stable; non-Grok list IDs are provider-qualified.
+- Capabilities are authoritative data, not inferred from a non-nil session ID.
+- Terminal text is untrusted. Missing authoritative approval support never claims
+  verified structured approval. Raw input remains clearly labeled.
+- New event frames carry a monotonically increasing eventSequence, scoped to the
+  authenticated connection challenge; legacy hosts use request/reply polling.
+- No offline command queue, blind retry, paid model calls or production changes.
+
+## Checkpoints
+
+- Baseline tests and native build recorded separately from introduced failures.
+- Core implementation integrated before independent review.
+- Full verification and self-review before the single integration push.

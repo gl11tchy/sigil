@@ -14,3 +14,21 @@
 - [x] A: Adversarial protocol paths; full verification passed.
 - [x] B: Sealed ticket routing and no-query logging; full verification passed.
 - [x] C: Git revision stamp and health proof; full verification passed (`tasks/remote-hardening-verify.md`).
+
+## Product correctness and continuity — 2026-09-27
+
+- [x] Record baseline full gate, native build, CI and installed CLI contracts.
+- [x] Bind approval context, lifetime and exact responses; test real dispatch.
+- [x] Remove unsupported completion claims; verify lifecycle transitions.
+- [x] Add provider-native Claude/Codex history, resume and saved-tab continuity.
+- [x] Share identity and capabilities across Mac, web and native phone.
+- [x] Harden event freshness, upload routing and lost-response behavior.
+- [x] Build real iOS app and both extensions; exercise simulator and real relay.
+- [x] Measure 900+ history and simultaneous sessions; fix measured blockers.
+- [x] Independently review integrated change and repair all findings.
+- [x] Update product, setup, capability and verification documentation.
+- [x] Run full CI commands locally, self-review and commit the verified integration.
+
+Delivery: publish this branch as one PR. Its GitHub record is the delivery receipt.
+Do not merge or deploy. The external Xcode 16.4 runner still needs an Xcode 26+ image.
+See [verification and limits](../docs/qa/product-hardening/README.md).

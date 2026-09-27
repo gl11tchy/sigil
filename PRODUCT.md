@@ -1,35 +1,41 @@
 # Sigil
 
-A native macOS shell for the Grok Build CLI. It runs the real `grok` terminal UI in
-a pseudo-terminal and adds the one thing a terminal cannot give you: every
-conversation you have ever had, listed, searchable, and one click from resuming.
+A native macOS home for real coding-agent CLIs, with Sidereal on the web and a
+native iPhone companion. The provider's terminal remains the conversation.
 
-## Register
+## Product outcome
 
-Product. Design serves the task. The user is mid-thought, moving between a
-conversation they had this morning and one from three weeks ago. The chrome has to
-disappear.
+Start in the right project. Leave the desk. Receive an accurate alert. Inspect
+what needs attention, respond, and return to the same conversation.
 
-## Who uses it, and where
+## Priorities
 
-One developer, at a desk, in a dark room, at night, with a terminal already open on
-the other half of the screen. They keep 900+ conversations. They switch between four
-or five in an hour. They are never "browsing" — they are looking for one specific
-thread and they half-remember its name.
+1. Remote commands target the intended session. Uncertain approvals stay ordinary,
+   clearly labeled terminal input, never verified authorization.
+2. State is truthful. Silence, title changes and a live process do not prove a
+   completed turn. Missing evidence remains unknown.
+3. Grok, Claude Code and Codex have provider-native history and resumption where
+   their CLIs support it. A terminal tab ID is not a conversation ID.
+4. The actual Mac app, iPhone app and shipping extensions build and receive tests.
+5. Find a conversation in under two seconds in a history of at least 900 chats.
 
-That scene forces the answer: **dark, dense, keyboard-first**. Not dark because
-tools look cool dark. Dark because it sits beside a terminal and must not be the
-bright thing on the screen.
+## Design
 
-## What it must do well
+Dark, dense, keyboard-first. Preserve the terminal, the project context, and the
+existing design system. No replacement chat interface or extra provider.
 
-1. Find a conversation in under two seconds, by name, without leaving the keyboard.
-2. Show at a glance which conversation is open and which one is doing work.
-3. Start a new chat in a project in one click, archive a chat or a project from the same row, and close an old one from that row.
-4. Never get in the terminal's way. The terminal is the product; this is the frame.
+## Continuity and safety
+
+History, search and restoration follow [provider capabilities](docs/provider-capabilities.md).
+Missing folders, unavailable CLIs and failed resumptions retain saved references.
+Native provider transcripts remain owned by their CLIs. Sigil stores its own names,
+notes, pins and archives separately.
+
+The phone shows the same identity, state and capabilities as the desktop. Commands
+are not queued offline or blindly retried. A dispatch receipt proves only that
+input reached the host dispatch path, not provider acceptance or successful work.
 
 ## Non-goals
 
-- Rendering the conversation itself. The CLI already does that, better.
-- Settings surfaces beyond the few that change how `grok` is launched.
-- Any decoration that costs a row of list density.
+Replacing provider CLIs, inventing unsupported integration, redesigning the product,
+or treating a launch smoke test as proof of complete product correctness.
