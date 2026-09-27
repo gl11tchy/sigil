@@ -1,7 +1,9 @@
 import http from 'node:http';
-import { readFile } from 'node:fs/promises';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { readFile, stat } from 'node:fs/promises';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
+import { brotliCompress, gzip } from 'node:zlib';
 import { WebSocketServer, WebSocket } from 'ws';
 import { importKey, open } from './public/crypto.mjs';
 import { loadRevision } from './revision.mjs';
@@ -23,6 +25,48 @@ const assets = new Map([
   ...['Inter-Regular', 'Inter-Medium', 'Inter-SemiBold', 'JetBrainsMono-Regular', 'JetBrainsMono-Medium']
     .map(name => [`/fonts/${name}.woff2`, [`fonts/${name}.woff2`, 'font/woff2']]),
 ]);
+const compressors = { br: promisify(brotliCompress), gzip: promisify(gzip) };
+const compressible = type => type.startsWith('text/') || type.endsWith('+xml') || type.endsWith('+json');
+// The first of br and gzip the client accepts; otherwise the file goes out as it is.
+function encoding(header) {
+  const accepted = new Map(String(header || '').split(',').map(part => {
+    const [name, ...params] = part.toLowerCase().split(';').map(value => value.trim());
+    const q = params.find(value => value.startsWith('q='));
+    return [name, q ? Number(q.slice(2)) : 1];
+  }));
+  return ['br', 'gzip'].find(name => accepted.get(name) > 0);
+}
+// If-None-Match uses the weak comparison: W/"x" matches "x".
+const unchanged = (header, etag) => typeof header === 'string' &&
+  header.split(',').some(tag => ['*', etag, `W/${etag}`].includes(tag.trim()));
+// Each file is read, hashed and compressed once per version on disk. A changed size, mtime,
+// ctime or inode reloads it, so a new deployment's code is never answered from an old copy.
+function publicFiles() {
+  const files = new Map();
+  return async (name, wanted) => {
+    const url = new URL(`public/${name}`, import.meta.url);
+    const { size, mtimeMs, ctimeMs, ino } = await stat(url);
+    const version = `${size}:${mtimeMs}:${ctimeMs}:${ino}`;
+    let file = files.get(name);
+    if (file?.version !== version) {
+      const identity = readFile(url).then(body => ({ body, etag: `"${createHash('sha256').update(body).digest('base64url')}"` }));
+      file = { version, identity, encoded: new Map() };
+      files.set(name, file);
+    }
+    try {
+      const plain = await file.identity;
+      if (!wanted) return plain;
+      if (!file.encoded.has(wanted)) {
+        file.encoded.set(wanted, compressors[wanted](plain.body).then(body => body.byteLength < plain.body.byteLength
+          ? { body, etag: `${plain.etag.slice(0, -1)}-${wanted}"`, encoding: wanted } : plain));
+      }
+      return await file.encoded.get(wanted);
+    } catch (error) {
+      if (files.get(name) === file) files.delete(name);
+      throw error;
+    }
+  };
+}
 
 export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns = null } = {}) {
   const origin = new URL(publicOrigin);
@@ -34,6 +78,7 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
   const tickets = new Map();
   let creationWindow = now(), creations = 0;
   const wss = new WebSocketServer({ noServer: true, maxPayload: 110000, perMessageDeflate: false });
+  const files = publicFiles();
   // No request, header, or frame logging. Proxies must log paths only, never queries.
   const server = http.createServer(async (req, res) => {
     req.url = req.url.split('?')[0];
@@ -62,11 +107,17 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
     const asset = req.method === 'GET' && assets.get(req.url);
     if (!asset) { res.writeHead(404).end(); return; }
     try {
-      const data = await readFile(new URL(`public/${asset[0]}`, import.meta.url));
+      const compress = compressible(asset[1]);
+      const file = await files(asset[0], compress && encoding(req.headers['accept-encoding']));
       const font = asset[1].startsWith('font/');
       // Fonts never change under one name and weigh ~500 KB; let the phone keep them.
-      if (font) res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
-      res.writeHead(200, { 'Content-Type': font ? asset[1] : `${asset[1]}; charset=utf-8` }).end(data);
+      // Everything else is kept but checked on each use, so a new deployment's code loads at once.
+      res.setHeader('Cache-Control', font ? 'public, max-age=604800, immutable' : 'no-cache');
+      res.setHeader('ETag', file.etag);
+      if (compress) res.setHeader('Vary', 'Accept-Encoding');
+      if (unchanged(req.headers['if-none-match'], file.etag)) { res.writeHead(304).end(); return; }
+      if (file.encoding) res.setHeader('Content-Encoding', file.encoding);
+      res.writeHead(200, { 'Content-Type': font ? asset[1] : `${asset[1]}; charset=utf-8`, 'Content-Length': file.body.byteLength }).end(file.body);
     } catch { res.writeHead(500).end(); }
   });
   server.requestTimeout = 10000;
@@ -96,54 +147,87 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
     if (typeof state.asking === 'boolean') out.asking = state.asking;
     return out.status ? out : null;
   };
-  // Returns the APNs request for a host's push frame, or null when the frame is malformed.
-  const pushRequest = (room, push) => {
+  // Returns what builds the APNs request for a host's push frame from the phone's
+  // registration when it goes out, or null when the frame is malformed. It keeps only
+  // the checked fields, never the frame.
+  const pushRequest = push => {
     if (!push || typeof push !== 'object' || Array.isArray(push)) return null;
     if (typeof push.data === 'string') {
       if (push.data.length > 3000 || !/^[A-Za-z0-9+/=]+$/.test(push.data)) return null;
       const thread = typeof push.thread === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(push.thread) ? push.thread : undefined;
-      return {
-        environment: room.push?.environment, token: room.push?.token, pushType: 'alert', collapseId: thread,
+      const data = push.data;
+      return registration => ({
+        environment: registration?.environment, token: registration?.token, pushType: 'alert', collapseId: thread,
         payload: {
           aps: {
             alert: { title: 'Sigil', body: 'A session needs you.' }, sound: 'default', 'mutable-content': 1,
             category: 'SESSION', ...(thread ? { 'thread-id': thread } : {}),
           },
-          sigil: { data: push.data },
+          sigil: { data },
         },
-      };
+      });
     }
     if (hexToken(push.activity) && (push.event === 'update' || push.event === 'end')) {
       const state = activityState(push.state);
       if (!state) return null;
-      const seconds = Math.floor(now() / 1000);
-      return {
-        environment: room.push?.environment, token: push.activity, pushType: 'liveactivity', priority: 10,
-        payload: {
-          aps: {
-            timestamp: seconds, event: push.event, 'content-state': state,
-            ...(push.event === 'end' ? { 'dismissal-date': seconds + 300 } : {}),
+      const { activity, event } = push;
+      return registration => {
+        const seconds = Math.floor(now() / 1000);
+        return {
+          environment: registration?.environment, token: activity, pushType: 'liveactivity', priority: 10,
+          payload: {
+            aps: {
+              timestamp: seconds, event, 'content-state': state,
+              ...(event === 'end' ? { 'dismissal-date': seconds + 300 } : {}),
+            },
           },
-        },
+        };
       };
     }
     return null;
   };
-  const deliverPush = async (ws, room, push) => {
-    const request = pushRequest(room, push);
-    if (!request) return false;
-    if (now() - (room.pushWindow || 0) >= 60000) { room.pushWindow = now(); room.pushCount = 0; }
-    if (++room.pushCount > 60) { send(ws, { type: 'push', ok: false, reason: 'rate' }); return true; }
-    if (!apns || !room.push) { send(ws, { type: 'push', ok: false, reason: apns ? 'token' : 'off' }); return true; }
-    try {
-      const { status } = await apns.send(request);
-      // Apple's 410 names the token it was sent: an ended activity's, not the phone's.
-      if (status === 410 && request.pushType === 'alert') room.push = undefined;
-      send(ws, { type: 'push', ok: status === 200, status });
-    } catch {
-      send(ws, { type: 'push', ok: false, reason: 'unreachable' });
-    }
+  // Apple can take ten seconds to answer. Pushes wait in a short queue per room, sent one at a
+  // time in order, so a reply to the phone never waits behind one. A push keeps the token
+  // registered before it; a full queue answers at once instead of holding more.
+  const maxQueuedPushes = 60;
+  const queuePush = (ws, room, push) => {
+    const build = pushRequest(push);
+    if (!build) return false;
+    const queue = room.pushes ??= [];
+    if (queue.length >= maxQueuedPushes) { send(ws, { type: 'push', ok: false, reason: 'busy' }); return true; }
+    queue.push({ ws, build, registration: room.push });
+    if (queue.length === 1) deliverPushes(room).catch(() => {});
     return true;
+  };
+  // The first push in the queue is the one with Apple; every push gets its answer in turn.
+  const deliverPushes = async room => {
+    const queue = room.pushes;
+    while (queue.length) {
+      const { ws, build, registration } = queue[0];
+      let answer;
+      // A host connection that closed or was replaced sends nothing more, and its pushes do not count.
+      const live = !room.closed && room.host === ws;
+      if (live && now() - (room.pushWindow || 0) >= 60000) { room.pushWindow = now(); room.pushCount = 0; }
+      if (!live) answer = { ok: false, reason: 'closed' };
+      else if (++room.pushCount > 60) answer = { ok: false, reason: 'rate' };
+      else if (!apns || !registration || registration.gone) answer = { ok: false, reason: apns ? 'token' : 'off' };
+      else {
+        const request = build(registration);
+        try {
+          const { status } = await apns.send(request);
+          // Apple's 410 names the token it was sent: an ended activity's, not the phone's.
+          if (status === 410 && request.pushType === 'alert') {
+            registration.gone = true;
+            if (room.push === registration) room.push = undefined;
+          }
+          answer = { ok: status === 200, status };
+        } catch {
+          answer = { ok: false, reason: 'unreachable' };
+        }
+      }
+      queue.shift();
+      send(ws, { type: 'push', ...answer });
+    }
   };
   // Two Sigil copies can share one pairing. Hand the ticket to another room whose host is live.
   const liveRoomFor = (ticket, except) => {
@@ -156,6 +240,9 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
     if (!room) return;
     rooms.delete(id);
     clearTimeout(room.dropPhone);
+    // Queued pushes not yet with Apple are not sent; the host hears so before its socket goes.
+    room.closed = true;
+    for (const { ws } of room.pushes?.splice(1) ?? []) send(ws, { type: 'push', ok: false, reason: 'closed' });
     if (room.ticket && tickets.get(room.ticket) === id) {
       const next = liveRoomFor(room.ticket, id);
       if (next) tickets.set(room.ticket, next); else tickets.delete(room.ticket);
@@ -251,7 +338,7 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
             return;
           }
           if (role === 'host' && room.host === ws && ('pushToken' in value || 'push' in value)) {
-            if ('pushToken' in value ? !registerPush(room, value) : !(await deliverPush(ws, room, value.push))) ws.close(1008);
+            if ('pushToken' in value ? !registerPush(room, value) : !queuePush(ws, room, value.push)) ws.close(1008);
             return;
           }
           const frame = {};
