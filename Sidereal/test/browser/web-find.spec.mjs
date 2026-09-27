@@ -443,6 +443,37 @@ for (const api of [true, false]) {
       } finally { mac.close(); }
     });
 
+    test('Find paints other matches in accent ink on the tint and fills the current one, highlighted or marked', async ({ page, baseURL, browserName }) => {
+      // The Latin lines are highlighted where the browser can; WebKit marks the block with the Hebrew line.
+      const text = [...Array.from({ length: 80 }, (_, i) => `plain line ${i} kiwi`), 'שלום עולם kiwi'].join('\n');
+      const mac = await pair(page, baseURL, { terminal: () => text });
+      try {
+        await expect(page.locator('#terminal')).toHaveText(readableOutput(text));
+        await openFind(page, 'kiwi');
+        await page.getByRole('button', { name: 'Previous match' }).click();
+        await expect(page.locator('#find-count')).toHaveText('81 of 81');
+        await frames(page);
+        for (const colorScheme of ['light', 'dark']) {
+          await page.emulateMedia({ colorScheme });
+          const styles = await page.evaluate(() => {
+            const terminal = document.getElementById('terminal'), probe = document.createElement('span');
+            const paint = style => ({ background: style.backgroundColor, color: style.color });
+            const color = value => { probe.style.color = value; terminal.append(probe); const resolved = getComputedStyle(probe).color; probe.remove(); return resolved; };
+            return {
+              other: { background: color('var(--accent-tint)'), color: color('var(--accent-ink)') },
+              current: { background: color('var(--accent-fill)'), color: color('var(--on-accent)') },
+              highlights: ['find-match', 'find-current'].map(name => paint(getComputedStyle(terminal, `::highlight(${name})`))),
+              marks: [...terminal.querySelectorAll('mark')].map(mark => ({ current: mark.dataset.current === 'true', ...paint(getComputedStyle(mark)), ring: getComputedStyle(mark).boxShadow })),
+            };
+          });
+          if (api) expect(styles.highlights, colorScheme).toEqual([styles.other, styles.current]);
+          expect(styles.marks.length > 0, colorScheme).toBe(!api || browserName === 'webkit');
+          expect(styles.marks.some(mark => mark.current), colorScheme).toBe(!api || browserName === 'webkit');
+          for (const { current, ...mark } of styles.marks) expect(mark, colorScheme).toEqual({ ...(current ? styles.current : styles.other), ring: 'none' });
+        }
+      } finally { mac.close(); }
+    });
+
     test('Find highlights every match in view on dense output, readable and raw, narrow and wide', async ({ page, baseURL }) => {
       // Up to 1,320 matches in view: more than the 500 out of view that are highlighted with them.
       const matches = count(dense, 'a').map(match => [match.index, match.index + 1]);
