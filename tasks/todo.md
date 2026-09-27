@@ -26,6 +26,7 @@
 - [x] Build real iOS app and both extensions; exercise simulator and real relay.
 - [x] Measure 900+ history and simultaneous sessions; fix measured blockers.
 - [x] Independently review integrated change and repair all findings.
+- [x] Repair CI-exposed startup focus race with deterministic RED/GREEN and unchanged focus matrix.
 - [x] Update product, setup, capability and verification documentation.
 - [x] Run full CI commands locally, self-review and commit the verified integration.
 

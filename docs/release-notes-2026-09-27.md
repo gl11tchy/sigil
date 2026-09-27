@@ -18,6 +18,8 @@ This integration has not been merged, installed or deployed.
   bind to a connection and tab. Timeouts do not dispatch queued keys or retry work.
 - Phone drafts stay with the correct Mac and native conversation, including
   delayed replies, reconnects and restarts outside the visible tab-list limit.
+- A restored terminal receives its pending keyboard focus when it joins an already
+  active window. Late view attachment no longer loses that startup request.
 - CI now requires the actual iPhone app and notification/Live Activity extensions,
   plus app-hosted simulator tests through the real relay.
 

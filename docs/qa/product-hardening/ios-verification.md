@@ -10,8 +10,8 @@ The tested shipping source is commit `98c1b52`, after PR120 integration and the 
 - `iOS/scripts/ci.sh` after integrating PR120 and the final race repairs: Xcode preflight, typecheck, 85 shared-logic/real-relay tests, 18 app-hosted simulator tests, and 7 native TextKit tests passed. No native tests were skipped.
 - `shellcheck iOS/scripts/ci.sh iOS/scripts/native-test.sh iOS/scripts/native-output-test.sh iOS/scripts/relay-e2e.sh` and `plutil -lint iOS/Sigil.xcodeproj/project.pbxproj` passed.
 
-The final repeated local result bundle is `.build/native-verification/native-20260927-121152-67346.xcresult`.
-The full repeated gate log is `/tmp/sigil-hardening-evidence/native-pr-review-ci.log`. Its 85/18/7 checks passed on unchanged native source while the Mac watcher review was addressed. These results supersede the pre-PR120 57 shared/relay and 15 app-hosted counts.
+The final repeated local result bundle is `.build/native-verification/native-20260927-123001-83553.xcresult`.
+The full repeated gate log is `/tmp/sigil-hardening-evidence/native-startup-review-ci.log`. Its 85/18/7 checks passed on unchanged native source while the Mac startup-focus review was addressed. These results supersede the pre-PR120 57 shared/relay and 15 app-hosted counts.
 CI uploads its own result bundles as `iPhone-native-verification` artifacts.
 
 The native gate discovers an installed compatible simulator runtime, creates a fresh simulator, and removes it after testing. It builds the actual `Sigil` scheme and checks these embedded executables:

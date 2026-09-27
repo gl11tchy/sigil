@@ -13,10 +13,10 @@ Work began at `be132383565d9d4cb4e253ae3f7f1b7183207c8f`. The branch
 asynchronous startup, native output/Find and screen-cache improvements were
 preserved, not replaced. The existing native TextKit harness still runs alongside
 the new shipping-app XCTest gate.
-The final implementation revision is `02022a923b82f705d65448c938545992b83eb8c4`;
+The final implementation revision is `6bacc71ea0f6f5ec70caeb333e54fc92377811b8`;
 the remaining delivery commit contains documentation and screenshot evidence only.
 The native app source is unchanged from `98c1b52`. The Mac/web gate was repeated
-for the watcher repair; the full native gate also passed again on unchanged native code.
+for the watcher and startup-focus repairs; the full native gate also passed again on unchanged native code.
 
 Local tools: Apple silicon, macOS 26.5.1, Xcode 26.6, Swift 6.3.3, Node 22.23.1,
 Metal 32023.883 and iOS simulator 26.5. Provider contracts: Claude Code 2.1.283,
@@ -52,7 +52,7 @@ The Mac/web gate and native gate are separate; neither substitutes for the other
 
 | Command | Verified result |
 |---|---|
-| `Scripts/verify.sh` | Passed: 892 Swift Testing cases, 37 XCTest cases, 161 Sidereal Node tests, 18 Site tests, 114 Chromium/WebKit cases; audits, shell/format checks, debug bundle/signature and isolated smoke passed |
+| `Scripts/verify.sh` | Passed: 893 Swift Testing cases, 37 XCTest cases, 161 Sidereal Node tests, 18 Site tests, 114 Chromium/WebKit cases; audits, shell/format checks, debug bundle/signature and isolated smoke passed |
 | `iOS/scripts/ci.sh` | Passed: 85 shared/real-relay cases, 18 app-hosted simulator cases, 7 native TextKit cases, no skips |
 | `Scripts/verify-provider-contracts.sh` | Installed version/help/resume contracts passed; no model calls |
 | `xcrun --sdk macosx metal --version` | Metal compiler available |
@@ -106,6 +106,12 @@ Codex title index after startup events settled. Scoped policies now cover append
 create, delete and index-only renames, while preserving Grok filtering and excluding
 unrelated Codex-home files. The 32-test focused watcher/store run and independent
 review passed before the full gates were repeated.
+The next CI run exposed an existing startup focus lost-wakeup: the key-window
+notification could precede terminal attachment. A deterministic real-pane test
+failed before repair. Attachment now retries only pending focus for the selected
+tab, retaining existing key-window, Find, sheet and selection guards. The original
+startup focus matrix is unchanged. All 29 focused cases and independent review
+passed, followed by both full local gates.
 Documentation was checked
 against the implemented capability limits. No reported code finding remains open.
 
@@ -130,7 +136,10 @@ fixture: scan 183.2 ms; 100 searches 1,211.8 ms (19.8 ms maximum); 20 snapshots
 runs show local variation, not a statistical latency percentile. The final
 watcher-repair gate recorded scan 63.4 ms, maximum search 10.3 ms, maximum snapshot
 9.0 ms, longest ticker interval 24.5 ms and RSS 112.6 MiB. Its native-history scan
-took 247.4 ms cold, 44.3 ms cached and 9.1 ms search.
+took 247.4 ms cold, 44.3 ms cached and 9.1 ms search. The subsequent startup-fix
+gate recorded 59.0 ms scan, 10.3 ms maximum search, 7.0 ms maximum snapshot,
+21.8 ms longest ticker interval and 112.7 MiB test-process RSS. Native-history
+scan was 255.5 ms cold, 47.2 ms cached and 9.6 ms search.
 
 The original harness ran all 120 UI operations without yielding and recorded a
 964 ms synthetic actor stall. The corrected harness yields between separate user
@@ -156,6 +165,9 @@ streaming workloads remain unmeasured.
   confirmed the Mac/web gate passed and the native preflight failed specifically
   because the selected Xcode was 16.4. No native result artifact existed on that
   incompatible runner; upload failed for the same reason.
+  [Run 36332912140](https://github.com/gl11tchy-team/sigil/actions/runs/36332912140)
+  then caught the startup focus race described above before reaching native
+  preflight. That failure was repaired, not attributed to Xcode or skipped.
 - **Provider limits:** all parsed approvals remain unverified terminal controls.
   Claude has no integrated final-completion observer. A new Codex tab cannot
   acquire a native ID by guesswork; open its discovered history to resume it.
