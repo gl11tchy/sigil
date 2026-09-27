@@ -17,7 +17,7 @@ struct ProviderBoundaryTests {
         let tab = try #require(fixture.model.newTab(in: fixture.root, provider: provider))
         #expect(tab.shouldWarnBeforeStopping)
         tab.noteTurnStarted()
-        try await Task.sleep(for: TerminalTab.idleFallbackSilence + .milliseconds(350))
+        try await Task.sleep(for: .milliseconds(1550))
         #expect(tab.activity == .working)
         #expect(tab.shouldWarnBeforeStopping)
         #expect(!tab.hasUnseenActivity)
@@ -86,6 +86,12 @@ struct ProviderBoundaryTests {
         let reply = await RemoteCommands.execute(
             RemoteRequest(challenge: "test", sequence: 1, action: "restart", tabID: tab.id.uuidString),
             model: fixture.model)
+        if provider == .codex {
+            #expect(!reply.ok)
+            #expect(fixture.model.selectedTab?.id == tab.id)
+            #expect(reply.error?.contains("session ID is not known") == true)
+            return
+        }
         #expect(reply.ok)
         let replacement = try #require(fixture.model.selectedTab)
         #expect(replacement.id != tab.id)
@@ -149,10 +155,14 @@ struct ProviderBoundaryTests {
         fixture.model.settings.model = "grok-4.7"
         fixture.model.settings.effort = "xhigh"
         let plain = try #require(fixture.model.newTab(in: fixture.root, provider: .claudeCode))
-        #expect(plain.spec.arguments().isEmpty)
+        #expect(plain.spec.arguments() == ["--session-id", plain.nativeSessionID!])
         let chosen = try #require(
             fixture.model.newTab(in: fixture.root, model: "opus", effort: "max", fastMode: true, provider: .claudeCode))
-        #expect(chosen.spec.arguments() == ["--model", "opus", "--effort", "max", "--settings", #"{"fastMode":true}"#])
+        #expect(
+            chosen.spec.arguments() == [
+                "--session-id", chosen.nativeSessionID!, "--model", "opus", "--effort", "max", "--settings",
+                #"{"fastMode":true}"#,
+            ])
         let grok = try #require(fixture.model.newTab(in: fixture.root))
         #expect(grok.spec.model == "grok-4.7")
         #expect(grok.spec.reasoningEffort == "xhigh")

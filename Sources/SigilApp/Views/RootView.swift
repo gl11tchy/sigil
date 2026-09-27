@@ -225,7 +225,10 @@ enum ScreenAnnouncement {
         switch new.activity {
         case .idle: return "\(new.title): turn finished"
         case .exited: return "\(new.title): session ended"
-        case .starting, .working: return nil
+        case .failed: return "\(new.title): failed"
+        case .interrupted: return "\(new.title): stopped"
+        case .waitingForApproval: return "\(new.title): needs approval"
+        case .starting, .working, .unknown, .disconnected: return nil
         }
     }
 

@@ -207,7 +207,8 @@ private struct TabChip: View {
     private var showsMark: Bool {
         switch tab.activity {
         case .idle: return tab.hasUnseenActivity && !isSelected
-        case .starting, .working, .exited: return true
+        case .starting, .working, .exited, .waitingForApproval, .interrupted, .failed, .disconnected, .unknown:
+            return true
         }
     }
 
@@ -222,12 +223,7 @@ private struct TabChip: View {
     private var accessibilityState: String {
         var parts = [isSelected ? "selected" : "background"]
         if tab.hasUnseenActivity { parts.append("unread") }
-        switch tab.activity {
-        case .starting: parts.append("starting")
-        case .working: parts.append("working")
-        case .idle: parts.append("idle")
-        case .exited: parts.append("exited")
-        }
+        parts.append(tab.activity.statusName)
         return parts.joined(separator: ", ")
     }
 }

@@ -12,6 +12,8 @@ public struct RemoteRequest: Codable, Sendable {
     public let challenge: String
     public let sequence: Int
     public let action: String
+    /// Phone-owned freshness, echoed inside the authenticated host response.
+    public var clientNonce: String?
     public var tabID: String?
     public var text: String?
     public var name: String?
@@ -28,11 +30,13 @@ public struct RemoteRequest: Codable, Sendable {
     public init(
         challenge: String, sequence: Int, action: String, tabID: String? = nil, text: String? = nil,
         name: String? = nil, index: Int? = nil, count: Int? = nil, transfer: String? = nil,
-        provider: String? = nil, model: String? = nil, effort: String? = nil, worktree: Bool? = nil
+        provider: String? = nil, model: String? = nil, effort: String? = nil, worktree: Bool? = nil,
+        clientNonce: String? = RemoteCrypto.randomKey()
     ) {
         self.challenge = challenge
         self.sequence = sequence
         self.action = action
+        self.clientNonce = clientNonce
         self.tabID = tabID
         self.text = text
         self.name = name
@@ -54,6 +58,7 @@ public struct RemoteSession: Sendable {
     public private(set) var challenge = RemoteCrypto.randomKey()
     public private(set) var deviceKey: String?
     private var lastSequence = 0
+    public private(set) var acceptedClientNonce: String?
     public var isPaired: Bool { deviceKey != nil }
 
     public init(now: Date = Date()) {
@@ -72,6 +77,7 @@ public struct RemoteSession: Sendable {
     public mutating func resetConnection() {
         challenge = RemoteCrypto.randomKey()
         lastSequence = 0
+        acceptedClientNonce = nil
     }
 
     public mutating func accept(_ frame: String, now: Date = Date()) throws -> RemoteRequest {
@@ -79,6 +85,10 @@ public struct RemoteSession: Sendable {
         guard request.challenge == challenge, request.sequence > lastSequence,
             request.sequence <= 9_007_199_254_740_991
         else { throw RemoteError.invalidMessage }
+        guard request.clientNonce == nil || RemoteCrypto.isValidKey(request.clientNonce!) else {
+            throw RemoteError.invalidMessage
+        }
+        acceptedClientNonce = request.clientNonce
         let textLimit = request.action == "file" ? 48_000 : 8_192
         let inBounds =
             request.action.utf8.count <= 32 && (request.text?.utf8.count ?? 0) <= textLimit

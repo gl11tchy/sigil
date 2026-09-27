@@ -28,6 +28,51 @@ struct RemoteUploadTests {
         #expect(try Data(contentsOf: url) == png)
     }
 
+    @Test func completedUploadCannotBeDispatchedTwice() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var inbox = RemoteUpload.Inbox()
+        let id = String(repeating: "a1", count: 16)
+        _ = try inbox.receive(
+            transfer: id, name: "once.txt", index: 0, count: 1,
+            base64: "b25jZQ==", directory: root)
+        #expect(throws: RemoteError.invalidMessage) {
+            try inbox.receive(
+                transfer: id, name: "once.txt", index: 0, count: 1,
+                base64: "b25jZQ==", directory: root)
+        }
+    }
+
+    @Test func orphanedUploadTailDoesNotStartATransfer() throws {
+        var inbox = RemoteUpload.Inbox()
+        #expect(throws: RemoteError.invalidMessage) {
+            try inbox.receive(
+                transfer: String(repeating: "b2", count: 16), name: "tail.txt",
+                index: 1, count: 2, base64: "dGFpbA==", directory: FileManager.default.temporaryDirectory)
+        }
+    }
+
+    @Test func transferCannotChangeTargetOrConnection() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var inbox = RemoteUpload.Inbox()
+        let id = String(repeating: "c3", count: 16)
+        _ = try inbox.receive(
+            transfer: id, name: "scoped.txt", index: 0, count: 2,
+            base64: "b25jZQ==", directory: root, scope: "connection1:tab1")
+        for scope in ["connection1:tab2", "connection2:tab1"] {
+            #expect(throws: RemoteError.invalidMessage) {
+                try inbox.receive(
+                    transfer: id, name: "scoped.txt", index: 1, count: 2,
+                    base64: "b25jZQ==", directory: root, scope: scope)
+            }
+        }
+        #expect(
+            try inbox.receive(
+                transfer: id, name: "scoped.txt", index: 1, count: 2,
+                base64: "b25jZQ==", directory: root, scope: "connection1:tab1") != nil)
+    }
+
     @Test func emptyFilesAreWritten() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "sigil-upload-empty-\(UUID().uuidString)", isDirectory: true)

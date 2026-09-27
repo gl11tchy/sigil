@@ -20,6 +20,11 @@ enum TabListRows {
     static func workingState(for activity: TerminalTab.Activity) -> String {
         switch activity {
         case .starting: "Starting"
+        case .waitingForApproval: "Needs approval"
+        case .interrupted: "Stopped"
+        case .failed: "Failed"
+        case .disconnected: "Disconnected"
+        case .unknown: "Status unknown"
         case .working: "Working"
         case .idle: "Idle"
         case .exited(let code): "Exited with code \(code.map(String.init) ?? "unknown")"

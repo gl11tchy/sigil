@@ -12,11 +12,15 @@ struct RemoteState: Codable, Sendable {
         var folder: String?
         /// Only a saved Grok chat can be archived; other tabs can only close.
         var canArchive: Bool?
+        var sessionID: String?
+        var capabilities: ProviderCapabilities?
+        var processRunning: Bool?
+        var cwd: String?
     }
     let tabs: [Tab]
     let selectedTabID: String?
     let terminal: String
-    var capabilities: [String] = ["restart", "screen", "sessionOps"]
+    var capabilities: [String] = ["restart", "screen", "sessionOps", "eventSequence", "approvalContext"]
     var tabsTruncated = false
     /// The selected tab's rows, on `watch`, `rows` and in events. Absent elsewhere.
     var screen: RemoteScreen?
@@ -30,6 +34,7 @@ struct RemoteChat: Codable, Sendable {
     var id: String
     var title: String
     var folder: String
+    var provider: String?
 }
 
 struct RemoteProject: Codable, Sendable {
@@ -82,6 +87,9 @@ struct RemoteReply: Codable, Sendable {
     var project: RemoteProject?
     /// True on a frame the Mac sent unasked. Its sequence is 0.
     var event: Bool?
+    /// Strictly rising across watches within one authenticated connection.
+    var eventSequence: Int?
+    var clientNonce: String?
 }
 
 @MainActor
@@ -234,8 +242,7 @@ enum RemoteCommands {
             else { return failure(request, "That chat is not available.") }
             // AppModel reports these with a modal alert, which would block this loop.
             if !model.isOpen(session) {
-                guard model.settings.executableExists
-                else { return failure(request, "Restore the Grok CLI on your Mac, then try again.") }
+                if let problem = startProblem(session.provider, model: model) { return failure(request, problem) }
                 guard AppModel.isUsableDirectory(URL(fileURLWithPath: session.cwd))
                 else { return failure(request, "Restore the folder on your Mac, then try again.") }
             }
@@ -264,6 +271,9 @@ enum RemoteCommands {
             guard case .exited = tab.activity, !tab.controller.isRunning else {
                 return failure(request, "Only ended sessions can be restarted.")
             }
+            guard tab.spec.provider != .codex || tab.sessionReference != nil else {
+                return failure(request, "Open this Codex conversation from Chats. Its session ID is not known.")
+            }
             guard AppModel.isUsableDirectory(tab.workingDirectory)
             else { return failure(request, "Restore the folder on your Mac, then try again.") }
             guard tab.spec.provider != .grokBuild || model.settings.executableExists
@@ -290,18 +300,14 @@ enum RemoteCommands {
             }
         case "answer":
             guard let tab, tab.controller.isRunning else { return failure(request, "This session is not running.") }
-            // The prompt is read again now and must be the one the phone saw, so a
-            // stale button cannot type into whatever replaced it.
-            guard let prompt = prompt(for: tab), request.name == prompt.id, let key = request.text,
-                prompt.keys.contains(key)
-            else {
-                return failure(request, "That question is no longer on screen.")
-            }
-            switch key {
-            case "enter", "escape": _ = tab.controller.sendRemoteKey(key)
-            case "y", "n": tab.controller.send(text: key + "\r")
-            default: tab.controller.send(text: key)
-            }
+            // Refresh the host ledger, not just a hash of the same-looking text.
+            guard let current = prompt(for: tab), request.name == current.id,
+                let sessionID = current.sessionID, let key = request.text
+            else { return failure(request, "That question is no longer on screen.") }
+            guard let prompt = tab.remoteInteraction.consume(id: current.id, sessionID: sessionID, key: key)
+            else { return failure(request, "This is unverified terminal output. Use terminal controls.") }
+            // No await between consume and write. Success means dispatched only.
+            tab.controller.send(text: key + (prompt.style == .yesNo ? "\r" : ""))
         case "file":
             guard let tab, tab.controller.isRunning else { return failure(request, "This session is not running.") }
             guard let transfer = request.transfer, let name = request.name, let index = request.index,
@@ -310,7 +316,7 @@ enum RemoteCommands {
             do {
                 if let url = try uploads.receive(
                     transfer: transfer, name: name, index: index, count: count, base64: text,
-                    directory: TerminalDrop.cacheDirectory())
+                    directory: TerminalDrop.cacheDirectory(), scope: request.challenge + ":" + tab.id.uuidString)
                 {
                     let paste = TerminalDrop.pasteText(for: [url.path]) + " "
                     guard tab.controller.pasteRemoteText(paste) else {
@@ -362,7 +368,9 @@ enum RemoteCommands {
     private static func chatRecord(_ session: GrokSession, model: AppModel) -> RemoteChat? {
         let folder = session.cwd
         guard !session.id.isEmpty, session.id.utf8.count <= 80, folder.utf8.count <= 4_000 else { return nil }
-        return RemoteChat(id: session.id, title: bounded(model.title(for: session), bytes: 96), folder: folder)
+        return RemoteChat(
+            id: session.id, title: bounded(model.title(for: session), bytes: 96), folder: folder,
+            provider: session.provider.rawValue)
     }
 
     /// The sidebar's folders: grouped from chats, plus added folders with no chat yet.
@@ -433,6 +441,7 @@ enum RemoteCommands {
     /// Why `provider` cannot start now. Checked here because AppModel reports
     /// these with a modal alert, which would block this loop.
     static func startProblem(_ provider: CLIProvider, model: AppModel) -> String? {
+        if let problem = model.providerInstallations[provider]?.problem { return problem }
         if provider == .grokBuild, !model.settings.executableExists {
             return "Restore the Grok CLI on your Mac, then try again."
         }
@@ -531,11 +540,19 @@ enum RemoteCommands {
         )
     }
 
-    /// The approval question at the bottom of `tab`'s screen, if any.
+    /// An explicitly unverified terminal hint, with a host-owned observation ID.
     static func prompt(for tab: TerminalTab) -> RemotePrompt? {
-        guard tab.controller.isRunning else { return nil }
-        let window = tab.controller.remoteScreenWindow(maxRows: PromptDetector.window + 80, maxCharacters: 12_000)
-        return PromptDetector.detect(rows: window.rows.map(\.t))
+        guard tab.controller.isRunning else {
+            tab.remoteInteraction.invalidate()
+            return nil
+        }
+        // Read before display bounds; oversized context produces no hint.
+        let window = tab.controller.remoteScreenWindow(maxRows: PromptDetector.window + 80, maxCharacters: 64_000)
+        let sessionID = "\(tab.spec.provider.rawValue):\(tab.sessionID ?? "unknown"):\(tab.id.uuidString)"
+        return tab.remoteInteraction.observeTerminal(
+            sessionID: sessionID, revision: tab.controller.remoteInteractionRevision,
+            afterInput: tab.controller.remoteInteractionAfterInput,
+            prompt: PromptDetector.detect(rows: window.rows.map(\.t)))
     }
 
     static func snapshot(_ model: AppModel, screen window: RemoteScreenWindow?) -> RemoteState {
@@ -555,7 +572,9 @@ enum RemoteCommands {
                 providerName: tab.spec.provider.name,
                 folder: bounded(
                     tab.workingDirectory.sigilWorktreeLabel ?? tab.workingDirectory.lastPathComponent, bytes: 96),
-                canArchive: model.session(for: tab) != nil)
+                canArchive: tab.spec.provider.capabilities.archive && model.session(for: tab) != nil,
+                sessionID: tab.nativeSessionID, capabilities: tab.capabilities,
+                processRunning: tab.controller.isRunning, cwd: tab.workingDirectory.path)
         }
     }
 

@@ -11,21 +11,29 @@ public struct RemoteAlert: Codable, Sendable, Equatable {
         case asking
         /// The session's process exited.
         case ended
+        case failed
+        case stopped
+        /// Terminal text suggests an interaction, but cannot authorize one.
+        case attention
     }
 
     public var kind: Kind
     public var tabID: String
     public var title: String
     public var body: String
+    public var id: String
+    public var issuedAt: Int
 
     /// The sealing direction, distinct from replies so a reply can never pass as an alert.
     public static let direction = "push"
 
-    public init(kind: Kind, tabID: String, title: String, body: String) {
+    public init(kind: Kind, tabID: String, title: String, body: String, now: Date = Date()) {
         self.kind = kind
         self.tabID = tabID
         self.title = String(title.prefix(96))
         self.body = String(body.prefix(200))
+        self.id = UUID().uuidString.lowercased()
+        self.issuedAt = Int(now.timeIntervalSince1970)
     }
 }
 
@@ -51,12 +59,19 @@ public struct RemoteAlertPlanner: Sendable, Equatable {
         public var since: Int
         public var question: String?
         public var title: String
+        public var interactionID: String?
+        public var verified: Bool
 
-        public init(status: String, since: Int, question: String?, title: String) {
+        public init(
+            status: String, since: Int, question: String?, title: String,
+            interactionID: String? = nil, verified: Bool = false
+        ) {
             self.status = status
             self.since = since
             self.question = question
             self.title = title
+            self.interactionID = interactionID
+            self.verified = verified
         }
     }
 
@@ -80,17 +95,29 @@ public struct RemoteAlertPlanner: Sendable, Equatable {
             alert = RemoteAlert(kind: .finished, tabID: tabID, title: now.title, body: "Finished and waiting for you.")
         } else if before.status != "exited", now.status == "exited" {
             alert = RemoteAlert(kind: .ended, tabID: tabID, title: now.title, body: "The session ended.")
-        }
-        if before.question == nil, let question = now.question {
+        } else if before.status != "failed", now.status == "failed" {
             alert = RemoteAlert(
-                kind: .asking, tabID: tabID, title: now.title,
-                body: question.isEmpty ? "Needs your approval." : question)
+                kind: .failed, tabID: tabID, title: now.title, body: "The session failed. Check the terminal.")
+        } else if before.status != "interrupted", now.status == "interrupted" {
+            alert = RemoteAlert(kind: .stopped, tabID: tabID, title: now.title, body: "The turn stopped.")
         }
-        let changed = before.status != now.status || (before.question == nil) != (now.question == nil)
+        let newInteraction =
+            before.question == nil
+            || (now.verified && before.interactionID != now.interactionID)
+        if newInteraction, let question = now.question {
+            alert = RemoteAlert(
+                kind: now.verified ? .asking : .attention, tabID: tabID, title: now.title,
+                body: now.verified
+                    ? (question.isEmpty ? "Needs your approval." : question) : "Check the terminal: \(question)")
+        }
+        let changed =
+            before.status != now.status || (before.question == nil) != (now.question == nil)
+            || before.verified != now.verified
         let activity =
             changed
-            ? RemoteActivityState(status: now.status, since: now.since, asking: now.question != nil) : nil
-        return Plan(alert: alert, activity: activity, ends: changed && now.status == "exited")
+            ? RemoteActivityState(status: now.status, since: now.since, asking: now.verified && now.question != nil)
+            : nil
+        return Plan(alert: alert, activity: activity, ends: changed && ["exited", "failed"].contains(now.status))
     }
 
     public mutating func forget(tabID: String) {

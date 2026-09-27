@@ -13,7 +13,11 @@ struct CLIProviderTests {
             bridgeTabID: "grok-tab", bridgeSocketPath: "/tmp/grok.sock",
             provider: provider
         )
-        #expect(spec.arguments().isEmpty)
+        if provider == .claudeCode {
+            #expect(spec.arguments().first == "--session-id")
+        } else {
+            #expect(spec.arguments().isEmpty)
+        }
         #expect(spec.sessionDirectory == nil)
         let env = spec.environment(processEnvironment: [
             "PATH": "/usr/bin:/bin", "GROK_WRAPPER": "inherited",
@@ -29,7 +33,7 @@ struct CLIProviderTests {
         #expect(env[BridgePaths.socketEnvironmentKey] == nil)
         let command = spec.hostCommand(processEnvironment: ["SHELL": "/bin/zsh"])
         #expect(command.executable.path == "/bin/zsh")
-        #expect(command.arguments.last == provider.command)
+        #expect(command.arguments.contains(provider.command))
     }
 
     @Test(arguments: [
@@ -46,9 +50,12 @@ struct CLIProviderTests {
             model: model, reasoningEffort: "high", fastMode: true,
             extraArguments: ["--verbose"], provider: provider
         )
-        #expect(spec.arguments() == expected + ["--verbose"])
+        let modeArguments: [String] =
+            provider == .claudeCode ? ["--continue"] : provider == .codex ? ["resume", "--last"] : []
+        let allArguments = modeArguments + expected + ["--verbose"]
+        #expect(spec.arguments() == allArguments)
         let command = spec.hostCommand(processEnvironment: ["SHELL": "/bin/zsh"])
-        #expect(Array(command.arguments.suffix(expected.count + 2)) == [provider.command] + expected + ["--verbose"])
+        #expect(Array(command.arguments.suffix(allArguments.count + 1)) == [provider.command] + allArguments)
     }
 
     @Test(arguments: [CLIProvider.claudeCode, .codex])
@@ -57,7 +64,7 @@ struct CLIProviderTests {
             workingDirectory: URL(fileURLWithPath: "/tmp/project"), mode: .continueLatest,
             model: " ", reasoningEffort: "", provider: provider
         )
-        #expect(spec.arguments().isEmpty)
+        #expect(spec.arguments() == (provider == .claudeCode ? ["--continue"] : ["resume", "--last"]))
     }
 
     @Test func grokKeepsItsOwnFlagsAndIgnoresFastMode() {

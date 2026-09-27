@@ -106,6 +106,8 @@ final class AppModel {
     /// Shared-list entries another running copy added, with the store's scan
     /// count when this copy first read them. See `awaitsScan`.
     @ObservationIgnored private var sharedArrivals: [String: Int] = [:]
+    private(set) var providerInstallations: [CLIProvider: ProviderInstallation] = [:]
+    @ObservationIgnored private var providerCheckGeneration = UUID()
 
     init(
         settings: AppSettings = AppSettings(),
@@ -192,6 +194,9 @@ final class AppModel {
         if Self.isSmokeTest { return }
         observeStoreForHousekeeping()
         store.start()
+        if !Self.isRunningAutomatedTests {
+            Task { [weak self] in await self?.refreshProviderInstallations() }
+        }
         // Bind the local socket before restoring tabs so they inherit it.
         // Registration is add-or-update and can take seconds; do not wait on it.
         if settings.isTabMessagingEnabled {
@@ -493,7 +498,7 @@ final class AppModel {
 
     func archive(_ project: SidebarProject) {
         let projectTabs = tabs.filter {
-            $0.spec.provider == .grokBuild && inProject($0.workingDirectory.path, project.cwd)
+            inProject($0.workingDirectory.path, project.cwd)
         }
         if let prompt = StopWorkingPrompt(action: .archive, stopping: projectTabs),
             !confirmStop(prompt)
@@ -826,7 +831,12 @@ final class AppModel {
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                if !self.store.isLoading { self.pruneMissingPins() }
+                if !self.store.isLoading {
+                    self.pruneMissingPins()
+                    // Native history is loaded asynchronously. A startup's
+                    // first restoration attempt may precede the first scan.
+                    if !self.deferredOpenTabs.isEmpty { self.restoreOpenTabs() }
+                }
                 self.observeStoreForHousekeeping()
             }
         }
@@ -882,7 +892,8 @@ final class AppModel {
         _ entries: [OpenTabsSnapshot.Entry], list: String
     ) -> [OpenTabsSnapshot.Entry] {
         entries.filter { entry in
-            store.sessions.contains { $0.id == entry.sessionID && samePath($0.cwd, entry.cwd) }
+            isNativeHistoryID(sidebarID(entry))
+                || store.sessions.contains { $0.id == entry.sessionID && samePath($0.cwd, entry.cwd) }
                 || tabs.contains { tabMatches($0, sessionID: entry.sessionID, cwd: entry.cwd) }
                 || awaitsScan(sharedKey(list, entry.sessionID, entry.cwd))
         }
@@ -897,9 +908,14 @@ final class AppModel {
         }
     }
 
+    private func isNativeHistoryID(_ id: String) -> Bool {
+        [CLIProvider.claudeCode, .codex].contains { id.hasPrefix($0.rawValue + ":") }
+    }
+
     private func pruningMissingNames(_ names: [ConversationName]) -> [ConversationName] {
         names.filter { record in
-            store.sessions.contains { $0.id == record.sessionID && samePath($0.cwd, record.cwd) }
+            isNativeHistoryID(record.sessionID)
+                || store.sessions.contains { $0.id == record.sessionID && samePath($0.cwd, record.cwd) }
                 || tabs.contains { tabMatches($0, sessionID: record.sessionID, cwd: record.cwd) }
                 || awaitsScan(sharedKey("name", record.sessionID, record.cwd))
         }
@@ -1576,6 +1592,34 @@ final class AppModel {
     func requestNewSession(in directory: URL? = nil) {
         pendingSessionDirectory = directory ?? newSessionDirectory
         isShowingNewSessionSheet = true
+        if !Self.isRunningAutomatedTests {
+            Task { [weak self] in await self?.refreshProviderInstallations() }
+        }
+    }
+
+    /// CLI lookup and version checks never block window drawing or input.
+    func refreshProviderInstallations() async {
+        let generation = UUID()
+        providerCheckGeneration = generation
+        let executable = settings.executableURL
+        let found = await withTaskGroup(of: (CLIProvider, ProviderInstallation).self) { group in
+            for provider in CLIProvider.allCases {
+                group.addTask {
+                    let result = await Task.detached(priority: .utility) {
+                        ProviderInstallation.detect(
+                            provider: provider,
+                            configuredExecutable: provider == .grokBuild ? executable : nil)
+                    }.value
+                    return (provider, result)
+                }
+            }
+            var result: [CLIProvider: ProviderInstallation] = [:]
+            for await (provider, installation) in group { result[provider] = installation }
+            return result
+        }
+        guard providerCheckGeneration == generation, !Task.isCancelled else { return }
+        providerInstallations = found
+        if !deferredOpenTabs.isEmpty { restoreOpenTabs() }
     }
 
     /// ⇧⌘N: choose the folder first, then open the new-session sheet on it.
@@ -1589,6 +1633,10 @@ final class AppModel {
         in directory: URL, model: String? = nil, effort: String? = nil, fastMode: Bool = false,
         provider: CLIProvider = .grokBuild
     ) -> TerminalTab? {
+        if let problem = providerInstallations[provider]?.problem {
+            showError(title: "\(provider.name) is unavailable", message: problem)
+            return nil
+        }
         guard provider != .grokBuild || settings.executableExists else {
             showError(title: "Grok CLI is unavailable", message: "Choose it in Settings, then try again.")
             return nil
@@ -1625,7 +1673,11 @@ final class AppModel {
             select(existing.id)
             return
         }
-        guard settings.executableExists else {
+        if let problem = providerInstallations[session.provider]?.problem {
+            showError(title: "\(session.provider.name) is unavailable", message: problem)
+            return
+        }
+        guard session.provider != .grokBuild || settings.executableExists else {
             showError(title: "Grok CLI is unavailable", message: "Choose it in Settings, then try again.")
             return
         }
@@ -1638,13 +1690,14 @@ final class AppModel {
             return
         }
         let spec = GrokLaunchSpec(
-            executable: settings.executableURL,
+            executable: session.provider == .grokBuild ? settings.executableURL : nil,
             workingDirectory: workingDirectory,
-            mode: .resume(sessionID: session.id),
-            model: settings.model.nilIfEmpty,
-            reasoningEffort: settings.effort.nilIfEmpty,
+            mode: .resume(sessionID: session.nativeSessionID),
+            model: session.provider == .grokBuild ? settings.model.nilIfEmpty : nil,
+            reasoningEffort: session.provider == .grokBuild ? settings.effort.nilIfEmpty : nil,
             themeName: settings.theme.grokThemeName,
-            themeVariables: settings.theme.grokThemeEnvironment
+            themeVariables: settings.theme.grokThemeEnvironment,
+            provider: session.provider, sessionFile: session.provider == .grokBuild ? nil : session.directory
         )
         let tab = add(spec)
         tab.sessionTitle = title(for: session)
@@ -1687,6 +1740,12 @@ final class AppModel {
     func restartTab(id: TerminalTab.ID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let old = tabs[index]
+        guard old.spec.provider != .codex || old.sessionReference != nil else {
+            showError(
+                title: "Open this conversation from history",
+                message: "This tab's Codex session ID is not known. Find the conversation in the sidebar.")
+            return
+        }
         guard old.spec.provider != .grokBuild || settings.executableExists else {
             showError(title: "Grok CLI is unavailable", message: "Choose it in Settings, then try again.")
             return
@@ -1726,6 +1785,9 @@ final class AppModel {
             }
             spec.themeName = settings.theme.grokThemeName
             spec.themeVariables = settings.theme.grokThemeEnvironment
+        }
+        if spec.provider != .grokBuild, let reference = old.sessionReference {
+            spec.mode = .resume(sessionID: reference.sessionID)
         }
         // A restart follows the current Kimi sign-in, not the one it started with.
         spec.providerEnvironment = providerEnvironment(for: spec.provider) ?? [:]
@@ -2309,7 +2371,7 @@ final class AppModel {
 
     func copySessionID(_ session: GrokSession) {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(session.id, forType: .string)
+        NSPasteboard.general.setString(session.nativeSessionID, forType: .string)
     }
 
     /// Shows the thread list if it is hidden, then asks the search field for focus.
@@ -2387,6 +2449,7 @@ final class AppModel {
     /// A permanent delete would be unrecoverable from here.
     @discardableResult
     func deleteConversation(_ session: GrokSession, reload: Bool = true) -> Bool {
+        guard session.provider.capabilities.delete else { return false }
         let matchingTabs = tabs.filter {
             tabMatches($0, sessionID: session.id, cwd: session.cwd)
         }
@@ -2480,6 +2543,7 @@ final class AppModel {
     /// The save panel stays on the main thread; the CLI itself runs off it so a
     /// long export cannot freeze the window.
     func exportTranscript(_ session: GrokSession) {
+        guard session.provider.capabilities.export else { return }
         exportTranscript(
             sessionID: session.id,
             title: title(for: session),
@@ -2487,10 +2551,14 @@ final class AppModel {
         )
     }
 
-    var canExportSelectedTranscript: Bool { selectedTab?.sessionID != nil }
+    var canExportSelectedTranscript: Bool {
+        selectedTab.map { $0.spec.provider.capabilities.export && $0.sessionID != nil } ?? false
+    }
 
     func exportSelectedTranscript() {
-        guard let tab = selectedTab, let sessionID = tab.sessionID else { return }
+        guard let tab = selectedTab, tab.spec.provider.capabilities.export, let sessionID = tab.nativeSessionID else {
+            return
+        }
         exportTranscript(
             sessionID: sessionID,
             title: title(for: tab),
@@ -2669,15 +2737,17 @@ final class AppModel {
             let snapshot = settings.openTabs
             deferredOpenTabs = snapshot.tabs
             if let selectedCWD = snapshot.selectedCWD, let selectedID = snapshot.selectedSessionID {
-                deferredSelectedEntry = .init(sessionID: selectedID, cwd: selectedCWD)
+                deferredSelectedEntry = .init(
+                    sessionID: selectedID, cwd: selectedCWD, provider: snapshot.selectedProvider ?? .grokBuild)
                 deferredLegacySelectedSessionID = nil
             } else {
                 deferredSelectedEntry = nil
                 deferredLegacySelectedSessionID = snapshot.selectedSessionID
             }
         }
-        guard settings.executableExists else { return }
         let candidates = deferredOpenTabs
+        let previousSelection = selectedTabID
+        let hadSavedSelection = deferredSelectedEntry != nil || deferredLegacySelectedSessionID != nil
         deferredOpenTabs.removeAll()
         isRestoringTabs = true
         defer {
@@ -2687,24 +2757,35 @@ final class AppModel {
         var restoredSelection: TerminalTab.ID?
         for entry in candidates {
             if tabs.contains(where: {
-                tabMatches($0, sessionID: entry.sessionID, cwd: entry.cwd)
+                tabMatches($0, sessionID: sidebarID(entry), cwd: entry.cwd)
             }) {
                 continue
             }
-            let directory = GrokPaths.sessionDirectory(cwd: entry.cwd, sessionID: entry.sessionID)
+            let known = store.sessions.first { $0.id == sidebarID(entry) && samePath($0.cwd, entry.cwd) }
+            let directory =
+                entry.provider == .grokBuild
+                ? GrokPaths.sessionDirectory(cwd: entry.cwd, sessionID: entry.sessionID)
+                : known?.directory
             let workingDirectory = URL(fileURLWithPath: entry.cwd)
-            guard Self.isUsableDirectory(directory), Self.isUsableDirectory(workingDirectory) else {
+            let historyExists = directory.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
+            guard historyExists, Self.isUsableDirectory(workingDirectory),
+                providerInstallations[entry.provider]?.problem == nil,
+                entry.provider != .grokBuild || settings.executableExists
+            else {
                 deferredOpenTabs.append(entry)
                 continue
             }
             let spec = GrokLaunchSpec(
-                executable: settings.executableURL,
+                executable: entry.provider == .grokBuild ? settings.executableURL : nil,
                 workingDirectory: workingDirectory,
                 mode: .resume(sessionID: entry.sessionID),
-                model: entry.model.map(\.nilIfEmpty) ?? settings.model.nilIfEmpty,
-                reasoningEffort: entry.effort.map(\.nilIfEmpty) ?? settings.effort.nilIfEmpty,
+                model: entry.model.map(\.nilIfEmpty)
+                    ?? (entry.provider == .grokBuild ? settings.model.nilIfEmpty : nil),
+                reasoningEffort: entry.effort.map(\.nilIfEmpty)
+                    ?? (entry.provider == .grokBuild ? settings.effort.nilIfEmpty : nil),
                 themeName: settings.theme.grokThemeName,
-                themeVariables: settings.theme.grokThemeEnvironment
+                themeVariables: settings.theme.grokThemeEnvironment,
+                provider: entry.provider, sessionFile: entry.provider == .grokBuild ? nil : directory
             )
             let tab = add(spec)
             if deferredSelectedEntry.map({ sameEntry($0, entry) }) == true
@@ -2717,16 +2798,18 @@ final class AppModel {
         }
         if let restoredSelection {
             select(restoredSelection)
+        } else if !hadSavedSelection, let previousSelection, tabs.contains(where: { $0.id == previousSelection }) {
+            select(previousSelection)
         }
     }
 
     private func persistOpenTabs() {
         guard !isRestoringTabs else { return }
         var entries = tabs.compactMap { tab -> OpenTabsSnapshot.Entry? in
-            guard let sessionID = tab.sessionID else { return nil }
+            guard let sessionID = tab.nativeSessionID else { return nil }
             return OpenTabsSnapshot.Entry(
                 sessionID: sessionID, cwd: tab.workingDirectory.path,
-                model: tab.spec.model ?? "", effort: tab.spec.reasoningEffort ?? "")
+                model: tab.spec.model ?? "", effort: tab.spec.reasoningEffort ?? "", provider: tab.spec.provider)
         }
         let liveKeys = Set(entries.map { entryKey($0) })
         entries.append(
@@ -2735,14 +2818,14 @@ final class AppModel {
             }
         )
         let liveSelection = selectedTab.flatMap { tab -> OpenTabsSnapshot.Entry? in
-            guard let sessionID = tab.sessionID else { return nil }
-            return .init(sessionID: sessionID, cwd: tab.workingDirectory.path)
+            guard let sessionID = tab.nativeSessionID else { return nil }
+            return .init(sessionID: sessionID, cwd: tab.workingDirectory.path, provider: tab.spec.provider)
         }
         let exactSelection = deferredSelectedEntry ?? liveSelection
         settings.openTabs = OpenTabsSnapshot(
             tabs: entries,
             selectedSessionID: exactSelection?.sessionID ?? deferredLegacySelectedSessionID,
-            selectedCWD: exactSelection?.cwd
+            selectedCWD: exactSelection?.cwd, selectedProvider: exactSelection?.provider
         )
     }
 
@@ -2758,17 +2841,21 @@ final class AppModel {
     private func entryMatches(
         _ entry: OpenTabsSnapshot.Entry, sessionID: String, cwd: String
     ) -> Bool {
-        entry.sessionID == sessionID && samePath(entry.cwd, cwd)
+        sidebarID(entry) == sessionID && samePath(entry.cwd, cwd)
     }
 
     private func sameEntry(
         _ lhs: OpenTabsSnapshot.Entry, _ rhs: OpenTabsSnapshot.Entry
     ) -> Bool {
-        entryMatches(lhs, sessionID: rhs.sessionID, cwd: rhs.cwd)
+        entryMatches(lhs, sessionID: sidebarID(rhs), cwd: rhs.cwd)
+    }
+
+    private func sidebarID(_ entry: OpenTabsSnapshot.Entry) -> String {
+        ProviderSessionReference(provider: entry.provider, sessionID: entry.sessionID, cwd: entry.cwd).sidebarID
     }
 
     private func entryKey(_ entry: OpenTabsSnapshot.Entry) -> String {
-        entry.sessionID + "\u{0}" + canonicalPath(entry.cwd)
+        sidebarID(entry) + "\u{0}" + canonicalPath(entry.cwd)
     }
 
     /// True when `path` is `project` or a Sigil worktree made from it.

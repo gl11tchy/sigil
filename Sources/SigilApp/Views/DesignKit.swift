@@ -365,6 +365,12 @@ struct ActivityMark: View {
                 PixelLoader(color: palette.accent)
             case .starting:
                 PixelLoader(color: palette.ink3)
+            case .waitingForApproval, .interrupted:
+                dot(palette.orange)
+            case .failed:
+                dot(palette.red)
+            case .unknown, .disconnected:
+                dot(palette.ink3)
             case .idle:
                 if hasUnseenActivity { dot(palette.accent) } else { Color.clear }
             case .exited:
@@ -385,6 +391,11 @@ struct ActivityMark: View {
         case .working: return "Working"
         case .idle: return hasUnseenActivity ? "Finished" : "Idle"
         case .starting: return "Starting"
+        case .waitingForApproval: return "Needs approval"
+        case .interrupted: return "Stopped"
+        case .failed: return "Failed"
+        case .disconnected: return "Disconnected"
+        case .unknown: return "Status unknown"
         case .exited(let code): return "Exited with code \(code.map(String.init) ?? "unknown")"
         }
     }

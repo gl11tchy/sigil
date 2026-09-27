@@ -723,8 +723,10 @@ struct SidebarView: View {
                     }
                 }
                 Divider()
-                Button("Move \(selection.count) Conversations to Trash…", role: .destructive) {
-                    pendingBulkDelete = selection
+                if selection.allSatisfy({ $0.provider.capabilities.delete }) {
+                    Button("Move \(selection.count) Conversations to Trash…", role: .destructive) {
+                        pendingBulkDelete = selection
+                    }
                 }
             } else {
                 Button(isPinned ? "Unpin" : "Pin") { model.togglePin(session) }
@@ -752,10 +754,14 @@ struct SidebarView: View {
                 }
                 Button("Reveal Folder in Finder") { model.revealInFinder(session) }
                 Button("Copy Session ID") { model.copySessionID(session) }
-                Button("Export Transcript…") { model.exportTranscript(session) }
+                if session.provider.capabilities.export {
+                    Button("Export Transcript…") { model.exportTranscript(session) }
+                }
                 Divider()
-                Button("Delete Conversation…", role: .destructive) {
-                    pendingDelete = session
+                if session.provider.capabilities.delete {
+                    Button("Delete Conversation…", role: .destructive) {
+                        pendingDelete = session
+                    }
                 }
             }
         }
@@ -858,7 +864,7 @@ struct SidebarView: View {
         case .closeTab:
             model.performSidebarDismiss(session)
         case .delete:
-            pendingDelete = session
+            if session.provider.capabilities.delete { pendingDelete = session }
         }
     }
 
@@ -931,7 +937,7 @@ struct SidebarView: View {
         guard model.renamingSessionKey == nil else { return .ignored }
         let sessions = SidebarOrganization.trashTargets(
             keyboardRowID: keyboardSelectionID, selection: multiSelection, in: visibleRowIDs()
-        ).compactMap { sessionAnywhere(for: $0) }
+        ).compactMap { sessionAnywhere(for: $0) }.filter { model.isOpen($0) || $0.provider.capabilities.delete }
         if sessions.count > 1 {
             pendingBulkDelete = sessions
         } else if let session = sessions.first {
@@ -1633,6 +1639,11 @@ private struct OpenTabRow: View {
     private var stateLabel: String {
         switch activity {
         case .starting: return "Starting"
+        case .waitingForApproval: return "Needs approval"
+        case .interrupted: return "Stopped"
+        case .failed: return "Failed"
+        case .disconnected: return "Disconnected"
+        case .unknown: return "Status unknown"
         case .working: return "Working"
         case .idle: return hasUnseenActivity ? "Finished" : "Idle"
         case .exited(let code):
@@ -1921,7 +1932,11 @@ private struct SessionRow: View {
             .accessibilityAction(named: isArchived ? "Unarchive" : "Archive") {
                 toggleArchive()
             }
-            .accessibilityAction(named: dismissHelp, dismiss)
+            .accessibilityActions {
+                if model.isOpen(session) || session.provider.capabilities.delete {
+                    Button(dismissHelp, action: dismiss)
+                }
+            }
             .accessibilityAction(named: "Rename") { beginRename() }
             .modifier(
                 SessionRowResetNameAction(
@@ -2044,7 +2059,9 @@ private struct SessionRow: View {
                 help: isPinned ? "Unpin" : "Pin",
                 action: togglePin
             )
-            RowAction(systemImage: "xmark", help: dismissHelp, action: dismiss)
+            if model.isOpen(session) || session.provider.capabilities.delete {
+                RowAction(systemImage: "xmark", help: dismissHelp, action: dismiss)
+            }
         }
     }
 

@@ -43,24 +43,44 @@ public final class SessionStore {
     @ObservationIgnored private var debounceTask: Task<Void, Never>?
     @ObservationIgnored private var firstPendingEvent: ContinuousClock.Instant?
     @ObservationIgnored private let watcher = SessionDirectoryWatcher()
+    @ObservationIgnored private var nativeWatchers: [String: SessionDirectoryWatcher] = [:]
     @ObservationIgnored private var watchedPath: String?
     @ObservationIgnored private var watcherRetryTask: Task<Void, Never>?
     @ObservationIgnored private let eventContinuation: AsyncStream<Bool>.Continuation
     @ObservationIgnored private var eventPump: Task<Void, Never>?
     @ObservationIgnored private let timing: SessionStoreTiming
     @ObservationIgnored private let scanOperation: ScanOperation
+    @ObservationIgnored private let includesNativeHistory: Bool
 
-    public convenience init(root: URL = GrokPaths.sessionsRoot) {
+    public convenience init() {
+        self.init(root: GrokPaths.sessionsRoot, includesNativeHistory: true)
+    }
+
+    public convenience init(root: URL, includesNativeHistory: Bool = false) {
         self.init(
             root: root,
             timing: SessionStoreTiming(),
+            includesNativeHistory: includesNativeHistory,
             scanOperation: { root, cache, ignoringCache in
                 await Task.detached(priority: .userInitiated) {
-                    SessionScanner.scan(
+                    var result = SessionScanner.scan(
                         root: root,
-                        cache: cache,
+                        cache: cache.filter { $0.value.session.provider == .grokBuild },
                         ignoringCache: ignoringCache
                     )
+                    if includesNativeHistory {
+                        for (provider, nativeRoot) in NativeSessionScanner.roots {
+                            let native = NativeSessionScanner.scan(
+                                provider: provider, root: nativeRoot, cache: cache, ignoringCache: ignoringCache)
+                            result.sessions += native.sessions
+                            result.cache.merge(native.cache) { _, new in new }
+                            result.loadError =
+                                [result.loadError, native.loadError].compactMap { $0 }.joined(separator: "\n")
+                                .nilIfBlank
+                        }
+                        result.sessions.sort(by: SessionScanner.isNewer)
+                    }
+                    return result
                 }.value
             }
         )
@@ -85,11 +105,13 @@ public final class SessionStore {
     init(
         root: URL,
         timing: SessionStoreTiming,
+        includesNativeHistory: Bool = false,
         scanOperation: @escaping ScanOperation
     ) {
         self.root = root
         self.timing = timing
         self.scanOperation = scanOperation
+        self.includesNativeHistory = includesNativeHistory
         let stream: AsyncStream<Bool>
         let continuation: AsyncStream<Bool>.Continuation
         (stream, continuation) = AsyncStream<Bool>.makeStream(
@@ -99,7 +121,11 @@ public final class SessionStore {
         self.eventPump = Task { [weak self] in
             for await requiresRestart in stream {
                 guard let self, self.isStarted else { continue }
-                if requiresRestart { self.watchedPath = nil }
+                if requiresRestart {
+                    self.watchedPath = nil
+                    for watcher in self.nativeWatchers.values { watcher.stop() }
+                    self.nativeWatchers.removeAll()
+                }
                 self.refreshWatcher()
                 self.scheduleDebouncedScan()
             }
@@ -112,6 +138,7 @@ public final class SessionStore {
         watcherRetryTask?.cancel()
         debounceTask?.cancel()
         watcher.stop()
+        for watcher in nativeWatchers.values { watcher.stop() }
     }
 
     /// Begins watching the sessions directory and performs the first scan.
@@ -125,6 +152,8 @@ public final class SessionStore {
 
     /// Stops watching. Safe to call when not started.
     public func stop() {
+        for watcher in nativeWatchers.values { watcher.stop() }
+        nativeWatchers.removeAll()
         watcher.stop()
         watchedPath = nil
         watcherRetryTask?.cancel()
@@ -271,6 +300,21 @@ public final class SessionStore {
     /// rescan constantly. The retry loop starts the watcher once it appears.
     private func refreshWatcher() {
         guard isStarted else { return }
+        if includesNativeHistory {
+            for (_, nativeRoot) in NativeSessionScanner.roots {
+                let path = nativeRoot.path
+                guard nativeWatchers[path] == nil, FileManager.default.fileExists(atPath: path) else { continue }
+                let watcher = SessionDirectoryWatcher()
+                let continuation = eventContinuation
+                if watcher.start(
+                    path: path, latency: timing.watcherLatency,
+                    handler: { requiresRestart in continuation.yield(requiresRestart) })
+                {
+                    nativeWatchers[path] = watcher
+                    continuation.yield(false)
+                }
+            }
+        }
         guard let desiredPath = existingRootPath() else {
             // Also ends a stream whose root was just deleted (a restart
             // event clears `watchedPath` before this runs).
