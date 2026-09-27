@@ -119,8 +119,9 @@ function coverage(page, matches) {
     const frame = terminal.getBoundingClientRect(), height = terminal.clientHeight, width = terminal.clientWidth;
     const top = frame.top + terminal.clientTop, left = frame.left + terminal.clientLeft, wide = terminal.scrollWidth > width;
     let visible = 0, missing = 0, far = 0;
+    // One range for every match: WebKit updates each live range when the text is replaced.
+    const range = document.createRange();
     for (const [start, end] of matches) {
-      const range = document.createRange();
       range.setStart(...point(start, false)); range.setEnd(...point(end, true));
       const box = range.getBoundingClientRect();
       if (box.bottom > top && box.top < top + height && (!wide || (box.right > left && box.left < left + width))) {
