@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Locates plain-text matches in terminal rows while preserving cell positions.
 struct ScrollbackSearch: Equatable, Sendable {
@@ -157,7 +158,24 @@ struct ScrollbackSearch: Equatable, Sendable {
         return matches
     }
 
+    /// Logical lines per search chunk. Chunks run on separate threads and
+    /// their hits are joined in line order, so the list is the one a single
+    /// pass over every line gives.
+    static let linesPerChunk = 512
+
     private static func locate(_ query: String, in lines: [LogicalLine]) -> [Match] {
+        let chunkCount = (lines.count + linesPerChunk - 1) / linesPerChunk
+        guard chunkCount > 1 else { return locate(query, in: lines[...]) }
+        let chunks = OSAllocatedUnfairLock(initialState: [[Match]](repeating: [], count: chunkCount))
+        DispatchQueue.concurrentPerform(iterations: chunkCount) { chunk in
+            let start = chunk * linesPerChunk
+            let found = locate(query, in: lines[start..<min(start + linesPerChunk, lines.count)])
+            chunks.withLock { $0[chunk] = found }
+        }
+        return chunks.withLock { $0 }.flatMap { $0 }
+    }
+
+    private static func locate(_ query: String, in lines: ArraySlice<LogicalLine>) -> [Match] {
         lines.flatMap { logical in
             var found: [Match] = []
             var searchRange = logical.text.startIndex..<logical.text.endIndex

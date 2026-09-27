@@ -134,4 +134,101 @@ struct MacFindScrollbackSearchTests {
         #expect(search.currentMatch?.line == 4)
         #expect(search.currentMatch?.columns == 4..<11)
     }
+
+    /// Several search chunks, with wrapped, wide and folded rows in each and a
+    /// few long lines soft-wrapped over five rows.
+    private static func manyChunks() -> [ScrollbackSearch.Row] {
+        var rows: [ScrollbackSearch.Row] = []
+        for block in 0..<420 {
+            rows += mixed
+            if block % 50 == 0 {
+                rows.append(ScrollbackSearch.Row(text: "needle " + String(repeating: "y", count: 33)))
+                let middle = String(repeating: "y", count: 17)
+                for _ in 0..<4 {
+                    rows.append(ScrollbackSearch.Row(text: middle + "needle" + middle, isWrapped: true))
+                }
+            }
+        }
+        return rows
+    }
+
+    @Test(arguments: ["needle", "NEEDLE", "e", "cafe", "界", "👩‍💻", "strasse", "y", "yn", "zz"])
+    func chunkedSearchMatchesOneFullPass(query: String) {
+        let rows = Self.manyChunks()
+        #expect(rows.filter { !$0.isWrapped }.count > 4 * ScrollbackSearch.linesPerChunk)
+        let expected = Self.referenceMatches(query, in: rows)
+        var search = ScrollbackSearch()
+
+        search.setQuery(query, in: ScrollbackSearch.Text(rows, version: 1), startingAtOrAbove: 2_000)
+
+        #expect(search.matches == expected)
+        #expect(search.current == (expected.isEmpty ? nil : expected.lastIndex { $0.line <= 2_000 } ?? 0))
+    }
+
+    @Test(arguments: [
+        ScrollbackSearch.linesPerChunk - 1, ScrollbackSearch.linesPerChunk,
+        ScrollbackSearch.linesPerChunk + 1, 2 * ScrollbackSearch.linesPerChunk + 1,
+    ])
+    func chunkEdgesKeepEveryHitInLineOrder(lineCount: Int) {
+        let rows = (0..<lineCount).map { ScrollbackSearch.Row(text: "needle \($0) needle") }
+        var search = ScrollbackSearch()
+
+        search.setQuery("needle", in: rows)
+
+        #expect(search.matches == Self.referenceMatches("needle", in: rows))
+        #expect(search.matches.map(\.line) == (0..<lineCount).flatMap { [$0, $0] })
+    }
+
+    /// The search as it was before chunking: every logical line in one pass.
+    private static func referenceMatches(
+        _ query: String,
+        in rows: [ScrollbackSearch.Row]
+    ) -> [ScrollbackSearch.Match] {
+        let fold: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
+        var lines: [(text: String, positions: [(row: Int, column: Int)])] = []
+        for (rowIndex, row) in rows.enumerated() {
+            let columns =
+                row.cellColumns.count == row.text.count + 1
+                ? row.cellColumns : Array(0...row.text.count)
+            if lines.isEmpty || !row.isWrapped {
+                lines.append(("", []))
+            }
+            let index = lines.count - 1
+            if lines[index].positions.isEmpty {
+                lines[index].positions.append((rowIndex, columns[0]))
+            } else {
+                lines[index].positions[lines[index].positions.count - 1] = (rowIndex, columns[0])
+            }
+            lines[index].text += row.text
+            for boundary in columns.dropFirst() {
+                lines[index].positions.append((rowIndex, boundary))
+            }
+        }
+        return lines.flatMap { logical in
+            var found: [ScrollbackSearch.Match] = []
+            var searchRange = logical.text.startIndex..<logical.text.endIndex
+            var offset = 0
+            while let hit = logical.text.range(of: query, options: fold, range: searchRange) {
+                let startOffset = offset + logical.text.distance(from: searchRange.lowerBound, to: hit.lowerBound)
+                let endOffset = startOffset + logical.text.distance(from: hit.lowerBound, to: hit.upperBound)
+                guard logical.positions.indices.contains(startOffset),
+                    logical.positions.indices.contains(endOffset)
+                else { break }
+                let start = logical.positions[startOffset]
+                let end = logical.positions[endOffset]
+                let sameRowEnd = end.row == start.row ? end.column : start.column + 1
+                found.append(
+                    ScrollbackSearch.Match(
+                        line: start.row,
+                        columns: start.column..<max(start.column, sameRowEnd),
+                        endLine: end.row,
+                        endColumn: end.column
+                    )
+                )
+                searchRange = hit.upperBound..<logical.text.endIndex
+                offset = endOffset
+            }
+            return found
+        }
+    }
 }
