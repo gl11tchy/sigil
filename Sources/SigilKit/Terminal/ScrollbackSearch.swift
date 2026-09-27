@@ -26,12 +26,25 @@ struct ScrollbackSearch: Equatable, Sendable {
         let endColumn: Int
     }
 
-    private struct CellPosition: Equatable, Sendable {
+    /// Rows joined into logical lines once, so several searches of the same
+    /// buffer do not rebuild them. `version` names the buffer contents; hits
+    /// are reused only when a later search has the same version and query.
+    struct Text: Sendable {
+        let version: Int?
+        fileprivate let lines: [LogicalLine]
+
+        init(_ rows: [Row], version: Int? = nil) {
+            self.version = version
+            lines = ScrollbackSearch.logicalLines(rows)
+        }
+    }
+
+    fileprivate struct CellPosition: Equatable, Sendable {
         let row: Int
         let column: Int
     }
 
-    private struct LogicalLine: Sendable {
+    fileprivate struct LogicalLine: Sendable {
         var text = ""
         /// Boundary at each Character offset, including the exclusive end.
         var positions: [CellPosition] = []
@@ -42,6 +55,8 @@ struct ScrollbackSearch: Equatable, Sendable {
     private(set) var query: String = ""
     private(set) var matches: [Match] = []
     private(set) var current: Int?
+    /// Version of the text that produced `matches`, or nil when it had none.
+    private var matchedVersion: Int?
 
     var matchCount: Int { matches.count }
 
@@ -56,12 +71,18 @@ struct ScrollbackSearch: Equatable, Sendable {
 
     /// Starts at the last hit on or above `line`, else the first hit below it.
     mutating func setQuery(_ query: String, in rows: [Row], startingAtOrAbove line: Int? = nil) {
+        setQuery(query, in: Text(rows), startingAtOrAbove: line)
+    }
+
+    /// Starts at the last hit on or above `line`, else the first hit below it.
+    mutating func setQuery(_ query: String, in text: Text, startingAtOrAbove line: Int? = nil) {
         if query.isEmpty {
             clear()
             return
         }
+        matches = reusableMatches(for: query, in: text) ?? Self.locate(query, in: text.lines)
         self.query = query
-        matches = Self.locate(query, in: rows)
+        matchedVersion = text.version
         if matches.isEmpty {
             current = nil
         } else if let line {
@@ -76,12 +97,19 @@ struct ScrollbackSearch: Equatable, Sendable {
     }
 
     mutating func updateRows(_ rows: [Row]) {
+        update(Text(rows))
+    }
+
+    /// Searches `text` again for the current query and keeps the current hit
+    /// when it is still there.
+    mutating func update(_ text: Text) {
         guard !query.isEmpty else {
             clear()
             return
         }
         let previous = currentMatch
-        matches = Self.locate(query, in: rows)
+        matches = reusableMatches(for: query, in: text) ?? Self.locate(query, in: text.lines)
+        matchedVersion = text.version
         if let previous, let index = matches.firstIndex(of: previous) {
             current = index
         } else if matches.isEmpty {
@@ -97,6 +125,7 @@ struct ScrollbackSearch: Equatable, Sendable {
         query = ""
         matches = []
         current = nil
+        matchedVersion = nil
     }
 
     @discardableResult
@@ -119,8 +148,17 @@ struct ScrollbackSearch: Equatable, Sendable {
         return currentMatch
     }
 
-    private static func locate(_ query: String, in rows: [Row]) -> [Match] {
-        logicalLines(rows).flatMap { logical in
+    /// The last hits, when they came from this exact query and buffer version.
+    private func reusableMatches(for query: String, in text: Text) -> [Match]? {
+        // Scalars, not `==`: canonically equivalent queries are different input.
+        guard let version = text.version, version == matchedVersion,
+            query.unicodeScalars.elementsEqual(self.query.unicodeScalars)
+        else { return nil }
+        return matches
+    }
+
+    private static func locate(_ query: String, in lines: [LogicalLine]) -> [Match] {
+        lines.flatMap { logical in
             var found: [Match] = []
             var searchRange = logical.text.startIndex..<logical.text.endIndex
             // Offsets carry forward from the previous hit, so a long line stays linear.
