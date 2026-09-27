@@ -36,8 +36,12 @@ jobs:
             Sidereal/package-lock.json
             Site/package-lock.json
 
-      - name: Show Swift toolchain
-        run: swift --version
+      - name: Show Xcode and Swift toolchain
+        id: toolchain
+        run: |
+          toolchain="$(xcodebuild -version && swift --version)"
+          printf '%s\n' "$toolchain"
+          printf 'cache-key=%s\n' "$(printf '%s\n' "$toolchain" | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
       - name: Restore Swift build cache
         uses: actions/cache@v4
@@ -45,9 +49,9 @@ jobs:
           path: |
             .build
             ~/Library/Caches/org.swift.swiftpm
-          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.resolved') }}-${{ hashFiles('Package.swift') }}
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ hashFiles('Package.resolved') }}-${{ hashFiles('Package.swift') }}
           restore-keys: |
-            swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.resolved') }}-
+            swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ hashFiles('Package.resolved') }}-
 
       - name: Install shellcheck
         env:

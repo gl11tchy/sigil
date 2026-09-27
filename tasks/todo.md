@@ -30,6 +30,9 @@
 - [x] Update product, setup, capability and verification documentation.
 - [x] Run full CI commands locally, self-review and commit the verified integration.
 
-Delivery: publish this branch as one PR. Its GitHub record is the delivery receipt.
-Do not merge or deploy. The external Xcode 16.4 runner still needs an Xcode 26+ image.
+Delivery: the owner authorized release after the required gates. PR #121 remains
+the product integration and delivery receipt. The isolated runner upgrade uses a
+validated Xcode 26.5/iOS 26.5 image and preserves the old base for rollback.
+Merge, Mac installation without quitting, and matching client deployment require
+their own exact receipts; local verification alone does not establish release.
 See [verification and limits](../docs/qa/product-hardening/README.md).

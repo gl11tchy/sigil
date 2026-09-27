@@ -210,7 +210,8 @@ Scripts/install.sh
 That copies `dist/Sigil.app` to `/Applications/Sigil.app` and opens it. GitHub
 cannot write to this Mac. After a merge to `main` and successful gates, CI builds a zip and attaches
 it to the rolling [latest release](https://github.com/gl11tchy/sigil/releases/latest).
-The runner needs Xcode 26+ and an iOS 26+ simulator; its current Xcode 16.4 image blocks this gate.
+The isolated runner uses a pinned Xcode 26.5 image with an iOS 26.5 simulator.
+Guest toolchain checks must pass before a new runner base is published.
 On this Mac, agents must run `Scripts/install-latest.sh` after that merge. It
 rebuilds HEAD and swaps the new bundle into place without quitting a running
 app. Restart Sigil to load the new binary. Download the zip, or rebuild

@@ -1,0 +1,46 @@
+{
+  "method": "Real interactive CLI processes in PTYs; positional prompts, no --print or codex exec.",
+  "scope": "Two synthetic text-only turns per provider in separate newly created empty temporary projects.",
+  "claude": {
+    "version": "2.1.283",
+    "model": "Opus 5.5 (1M context), high effort; existing Claude Max login",
+    "nativeSessionID": "9027858c-1b9c-4fe1-95aa-b723a4815a6d",
+    "project": "/tmp/sigil-live-claude-bs94r072",
+    "marker": "SIGIL-CLAUDE-d0a38c4368e4",
+    "launchMode": "--session-id",
+    "resumeMode": "--resume same native ID",
+    "safety": "--safe-mode --tools '' --permission-mode manual --strict-mcp-config with empty MCP; nonessential traffic disabled; API key environment removed",
+    "userTurns": 2,
+    "assistantAnswers": [
+      "ACK",
+      "SIGIL-CLAUDE-d0a38c4368e4"
+    ],
+    "toolCalls": 0,
+    "sameNativeIDConfirmed": true
+  },
+  "codex": {
+    "version": "0.157.1",
+    "model": "GPT-6-Astra ultra; existing ChatGPT login required",
+    "nativeSessionID": "01a0e43a-9bd6-7053-b908-24b3548f5ede",
+    "project": "/tmp/sigil-live-codex-vvj7jiev",
+    "marker": "SIGIL-CODEX-0b63c09affcd",
+    "launchMode": "interactive default",
+    "resumeMode": "resume same native ID",
+    "invocationOptions": "--no-daemon --no-alt-screen --sandbox read-only --ask-for-approval never --disable hooks --disable plugins --disable apps --disable memories --disable shell_tool --disable unified_exec --disable shell_snapshot --disable skill_mcp_dependency_install -c 'mcp_servers.node_repl.enabled=false' -c 'mcp_servers.railway.enabled=false' -c 'mcp_servers.computer-use.enabled=false' -c 'web_search=\"disabled\"' -c 'memories.use_memories=false' -c 'analytics.enabled=false' -c 'notify=[]' -c 'project_doc_max_bytes=0' -c 'forced_login_method=\"chatgpt\"'",
+    "userTurns": 2,
+    "assistantAnswers": [
+      "ACK",
+      "SIGIL-CODEX-0b63c09affcd"
+    ],
+    "toolCalls": 0,
+    "sameNativeIDConfirmed": true
+  },
+  "preservation": "CLI-owned test histories and empty project folders retained. Inspected only transcripts with these newly created IDs.",
+  "limitations": [
+    "Not a Sigil GUI or physical-phone acceptance test.",
+    "No Grok model call.",
+    "No authenticated provider tool, approval, filesystem, or error-recovery behavior tested.",
+    "No account changes, credential copies, API purchases, source edits, push, or deployment."
+  ],
+  "verifiedAtUTC": "2026-09-27T18:59:28.222804+00:00"
+}

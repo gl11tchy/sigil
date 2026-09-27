@@ -1,8 +1,9 @@
 # Product hardening verification — 2026-09-27
 
-This is local implementation evidence, not a production release or a claim of
-flawless behavior. No personal sessions, model prompts, production deployment,
-PR merge, or installed app replacement were used.
+This records the isolated implementation verification, not a claim of flawless
+behavior. That phase used no personal sessions or model prompts and did not merge
+or deploy. The owner later authorized completing the release. Current CI, review,
+installation and deployment receipts belong to [PR #121](https://github.com/gl11tchy-team/sigil/pull/121).
 
 ## Revision and environment
 
@@ -13,8 +14,8 @@ Work began at `be132383565d9d4cb4e253ae3f7f1b7183207c8f`. The branch
 asynchronous startup, native output/Find and screen-cache improvements were
 preserved, not replaced. The existing native TextKit harness still runs alongside
 the new shipping-app XCTest gate.
-The final implementation revision is `6bacc71ea0f6f5ec70caeb333e54fc92377811b8`;
-the remaining delivery commit contains documentation and screenshot evidence only.
+The product implementation revision is `6bacc71ea0f6f5ec70caeb333e54fc92377811b8`.
+Follow-up CI/cache and documentation changes do not alter that application source.
 The native app source is unchanged from `98c1b52`. The Mac/web gate was repeated
 for the watcher and startup-focus repairs; the full native gate also passed again on unchanged native code.
 
@@ -115,6 +116,18 @@ passed, followed by both full local gates.
 Documentation was checked
 against the implemented capability limits. No reported code finding remains open.
 
+## Separate authenticated CLI continuity check
+
+The release follow-up used existing Claude Max and ChatGPT logins in two new,
+empty temporary projects. Each real interactive CLI accepted exactly two tiny
+text-only turns: store a synthetic marker, exit, then resume the same native ID
+and return that marker. Both providers passed with zero tool calls. No personal
+conversation, credential copy, auth change, or API purchase was involved. These
+checks are not part of CI and do not prove Sigil GUI, physical-phone, provider
+approval, tool execution, or expired-account recovery.
+
+See [sanitized live continuity receipt](provider-live-continuity.json).
+
 ## Performance
 
 These are local synthetic fixtures, not field telemetry or cloud capacity claims.
@@ -156,11 +169,17 @@ streaming workloads remain unmeasured.
 
 ## Remaining verification boundaries
 
-- **CI runner prerequisite:** the configured `sigil-vm` image is Xcode 16.4.
-  The complete iOS 26 gate requires Xcode 26+ and an installed iOS 26+ simulator.
-  The old green workflow did not establish that capability. The new gate fails
-  explicitly instead of skipping the shipping targets. External runner changes
-  and paid hosted capacity were not part of this task.
+- **CI runner upgrade:** the original Xcode 16.4 image could not run this native
+  gate. The release follow-up uses a digest-pinned Tahoe/Xcode 26.5 image with
+  iOS 26.5, verified inside its isolated guest. Provisioning checks Xcode, runtime,
+  Metal and first-launch readiness before publishing a base. Fifteen regression
+  fixtures and independent review cover invalid candidates, unknown shutdown
+  state, per-base hashes and the guest shutdown path. Actual guest shutdown and
+  base publication passed after using the absolute `/sbin/shutdown` path.
+  The old base/hash remains for rollback; the unrelated
+  Linux runner was not restarted. Swift caches now include the actual toolchain
+  fingerprint. No hosted capacity was purchased. Full workflow results are in
+  the PR delivery record; a guest preflight alone is not a full CI pass.
   [PR CI run 36331776892](https://github.com/gl11tchy-team/sigil/actions/runs/36331776892)
   confirmed the Mac/web gate passed and the native preflight failed specifically
   because the selected Xcode was 16.4. No native result artifact existed on that
@@ -172,11 +191,13 @@ streaming workloads remain unmeasured.
   Claude has no integrated final-completion observer. A new Codex tab cannot
   acquire a native ID by guesswork; open its discovered history to resume it.
   See [exact capabilities](../../provider-capabilities.md).
-- **Credentials/hardware:** authenticated provider turns and expired-account
-  recovery, physical APNs/Live Activities, camera/cellular workflows and device
-  entitlements were not exercised. Local tests use deterministic supported fixtures.
-- **Distribution:** debug Mac bundles are ad-hoc signed. Simulator artifacts are
-  unsigned. No signed/notarized release or production protocol upgrade was made.
+- **Credentials/hardware:** the separate text-only Claude/Codex resume check above
+  passed. Provider tool approval and expired-account recovery, physical APNs/Live
+  Activities, camera/cellular workflows and device entitlements remain unverified.
+  Ordinary CI uses deterministic supported fixtures, not authenticated model calls.
+- **Distribution:** the implementation gates used ad-hoc-signed debug Mac bundles
+  and unsigned simulator artifacts. They do not prove signed/notarized distribution.
+  The separately authorized release must record its actual artifacts and activation.
   Mac and phone clients must be released together for the nonce requirement.
 
 Local raw gate logs are in `/tmp/sigil-hardening-evidence/`; native result bundles

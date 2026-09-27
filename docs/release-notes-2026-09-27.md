@@ -1,6 +1,7 @@
-# Unreleased — product hardening
+# Product hardening — 2026-09-27
 
-This integration has not been merged, installed or deployed.
+Release status and exact artifact receipts are recorded in
+[PR #121](https://github.com/gl11tchy-team/sigil/pull/121).
 
 ## Changes
 
@@ -28,13 +29,14 @@ This integration has not been merged, installed or deployed.
 Update the Mac app and phone clients together. Older endpoints receive an upgrade
 error; the new clients do not silently use the less fresh protocol.
 
-The configured CI runner still needs Xcode 26+ and an iOS 26+ simulator. Local
-native verification passed, but the old Xcode 16.4 runner cannot pass this gate.
-No external runner or production deployment was changed.
+The CI runner now uses a pinned Xcode 26.5 image with iOS 26.5. Guest toolchain
+checks protect base publication; the old image remains available for rollback.
+Swift caches are isolated by Xcode and compiler version.
 
 Claude completion observation and newly launched Codex identity remain limited.
-There is no provider-accepted or exactly-once approval guarantee. Physical push,
-authenticated provider sessions and distribution signing were not verified.
+There is no provider-accepted or exactly-once approval guarantee. Text-only
+Claude/Codex interactive resume passed separately from CI. Physical push, provider
+tool approvals, expired-account recovery and distribution signing remain separate checks.
 
 See [verification evidence](qa/product-hardening/README.md) and
 [provider capabilities](provider-capabilities.md).

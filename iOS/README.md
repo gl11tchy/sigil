@@ -90,10 +90,11 @@ real relay with a deterministic Mac fixture. The separate TextKit harness preser
 Result bundles contain test evidence
 and a synthetic accessibility-size composer screenshot.
 
-The configured `sigil-vm` CI runner still uses `macos-sequoia-xcode16.4`.
-It needs an Xcode 26+ image before this native gate can pass in CI. The gate fails
-clearly rather than skipping the application build. This work does not upgrade
-that external runner or use paid hosted-runner capacity.
+The `sigil-vm` runner uses a digest-pinned Tahoe/Xcode 26.5 image with iOS 26.5.
+Provisioning checks Xcode, simulator availability, Metal and first-launch readiness
+before publishing its base. The previous Xcode 16.4 base remains available for
+rollback. No GitHub-hosted capacity is used. Native checks still fail rather than
+skipping the application build.
 
 Simulator builds do not prove distribution signing, physical-device Keychain
 entitlements, APNs delivery, notification service activation, or Live Activity

@@ -10,8 +10,8 @@ The tested shipping source is commit `98c1b52`, after PR120 integration and the 
 - `iOS/scripts/ci.sh` after integrating PR120 and the final race repairs: Xcode preflight, typecheck, 85 shared-logic/real-relay tests, 18 app-hosted simulator tests, and 7 native TextKit tests passed. No native tests were skipped.
 - `shellcheck iOS/scripts/ci.sh iOS/scripts/native-test.sh iOS/scripts/native-output-test.sh iOS/scripts/relay-e2e.sh` and `plutil -lint iOS/Sigil.xcodeproj/project.pbxproj` passed.
 
-The final repeated local result bundle is `.build/native-verification/native-20260927-123001-83553.xcresult`.
-The full repeated gate log is `/tmp/sigil-hardening-evidence/native-startup-review-ci.log`. Its 85/18/7 checks passed on unchanged native source while the Mac startup-focus review was addressed. These results supersede the pre-PR120 57 shared/relay and 15 app-hosted counts.
+The final repeated local result bundle is `.build/native-verification/native-20260927-144756-34944.xcresult`.
+The full repeated gate log is `/tmp/sigil-release-evidence/native-local-gate.log`. Its 85/18/7 checks passed on unchanged native source during the release follow-up and CI toolchain-cache review. These results supersede the pre-PR120 57 shared/relay and 15 app-hosted counts.
 CI uploads its own result bundles as `iPhone-native-verification` artifacts.
 
 The native gate discovers an installed compatible simulator runtime, creates a fresh simulator, and removes it after testing. It builds the actual `Sigil` scheme and checks these embedded executables:
@@ -32,7 +32,7 @@ The screenshot contains synthetic demo data. An app-hosted test focuses the edit
 
 ## CI prerequisite and limits
 
-The configured `sigil-vm` runner image is currently `macos-sequoia-xcode16.4`. It cannot build this iOS 26 application. The native gate now fails clearly on that toolchain rather than treating shared macOS tests as an iPhone build. An Xcode 26+ runner image with an iOS 26+ simulator runtime is still required. This task did not alter the external runner or buy hosted-runner capacity.
+The original Xcode 16.4 runner correctly failed native preflight. The authorized release follow-up replaces it with a digest-pinned Tahoe/Xcode 26.5 image and available iOS 26.5 runtime. Guest Xcode, runtime, first-launch and Metal checks pass before a candidate becomes the base. The previous base/hash remains for rollback. Current-head CI results are recorded in [PR #121](https://github.com/gl11tchy-team/sigil/pull/121); local simulator checks are not substituted for that workflow. No hosted-runner capacity was purchased.
 
 Local simulator evidence does not prove signing, physical-device Keychain entitlements, APNs delivery, notification extension activation, or remote Live Activity updates. It does not prove signed or notarized distribution artifacts.
 

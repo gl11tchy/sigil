@@ -59,7 +59,9 @@ test-driven-development, write-swift.
 
 Start at `be13238`, equal to fresh `origin/main`; its CI succeeded. Preserve the
 terminal-first interface, existing providers and all CLI-owned history. Deliver
-one integration PR; do not merge, install over the running app, or deploy.
+one integration PR. The owner subsequently authorized completing the release:
+pass current-head CI and required review, merge, install without quitting the
+running Mac app, and deploy the matching remote clients.
 Prior completed plans above remain historical evidence, not current acceptance.
 
 ## Ordered work and ownership
@@ -92,7 +94,8 @@ Prior completed plans above remain historical evidence, not current acceptance.
   verified structured approval. Raw input remains clearly labeled.
 - New event frames carry a monotonically increasing eventSequence, scoped to the
   authenticated connection challenge; legacy hosts use request/reply polling.
-- No offline command queue, blind retry, paid model calls or production changes.
+- No offline command queue, blind retry, or paid model calls in ordinary CI.
+- Release only after the required gates; preserve the running Mac app and user work.
 
 ## Checkpoints
 
