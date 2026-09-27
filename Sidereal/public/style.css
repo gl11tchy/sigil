@@ -280,8 +280,9 @@ main {
 #find-count { color: var(--ink2); font: 11.5px/16px var(--mono); letter-spacing: 0; white-space: nowrap; padding-right: 4px; }
 mark { background: var(--accent-tint); color: var(--accent-ink); border-radius: 2px; }
 mark[data-current="true"] { box-shadow: 0 0 0 1.5px var(--accent); }
-/* Find highlights text ranges where the browser can; a highlight has no ring, so the current match is filled. */
-::highlight(find-match) { background-color: var(--accent-tint); color: var(--accent-ink); }
+/* Find highlights text ranges where the browser can; a highlight has no ring, so the current match is filled.
+   WebKit paints a highlight that sets a color two to three times slower, so other matches keep the text color. */
+::highlight(find-match) { background-color: var(--accent-tint); }
 ::highlight(find-current) { background-color: var(--accent-fill); color: var(--on-accent); }
 
 /* Output: machine text in JetBrains Mono on the page. */

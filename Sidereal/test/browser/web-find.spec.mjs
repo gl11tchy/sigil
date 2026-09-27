@@ -61,7 +61,8 @@ const dense = Array.from({ length: 780 }, () => `${'a '.repeat(39)}a`).join('\n'
 const sparse = Array.from({ length: 900 }, (_, i) => `line ${String(i).padStart(4, '0')}: needle alpha beta gamma delta epsilon zeta needle`).join('\n');
 const count = (text, query) => [...text.matchAll(new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu'))];
 
-// What Find shows, read from the page: highlights where the browser has them, else marks.
+// What Find shows, read from the page: highlights where the browser has them, and marks without
+// them or over complex text. Highlights hold static ranges, measured and read through one range.
 function findState(page) {
   return page.evaluate(() => {
     const terminal = document.getElementById('terminal');
@@ -72,16 +73,21 @@ function findState(page) {
       while (walker.nextNode()) { if (walker.currentNode === node) return total + at; total += walker.currentNode.length; }
       return -1;
     };
-    const describe = range => ({ start: offset(range.startContainer, range.startOffset), end: offset(range.endContainer, range.endOffset), text: range.toString() });
+    const scratch = document.createRange();
+    const live = range => { scratch.setStart(range.startContainer, range.startOffset); scratch.setEnd(range.endContainer, range.endOffset); return scratch; };
+    const describe = range => ({ start: offset(range.startContainer, range.startOffset), end: offset(range.endContainer, range.endOffset), text: live(range).toString() });
     const box = terminal.getBoundingClientRect();
     const visible = range => {
-      const rect = range.getBoundingClientRect();
+      const rect = live(range).getBoundingClientRect();
       return rect.bottom > box.top && rect.top < box.bottom && rect.right > box.left && rect.left < box.right;
     };
     const api = typeof Highlight === 'function' && CSS.highlights?.has('find-match');
-    const marks = [...terminal.querySelectorAll('mark')].map(mark => { const range = document.createRange(); range.selectNodeContents(mark.firstChild); return { mark, range }; });
-    const matches = api ? [...CSS.highlights.get('find-match')] : marks.map(item => item.range);
-    const current = api ? [...CSS.highlights.get('find-current')][0] : marks.find(item => item.mark.dataset.current === 'true')?.range;
+    const marks = [...terminal.querySelectorAll('mark')];
+    const over = (first, last) => ({ startContainer: first.firstChild, startOffset: 0, endContainer: last.firstChild, endOffset: last.firstChild.length });
+    const matches = [...(api ? CSS.highlights.get('find-match') : []), ...marks.map(mark => over(mark, mark))];
+    // A match across two chunks has a mark in each.
+    const currentMarks = marks.filter(mark => mark.dataset.current === 'true');
+    const current = api ? [...CSS.highlights.get('find-current')][0] : currentMarks.length ? over(currentMarks[0], currentMarks[currentMarks.length - 1]) : undefined;
     const texts = [];
     for (const walker = document.createTreeWalker(terminal, NodeFilter.SHOW_TEXT); walker.nextNode();) texts.push(walker.currentNode.length);
     return {
@@ -112,10 +118,10 @@ function coverage(page, matches) {
       return [nodes[low], offset - starts[low]];
     };
     const api = typeof Highlight === 'function' && CSS.highlights?.has('find-match');
-    const ranges = api ? [...CSS.highlights.get('find-match')] : [...terminal.querySelectorAll('mark')].map(mark => {
-      const range = document.createRange(); range.selectNodeContents(mark.firstChild); return range;
-    });
-    const shown = new Set(ranges.map(range => starts[nodes.indexOf(range.startContainer)] + range.startOffset));
+    const ranges = [...(api ? CSS.highlights.get('find-match') : []), ...[...terminal.querySelectorAll('mark')].map(mark => (
+      { startContainer: mark.firstChild, startOffset: 0, endContainer: mark.firstChild, endOffset: mark.firstChild.length }))];
+    const index = new Map(nodes.map((node, at) => [node, at]));
+    const shown = new Set(ranges.map(range => starts[index.get(range.startContainer)] + range.startOffset));
     const frame = terminal.getBoundingClientRect(), height = terminal.clientHeight, width = terminal.clientWidth;
     const top = frame.top + terminal.clientTop, left = frame.left + terminal.clientLeft, wide = terminal.scrollWidth > width;
     let visible = 0, missing = 0, far = 0;
@@ -129,7 +135,8 @@ function coverage(page, matches) {
         if (!shown.has(start)) missing++;
       }
     }
-    for (const range of ranges) {
+    for (const shownRange of ranges) {
+      range.setStart(shownRange.startContainer, shownRange.startOffset); range.setEnd(shownRange.endContainer, shownRange.endOffset);
       const box = range.getBoundingClientRect();
       if (box.bottom < top - height / 2 || box.top > top + 1.5 * height
         || (wide && (box.right < left - width / 2 || box.left > left + 1.5 * width))) far++;
@@ -146,6 +153,19 @@ const timed = (page, id, query) => page.evaluate(async ([id, query]) => {
   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   return performance.now() - start;
 }, [id, query]);
+// The longest frame, in milliseconds, while each of `steps` frames clicks Next or scrolls the
+// output by `screens`, and the frame after the last.
+const longestFrame = (page, steps, screens) => page.evaluate(async ([steps, screens]) => {
+  const terminal = document.getElementById('terminal'), next = document.getElementById('find-next');
+  const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+  let last = await frame(), longest = 0;
+  for (let step = 0; step <= steps; step++) {
+    if (step < steps) { if (screens) terminal.scrollTop += screens * terminal.clientHeight; else next.click(); }
+    const now = await frame();
+    longest = Math.max(longest, now - last); last = now;
+  }
+  return longest;
+}, [steps, screens]);
 async function toggleRaw(page) {
   await page.getByLabel('Connection settings').click();
   await page.locator('#raw-toggle').click();
@@ -323,29 +343,37 @@ for (const api of [true, false]) {
       } finally { mac.close(); }
     });
 
-    test('Find marks the match it jumped to once the reader lets go of a selection', async ({ page, baseURL }) => {
+    test('Find marks the match it jumped to while the reader holds a selection', async ({ page, baseURL }) => {
       const matches = count(sparse, 'needle').map(match => [match.index, match.index + 6]);
       const mac = await pair(page, baseURL, { terminal: () => sparse });
+      const selected = () => page.evaluate(() => getSelection().toString());
       try {
         await expect(page.locator('#terminal')).toHaveText(sparse);
         await openFind(page, 'needle');
         await expect(page.locator('#find-count')).toHaveText(`1 of ${matches.length}`);
         await frames(page);
-        await page.evaluate(() => {
-          const text = document.getElementById('terminal').firstChild;
-          getSelection().setBaseAndExtent(text, 0, text, 'line'.length);
-        });
-        // Previous wraps to the last match, far from the marks painted so far. Marks would replace
-        // the text under the selection, so they wait; without a scroll they waited for good. A click
-        // takes focus from the search field, as a drag in the output would have.
+        // The first 30 characters, across the first match, which is marked without highlights.
+        await page.evaluate(length => {
+          const walker = document.createTreeWalker(document.getElementById('terminal'), NodeFilter.SHOW_TEXT);
+          const start = walker.nextNode();
+          let node = start, at = length;
+          while (at > node.length) { at -= node.length; node = walker.nextNode(); }
+          getSelection().setBaseAndExtent(start, 0, node, at);
+        }, 30);
+        expect(await selected()).toBe(sparse.slice(0, 30));
+        // Previous wraps to the last match, far from the marks painted so far. The marks waited for
+        // the selection to end, so the current match had none. A click takes focus from the search
+        // field, as a drag in the output would have.
         await page.getByRole('button', { name: 'Previous match' }).click();
         await expect(page.locator('#find-count')).toHaveText(`${matches.length} of ${matches.length}`);
-        await frames(page);
-        expect(await page.evaluate(() => getSelection().toString())).toBe('line');
-        await page.evaluate(() => getSelection().removeAllRanges());
         const [start, end] = matches.at(-1);
         await expect.poll(async () => (await findState(page)).current).toEqual({ start, end, text: 'needle', visible: true });
         expect(await coverage(page, matches)).toMatchObject({ missing: 0, far: 0 });
+        expect(await selected()).toBe(sparse.slice(0, 30));
+        // Back at the top, the text under the selection is marked again and the selection stays.
+        await page.locator('#terminal').evaluate(el => { el.scrollTop = 0; });
+        await expect.poll(async () => { const state = await coverage(page, matches); return [state.visible > 0, state.missing]; }).toEqual([true, 0]);
+        expect(await selected()).toBe(sparse.slice(0, 30));
       } finally { mac.close(); }
     });
 
@@ -600,6 +628,98 @@ for (const api of [true, false]) {
         await expect(page.locator('#find-count')).toHaveText('1 of 31200');
         expect(typed).toBeGreaterThan(0);
         expect(typed).toBeLessThanOrEqual(80);
+      } finally { mac.close(); }
+    });
+
+    test('Find makes no range per match, so new output repaints as fast after the reader moves', async ({ page, baseURL }) => {
+      let terminal = dense;
+      const mac = await pair(page, baseURL, { terminal: () => terminal });
+      // The longest frame until the count reads `text`, and the frame after it.
+      const repaint = text => page.evaluate(async text => {
+        const frame = () => new Promise(resolve => requestAnimationFrame(resolve)), count = document.getElementById('find-count');
+        let last = await frame(), longest = 0, settled = 0;
+        for (const start = last; settled < 2 && last - start < 10_000;) {
+          const now = await frame();
+          longest = Math.max(longest, now - last); last = now;
+          if (count.textContent === text) settled++;
+        }
+        return settled < 2 ? Infinity : longest;
+      }, text);
+      try {
+        await expect(page.locator('#terminal')).toHaveText(dense);
+        await openFind(page, 'a');
+        await expect(page.locator('#find-count')).toHaveText('1 of 31200');
+        // Streamed output: every chunk is painted again, before the reader has moved.
+        let painted = repaint('1 of 31201');
+        terminal = `${dense}\nb a`;
+        const fresh = await painted;
+        // Every range made from here on is counted. WebKit updates each live range on every change to
+        // the text until it is collected: after the reader moved through Find, a poll took 715 ms.
+        await page.evaluate(() => {
+          const create = Document.prototype.createRange;
+          window.findRanges = 0;
+          Document.prototype.createRange = function () { window.findRanges++; return create.call(this); };
+          window.Range = new Proxy(Range, { construct: (target, args) => { window.findRanges++; return Reflect.construct(target, args); } });
+        });
+        await page.getByRole('button', { name: 'Previous match' }).click();
+        await expect(page.locator('#find-count')).toHaveText('31201 of 31201');
+        await page.getByRole('button', { name: 'Next match' }).click();
+        await expect(page.locator('#find-count')).toHaveText('1 of 31201');
+        await longestFrame(page, 20, 0);
+        await expect(page.locator('#find-count')).toHaveText('21 of 31201');
+        await longestFrame(page, 20, 1);
+        await longestFrame(page, 20, -1);
+        expect(await page.evaluate(() => window.findRanges)).toBe(0);
+        painted = repaint('21 of 31202');
+        terminal = `${dense}\nb a a`;
+        const moved = await painted;
+        expect(moved).toBeLessThan(Math.max(100, 2 * fresh));
+      } finally { mac.close(); }
+    });
+
+    // Without highlights every match in view is marked, as the scroll test below times.
+    if (api) for (const [script, unit, query, repeat] of [['Arabic', 'السلام عليكم ورحمة الله وبركاته ', 'ال', 3], ['Hebrew', 'שלום עולם את הדבר הזה ', 'ה', 4],
+      ['Hindi', 'यह एक परीक्षण है और यह सही है ', 'है', 3], ['Japanese', 'これは私の友達の家の猫の名前です', 'の', 5]]) {
+      test(`Find stays under 100 ms a frame over ${script}, readable and raw`, async ({ page, baseURL }) => {
+        // A change to a highlight paints every highlighted range in view again: in WebKit a tenth to
+        // half a millisecond a range over these scripts, and two to three times that with a text color.
+        // Lines of about 90 characters, under one sealed message's 64 KB.
+        const line = unit.repeat(repeat), lines = Math.floor(58_000 / (new TextEncoder().encode(line).length + 1));
+        const text = Array.from({ length: lines }, () => line).join('\n');
+        const mac = await pair(page, baseURL, { terminal: () => text });
+        try {
+          await page.setViewportSize({ width: 1280, height: 844 });
+          const times = [];
+          for (const raw of [false, true]) {
+            const shown = raw ? text : readableOutput(text);
+            if (raw) await toggleRaw(page);
+            await expect(page.locator('#terminal')).toHaveText(shown);
+            if (!raw) await openFind(page, query);
+            await expect(page.locator('#find-count')).toHaveText(new RegExp(` of ${count(shown, query).length}$`));
+            await frames(page);
+            times.push({ raw, next: Math.round(await longestFrame(page, 3, 0)), scrolled: Math.round(await longestFrame(page, 12, 1 / 4)) });
+          }
+          expect(times.filter(time => time.next >= 100 || time.scrolled >= 100)).toEqual([]);
+        } finally { mac.close(); }
+      });
+    }
+
+    test('Find paints again only the chunks whose marks change as the reader scrolls', async ({ page, baseURL }) => {
+      const mac = await pair(page, baseURL, { terminal: () => dense });
+      try {
+        await expect(page.locator('#terminal')).toHaveText(dense);
+        await openFind(page, 'a');
+        await expect(page.locator('#find-count')).toHaveText('1 of 31200');
+        await frames(page);
+        // Painting all of the output for each new window took over 50 ms in a third of the frames
+        // of a scroll in WebKit. The last chunk, never near the view, stays the same node.
+        const last = await page.locator('#terminal').evaluateHandle(el => el.lastChild);
+        const scrolled = await longestFrame(page, 16, 1 / 2);
+        expect(await page.locator('#terminal').evaluate(el => el.scrollTop)).toBeGreaterThan(0);
+        expect(await last.evaluate(node => node.isConnected)).toBe(true);
+        expect(scrolled).toBeLessThan(100);
+        await expect.poll(async () => { const state = await coverage(page, count(dense, 'a').map(match => [match.index, match.index + 1])); return [state.visible > 0, state.missing, state.far]; })
+          .toEqual([true, 0, 0]);
       } finally { mac.close(); }
     });
   });
