@@ -18,21 +18,41 @@ struct RootView: View {
 
 /// AppKit gives a window its first key view as the window first shows. A
 /// window that showed with only the launch canvas got none and kept no first
-/// responder, so this makes the same pick once the content is in.
+/// responder, so this makes the same pick once the content is in and shown.
 private struct FirstKeyView: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { Picker(frame: .zero) }
 
     func updateNSView(_ nsView: NSView, context: Context) {}
 
     final class Picker: NSView {
+        private var visibility: NSKeyValueObservation?
+
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            // Not shown yet: AppKit picks when it shows, as it always has.
-            guard let window, window.isVisible else { return }
+            visibility = nil
+            guard let window else { return }
+            guard window.isVisible else {
+                // Pick when it shows. On a first show AppKit has picked by
+                // then; a window hidden or minimized since the canvas has not.
+                visibility = window.observe(\.isVisible) { [weak self] window, _ in
+                    MainActor.assumeIsolated {
+                        if window.isVisible { self?.pick() }
+                    }
+                }
+                return
+            }
+            pick()
+        }
+
+        private func pick() {
+            visibility = nil
             DispatchQueue.main.async { [weak window] in
                 guard let window, window.firstResponder === window,
                     let content = window.contentView
                 else { return }
+                // Content that came in while the window was hidden is not in
+                // the key view loop until the loop is rebuilt.
+                window.recalculateKeyViewLoop()
                 window.selectKeyView(following: content)
             }
         }

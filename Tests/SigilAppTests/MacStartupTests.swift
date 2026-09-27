@@ -280,23 +280,34 @@ struct MacStartupTests {
 
     /// The window takes focus as a blocking launch's did: the sidebar search
     /// when the window shows, then the restored tab's terminal once the
-    /// window is key. A test window need not become key, so one that reports
-    /// key stands in for it, with the notification AppKit posts.
+    /// window is key. That holds too when the app was hidden or the window
+    /// minimized or ordered out while the launch waited. A test window need
+    /// not become key, so one that reports key stands in for it, with the
+    /// notification AppKit posts.
     @Test(arguments: [false, true], [false, true])
     func theWindowFocusesAsABlockingLaunchDid(restoredTab: Bool, key: Bool) async throws {
-        let blocking = try await startupFocus(waitsForShell: false, restoredTab: restoredTab, key: key)
-        let waiting = try await startupFocus(waitsForShell: true, restoredTab: restoredTab, key: key)
+        for away in WindowAway.allCases {
+            let blocking = try await startupFocus(
+                waitsForShell: false, restoredTab: restoredTab, key: key, away: away)
+            let waiting = try await startupFocus(
+                waitsForShell: true, restoredTab: restoredTab, key: key, away: away)
 
-        let settled: KeyboardFocus = restoredTab ? .sessionTerminal : .sidebar
-        #expect(blocking == (key ? [settled] : [.sidebar, settled]))
-        #expect(waiting == blocking)
+            let settled: KeyboardFocus = restoredTab ? .sessionTerminal : .sidebar
+            #expect(blocking == (key ? [settled] : [.sidebar, settled]), "\(away)")
+            #expect(waiting == blocking, "\(away)")
+        }
     }
 
-    /// Shows the real window with the window's key state, lets the launch
-    /// finish, and reads where focus lands; for a window that was not key,
-    /// again once it becomes key.
+    /// Where the window is while the launch finishes.
+    enum WindowAway: CaseIterable {
+        case shown, appHidden, minimized, orderedOut
+    }
+
+    /// Shows the real window with the window's key state, sends it away,
+    /// lets the launch finish, brings it back, and reads where focus lands;
+    /// for a window that was not key, again once it becomes key.
     private func startupFocus(
-        waitsForShell: Bool, restoredTab: Bool, key: Bool
+        waitsForShell: Bool, restoredTab: Bool, key: Bool, away: WindowAway
     ) async throws -> [KeyboardFocus] {
         let fixture = try ModelFixture(script: "#!/bin/sh\nread line\n")
         defer { fixture.cleanup() }
@@ -332,6 +343,16 @@ struct MacStartupTests {
         window.reportsKey = key
         window.orderFront(nil)
         if key { NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window) }
+        switch away {
+        case .shown: break
+        case .appHidden: NSApp.hide(nil)
+        case .minimized: window.miniaturize(nil)
+        case .orderedOut: window.orderOut(nil)
+        }
+        if away != .shown {
+            window.reportsKey = false
+            #expect(await waitUntil { !window.isVisible })
+        }
 
         gate.signal()
         let model = await ready(launch)
@@ -342,6 +363,20 @@ struct MacStartupTests {
                     ? model.selectedTab?.controller.view.window === window
                     : holds(WindowCloseGuard.GuardView.self, window.contentView!)
             })
+        if away != .shown {
+            try? await Task.sleep(for: .milliseconds(300))
+            switch away {
+            case .shown: break
+            case .appHidden: NSApp.unhide(nil)
+            case .minimized: window.deminiaturize(nil)
+            case .orderedOut: window.orderFront(nil)
+            }
+            #expect(await waitUntil { window.isVisible })
+            if key {
+                window.reportsKey = true
+                NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
+            }
+        }
         func focus() async -> KeyboardFocus {
             // Focus moves on the main queue's next turns; let them run.
             try? await Task.sleep(for: .milliseconds(300))
