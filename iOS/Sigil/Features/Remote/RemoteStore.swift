@@ -31,6 +31,8 @@ final class RemoteStore {
     fileprivate(set) var prompt: RemotePrompt?
     /// When the tabs on screen were last heard from the Mac; nil once live.
     private(set) var cachedAt: Date?
+    /// At launch, the screen waits for a cache on disk instead of showing an empty Mac.
+    private(set) var awaitingCache = false
     var errorMessage: String?
     var rawMode = false
     var drafts: [String: String] = [:]
@@ -75,7 +77,10 @@ final class RemoteStore {
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     /// Lets a cache read land only if nothing replaced the screen meanwhile.
-    @ObservationIgnored private var restoreGate = RestoreGate()
+    @ObservationIgnored private var restoreGate = RestoreGate() {
+        // Set only on a change: live state invalidates the gate many times a second.
+        didSet { if awaitingCache != restoreGate.isAwaiting { awaitingCache = restoreGate.isAwaiting } }
+    }
     @ObservationIgnored private var searchToken = 0
     @ObservationIgnored private var chatQuery = ""
     @ObservationIgnored private var lastChunkAt = Date.distantPast
@@ -95,18 +100,18 @@ final class RemoteStore {
         } else {
             let list = CredentialStore.loadList()
             macs = list.macs
-            if let saved = list.selected { activate(saved) }
+            if let saved = list.selected { activate(saved, launching: true) }
         }
     }
 
     /// Shows one Mac: its cached screen first, then its live connection.
-    private func activate(_ saved: PairingCredential) {
+    private func activate(_ saved: PairingCredential, launching: Bool = false) {
         activeMacID = saved.id
         hasPairing = true
         credential = saved
         macAddress = saved.origin.host
         macName = saved.name
-        restoreCache(for: saved)
+        restoreCache(for: saved, launching: launching)
         connection.resume(saved)
     }
 
@@ -789,23 +794,54 @@ final class RemoteStore {
 
     // MARK: Cache
 
-    /// Read and decoded off the main actor. It lands only on the screen it was read
-    /// for: the same Mac, before anything live or another Mac replaced it.
-    private func restoreCache(for credential: PairingCredential) {
-        let ticket = restoreGate.begin(macID: credential.id)
-        Task { [weak self] in
-            guard
-                let cached = await ScreenCache.restore(for: credential, if: {
-                    self.map { $0.restoreGate.isCurrent(ticket, activeMacID: $0.activeMacID) } ?? false
-                }),
-                let self
-            else { return }
-            self.tabs = cached.tabs
-            self.selectedTabID = cached.selectedTabID
-            self.macName = cached.mac
-            self.screens = cached.screens
-            self.cachedAt = cached.savedAt
-            self.refreshOutput()
+    /// Read, decoded and styled off the main actor, starting at once. It lands only on
+    /// the screen it was read for: the same Mac, before anything live or another Mac
+    /// replaced it. At launch, with a cache on disk, the screen waits for it rather
+    /// than showing an empty Mac, but never longer than `RestoreGate.patience`.
+    private func restoreCache(for credential: PairingCredential, launching: Bool) {
+        let ticket = restoreGate.begin(
+            macID: credential.id, awaited: launching && ScreenCache.hasCache(for: credential))
+        if awaitingCache {
+            Task { [weak self] in
+                try? await Task.sleep(for: RestoreGate.patience)
+                self?.restoreGate.finish(ticket)
+            }
+        }
+        outputGeneration += 1
+        let generation = outputGeneration
+        let raw = rawMode
+        let worker = worker
+        ScreenCache.read(for: credential) { [weak self] cached in
+            guard let cached else {
+                Task { @MainActor [weak self] in self?.landCache(nil, styled: nil, ticket: ticket) }
+                return
+            }
+            let snapshot = OutputSnapshot(
+                screen: cached.selectedTabID.flatMap { cached.screens[$0] }, history: nil, raw: raw)
+            worker.submit(snapshot, generation: generation) { [weak self] styled in
+                Task { @MainActor [weak self] in
+                    self?.landCache(cached, styled: styled.map { ($0, snapshot, generation) }, ticket: ticket)
+                }
+            }
+        }
+    }
+
+    /// Tabs and output in one turn. Output styled for a mode or a generation that is
+    /// no longer on screen is built again here.
+    private func landCache(
+        _ cached: CachedScreen?, styled: (StyledText, OutputSnapshot, Int)?, ticket: RestoreGate.Ticket
+    ) {
+        defer { restoreGate.finish(ticket) }
+        guard let cached, restoreGate.isCurrent(ticket, activeMacID: activeMacID) else { return }
+        tabs = cached.tabs
+        selectedTabID = cached.selectedTabID
+        macName = cached.mac
+        screens = cached.screens
+        cachedAt = cached.savedAt
+        if let (next, snapshot, generation) = styled, snapshot.raw == rawMode, generation > shownGeneration {
+            show(next, from: snapshot, generation: generation)
+        } else {
+            refreshOutput()
         }
     }
 

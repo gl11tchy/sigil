@@ -14,6 +14,10 @@ enum ScreenCacheTests {
         ("cache: only the newest restore of the Mac on screen is current", onlyTheNewestRestoreIsCurrent),
         ("cache: live state with no tabs keeps a late restore off screen", liveEmptyStateBeatsALateRestore),
         ("cache: queued work holds the app until the last change is written", queuedWorkHoldsTheApp),
+        ("cache: launch waits only for a cache on disk", launchWaitsOnlyForACacheOnDisk),
+        ("cache: the read starts at once, off the main actor", readStartsAtOnce),
+        ("cache: the wait ends when the restore lands, finds nothing or goes stale", waitEnds),
+        ("cache: the wait is bounded while the read is held", waitIsBounded),
     ]
 
     /// Holds the writer's queue once everything queued before it has run.
@@ -285,13 +289,14 @@ enum ScreenCacheTests {
         writer.save(snapshot("previous"), for: previous)
         shown.gate.invalidate()
         shown.activeMacID = a.id
-        let ticket = shown.gate.begin(macID: a.id)
+        let ticket = shown.gate.begin(macID: a.id, awaited: true)
         let late = Task { @MainActor in
             await writer.restore(for: a) { shown.gate.isCurrent(ticket, activeMacID: shown.activeMacID) }
         }
         await Task.yield()
         // A's watch reply lands first, with no tabs and nothing selected.
         shown.gate.invalidate()
+        try Expect.true(!shown.gate.isAwaiting, "live state ends the wait at once")
         held.release()
         let dropped = await late.value
         try Expect.equal(dropped, nil, "a late restore never replaces live state, even an empty one")
@@ -341,5 +346,112 @@ enum ScreenCacheTests {
         try await waitForRelease(writer)
         try Expect.true(!writer.holdingApp, "let go once the last save is written")
         try Expect.equal(ScreenCache.read(file), snapshot("c"), "the last save is on disk")
+    }
+
+    /// A cache on disk or waiting to be written makes the launch wait; with none, the
+    /// screen shows the empty Mac at once, as before.
+    static func launchWaitsOnlyForACacheOnDisk() async throws {
+        let (writer, folder) = try makeWriter()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let mac = mac()
+        let file = folder.appendingPathComponent(ScreenCache.fileName(for: mac))
+        try Expect.true(!writer.hasCache(for: mac), "no cache on a first run")
+        var gate = RestoreGate()
+        _ = gate.begin(macID: mac.id, awaited: writer.hasCache(for: mac))
+        try Expect.true(!gate.isAwaiting, "with no cache the screen does not wait")
+
+        let held = Gate(on: writer.queue)
+        writer.save(snapshot("a"), for: mac)
+        try Expect.true(writer.hasCache(for: mac), "a waiting save counts")
+        writer.delete(for: mac)
+        try Expect.true(!writer.hasCache(for: mac), "a waiting delete does not")
+        writer.save(snapshot("b"), for: mac)
+        held.release()
+        _ = await load(writer, mac)
+        try Expect.true(writer.hasCache(for: mac), "a written cache counts")
+
+        // A corrupt file still makes the launch wait; its read finds nothing and ends it.
+        try Data("not json".utf8).write(to: file)
+        try Expect.true(writer.hasCache(for: mac), "a file on disk counts, whatever is in it")
+        let ticket = gate.begin(macID: mac.id, awaited: writer.hasCache(for: mac))
+        try Expect.true(gate.isAwaiting, "the launch waits for it")
+        let found = await load(writer, mac)
+        try Expect.equal(found, nil, "the corrupt cache is ignored")
+        gate.finish(ticket)
+        try Expect.true(!gate.isAwaiting, "a read that finds nothing ends the wait")
+    }
+
+    /// The launch read must not wait for a main-actor turn: those come late while the
+    /// first screen is built.
+    static func readStartsAtOnce() throws {
+        let (writer, folder) = try makeWriter()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let mac = mac()
+        writer.save(snapshot("a"), for: mac)
+        let done = DispatchSemaphore(value: 0)
+        final class Result: @unchecked Sendable { var cached: CachedScreen?; var onMain = true }
+        let result = Result()
+        writer.read(for: mac) { cached in
+            result.cached = cached
+            result.onMain = Thread.isMainThread
+            done.signal()
+        }
+        // The main actor stays blocked here; the read finishes all the same.
+        try Expect.true(done.wait(timeout: .now() + 2) == .success, "the read finishes with the main actor busy")
+        try Expect.equal(result.cached, snapshot("a"), "the read sees the queued save")
+        try Expect.true(!result.onMain, "the result comes back off the main thread")
+    }
+
+    /// The store's steps: a launch that waits, then what ends the wait.
+    static func waitEnds() throws {
+        var gate = RestoreGate()
+        let launch = gate.begin(macID: "A", awaited: true)
+        try Expect.true(gate.isAwaiting, "a launch with a cache on disk waits")
+        gate.finish(launch)
+        try Expect.true(!gate.isAwaiting, "the restore landing ends the wait")
+        try Expect.true(gate.isCurrent(launch, activeMacID: "A"), "ending the wait does not make the restore stale")
+
+        // Live state comes first: the wait ends and the restore is stale.
+        let second = gate.begin(macID: "A", awaited: true)
+        gate.invalidate()
+        try Expect.true(!gate.isAwaiting, "live state ends the wait")
+        try Expect.true(!gate.isCurrent(second, activeMacID: "A"), "and the late restore stays off screen")
+
+        // A switch to another Mac never waits, and an old restore cannot end a newer wait.
+        let third = gate.begin(macID: "A", awaited: true)
+        _ = gate.begin(macID: "B")
+        try Expect.true(!gate.isAwaiting, "switching Macs ends the wait and does not start one")
+        let fourth = gate.begin(macID: "A", awaited: true)
+        gate.finish(third)
+        try Expect.true(gate.isAwaiting, "a stale restore does not end the newer wait")
+        gate.finish(fourth)
+        try Expect.true(!gate.isAwaiting, "the newer restore does")
+    }
+
+    /// A read stuck behind a slow disk ends the wait after `RestoreGate.patience`, as
+    /// the store does; the cache still lands when it comes, if nothing live came first.
+    static func waitIsBounded() async throws {
+        let (writer, folder) = try makeWriter()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let mac = mac()
+        writer.save(snapshot("a"), for: mac)
+        _ = await load(writer, mac)
+        try Expect.true(RestoreGate.patience <= .seconds(1), "the wait is short")
+
+        let shown = Shown()
+        shown.activeMacID = mac.id
+        let held = Gate(on: writer.queue)
+        let ticket = shown.gate.begin(macID: mac.id, awaited: writer.hasCache(for: mac))
+        let late = Task { @MainActor in
+            await writer.restore(for: mac) { shown.gate.isCurrent(ticket, activeMacID: shown.activeMacID) }
+        }
+        let started = ContinuousClock.now
+        try await Task.sleep(for: RestoreGate.patience)
+        shown.gate.finish(ticket)
+        try Expect.true(!shown.gate.isAwaiting, "the wait ends with the read still held")
+        try Expect.true(ContinuousClock.now - started < RestoreGate.patience + .milliseconds(500), "on time")
+        held.release()
+        let landed = await late.value
+        try Expect.equal(landed, snapshot("a"), "the cache lands when the read finishes")
     }
 }

@@ -14,7 +14,7 @@ final class ScreenCacheWriter: @unchecked Sendable {
         case delete
     }
 
-    /// Asked on the queue, since it may create the folder.
+    /// Asked on the queue, since it may create the folder; `hasCache` asks it once at launch.
     private let directory: @Sendable () -> URL?
     /// Not private, so tests can hold it.
     let queue = DispatchQueue(label: "sigil.screen-cache", qos: .utility)
@@ -43,18 +43,35 @@ final class ScreenCacheWriter: @unchecked Sendable {
         submit(.delete, to: ScreenCache.fileName(for: credential))
     }
 
-    /// Reads behind every change already queued, so it sees the last save. The cache
-    /// comes back only if `isCurrent` still holds once it is read.
+    /// Starts reading at once, behind every change already queued, so it sees the
+    /// last save. `done` gets the cache, or nil, on the queue.
+    func read(for credential: PairingCredential, done: @escaping @Sendable (CachedScreen?) -> Void) {
+        let name = ScreenCache.fileName(for: credential)
+        queue.async(qos: .userInitiated, flags: .enforceQoS) {
+            done(self.directory().flatMap { ScreenCache.read($0.appendingPathComponent(name)) })
+        }
+    }
+
+    /// Reads as `read` does. The cache comes back only if `isCurrent` still holds once it is read.
     @MainActor
     func restore(for credential: PairingCredential, if isCurrent: () -> Bool) async -> CachedScreen? {
-        let name = ScreenCache.fileName(for: credential)
-        let cached: CachedScreen? = await withCheckedContinuation { continuation in
-            queue.async(qos: .userInitiated, flags: .enforceQoS) {
-                let url = self.directory()?.appendingPathComponent(name)
-                continuation.resume(returning: url.flatMap(ScreenCache.read))
-            }
+        let cached = await withCheckedContinuation { continuation in
+            read(for: credential) { continuation.resume(returning: $0) }
         }
         return isCurrent() ? cached : nil
+    }
+
+    /// True when a cache for the Mac is on disk or waiting to be written there. Cheap
+    /// enough to ask at launch: a look at the waiting changes and one file check.
+    func hasCache(for credential: PairingCredential) -> Bool {
+        let name = ScreenCache.fileName(for: credential)
+        switch lock.withLock({ pending[name] }) {
+        case .save?: return true
+        case .delete?: return false
+        case nil:
+            guard let url = directory()?.appendingPathComponent(name) else { return false }
+            return FileManager.default.fileExists(atPath: url.path)
+        }
     }
 
     @MainActor
