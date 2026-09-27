@@ -532,8 +532,8 @@ function showProviderProblem() {
     if (button.dataset.more !== 'true') button.disabled = Boolean(problem);
   }
 }
-// Find keeps every match as text offsets and highlights only the matches near the visible
-// output. A mark per match made each keystroke rebuild and lay out the whole history.
+// Find keeps every match as text offsets and highlights only the matches in view. A mark per
+// match made each keystroke rebuild and lay out the whole history.
 const findHighlight = globalThis.CSS?.highlights && typeof Highlight === 'function'
   ? { match: new Highlight(), current: new Highlight() } : null;
 if (findHighlight) {
@@ -541,8 +541,15 @@ if (findHighlight) {
   CSS.highlights.set('find-match', findHighlight.match);
   CSS.highlights.set('find-current', findHighlight.current);
 }
-// The matches in [findShown[0], findShown[1]) are highlighted; without the API, they are marks.
-let findShown = null, findMarks = [], findMarked = -1, findFrame = 0;
+// The output is painted as text nodes of at most findChunk characters: in WebKit, a range's
+// paint and box cost grow with its offset inside its text node. WebKit also repaints every
+// highlighted range for each line it paints, so at most findCap matches are highlighted.
+const findChunk = 4096, findCap = 500;
+// findPieces: the painted text nodes and their offsets in findText, which starts a chunk at each
+// of findStarts. findShown: the highlighted match indices, chosen at the scroll offsets findBand.
+// Without the Highlight API, findMarks maps each shown index to its mark.
+let findText = null, findStarts = [], findPieces = [], findShown = null, findBand = null;
+let findMarks = new Map(), findMarked = -1, findFrame = 0;
 function paintOutput() {
   const output = displayedOutput || '';
   const query = $('find-bar').hidden ? '' : $('find-query').value;
@@ -555,9 +562,9 @@ function paintOutput() {
     findIndex = Math.min(findIndex, Math.max(0, findMatches.length - 1));
   }
   // A new query alone keeps the laid-out text; only new text or old marks replace it.
-  const text = terminal.firstChild;
-  if (!text || text !== terminal.lastChild || text.data !== output) terminal.textContent = output;
-  findShown = null; findMarks = []; findMarked = -1;
+  if (findText !== output || findMarks.size || terminal.firstChild !== (findPieces[0]?.node ?? null)
+    || terminal.lastChild !== (findPieces.at(-1)?.node ?? null)) paintText(output);
+  findShown = null; findMarked = -1;
   findHighlight?.match.clear();
   updateFind(false);
   if (findMatches.length) showMatchesSoon();
@@ -569,7 +576,7 @@ function updateFind(scroll = true) {
     findHighlight.current.clear();
     if (current >= 0) findHighlight.current.add(findRange(current));
   } else {
-    const before = shownMark(findMarked), after = shownMark(current);
+    const before = findMarks.get(findMarked), after = findMarks.get(current);
     if (before) before.dataset.current = 'false';
     if (after) after.dataset.current = 'true';
   }
@@ -578,21 +585,64 @@ function updateFind(scroll = true) {
   $('find-next').disabled = $('find-previous').disabled = !findMatches.length;
   if (scroll && current >= 0) scrollToMatch(current);
 }
-function shownMark(index) {
-  return findShown && findMarks[index - findShown[0]];
+// Chunks end after a newline where one is near. A longer line is split after a space or between
+// two ASCII characters, which never join into one glyph, so the text lays out as one node would.
+function chunkStarts(output) {
+  const starts = [0], ascii = at => output.charCodeAt(at) >= 32 && output.charCodeAt(at) < 127;
+  let start = 0, line = output.indexOf('\n');
+  while (output.length - start > findChunk) {
+    let end = start;
+    while (line >= 0 && line < start + findChunk) { end = line + 1; line = output.indexOf('\n', end); }
+    for (let at = start + findChunk; end === start && at > start; at--) if (output[at - 1] === ' ' && ascii(at)) end = at;
+    for (let at = start + findChunk; end === start && at > start; at--) if (ascii(at - 1) && ascii(at)) end = at;
+    for (let at = start + findChunk + 1; end === start && at < output.length; at++) if (output[at - 1] === '\n' || (ascii(at - 1) && ascii(at))) end = at;
+    if (end === start || end >= output.length) break;
+    starts.push(end); start = end;
+  }
+  return starts;
 }
-// A range over one match in the painted text: its mark, or the text before or after the marks.
+// Paint the output in chunks, with a mark around each match in `marked`, an ascending index list.
+function paintText(output, marked = []) {
+  if (findText !== output) { findText = output; findStarts = chunkStarts(output); }
+  const fragment = document.createDocumentFragment();
+  let chunk = 1, cursor = 0;
+  const text = (start, end) => {
+    while (start < end) {
+      while (findStarts[chunk] <= start) chunk++;
+      const stop = Math.min(end, findStarts[chunk] ?? end), node = document.createTextNode(output.slice(start, stop));
+      fragment.append(node); findPieces.push({ node, start });
+      start = stop;
+    }
+  };
+  findPieces = []; findMarks = new Map();
+  for (const index of marked) {
+    const { start, end } = findMatches[index], mark = document.createElement('mark');
+    text(cursor, start);
+    mark.textContent = output.slice(start, end);
+    mark.dataset.current = String(index === findIndex);
+    fragment.append(mark); findPieces.push({ node: mark.firstChild, start }); findMarks.set(index, mark);
+    cursor = end;
+  }
+  text(cursor, output.length);
+  $('terminal').replaceChildren(fragment);
+}
+// A range over one match in the painted text nodes.
 function findRange(index) {
-  const terminal = $('terminal'), range = document.createRange?.();
-  if (!range || !terminal.firstChild) return null;
-  const mark = shownMark(index);
-  if (mark) { range.selectNodeContents(mark); return range; }
-  const after = findMarks.length > 0 && index >= findShown[1];
-  const base = after ? findMatches[findShown[1] - 1].end : 0;
-  const node = after ? terminal.lastChild : terminal.firstChild;
-  range.setStart(node, findMatches[index].start - base);
-  range.setEnd(node, findMatches[index].end - base);
+  const range = document.createRange?.();
+  if (!range || !findPieces.length) return null;
+  range.setStart(...findPoint(findMatches[index].start, false));
+  range.setEnd(...findPoint(findMatches[index].end, true));
   return range;
+}
+// The text node and offset at a place in the painted text: in the last piece that starts at or
+// before it, or before it for the end of a range.
+function findPoint(offset, end) {
+  let low = 0, high = findPieces.length - 1;
+  while (low < high) {
+    const middle = (low + high + 1) >> 1, start = findPieces[middle].start;
+    if (end ? start < offset : start <= offset) low = middle; else high = middle - 1;
+  }
+  return [findPieces[low].node, offset - findPieces[low].start];
 }
 // Like scrollIntoView({ block: 'center' }) on the match, inside the terminal only.
 function scrollToMatch(index) {
@@ -607,48 +657,65 @@ function scrollToMatch(index) {
 function showMatchesSoon() {
   if (!findFrame) findFrame = globalThis.requestAnimationFrame?.(showVisibleMatches) ?? 0;
 }
-// Highlight the matches from one screen above the visible output to one screen below it.
+// Highlight the matches in view and a quarter screen around it, so a smaller scroll keeps them.
 function showVisibleMatches() {
   findFrame = 0;
-  const terminal = $('terminal'), height = terminal.clientHeight;
+  const terminal = $('terminal'), height = terminal.clientHeight, width = terminal.clientWidth;
   if (!findMatches.length || !height) return;
-  const top = terminal.getBoundingClientRect().top + terminal.clientTop;
-  // Matches are in document order, so their boxes run top to bottom.
-  const first = test => {
-    let low = 0, high = findMatches.length;
+  const scroll = [terminal.scrollTop, terminal.scrollLeft];
+  if (findShown && Math.abs(scroll[0] - findBand[0]) <= height / 4 && Math.abs(scroll[1] - findBand[1]) <= width / 4) return;
+  const frame = terminal.getBoundingClientRect();
+  const top = frame.top + terminal.clientTop - height / 4, bottom = top + 1.5 * height;
+  const left = frame.left + terminal.clientLeft - width / 4, right = left + 1.5 * width;
+  // Matches are in document order, so their boxes run top to bottom, and left to right on a line.
+  const first = (low, high, test) => {
     while (low < high) {
       const middle = (low + high) >> 1;
       if (test(findRange(middle).getBoundingClientRect())) high = middle; else low = middle + 1;
     }
     return low;
   };
-  const from = y => first(box => box.bottom >= y), to = y => first(box => box.top > y);
-  const visible = [from(top), to(top + height)];
-  if (findShown && visible[0] >= findShown[0] && visible[1] <= findShown[1]) return;
-  const shown = [from(top - height), to(top + 2 * height)];
+  const from = first(0, findMatches.length, box => box.bottom >= top);
+  const to = first(from, findMatches.length, box => box.top > bottom);
+  // Raw output does not wrap, so a line wider than the view also needs the columns in view.
+  const wide = terminal.scrollWidth > width;
+  let shown = [];
+  for (let index = from; index < to;) {
+    let next = to;
+    if (wide) {
+      const end = findText.indexOf('\n', findMatches[index].start);
+      for (let low = index + 1; end >= 0 && low < next;) {
+        const middle = (low + next) >> 1;
+        if (findMatches[middle].start > end) next = middle; else low = middle + 1;
+      }
+      const low = first(index, next, box => box.right >= left);
+      for (let at = low, high = first(low, next, box => box.left > right); at < high; at++) shown.push(at);
+    } else for (let at = index; at < next; at++) shown.push(at);
+    index = next;
+  }
+  if (shown.length > findCap) {
+    // Keep the findCap matches nearest the middle of the view.
+    const middle = first(from, to, box => box.bottom >= frame.top + terminal.clientTop + height / 2);
+    const at = shown.findIndex(index => index >= middle);
+    const skip = Math.max(0, Math.min((at < 0 ? shown.length : at) - findCap / 2, shown.length - findCap));
+    shown = shown.slice(skip, skip + findCap);
+  }
   if (findHighlight) {
     findHighlight.match.clear();
-    for (let index = shown[0]; index < shown[1]; index++) findHighlight.match.add(findRange(index));
-    findShown = shown;
-    return;
+    for (const index of shown) findHighlight.match.add(findRange(index));
+  } else {
+    // Replacing the text drops a selection the reader is making; the next scroll tries again.
+    const selection = globalThis.getSelection?.();
+    if (selection && !selection.isCollapsed && terminal.contains(selection.anchorNode)) return;
+    paintText(findText, shown);
+    findMarked = findIndex;
   }
-  // Replacing the text drops a selection the reader is making; the next scroll tries again.
-  const selection = globalThis.getSelection?.();
-  if (selection && !selection.isCollapsed && terminal.contains(selection.anchorNode)) return;
-  const output = displayedOutput || '', fragment = document.createDocumentFragment(), marks = [];
-  let cursor = 0;
-  for (let index = shown[0]; index < shown[1]; index++) {
-    const { start, end } = findMatches[index];
-    fragment.append(document.createTextNode(output.slice(cursor, start)));
-    const mark = document.createElement('mark');
-    mark.textContent = output.slice(start, end);
-    mark.dataset.current = String(index === findIndex);
-    fragment.append(mark); marks.push(mark);
-    cursor = end;
-  }
-  fragment.append(document.createTextNode(output.slice(cursor)));
-  terminal.replaceChildren(fragment);
-  findShown = shown; findMarks = marks; findMarked = findIndex;
+  findShown = shown; findBand = scroll;
+}
+// A new width or font wraps the text again under the same scroll offset.
+function refindVisible() {
+  findShown = null;
+  if (findMatches.length) showMatchesSoon();
 }
 function moveFind(delta) {
   if (!findMatches.length) return;
@@ -677,6 +744,10 @@ $('find-toggle').onclick = () => {
 };
 $('find-query').oninput = () => { findIndex = 0; paintOutput(); updateFind(); };
 $('terminal').addEventListener('scroll', () => { if (findMatches.length) showMatchesSoon(); });
+// The observer also keeps refindVisible alive: WebKit drops a listener on document.fonts once
+// nothing else holds its function.
+if (globalThis.ResizeObserver) new ResizeObserver(refindVisible).observe($('terminal'));
+document.fonts?.addEventListener?.('loadingdone', refindVisible);
 $('find-bar').onsubmit = event => { event.preventDefault(); moveFind(1); };
 $('find-next').onclick = () => moveFind(1);
 $('find-previous').onclick = () => moveFind(-1);
