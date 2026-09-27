@@ -1,3 +1,6 @@
+#if canImport(Sigil)
+@testable import Sigil
+#endif
 import Foundation
 
 /// IOS-1: the output is formatted and styled on one ordered worker that owns its formatter.

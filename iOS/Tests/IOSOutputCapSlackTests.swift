@@ -1,3 +1,6 @@
+#if canImport(Sigil)
+@testable import Sigil
+#endif
 import Foundation
 
 /// IOS-1 at `ScreenModel.cap`: the oldest rows go a slack's worth at a time, so

@@ -1,3 +1,6 @@
+#if canImport(Sigil)
+@testable import Sigil
+#endif
 import Foundation
 
 enum ScreenTests {

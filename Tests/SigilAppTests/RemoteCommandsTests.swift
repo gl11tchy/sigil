@@ -31,7 +31,8 @@ struct RemoteCommandsTests {
         let settings = AppSettings(defaults: defaults)
         settings.executablePath = executable.path
         settings.defaultDirectory = root.path
-        let model = AppModel(settings: settings, presentError: { _ in })
+        let model = AppModel(
+            settings: settings, presentError: { _ in }, providerInstallations: fixtureProviderInstallations(executable))
         defer { model.closeAllTabsAndWait() }
         let tab = try #require(model.newTab(in: root))
         for _ in 0..<100 {
@@ -107,7 +108,8 @@ struct RemoteCommandsTests {
         let settings = AppSettings(defaults: defaults)
         settings.executablePath = executable.path
         settings.defaultDirectory = root.path
-        let model = AppModel(settings: settings, presentError: { _ in })
+        let model = AppModel(
+            settings: settings, presentError: { _ in }, providerInstallations: fixtureProviderInstallations(executable))
         defer { model.closeAllTabsAndWait() }
         let tab = try #require(model.newTab(in: link))
         tab.terminateAndWait()
@@ -140,7 +142,8 @@ struct RemoteCommandsTests {
         let settings = AppSettings(defaults: defaults)
         settings.executablePath = executable.path
         settings.defaultDirectory = root.path
-        let model = AppModel(settings: settings, presentError: { _ in })
+        let model = AppModel(
+            settings: settings, presentError: { _ in }, providerInstallations: fixtureProviderInstallations(executable))
         defer { model.closeAllTabsAndWait() }
         let tab = try #require(model.newTab(in: root))
         for _ in 0..<100 {
@@ -692,7 +695,7 @@ final class PhoneCommandFixture {
         self.alerts = alerts
         model = AppModel(
             settings: settings, store: store, presentError: { _ in alerts.count += 1 },
-            pairingStore: InMemoryRemotePairingStore())
+            pairingStore: InMemoryRemotePairingStore(), providerInstallations: fixtureProviderInstallations(executable))
     }
 
     func cleanup() {
@@ -777,8 +780,18 @@ struct RemoteSessionOpsTests {
         defer { fixture.cleanup() }
         let folder = try fixture.directory("ops-folder")
         fixture.settings.defaultProvider = .claudeCode
-        setenv("SHELL", "/bin/sh", 1)
+        let shell = fixture.root.appendingPathComponent("zsh")
+        try "#!/bin/sh\nprintf 'ISOLATED_PROVIDER_READY\\n'\nwhile IFS= read -r line; do :; done\n"
+            .write(to: shell, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: shell.path)
+        let oldShell = ProcessInfo.processInfo.environment["SHELL"]
+        setenv("SHELL", shell.path, 1)
+        defer { if let oldShell { setenv("SHELL", oldShell, 1) } else { unsetenv("SHELL") } }
         let tab = try #require(fixture.model.newTab(in: folder, provider: .claudeCode))
+        for _ in 0..<100 where !tab.controller.remoteSnapshot().contains("ISOLATED_PROVIDER_READY") {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(tab.controller.remoteSnapshot().contains("ISOLATED_PROVIDER_READY"))
         let id = tab.id.uuidString
 
         #expect(await fixture.command("rename", tabID: id, name: "  Phone name  ").ok)
@@ -848,7 +861,7 @@ struct RemoteSessionOpsTests {
         #expect(await !fixture.command("rows", tabID: tab.id.uuidString, index: 0).ok)
     }
 
-    @Test @MainActor func answerTypesOnlyWhatTheQuestionOnScreenAllows() async throws {
+    @Test @MainActor func unverifiedTerminalHintsRejectStructuredAnswersButKeepRawControls() async throws {
         let fixture = try PhoneCommandFixture()
         defer { fixture.cleanup() }
         let folder = try fixture.directory("prompt-folder")
@@ -870,7 +883,9 @@ struct RemoteSessionOpsTests {
         let prompt = try #require(state.prompt)
         #expect(prompt.question == "Do you want to proceed?")
         #expect(prompt.choices.map(\.key) == ["1", "2", "3"])
-        #expect(prompt.yes == "1" && prompt.no == "3")
+        #expect(prompt.yes == "1" && prompt.no == nil)
+        #expect(prompt.verified == false)
+        #expect(prompt.sessionID?.contains(tab.id.uuidString) == true)
 
         let id = tab.id.uuidString
         #expect(await !fixture.command("answer", text: "7", tabID: id, name: prompt.id).ok)
@@ -878,7 +893,13 @@ struct RemoteSessionOpsTests {
         // A tap meant for another question, or for none, types nothing.
         #expect(await !fixture.command("answer", text: "2", tabID: id, name: "stale").ok)
         #expect(await !fixture.command("answer", text: "2", tabID: id).ok)
-        #expect(await fixture.command("answer", text: "2", tabID: id, name: prompt.id).ok)
+        #expect(await !fixture.command("answer", text: "2", tabID: id, name: prompt.id).ok)
+        #expect(await !fixture.command("answer", text: "2", tabID: id, name: prompt.id).ok)
+        #expect(await !fixture.command("answer", text: "enter", tabID: id, name: prompt.id).ok)
+        #expect(!FileManager.default.fileExists(atPath: received.path))
+        // A consciously chosen ordinary terminal action remains available.
+        #expect(await fixture.command("input", text: "2", tabID: id).ok)
+        #expect(RemoteCommands.prompt(for: tab) == nil)
         _ = await fixture.command("key", text: "enter", tabID: id)
         for _ in 0..<100 {
             if (try? String(contentsOf: received, encoding: .utf8)) == "2" { break }
@@ -886,6 +907,61 @@ struct RemoteSessionOpsTests {
         }
         #expect(try String(contentsOf: received, encoding: .utf8) == "2")
         #expect(fixture.alerts.count == 0)
+    }
+
+    @Test @MainActor func repeatedAndReplacedTerminalMenusInvalidateDelayedAnswers() async throws {
+        let fixture = try PhoneCommandFixture()
+        defer { fixture.cleanup() }
+        let folder = try fixture.directory("interaction-folder")
+        let received = fixture.root.appendingPathComponent("received")
+        let script = """
+            #!/bin/sh
+            stty -echo
+            show() { printf '\\033[2J\\033[H%s\\nProceed?\\n1. Yes\\n2. No\\n' "$1"; }
+            show 'git status'
+            while IFS= read -r line; do
+                case "$line" in
+                    repeat) show 'git status';;
+                    replace) show 'rm -rf build';;
+                    *) printf '%s' "$line" >> '\(received.path)';;
+                esac
+            done
+            """
+        try Data(script.utf8).write(to: fixture.executable)
+        let tab = try #require(fixture.model.newTab(in: folder))
+        for _ in 0..<200 {
+            if tab.controller.remoteSnapshot().contains("2. No") { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let first = try #require(RemoteCommands.prompt(for: tab))
+        #expect(RemoteCommands.prompt(for: tab)?.id == first.id)
+        let revision = tab.controller.remoteInteractionRevision
+        tab.controller.send(text: "repeat\r")
+        #expect(RemoteCommands.prompt(for: tab) == nil)
+        for _ in 0..<200 {
+            if tab.controller.remoteInteractionRevision > revision + 1,
+                !tab.controller.remoteInteractionAfterInput
+            {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let repeated = try #require(RemoteCommands.prompt(for: tab))
+        #expect(repeated.question == first.question)
+        #expect(repeated.id != first.id)
+        #expect(await !fixture.command("answer", text: "1", tabID: tab.id.uuidString, name: first.id).ok)
+        tab.controller.send(text: "replace\r")
+        for _ in 0..<200 {
+            if tab.controller.remoteSnapshot().contains("rm -rf build") { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let replaced = try #require(RemoteCommands.prompt(for: tab))
+        #expect(replaced.operation?.contains("rm -rf build") == true)
+        #expect(replaced.id != repeated.id)
+        #expect(await !fixture.command("answer", text: "1", tabID: tab.id.uuidString, name: repeated.id).ok)
+        let other = try #require(fixture.model.newTab(in: folder))
+        #expect(await !fixture.command("answer", text: "1", tabID: other.id.uuidString, name: replaced.id).ok)
+        #expect(!FileManager.default.fileExists(atPath: received.path))
     }
 
     @Test @MainActor func projectsSayWhetherAWorktreeCanStartThere() async throws {

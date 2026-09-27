@@ -1,67 +1,61 @@
 #!/bin/bash
-# Build NativeTests/ with the output view for the iOS simulator and run it, so
-# the output checks use UIKit and TextKit 2 themselves. The run gets a simulator
-# of its own, deleted afterwards; set SIGIL_NATIVE_TEST_DEVICE to a simulator's
-# UDID to use that one instead. Exits non-zero on any failing test.
+# Build the shipping app and both extensions, then test the app on a fresh
+# simulator through the real loopback relay. No signing or provider credentials.
 set -euo pipefail
-
 cd "$(dirname "$0")/.."
 
-WORK="$(mktemp -d)"
-APP="$WORK/SigilNativeTests.app"
-BUNDLE=dev.sigil.native-tests
-DEVICE="${SIGIL_NATIVE_TEST_DEVICE:-}"
+if [ -z "${SIGIL_RELAY_PORT:-}" ]; then
+  exec scripts/relay-e2e.sh scripts/native-test.sh
+fi
+
+ARTIFACTS="${SIGIL_NATIVE_ARTIFACTS:-$PWD/../.build/native-verification}"
+mkdir -p "$ARTIFACTS"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/sigil-native.XXXXXX")"
+SIMULATOR=""
 cleanup() {
-  if [ -z "${SIGIL_NATIVE_TEST_DEVICE:-}" ] && [ -n "$DEVICE" ]; then
-    xcrun simctl shutdown "$DEVICE" >/dev/null 2>&1 || true
-    xcrun simctl delete "$DEVICE" >/dev/null 2>&1 || true
+  if [ -n "$SIMULATOR" ]; then
+    xcrun simctl shutdown "$SIMULATOR" >/dev/null 2>&1 || true
+    xcrun simctl delete "$SIMULATOR" >/dev/null 2>&1 || true
   fi
   rm -rf "$WORK"
 }
 trap cleanup EXIT
 
-mkdir -p "$APP"
-SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
-FILES=$(find Shared Sigil/Core/Networking Sigil/Core/Utilities NativeTests -name '*.swift' | sort)
+# Discover the installed runtime instead of assuming a particular phone name.
+xcrun simctl list -j > "$WORK/simulators.json"
+python3 - "$WORK/simulators.json" "$WORK/device" "$WORK/runtime" <<'PY'
+import json, sys
+from pathlib import Path
+data = json.loads(Path(sys.argv[1]).read_text())
+runtimes = [r for r in data['runtimes'] if r.get('isAvailable') and r['identifier'].startswith('com.apple.CoreSimulator.SimRuntime.iOS-') and int(r['version'].split('.')[0]) >= 26]
+if not runtimes:
+    raise SystemExit('Native verification requires Xcode 26 and an installed iOS 26+ simulator runtime.')
+runtime = max(runtimes, key=lambda r: tuple(map(int, r['version'].split('.'))))
+version = tuple(map(int, runtime['version'].split('.')))
+encoded = (version[0] << 16) | (version[1] << 8)
+devices = [d for d in data['devicetypes'] if d['name'].startswith('iPhone') and d.get('minRuntimeVersion', 0) <= encoded <= d.get('maxRuntimeVersion', 0xFFFFFFFF)]
+if not devices:
+    raise SystemExit('No compatible iPhone simulator device type is installed.')
+Path(sys.argv[2]).write_text(devices[-1]['identifier'])
+Path(sys.argv[3]).write_text(runtime['identifier'])
+PY
+SIMULATOR="$(xcrun simctl create "sigil-native-verify-$$" "$(cat "$WORK/device")" "$(cat "$WORK/runtime")")"
+xcrun simctl boot "$SIMULATOR"
+xcrun simctl bootstatus "$SIMULATOR" -b
 
-# shellcheck disable=SC2086
-xcrun swiftc \
-  -O \
-  -sdk "$SDK" \
-  -target arm64-apple-ios26.0-simulator \
-  -swift-version 5 \
-  -parse-as-library \
-  -o "$APP/SigilNativeTests" \
-  $FILES \
-  Sigil/Features/Session/OutputView.swift Sigil/Features/Shared/Theme.swift \
-  Tests/TestSupport.swift Tests/IOSOutputFixtures.swift Tests/IOSOutputEditTests.swift
+xcodebuild -project Sigil.xcodeproj -scheme Sigil -sdk iphonesimulator \
+  -destination "platform=iOS Simulator,id=$SIMULATOR" -derivedDataPath "$WORK/DerivedData" \
+  CODE_SIGNING_ALLOWED=NO SIGIL_RELAY_PORT="$SIGIL_RELAY_PORT" build-for-testing -quiet
 
-cp Sigil/Resources/readable-output.js Sigil/Resources/Fonts/*.ttf "$APP/"
-FONTS=""
-for font in "$APP"/*.ttf; do FONTS="$FONTS<string>$(basename "$font")</string>"; done
-cat > "$APP/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>CFBundleIdentifier</key><string>$BUNDLE</string>
-<key>CFBundleName</key><string>SigilNativeTests</string>
-<key>CFBundleExecutable</key><string>SigilNativeTests</string>
-<key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleVersion</key><string>1</string>
-<key>CFBundleShortVersionString</key><string>1</string>
-<key>MinimumOSVersion</key><string>26.0</string>
-<key>UIDeviceFamily</key><array><integer>1</integer></array>
-<key>UIAppFonts</key><array>$FONTS</array>
-<key>UILaunchScreen</key><dict/>
-<key>UIApplicationSceneManifest</key><dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
-</dict></plist>
-PLIST
-codesign --force --sign - "$APP" >/dev/null
+APP="$WORK/DerivedData/Build/Products/Debug-iphonesimulator/Sigil.app"
+for product in "$APP/Sigil" "$APP/PlugIns/SigilNotifications.appex/SigilNotifications" "$APP/PlugIns/SigilWidgets.appex/SigilWidgets"; do
+  test -f "$product" || { echo "Missing shipping product: $product" >&2; exit 1; }
+done
+RESULT="$ARTIFACTS/native-$(date +%Y%m%d-%H%M%S)-$$.xcresult"
+TEST_RUNNER_SIGIL_RELAY_PORT="$SIGIL_RELAY_PORT" xcodebuild -project Sigil.xcodeproj -scheme Sigil -sdk iphonesimulator \
+  -destination "platform=iOS Simulator,id=$SIMULATOR" -derivedDataPath "$WORK/DerivedData" \
+  -parallel-testing-enabled NO -test-timeouts-enabled YES -default-test-execution-time-allowance 120 \
+  -resultBundlePath "$RESULT" CODE_SIGNING_ALLOWED=NO SIGIL_RELAY_PORT="$SIGIL_RELAY_PORT" test-without-building -quiet
 
-if [ -z "$DEVICE" ]; then
-  DEVICE="$(xcrun simctl create "Sigil native tests $$" "${SIGIL_NATIVE_TEST_TYPE:-com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro}")"
-fi
-xcrun simctl bootstatus "$DEVICE" -b >/dev/null
-xcrun simctl install "$DEVICE" "$APP"
-xcrun simctl launch --console-pty --terminate-running-process "$DEVICE" "$BUNDLE" | tee "$WORK/output.txt"
-grep -q '^OK ' "$WORK/output.txt"
+echo "native: OK (Sigil.app, SigilNotifications.appex, SigilWidgets.appex; app-hosted simulator tests)"
+echo "Evidence: $RESULT"

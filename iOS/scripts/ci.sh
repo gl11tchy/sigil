@@ -19,6 +19,18 @@ stage() {
   fi
 }
 
+toolchain() {
+  local version
+  version="$(xcodebuild -version | sed -n '1s/^Xcode //p')"
+  if [[ ! "$version" =~ ^[0-9]+([.][0-9]+)*$ ]] || [ "${version%%.*}" -lt 26 ]; then
+    echo "Native verification requires Xcode 26+ with an iOS 26+ simulator runtime; selected Xcode is ${version:-unknown}." >&2
+    return 1
+  fi
+}
+
+stage "Xcode 26+ toolchain" toolchain
 stage "typecheck" scripts/typecheck.sh
 stage "test (with the real relay)" scripts/relay-e2e.sh
-stage "build" scripts/build.sh
+stage "native app, extensions, and simulator tests" scripts/native-test.sh
+
+stage "native TextKit output, Find, and cover tests" scripts/native-output-test.sh

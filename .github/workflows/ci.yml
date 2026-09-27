@@ -17,7 +17,7 @@ concurrency:
 jobs:
   verify:
     name: Build, test, and smoke check
-    # A fresh macOS 15 + Xcode 16.4 Tart VM per job on the owner's Mac
+    # Requires a fresh Tart VM with Xcode 26+ and an iOS 26+ runtime on the owner's Mac
     # (gl11tchy/gh-runner-broker mac/macos-supervisor.sh). Jobs wait while the Mac is off.
     runs-on: [self-hosted, sigil-vm]
     timeout-minutes: 45
@@ -36,8 +36,12 @@ jobs:
             Sidereal/package-lock.json
             Site/package-lock.json
 
-      - name: Show Swift toolchain
-        run: swift --version
+      - name: Show Xcode and Swift toolchain
+        id: toolchain
+        run: |
+          toolchain="$(xcodebuild -version && swift --version)"
+          printf '%s\n' "$toolchain"
+          printf 'cache-key=%s\n' "$(printf '%s\n' "$toolchain" | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
       - name: Restore Swift build cache
         uses: actions/cache@v4
@@ -45,9 +49,9 @@ jobs:
           path: |
             .build
             ~/Library/Caches/org.swift.swiftpm
-          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.resolved') }}-${{ hashFiles('Package.swift') }}
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ hashFiles('Package.resolved') }}-${{ hashFiles('Package.swift') }}
           restore-keys: |
-            swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.resolved') }}-
+            swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ hashFiles('Package.resolved') }}-
 
       - name: Install shellcheck
         env:
@@ -60,8 +64,16 @@ jobs:
       - name: Verify
         run: Scripts/verify.sh
 
-      - name: iPhone app logic and relay tests
-        run: iOS/scripts/relay-e2e.sh
+      - name: iPhone app, shipping extensions, and native relay tests
+        run: iOS/scripts/ci.sh
+
+      - name: Upload native verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iPhone-native-verification
+          path: .build/native-verification/*.xcresult
+          if-no-files-found: error
 
       - name: Build release bundle
         if: github.event_name != 'pull_request'

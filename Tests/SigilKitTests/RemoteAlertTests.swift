@@ -6,7 +6,7 @@ import Testing
 struct RemoteAlertTests {
     private func snap(_ status: String, question: String? = nil, title: String = "sigil") -> RemoteAlertPlanner.Snapshot
     {
-        RemoteAlertPlanner.Snapshot(status: status, since: 100, question: question, title: title)
+        RemoteAlertPlanner.Snapshot(status: status, since: 100, question: question, title: title, verified: true)
     }
 
     @Test func transitionsTable() {
@@ -43,6 +43,30 @@ struct RemoteAlertTests {
         #expect(gone.activity?.asking == false)
         let unnamed = planner.plan(tabID: "T", snap("working", question: ""))
         #expect(unnamed.alert?.body == "Needs your approval.")
+    }
+
+    @Test func unverifiedTextCannotClaimApprovalOrRepeatOnRedraw() {
+        var planner = RemoteAlertPlanner()
+        _ = planner.plan(tabID: "T", snap("unknown"))
+        func hint(_ id: String) -> RemoteAlertPlanner.Snapshot {
+            .init(status: "unknown", since: 100, question: "Proceed?", title: "test", interactionID: id)
+        }
+        let first = planner.plan(tabID: "T", hint("one"))
+        #expect(first.alert?.kind == .attention)
+        #expect(first.activity?.asking == false)
+        #expect(planner.plan(tabID: "T", hint("one")).alert == nil)
+        #expect(planner.plan(tabID: "T", hint("two")).alert == nil)
+    }
+
+    @Test func uncertainStoppedAndFailedWorkNeverSendsFinished() {
+        for status in ["unknown", "disconnected", "interrupted", "failed", "waitingForApproval"] {
+            var planner = RemoteAlertPlanner()
+            _ = planner.plan(tabID: "T", snap("working"))
+            let result = planner.plan(tabID: "T", snap(status))
+            #expect(result.alert?.kind != .finished)
+            if status == "failed" { #expect(result.alert?.kind == .failed) }
+            if status == "interrupted" { #expect(result.alert?.kind == .stopped) }
+        }
     }
 
     @Test func alertsAreBoundedAndSealedApart() throws {

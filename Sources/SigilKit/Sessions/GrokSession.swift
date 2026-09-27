@@ -3,6 +3,11 @@ import Foundation
 /// One Grok Build conversation, as recorded in `<session-dir>/summary.json`.
 public struct GrokSession: Identifiable, Hashable, Sendable {
     public let id: String
+    public let provider: CLIProvider
+    public let nativeSessionID: String
+    public var reference: ProviderSessionReference {
+        ProviderSessionReference(provider: provider, sessionID: nativeSessionID, cwd: cwd)
+    }
     /// Absolute working directory the session was started in.
     public let cwd: String
     /// The CLI's own summary line; empty for sessions that never got one.
@@ -10,6 +15,9 @@ public struct GrokSession: Identifiable, Hashable, Sendable {
     public let createdAt: Date
     public let updatedAt: Date
     public let messageCount: Int
+    /// Native history uses bounded samples, so this proves content exists
+    /// without pretending to know the full transcript message count.
+    public let hasObservedMessages: Bool
     public let modelID: String?
     public let agentName: String?
     public let reasoningEffort: String?
@@ -29,14 +37,19 @@ public struct GrokSession: Identifiable, Hashable, Sendable {
         agentName: String?,
         reasoningEffort: String?,
         kind: String? = nil,
-        directory: URL
+        directory: URL,
+        provider: CLIProvider = .grokBuild,
+        hasObservedMessages: Bool = false
     ) {
-        self.id = id
+        self.provider = provider
+        self.nativeSessionID = id
+        self.id = ProviderSessionReference(provider: provider, sessionID: id, cwd: cwd).sidebarID
         self.cwd = cwd
         self.summary = summary
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.messageCount = messageCount
+        self.hasObservedMessages = hasObservedMessages
         self.modelID = modelID
         self.agentName = agentName
         self.reasoningEffort = reasoningEffort

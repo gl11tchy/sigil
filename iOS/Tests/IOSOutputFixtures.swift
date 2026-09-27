@@ -1,3 +1,6 @@
+#if canImport(Sigil)
+@testable import Sigil
+#endif
 import Foundation
 
 /// Random, repeatable screens for the output tests: prose and list rows, panel

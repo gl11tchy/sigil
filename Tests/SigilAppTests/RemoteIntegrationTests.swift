@@ -56,7 +56,9 @@ struct RemoteIntegrationTests {
         let settings = AppSettings(defaults: defaults)
         settings.executablePath = executable.path
         let pairingStore = InMemoryRemotePairingStore()
-        let model = AppModel(settings: settings, presentError: { _ in }, pairingStore: pairingStore)
+        let model = AppModel(
+            settings: settings, presentError: { _ in }, pairingStore: pairingStore,
+            providerInstallations: fixtureProviderInstallations(executable))
         defer { model.closeAllTabsAndWait() }
         let tab = try #require(model.newTab(in: root))
         for _ in 0..<100 {

@@ -1,7 +1,7 @@
 import UserNotifications
 
 /// Opens the sealed alert the Mac sent and puts its words on the notification.
-/// Without a matching key the notification keeps the relay's plain fallback.
+/// Invalid or replayed payloads keep only a local, non-actionable fallback.
 final class NotificationService: UNNotificationServiceExtension {
     private var handler: ((UNNotificationContent) -> Void)?
     private var content: UNMutableNotificationContent?
@@ -12,11 +12,24 @@ final class NotificationService: UNNotificationServiceExtension {
         handler = contentHandler
         let content = (request.content.mutableCopy() as? UNMutableNotificationContent) ?? UNMutableNotificationContent()
         self.content = content
+        // Never preserve routing metadata supplied outside the sealed payload.
+        content.userInfo = [:]
+        content.title = "Sigil"
+        content.subtitle = ""
+        content.body = "Open Sigil to check your sessions."
+        content.threadIdentifier = ""
+        content.sound = nil
+        content.badge = nil
+        content.interruptionLevel = .passive
+        content.categoryIdentifier = ""
         let macs = CredentialStore.loadAll()
         if let sealed = (request.content.userInfo["sigil"] as? [String: Any])?["data"] as? String,
-            let opened = RemoteAlert.opened(sealed, keys: macs.map(\.deviceKey))
+            let opened = RemoteAlert.opened(sealed, keys: macs.map(\.deviceKey)),
+            AlertReceiptStore.local?.consume(opened.alert, pairingID: macs[opened.keyIndex].id) == true
         {
             let mac = macs[opened.keyIndex]
+            content.sound = .default
+            content.interruptionLevel = .active
             content.title = alert(opened.alert, from: mac, among: macs)
             content.body = opened.alert.shownBody
             content.threadIdentifier = "\(mac.id)/\(opened.alert.tabID)"

@@ -5,10 +5,14 @@ enum RemoteConnectionError: LocalizedError, Equatable {
     case changed
     case noResponse
     case lost
+    case incompatible
+    case busy
     case mac(String)
 
     var errorDescription: String? {
         switch self {
+        case .busy: return "Wait for pending terminal input."
+        case .incompatible: return "Update Sigil and the phone companion, then reconnect."
         case .notConnected: return "Not connected."
         case .changed: return "Connection changed. Check the terminal before sending again."
         case .noResponse: return "No response. Check the terminal before sending again."
@@ -49,18 +53,27 @@ final class RemoteConnection {
     private(set) var credential: PairingCredential?
 
     private struct Pending {
+        let id: UUID
         let continuation: CheckedContinuation<RemoteReply, Error>
         let action: String
         let tabID: String?
         let timeout: Task<Void, Never>
     }
 
+    typealias Receiver = (URLSessionWebSocketTask) async throws -> URLSessionWebSocketTask.Message
+    typealias Sender = (URLSessionWebSocketTask, String, @escaping @Sendable (Error?) -> Void) -> Void
     private let session: URLSession
+    private let send: Sender
+    private let receive: Receiver
     private var socket: URLSessionWebSocketTask?
     private var generation = 0
-    private var commandEpoch = 0
+    private(set) var commandEpoch = 0
+    private var queuedRequests = 0
     private var challenge: String?
+    private var clientNonce = RemoteCrypto.randomKey()
     private var sequence = 0
+    private var eventSequence = 0
+    private(set) var supportsOrderedEvents = false
     private var pending: [Int: Pending] = [:]
     private var queue: Task<Void, Never>?
     private var bootstrapKey: String?
@@ -72,8 +85,12 @@ final class RemoteConnection {
     private var reconnectTask: Task<Void, Never>?
     private var helloTimeout: Task<Void, Never>?
 
-    init(session: URLSession = URLSession(configuration: .ephemeral)) {
+    init(session: URLSession = URLSession(configuration: .ephemeral),
+         send: @escaping Sender = { socket, frame, completion in socket.send(.string(frame), completionHandler: completion) },
+         receive: @escaping Receiver = { socket in try await socket.receive() }) {
         self.session = session
+        self.send = send
+        self.receive = receive
     }
 
     /// Reconnect with a pairing the Mac already accepted.
@@ -123,6 +140,10 @@ final class RemoteConnection {
         index: Int? = nil, count: Int? = nil, transfer: String? = nil, provider: String? = nil,
         model: String? = nil, effort: String? = nil, worktree: Bool? = nil
     ) async throws -> RemoteReply {
+        guard phase == .connected else { throw RemoteConnectionError.notConnected }
+        guard queuedRequests < 32 else { throw RemoteConnectionError.busy }
+        queuedRequests += 1
+        defer { queuedRequests -= 1 }
         let previous = queue
         let current = generation
         let epoch = commandEpoch
@@ -137,6 +158,10 @@ final class RemoteConnection {
         }
         queue = Task { _ = try? await work.value }
         return try await work.value
+    }
+
+    func requireCurrentConnection(_ epoch: Int) throws {
+        guard phase == .connected, commandEpoch == epoch else { throw RemoteConnectionError.changed }
     }
 
     private struct RequestFields {
@@ -163,26 +188,32 @@ final class RemoteConnection {
         let request = RemoteRequest(
             challenge: challenge, sequence: seq, action: fields.action, tabID: fields.tabID, text: fields.text,
             name: fields.name, index: fields.index, count: fields.count, transfer: fields.transfer,
-            provider: fields.provider, model: fields.model, effort: fields.effort, worktree: fields.worktree)
+            provider: fields.provider, model: fields.model, effort: fields.effort, worktree: fields.worktree, clientNonce: clientNonce)
         let sealed = try RemoteCrypto.seal(request, key: key, direction: "phone")
         let frame = try Self.json(["data": sealed])
         return try await withCheckedThrowingContinuation { continuation in
+            let requestID = UUID()
             let timeout = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(10))
-                guard !Task.isCancelled, let self, let item = self.pending.removeValue(forKey: seq) else { return }
+                guard !Task.isCancelled, let self, self.pending[seq]?.id == requestID,
+                    let item = self.pending.removeValue(forKey: seq) else { return }
+                self.commandEpoch += 1
                 item.continuation.resume(throwing: RemoteConnectionError.noResponse)
                 // A silent socket may be half-open after a network change. Drop it so the
                 // receive loop ends and a fresh connection is made.
                 self.socket?.cancel(with: .goingAway, reason: nil)
             }
             pending[seq] = Pending(
-                continuation: continuation, action: fields.action, tabID: fields.tabID, timeout: timeout)
-            socket.send(.string(frame)) { [weak self] error in
+                id: requestID, continuation: continuation, action: fields.action, tabID: fields.tabID, timeout: timeout)
+            send(socket, frame) { [weak self] error in
                 guard error != nil else { return }
                 Task { @MainActor [weak self] in
-                    guard let self, let item = self.pending.removeValue(forKey: seq) else { return }
+                    guard let self, self.pending[seq]?.id == requestID,
+                        let item = self.pending.removeValue(forKey: seq) else { return }
                     item.timeout.cancel()
+                    self.commandEpoch += 1
                     item.continuation.resume(throwing: RemoteConnectionError.lost)
+                    self.socket?.cancel(with: .goingAway, reason: nil)
                 }
             }
         }
@@ -199,7 +230,10 @@ final class RemoteConnection {
         socket?.cancel(with: .goingAway, reason: nil)
         goOffline(.connecting)
         challenge = nil
+        clientNonce = RemoteCrypto.randomKey()
         sequence = 0
+        eventSequence = 0
+        supportsOrderedEvents = false
         var request = URLRequest(url: url)
         // The relay only lets a phone in with the companion's own origin.
         request.setValue(credential.originString, forHTTPHeaderField: "Origin")
@@ -215,11 +249,12 @@ final class RemoteConnection {
             self.delegate?.connection(self, didFail: "The Mac did not respond. Keep Sigil open and try again.")
             ws.cancel(with: .goingAway, reason: nil)
         }
+        let receive = self.receive
         Task { @MainActor [weak self] in
             var routed = false
             while true {
                 let message: URLSessionWebSocketTask.Message
-                do { message = try await ws.receive() } catch { break }
+                do { message = try await receive(ws) } catch { break }
                 guard let self, current == self.generation else { return }
                 guard case .string(let text) = message, text.utf8.count <= 110_000 else {
                     self.delegate?.connection(self, didFail: "Could not verify the connection.")
@@ -230,7 +265,10 @@ final class RemoteConnection {
                     try await self.handle(text, socket: ws, routed: &routed)
                 } catch {
                     guard current == self.generation else { return }
-                    self.delegate?.connection(self, didFail: "Could not verify the connection.")
+                    let failure = error as? RemoteConnectionError
+                    self.delegate?.connection(self, didFail: failure == .incompatible
+                        ? RemoteConnectionError.incompatible.localizedDescription : "Could not verify the connection.")
+                    self.failPending(failure ?? .lost)
                     ws.cancel(with: .policyViolation, reason: nil)
                     break
                 }
@@ -251,10 +289,12 @@ final class RemoteConnection {
             try await ws.send(.string(try Self.json(["route": envelope])))
         } else if let hello = frame.hello, RemoteCrypto.isValidKey(hello) {
             guard challenge != hello else { return }
-            commandEpoch += 1
-            failPending(RemoteConnectionError.changed)
+            goOffline(.connecting)
             challenge = hello
+            clientNonce = RemoteCrypto.randomKey()
             sequence = 0
+            eventSequence = 0
+            supportsOrderedEvents = false
             authorize(generation: generation)
         } else if frame.error == "unauthorized" {
             if bootstrapKey != nil {
@@ -271,13 +311,22 @@ final class RemoteConnection {
             let reply: RemoteReply = try RemoteCrypto.open(data, key: credential.deviceKey, direction: "mac")
             // A delayed reply from an earlier Mac epoch.
             guard reply.challenge == challenge else { return }
+            guard reply.clientNonce == clientNonce else { throw RemoteConnectionError.incompatible }
             if reply.event == true, reply.sequence == 0 {
-                guard phase == .connected, let state = reply.state else { return }
+                guard phase == .connected, supportsOrderedEvents, let state = reply.state else { return }
+                guard let next = reply.eventSequence, next > 0, next <= 9_007_199_254_740_991 else {
+                    throw RemoteCryptoError.invalidMessage
+                }
+                guard next > eventSequence else { return }
                 try state.validate()
+                eventSequence = next
                 delegate?.connection(self, didReceiveEvent: reply)
                 return
             }
             guard let item = pending[reply.sequence] else { return }
+            // Validate before removing the continuation. If validation throws, closing
+            // the socket must still fail this request rather than leave it suspended.
+            if reply.ok != false, let state = reply.state { try state.validate() }
             pending[reply.sequence] = nil
             item.timeout.cancel()
             guard reply.ok != false else {
@@ -285,7 +334,9 @@ final class RemoteConnection {
                     throwing: RemoteConnectionError.mac(reply.error ?? "The Mac could not complete this action."))
                 return
             }
-            if let state = reply.state { try state.validate() }
+            if let state = reply.state {
+                supportsOrderedEvents = state.capabilities?.contains("eventSequence") == true
+            }
             if let ticket = reply.ticket, RemoteCrypto.isValidKey(ticket), ticket != credential.ticket {
                 self.credential?.ticket = ticket
                 if !unsaved, let saved = self.credential { delegate?.connection(self, didSave: saved) }
@@ -298,6 +349,7 @@ final class RemoteConnection {
     }
 
     private func authorize(generation current: Int) {
+        let epoch = commandEpoch
         let pairing = bootstrapKey != nil
         if pairing { pairSent = true }
         let fields =
@@ -305,9 +357,10 @@ final class RemoteConnection {
             ? RequestFields(action: "pair", text: credential?.deviceKey)
             : RequestFields(action: "state")
         Task { @MainActor in
+            guard current == self.generation, epoch == self.commandEpoch else { return }
             do {
                 _ = try await self.transmit(fields, pairing: pairing)
-                guard current == self.generation else { return }
+                guard current == self.generation, epoch == self.commandEpoch else { return }
                 self.bootstrapKey = nil
                 self.reconnectDelay = 0.5
                 self.helloTimeout?.cancel()
@@ -319,7 +372,7 @@ final class RemoteConnection {
                 }
             } catch {
                 // After a refusal the reason is already shown; "connection lost" would hide it.
-                guard current == self.generation, self.phase != .revoked else { return }
+                guard current == self.generation, epoch == self.commandEpoch, self.phase != .revoked else { return }
                 self.delegate?.connection(self, didFail: error.localizedDescription)
             }
         }
@@ -351,6 +404,7 @@ final class RemoteConnection {
     }
 
     private func goOffline(_ next: Phase) {
+        commandEpoch += 1
         helloTimeout?.cancel()
         failPending(RemoteConnectionError.lost)
         phase = next

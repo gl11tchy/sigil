@@ -19,7 +19,7 @@ struct ComposerBar: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var status: TabStatus? { store.selectedTab?.status }
-    private var ended: Bool { status == .exited }
+    private var ended: Bool { store.selectedTab?.acceptsInput == false }
 
     var body: some View {
         @Bindable var store = store
@@ -66,7 +66,7 @@ struct ComposerBar: View {
                 HStack(spacing: 0) {
                     attachMenu
                     Spacer(minLength: 0)
-                    if status == .working { stopButton }
+                    if store.selectedTab?.canInterrupt == true { stopButton }
                     sendButton
                 }
                 .padding(Theme.Space.s2)
@@ -227,28 +227,45 @@ struct ComposerBar: View {
     /// primary button; No and each numbered row of the question on screen are secondary.
     private func answerBar(_ prompt: RemotePrompt) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.small) {
+            Text(prompt.verified ? "Approval" : "Terminal controls")
+                .typeStep(.small, weight: .medium)
+                .foregroundStyle(Theme.ink2)
+            if !prompt.verified {
+                Text("Unverified. Check the terminal before typing.")
+                    .typeStep(.small)
+                    .foregroundStyle(Theme.ink2)
+            }
+            if let operation = prompt.operation, !operation.isEmpty {
+                Text(operation)
+                    .typeStep(.mono)
+                    .foregroundStyle(Theme.ink)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if !prompt.question.isEmpty {
                 Text(prompt.question)
                     .typeStep(.body, weight: .medium)
                     .foregroundStyle(Theme.ink)
-                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, Theme.Space.tight)
             }
             // The answers wrap onto more lines, so a long one is never cut at the card's edge.
             FlowLayout(spacing: Theme.Space.s6) {
-                answerButton("Yes", key: prompt.yes, primary: true)
-                answerButton("No", key: prompt.no)
+                if prompt.choices.isEmpty {
+                    if let yes = prompt.yes { answerButton("Yes", key: yes, primary: prompt.verified) }
+                    if let no = prompt.no { answerButton("No", key: no) }
+                }
                 ForEach(prompt.choices) { choice in
                     answerButton(
-                        "\(choice.key)  \(Self.shortLabel(choice.label))", key: choice.key,
-                        number: choice.key, text: Self.shortLabel(choice.label))
+                        "\(choice.key)  \(choice.label)", key: choice.key,
+                        number: choice.key, text: choice.label)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentCard(padding: Theme.Space.s8)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(prompt.question.isEmpty ? "Approval question" : prompt.question)
+        .accessibilityLabel(prompt.verified ? "Approval" : "Unverified terminal controls")
     }
 
     /// `number` draws a menu row's key in mono before its text; `title` stays the spoken label.
@@ -276,16 +293,6 @@ struct ComposerBar: View {
         .buttonStyle(SigilButtonStyle(kind: primary ? .primary : .secondary))
         .disabled(!store.isConnected || store.busy)
         .accessibilityLabel(title)
-    }
-
-    /// A menu row as a button's text. The key hint a CLI appends, like "(esc)", goes; the
-    /// rest stays whole, since the answers wrap.
-    static func shortLabel(_ label: String) -> String {
-        let trimmed = label.trimmingCharacters(in: .whitespaces)
-        if trimmed.hasSuffix(")"), let open = trimmed.lastIndex(of: "(") {
-            return trimmed[..<open].trimmingCharacters(in: .whitespaces)
-        }
-        return trimmed
     }
 
     /// The terminal keys, four to a row like the web companion's narrow grid;

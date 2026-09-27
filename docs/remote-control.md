@@ -10,7 +10,7 @@ The companion can list and select open tabs, read bounded terminal text, send
 text, keys, and phone photos/files, and create a session in the current folder.
 Phone files are written into the local drop cache and pasted as paths. It does not
 expose arbitrary Mac file access, shell launch configuration, or the local MCP socket.
-Remote input has the same authority as typing in an open Grok session.
+Remote input has the same authority as typing in the selected provider terminal.
 
 ## Contract and security
 
@@ -26,7 +26,10 @@ Remote input has the same authority as typing in an open Grok session.
   ticket on a new room after a drop.
 - Commands and responses use AES-256-GCM (96-bit random nonce, 128-bit tag).
   Direction is authenticated. Each connection has a fresh Mac-generated challenge;
-  each request has a strictly increasing sequence. No command retries or offline queue.
+  each request has a strictly increasing sequence. The phone also supplies a fresh
+  256-bit `clientNonce`; every authenticated reply and event must echo it. Replaying
+  an old unsealed Mac challenge cannot authenticate an old recorded reply. Both
+  endpoints must be updated together. No command retries or offline queue.
 - The Mac keeps the device key and ticket in the login keychain. That keychain
   is not bound to this Mac: Migration Assistant or a restore copies the pairing.
   The phone stores a non-extractable CryptoKey and the ticket in IndexedDB.
@@ -34,7 +37,8 @@ Remote input has the same authority as typing in an open Grok session.
 - The relay routes bounded ciphertext, not terminal contents or encryption keys.
   The web host is trusted to serve the correct client code (as with any web app).
 - Frames, peers, rooms, request rates and send buffers have explicit limits.
-- No content or credentials in logs, service-worker caches, or repository files.
+- No remote frame contents or credentials in relay logs or service-worker caches.
+  Local diagnostic reports and native screen caches have separate privacy boundaries.
 
 ## Implementation
 
@@ -51,12 +55,13 @@ struct RemoteRequest: Codable, Sendable {
     let challenge: String
     let sequence: Int
     let action: String
+    let clientNonce: String // Required for dispatch; fresh for this phone connection.
     let tabID: String?
     let text: String?
 }
 ```
 
-## Live stream and session operations (2026-09-24)
+## Live stream and session operations
 
 - `watch` makes the Mac send events: sealed replies with `event: true` and
   `sequence: 0`, carrying the tab list, the selection and a `screen` of changed
@@ -66,24 +71,30 @@ struct RemoteRequest: Codable, Sendable {
   colour; flags are SwiftTerm `CharacterStyle` bits). `gen` restarts the index
   space (reset, alternate screen, another tab). A full window carries the tab's
   theme (`palette`, `fg`, `bg`). Events go out only while a phone is watching,
-  batched at 80 ms, at most 60 rows a frame. Clients that do not know events drop
-  them: neither pending sequence nor error.
+  batched at 80 ms and split by encoded byte size. Whole batches are serialized.
+  `eventSequence` strictly increases within a connection, including across re-watch.
+  Clients reject duplicates, older counters, wrong challenges and wrong client nonces.
+  Hosts without the event freshness capability are polled, not streamed.
 - `rows` returns older rows before `index`; `close`, `rename` (`name`) and
-  `archive` act on a tab (archive needs a saved Grok chat); `new` with
+  `archive` act on a tab (archive needs recognized provider history); `new` with
   `worktree: true` makes a worktree first. Tabs report `provider`,
   `providerName`, `folder` and `canArchive`; projects report `repository`;
   state reports `mac` and the capabilities `screen` and `sessionOps`.
-- `prompt` in state and events: an approval question read from the last screen
-  rows (numbered menus such as Claude Code's and Codex's, or `[y/n]` questions),
-  with `choices`, `yes` and `no` keys. `answer` (`text` = key) types the digit,
-  or the letter and Return, only after reading the screen again and finding the
-  same kind of prompt; anything else is refused.
+- `prompt` carries the question, full available operation context, exact choices,
+  a host-owned interaction ID and explicit `verified` status. Terminal revisions
+  invalidate the interaction even when a later menu looks identical. Comparison
+  precedes display bounds; oversized or incomplete hints fail closed. Yes/No
+  shortcuts exist only for exact meanings, never for the first numbered choice.
+  No current provider has an authoritative response broker connected to its TUI,
+  so all parsed prompts are unverified. `answer` refuses them. The phone labels
+  literal `input`/`key` controls as terminal typing; these cannot guarantee stale
+  approval rejection or provider acceptance.
 - Alerts: `notify` (`text` = APNs device token hex, `name` = `development` or
   `production`; empty text stops alerts) is kept with the pairing in Keychain
   and told to the relay as `{pushToken, pushEnvironment}` on every host
   connect. `activity` (`tabID`, `text` = Live Activity push token; empty ends)
   is held in memory. While no phone is on the socket, a turn that finishes, a
-  question that appears, or a process that ends becomes `{push: {data, thread}}`
+  verified approval, unverified terminal hint, failure, stop, or process exit becomes `{push: {data, thread}}`
   where `data` is a `RemoteAlert` sealed with the device key in direction
   `push`; the relay wraps it as an APNs alert with `mutable-content` and a
   fixed fallback text, and the phone's notification extension opens it. A tab
@@ -98,7 +109,8 @@ struct RemoteRequest: Codable, Sendable {
 ## Verification and boundaries
 
 Build/tests: `swift test --no-parallel`.
-Full native gate: `Scripts/verify.sh`.
+Full Mac/web gate: `Scripts/verify.sh`.
+Complete iPhone app, extensions and simulator gate: `iOS/scripts/ci.sh`.
 Companion: `cd Sidereal && npm ci && npm test && npm audit --omit=dev`.
 Test unauthenticated, expired, reused, tampered, reflected and replayed messages;
 revocation; transport limits; and real terminal input/output using an isolated fixture.
@@ -113,7 +125,10 @@ Hosting needs a real HTTPS deployment; local tests do not prove cellular/iPhone 
 - [Secure contexts](https://developer.mozilla.org/en-US/docs/Web/Security/Defenses/Secure_Contexts)
 - [ws server limits](https://github.com/websockets/ws/blob/master/doc/ws.md)
 
-## Local evidence
+## Historical evidence before the secure protocol upgrade
+
+The checks and deployment below predate the 2026-09-27 hardening. They do not
+verify this revision, which has not been deployed. See [current verification](qa/product-hardening/README.md).
 
 - `Scripts/verify.sh`: native tests, companion tests/audit, shell checks, formatting,
   signed debug bundle and isolated smoke launch passed.
@@ -134,7 +149,7 @@ Hosting needs a real HTTPS deployment; local tests do not prove cellular/iPhone 
   not install as a standalone iOS web app, so a Home Screen shortcut uses Safari
   storage. A leftover standalone icon is split from Safari until it is replaced.
 
-## Hosted deployment
+## Historical hosted deployment record
 
 - Project: `26f52bc8-daae-4371-aa70-4cebb2d0f222` (sidereal).
 - Environment: `1a3850e2-c49f-45c4-bb54-627dd102c646` (production).
@@ -166,3 +181,25 @@ Hosting needs a real HTTPS deployment; local tests do not prove cellular/iPhone 
 - Rollback: remove/revert the active Railway deployment. This only ends remote
   sessions; it does not alter Mac sessions or files. Restarting the relay drops
   live sockets; a stored ticket reconnects when Sigil is running.
+
+
+## Hardened receipt and upload boundaries
+
+An authenticated reply acknowledges host dispatch, not provider acceptance or
+completion. Missing replies are ambiguous: inspect the terminal before retrying.
+No exactly-once provider execution claim is made. Uploads bind connection challenge,
+target tab and transfer ID. Orphaned tails, target changes and recently consumed
+transfers are rejected. Pending chunks expire after 60 seconds; bounds remain
+four pending transfers, 128 chunks and 4 MiB each.
+
+Sealed alerts include a UUID and issuance time. The notification extension rejects
+stale, future-dated and duplicate alert content. APNs may still display the generic
+OS fallback after delivery; simulator tests do not prove physical-device APNs or
+Live Activity delivery. Alert content is encrypted; Live Activity status is not.
+
+The relay cannot decrypt terminal frames, but can deny service and observe timing,
+routing identifiers and payload sizes. The browser still trusts its JavaScript
+host. A compromised web host can serve code that uses the phone key. Local Mac
+processes run at the user's authority. Native cached screens and local crash
+reports can contain terminal content; they are not public telemetry. Do not share
+those files without reviewing them. See the iOS README for cache protection.
