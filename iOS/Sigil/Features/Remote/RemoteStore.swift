@@ -31,6 +31,8 @@ final class RemoteStore {
     fileprivate(set) var prompt: RemotePrompt?
     /// When the tabs on screen were last heard from the Mac; nil once live.
     private(set) var cachedAt: Date?
+    /// At launch, the screen waits for a cache on disk instead of showing an empty Mac.
+    private(set) var awaitingCache = false
     var errorMessage: String?
     var rawMode = false
     var drafts: [String: String] = [:]
@@ -52,7 +54,8 @@ final class RemoteStore {
     private(set) var themeForeground = ""
     private(set) var themeBackground = ""
     /// The last theme background this Mac sent, for light or dark. It outlives a tab
-    /// with no screen yet, so the look does not flip; empty until the first one.
+    /// with no screen yet, so the look does not flip. A restore starts from the one
+    /// last saved for the Mac; empty until there is one.
     private(set) var appearanceGround = ""
 
     let isDemo: Bool
@@ -74,6 +77,11 @@ final class RemoteStore {
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
+    /// Lets a cache read land only if nothing replaced the screen meanwhile.
+    @ObservationIgnored private var restoreGate = RestoreGate() {
+        // Set only on a change: live state invalidates the gate many times a second.
+        didSet { if awaitingCache != restoreGate.isAwaiting { awaitingCache = restoreGate.isAwaiting } }
+    }
     @ObservationIgnored private var searchToken = 0
     @ObservationIgnored private var chatQuery = ""
     @ObservationIgnored private var lastChunkAt = Date.distantPast
@@ -93,18 +101,19 @@ final class RemoteStore {
         } else {
             let list = CredentialStore.loadList()
             macs = list.macs
-            if let saved = list.selected { activate(saved) }
+            if let saved = list.selected { activate(saved, awaitCache: true) }
         }
     }
 
     /// Shows one Mac: its cached screen first, then its live connection.
-    private func activate(_ saved: PairingCredential) {
+    /// `awaitCache` holds the screen for a cache on disk, as at launch.
+    private func activate(_ saved: PairingCredential, awaitCache: Bool = false) {
         activeMacID = saved.id
         hasPairing = true
         credential = saved
         macAddress = saved.origin.host
         macName = saved.name
-        restoreCache(for: saved)
+        restoreCache(for: saved, awaitCache: awaitCache)
         connection.resume(saved)
     }
 
@@ -120,13 +129,16 @@ final class RemoteStore {
         saveCacheNow()
         connection.stop()
         liveActivity.end()
+        // A notification or a widget can open another Mac at launch: keep the launch wait for its cache.
+        let waiting = restoreGate.isAwaiting
         clearMacState()
         CredentialStore.select(id: macID)
-        activate(next)
+        activate(next, awaitCache: waiting)
     }
 
     /// Everything that belongs to the Mac on screen. Drafts stay: tab ids never collide across Macs.
     private func clearMacState() {
+        restoreGate.invalidate()
         tabs = []
         selectedTabID = nil
         screens = [:]
@@ -683,6 +695,9 @@ final class RemoteStore {
             drafts[next] = drafts[previous]
             attachments[next] = attachments[previous]
         }
+        // Live, even with no tabs: a cache still being read must not replace it.
+        // A launch wait holds until `show` draws this state's output.
+        restoreGate.supersede()
         tabs = state.tabs
         selectedTabID = state.selectedTabID
         canRestart = state.canRestart
@@ -717,6 +732,13 @@ final class RemoteStore {
         reflectLiveActivity()
     }
 
+    /// Streamed output is formatted and styled here, off the main thread. Each refresh
+    /// takes the next generation; a result lands only if it is newer than the output
+    /// on screen and was built for the Mac, tab and mode still on screen.
+    @ObservationIgnored private let worker = OutputWorker { ReadableOutput.bundled() }
+    @ObservationIgnored private var outputGeneration = 0
+    @ObservationIgnored private var shownGeneration = 0
+
     /// Output changes arrive many times a second; one repaint per burst is enough.
     private func scheduleRefresh() {
         guard refreshTask == nil else { return }
@@ -724,30 +746,37 @@ final class RemoteStore {
             try? await Task.sleep(for: .milliseconds(40))
             guard let self, !Task.isCancelled else { return }
             self.refreshTask = nil
-            self.refreshOutput()
+            let snapshot = self.outputSnapshot()
+            let key = (self.activeMacID, self.selectedTabID, self.rawMode)
+            self.outputGeneration += 1
+            let generation = self.outputGeneration
+            guard let next = await self.worker.render(snapshot, generation: generation),
+                generation > self.shownGeneration
+            else { return }
+            // The tab or the mode changed meanwhile: build again for what is on screen now.
+            guard key == (self.activeMacID, self.selectedTabID, self.rawMode) else { return self.scheduleRefresh() }
+            self.show(next, from: snapshot, generation: generation)
         }
     }
 
+    /// Builds the output at once, on the main thread; a result still on the worker is then dropped.
     func refreshOutput() {
-        let next: StyledText
-        var colours: [String] = []
-        var fg = ""
-        var bg = ""
-        if let id = selectedTabID, let screen = screens[id] {
-            let prepared = StyledOutput.prepare(screen.lines)
-            colours = screen.palette
-            fg = screen.foreground
-            bg = screen.background
-            if rawMode {
-                next = StyledOutput.raw(prepared)
-            } else {
-                next = StyledOutput.readable(
-                    formatter.format(ScreenModel.text(of: prepared.lines)), screen: prepared)
-            }
-        } else {
-            let raw = selectedTabID.flatMap { histories[$0]?.text } ?? ""
-            next = StyledText(text: rawMode ? raw : formatter.format(raw), spans: [])
-        }
+        outputGeneration += 1
+        let snapshot = outputSnapshot()
+        show(snapshot.render(with: formatter), from: snapshot, generation: outputGeneration)
+    }
+
+    private func outputSnapshot() -> OutputSnapshot {
+        let screen = selectedTabID.flatMap { screens[$0] }
+        let history = screen == nil ? selectedTabID.flatMap { histories[$0] } : nil
+        return OutputSnapshot(screen: screen, history: history, raw: rawMode)
+    }
+
+    private func show(_ next: StyledText, from snapshot: OutputSnapshot, generation: Int) {
+        shownGeneration = generation
+        let colours = snapshot.screen?.palette ?? []
+        let fg = snapshot.screen?.foreground ?? ""
+        let bg = snapshot.screen?.background ?? ""
         if next != styledOutput || colours != palette || fg != themeForeground || bg != themeBackground {
             styledOutput = next
             palette = colours
@@ -757,6 +786,7 @@ final class RemoteStore {
             outputRevision += 1
         }
         if !bg.isEmpty, bg != appearanceGround { appearanceGround = bg }
+        restoreGate.endWait()
     }
 
     /// The Mac's name goes into the pairing, so the picker can show it before connecting.
@@ -770,14 +800,60 @@ final class RemoteStore {
 
     // MARK: Cache
 
-    private func restoreCache(for credential: PairingCredential) {
-        guard let cached = ScreenCache.load(for: credential) else { return }
+    /// Read, decoded and styled off the main actor, starting at once. It lands only on
+    /// the screen it was read for: the same Mac, before anything live or another Mac
+    /// replaced it. At launch, with a cache on disk, the screen waits for it rather
+    /// than showing an empty Mac, but never longer than `RestoreGate.patience`.
+    private func restoreCache(for credential: PairingCredential, awaitCache: Bool) {
+        // Light or dark from the first frame, as the cached screen will be, so the wait's cover matches it.
+        let ground = ScreenCache.ground(for: credential)
+        if !ground.isEmpty { appearanceGround = ground }
+        let ticket = restoreGate.begin(
+            macID: credential.id, awaited: awaitCache && ScreenCache.hasCache(for: credential))
+        if awaitingCache {
+            Task { [weak self] in
+                try? await Task.sleep(for: RestoreGate.patience)
+                self?.restoreGate.finish(ticket)
+            }
+        }
+        outputGeneration += 1
+        let generation = outputGeneration
+        let raw = rawMode
+        let worker = worker
+        ScreenCache.read(for: credential) { [weak self] cached in
+            guard let cached else {
+                Task { @MainActor [weak self] in self?.landCache(nil, styled: nil, ticket: ticket) }
+                return
+            }
+            let snapshot = OutputSnapshot(
+                screen: cached.selectedTabID.flatMap { cached.screens[$0] }, history: nil, raw: raw)
+            worker.submit(snapshot, generation: generation) { [weak self] styled in
+                Task { @MainActor [weak self] in
+                    self?.landCache(cached, styled: styled.map { ($0, snapshot, generation) }, ticket: ticket)
+                }
+            }
+        }
+    }
+
+    /// Tabs and output in one turn. Output styled for a mode or a generation that is
+    /// no longer on screen is built again here.
+    private func landCache(
+        _ cached: CachedScreen?, styled: (StyledText, OutputSnapshot, Int)?, ticket: RestoreGate.Ticket
+    ) {
+        // A stale restore leaves the wait to what replaced it.
+        guard restoreGate.isCurrent(ticket, activeMacID: activeMacID) else { return }
+        defer { restoreGate.finish(ticket) }
+        guard let cached else { return }
         tabs = cached.tabs
         selectedTabID = cached.selectedTabID
         macName = cached.mac
         screens = cached.screens
         cachedAt = cached.savedAt
-        refreshOutput()
+        if let (next, snapshot, generation) = styled, snapshot.raw == rawMode, generation > shownGeneration {
+            show(next, from: snapshot, generation: generation)
+        } else {
+            refreshOutput()
+        }
     }
 
     private func scheduleSave() {

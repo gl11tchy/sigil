@@ -38,10 +38,10 @@ enum ScreenTests {
 
     static func modelStaysUnderCapAndForgetsOldestFirst() throws {
         var model = ScreenModel()
-        let rows = (0..<(ScreenModel.cap + 50)).map { ($0, "r\($0)") }
+        let rows = (0..<(ScreenModel.cap + ScreenModel.slack + 50)).map { ($0, "r\($0)") }
         model.apply(screen(rows))
         try Expect.equal(model.rows.count, ScreenModel.cap, "capped")
-        try Expect.equal(model.oldestIndex, 50, "oldest rows dropped")
+        try Expect.equal(model.oldestIndex, ScreenModel.slack + 50, "oldest rows dropped")
     }
 
     static func wrappedRowsJoinWithoutABreak() throws {

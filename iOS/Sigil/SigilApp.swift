@@ -64,6 +64,10 @@ struct RootView: View {
                 PairView()
             }
         }
+        .overlay {
+            // The launch screen's plain ground over an empty Mac, until the cached screen lands.
+            if store.awaitingCache { Color(uiColor: .systemBackground).ignoresSafeArea() }
+        }
         .themeAnimation(.snappy, value: store.hasPairing)
     }
 }

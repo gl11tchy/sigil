@@ -6,7 +6,8 @@ import JavaScriptCore
 /// This runs the web companion's own `output.mjs` rather than a Swift port, so
 /// the two phone surfaces cannot drift apart. `scripts/test.sh` fails when the
 /// bundled copy differs from `Sidereal/public/output.mjs`.
-@MainActor
+///
+/// Not thread-safe: each instance belongs to one thread or serial queue.
 final class ReadableOutput {
     private let function: JSValue?
     private var lastInput: String?
