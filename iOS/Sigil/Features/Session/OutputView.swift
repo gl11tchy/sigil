@@ -77,7 +77,6 @@ struct OutputView: UIViewRepresentable {
                 view.contentOffset.y = max(0, view.contentSize.height - fromEnd)
             }
             coordinator.first = false
-            if !highlight.isEmpty { coordinator.scrollToFirstMatch(view, highlight) }
         }
         if coordinator.scrollToEnd != scrollToEnd {
             coordinator.scrollToEnd = scrollToEnd
@@ -216,10 +215,10 @@ struct OutputView: UIViewRepresentable {
         private var shown: StyledText?
         private var look: Look?
         /// The find matches, in order, the text whose matches TextKit marks, and
-        /// the search that finds them.
+        /// the search that finds them. A test may hold the search's queue.
         private var matches: [NSRange] = []
         private var marked = IndexSet()
-        private let finder = OutputFinder()
+        var finder = OutputFinder()
 
         private struct Look: Equatable {
             var palette: [String]
@@ -278,8 +277,8 @@ struct OutputView: UIViewRepresentable {
             if !matches.isEmpty { mark([], in: view) }
         }
 
-        /// Searches the output off the main thread and marks what it finds, unless
-        /// the output or the query moved on meanwhile.
+        /// Searches the output off the main thread, marks what it finds and shows
+        /// the last match, unless the output or the query moved on meanwhile.
         func find(_ query: String, in view: UITextView) {
             guard !query.isEmpty else {
                 if !matches.isEmpty { mark([], in: view) }
@@ -289,9 +288,10 @@ struct OutputView: UIViewRepresentable {
             let revision = revision
             Task { [weak self, weak view] in
                 guard let found = await self?.finder.matches(of: query, in: text), let self, let view,
-                    self.highlight == query, self.revision == revision, found != self.matches
+                    self.highlight == query, self.revision == revision
                 else { return }
-                self.mark(found, in: view)
+                if found != self.matches { self.mark(found, in: view) }
+                if let last = found.last { view.scrollRangeToVisible(last) }
             }
         }
 
@@ -362,12 +362,6 @@ struct OutputView: UIViewRepresentable {
                 return PanelLayoutFragment(textElement: textElement, range: textElement.elementRange, panel: panel)
             }
             return NSTextLayoutFragment(textElement: textElement, range: textElement.elementRange)
-        }
-
-        func scrollToFirstMatch(_ view: UITextView, _ query: String) {
-            let found = (text as NSString).range(of: query, options: [.caseInsensitive, .backwards])
-            guard found.location != NSNotFound else { return }
-            view.scrollRangeToVisible(found)
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {

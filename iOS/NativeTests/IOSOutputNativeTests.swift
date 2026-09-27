@@ -60,6 +60,7 @@ enum IOSOutputNativeTests {
             await run("show equals a full rebuild over random diffs") { try await showEqualsFullRebuild(shown) }
             await run("show at the screen cap edits only the ends") { try await showAtCapEditsOnlyTheEnds(shown) }
             await run("find marks leave the text as it was") { try await findLeavesTheText(shown) }
+            await run("find scrolls once the search lands") { try await findScrollsOnceTheSearchLands(shown) }
         } catch {
             failed += 1
             print("FAIL setup: \(error)")

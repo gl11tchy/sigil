@@ -61,6 +61,7 @@ enum TestMain {
         run("find marks the matches near the screen once") { try IOSOutputFindTests.nearbyMarksCoverTheMatches() }
         run("find marks follow output edits") { try IOSOutputFindTests.marksFollowEdits() }
         run("find skips replaced queries") { try IOSOutputFindTests.finderSkipsReplacedQueries() }
+        run("find scrolls to where the old search did") { try IOSOutputFindScrollTests.lastMatchIsWhereTheOldSearchScrolled() }
 
         run("screen model applies windows and diffs") { try ScreenTests.modelAppliesWindowsAndDiffs() }
         run("screen model prepends older rows until exhausted") { try ScreenTests.modelPrependsOlderRowsUntilExhausted() }
