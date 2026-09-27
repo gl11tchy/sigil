@@ -452,6 +452,37 @@ for (const api of [true, false]) {
       } finally { mac.close(); }
     });
 
+    test('Find scrolls to the matches on a raw line of 80,000 px with no ASCII words', async ({ page, baseURL }) => {
+      // In WebKit, a text node that wide on one line gives empty boxes: Previous did not scroll, and
+      // every match on the line was highlighted, which took seconds.
+      const line = 'привет мир '.repeat(1000);
+      const matches = count(line, 'привет').map(match => [match.index, match.index + 6]);
+      const mac = await pair(page, baseURL, { terminal: () => line });
+      try {
+        await expect(page.locator('#terminal')).toHaveText(line);
+        await toggleRaw(page);
+        await expect(page.locator('#terminal')).toHaveAttribute('data-raw', 'true');
+        expect(await page.locator('#terminal').evaluate(el => el.scrollWidth)).toBeGreaterThan(70_000);
+        await page.getByRole('button', { name: 'Find in output' }).click();
+        const typeTime = await timed(page, 'find-query', 'привет');
+        await expect(page.locator('#find-count')).toHaveText(`1 of ${matches.length}`);
+        expect(typeTime).toBeLessThan(1000);
+        await frames(page);
+        const state = await findState(page);
+        expect(state.longestText).toBeLessThanOrEqual(256);
+        expect(await coverage(page, matches)).toMatchObject({ missing: 0, far: 0 });
+        expect(state.shown).toBeLessThan(200);
+        const wrapTime = await timed(page, 'find-previous');
+        await expect(page.locator('#find-count')).toHaveText(`${matches.length} of ${matches.length}`);
+        expect(wrapTime).toBeLessThan(400);
+        await frames(page);
+        const [start, end] = matches.at(-1);
+        expect((await findState(page)).current).toEqual({ start, end, text: 'привет', visible: true });
+        expect(await page.locator('#terminal').evaluate(el => el.scrollLeft)).toBeGreaterThan(70_000);
+        expect(await coverage(page, matches)).toMatchObject({ missing: 0, far: 0 });
+      } finally { mac.close(); }
+    });
+
     test('Find highlights the matches in view again after a resize or a font change', async ({ page, baseURL }) => {
       const matches = count(sparse, 'needle').map(match => [match.index, match.index + 6]);
       const mac = await pair(page, baseURL, { terminal: () => sparse });
@@ -516,8 +547,10 @@ for (const api of [true, false]) {
 
 test('Find paints long output as short text nodes that lay out as one node would', async ({ page, baseURL }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  // Long lines with spaces, with ASCII and no spaces, with no ASCII at all, and mixed.
-  const output = ['word '.repeat(1800), 'x'.repeat(8200), '🙂é日本'.repeat(1700), 'ab🙂'.repeat(2400), 'end'].join('\n');
+  // Long lines with spaces, with ASCII and no spaces, with no ASCII at all, and mixed; Cyrillic and
+  // Hebrew words; a combining mark after each space; emoji joined into one cluster.
+  const output = ['word '.repeat(600), 'x'.repeat(3000), '🙂é日本'.repeat(600), 'ab🙂'.repeat(750), 'привет мир '.repeat(300),
+    'שלום עולם '.repeat(300), 'ж \u0301'.repeat(1000), '👩\u200d💻'.repeat(700), 'end'].join('\n');
   expect(new TextEncoder().encode(output).length).toBeLessThan(60_000);
   const mac = await pair(page, baseURL, { terminal: () => output });
   try {
@@ -545,19 +578,33 @@ test('Find paints long output as short text nodes that lay out as one node would
       });
       expect(layout.types.every(type => type === 3)).toBe(true);
       expect(layout.ends.length).toBeGreaterThan(8);
-      // The same lines at the same heights. A box may move to the side by one layout unit (1/64 px),
-      // which WebKit reports rounded out to a whole pixel.
-      expect([layout.chunked.height, layout.chunked.width]).toEqual([layout.single.height, layout.single.width]);
+      // The same lines at the same heights, to a layout unit (1/64 px). A box, or the widest line, may
+      // move to the side by one layout unit where glyph advances add up in another order, rounded out
+      // to a pixel.
+      expect(layout.chunked.height).toBe(layout.single.height);
+      expect(Math.abs(layout.chunked.width - layout.single.width)).toBeLessThanOrEqual(1);
+      // WebKit lays out a mark after a space wider than it paints it, so a long line of them shows a
+      // gap after each node; only the heights of that line's boxes are compared.
+      const line = at => layout.text.slice(layout.text.lastIndexOf('\n', at - 1) + 1);
+      const offsets = [...layout.ends.slice(0, -1), layout.text.length - 1];
       layout.chunked.boxes.forEach(([top, left], index) => {
-        expect(top).toBe(layout.single.boxes[index][0]);
-        expect(Math.abs(left - layout.single.boxes[index][1])).toBeLessThanOrEqual(1);
+        expect(top).toBeCloseTo(layout.single.boxes[index][0], 1);
+        if (!line(offsets[index]).startsWith('ж')) expect(Math.abs(left - layout.single.boxes[index][1])).toBeLessThanOrEqual(1);
       });
-      // Nodes end after a newline or between two ASCII characters, so no glyph or pair is split.
-      const ascii = at => layout.text.charCodeAt(at) >= 32 && layout.text.charCodeAt(at) < 127;
-      for (const end of layout.ends.slice(0, -1)) expect(layout.text[end - 1] === '\n' || (ascii(end - 1) && ascii(end))).toBe(true);
-      // Only the line with no ASCII in it needs a node over 4,096 characters.
+      // Nodes end where a grapheme cluster starts, so no glyph is split, and none is over 256
+      // characters: in WebKit a box in a longer run of non-ASCII text on one line costs milliseconds.
+      const clusters = new Set([...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(layout.text)].map(part => part.index));
+      expect(layout.ends.slice(0, -1).filter(end => !clusters.has(end))).toEqual([]);
       const sizes = layout.ends.map((end, index) => end - (layout.ends[index - 1] ?? 0));
-      expect(sizes.filter(size => size > 4096)).toEqual(['🙂é日本'.repeat(1700).length + 1]);
+      expect(Math.max(...sizes)).toBeLessThanOrEqual(256);
+      // A line with spaces or ASCII pairs is split only there, and never between a space and its mark.
+      const ascii = at => layout.text.charCodeAt(at) >= 32 && layout.text.charCodeAt(at) < 127;
+      for (const end of layout.ends.slice(0, -1)) {
+        if (['word', 'x', 'ab', 'привет', 'שלום'].some(start => line(end).startsWith(start))) {
+          expect(layout.text[end - 1] === '\n' || layout.text[end - 1] === ' ' || (ascii(end - 1) && ascii(end))).toBe(true);
+        }
+        if (line(end).startsWith('ж')) expect(layout.text[end - 1]).not.toBe(' ');
+      }
     }
   } finally { mac.close(); }
 });

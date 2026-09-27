@@ -541,10 +541,12 @@ if (findHighlight) {
   CSS.highlights.set('find-match', findHighlight.match);
   CSS.highlights.set('find-current', findHighlight.current);
 }
-// The output is painted as text nodes of at most findChunk characters: in WebKit, a range's
-// paint and box cost grow with its offset inside its text node. WebKit also repaints every
+// The output is painted as text nodes of at most findChunk characters: in WebKit, a range's box
+// costs about a microsecond per character of non-ASCII text its node has on that line, and a node
+// wider than about 66,000 px on one line gives empty boxes, so Find neither scrolls nor stops at
+// findCap. The paint cost of a range grows with its offset inside its node. WebKit also repaints every
 // highlighted range for each line it paints, so at most findCap matches out of view are highlighted.
-const findChunk = 4096, findCap = 500;
+const findChunk = 256, findCap = 500;
 // findPieces: the painted text nodes and their offsets in findText, which starts a chunk at each
 // of findStarts. findShown: the highlighted match indices, chosen at the scroll offsets findBand[0]
 // and findBand[1]; they hold every match in view until a scroll of over findBand[2] screens.
@@ -586,16 +588,24 @@ function updateFind(scroll = true) {
   $('find-next').disabled = $('find-previous').disabled = !findMatches.length;
   if (scroll && current >= 0) scrollToMatch(current);
 }
-// Chunks end after a newline where one is near. A longer line is split after a space or between
-// two ASCII characters, which never join into one glyph, so the text lays out as one node would.
+// Chunks end after a newline where one is near. A longer line is split after a space that no mark
+// or joiner follows, or between two ASCII characters, which never join into one glyph. Text with
+// neither, as in CJK, is split where a grapheme cluster starts. So the text lays out as one node would.
+const findJoins = /[\p{M}\p{Grapheme_Extend}\p{Emoji_Modifier}\u200d\u0e33\u0eb3]/uy;
 function chunkStarts(output) {
   const starts = [0], ascii = at => output.charCodeAt(at) >= 32 && output.charCodeAt(at) < 127;
+  const spaced = at => { findJoins.lastIndex = at; return output[at - 1] === ' ' && !findJoins.test(output); };
   let start = 0, line = output.indexOf('\n');
   while (output.length - start > findChunk) {
     let end = start;
     while (line >= 0 && line < start + findChunk) { end = line + 1; line = output.indexOf('\n', end); }
-    for (let at = start + findChunk; end === start && at > start; at--) if (output[at - 1] === ' ' && ascii(at)) end = at;
+    for (let at = start + findChunk; end === start && at > start; at--) if (spaced(at)) end = at;
     for (let at = start + findChunk; end === start && at > start; at--) if (ascii(at - 1) && ascii(at)) end = at;
+    // Every chunk starts a cluster, so the clusters from `start` are those of the whole text.
+    if (end === start && globalThis.Intl?.Segmenter) {
+      end = start + new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+        .segment(output.slice(start, start + findChunk + 2)).containing(findChunk).index;
+    }
     for (let at = start + findChunk + 1; end === start && at < output.length; at++) if (output[at - 1] === '\n' || (ascii(at - 1) && ascii(at))) end = at;
     if (end === start || end >= output.length) break;
     starts.push(end); start = end;
