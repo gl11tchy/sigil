@@ -22,7 +22,7 @@ async function browser() {
       id, value: '', textContent: '', hidden: false, disabled: false, dataset: {}, style: {},
       open: false, focus() {}, contains() { return false; },
       getAttribute(name) { return this[name]; }, setAttribute(name, value) { this[name] = value; },
-      addEventListener() {},
+      listeners: {}, addEventListener(type, listener) { (this.listeners[type] ??= []).push(listener); },
       showModal() { this.open = true; }, close() { this.open = false; },
       scrollHeight: 0, scrollTop: 0, clientHeight: 0,
       querySelector(selector) { return element(`${id}-${selector}`); },
@@ -235,6 +235,61 @@ test('keys queued between searches keep their order and are never dropped', asyn
   assert.deepEqual(socket.sent.map(request => [request.action, request.text]),
     [['state', undefined], ['chats', 'a'], ['key', 'interrupt'], ['key', 'interrupt'], ['chats', 'abcd']]);
   assert.deepEqual(page.element('saved-list').children.map(row => row.children[0].textContent), ['abcd result']);
+  assert.equal(page.element('error').hidden, true);
+});
+
+// Close the Chats sheet as the browser does: close(), then the close event.
+function closeSheet(page) {
+  page.element('sessions-close').onclick();
+  for (const listener of page.element('sessions-dialog').listeners.close) listener();
+}
+
+test('clearing the search drops the waiting query, and a session tapped next waits only for the search out', async () => {
+  const page = await browser();
+  const socket = await page.authorize({ tabs: [tab('tab-1'), tab('tab-2', 'Other')], selectedTabID: 'tab-1', terminal: 'READY' });
+  socket.sent[0].answered = true;
+  page.element('sessions-toggle').onclick();
+  await page.type('alphaw');
+  assert.deepEqual(searches(socket).map(request => request.text), ['a']);
+  page.element('session-search').value = '';
+  page.element('session-search').oninput();
+  page.element('session-list').children.find(row => row.dataset.tabId === 'tab-2').onclick();
+  await drain(socket);
+  assert.deepEqual(socket.sent.map(request => [request.action, request.text ?? request.tabID]),
+    [['state', undefined], ['chats', 'a'], ['select', 'tab-2']]);
+  assert.deepEqual(page.element('saved-list').children, []);
+  assert.equal(page.element('error').hidden, true);
+});
+
+test('closing the sheet drops the waiting query and shows nothing for it', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  socket.sent[0].answered = true;
+  page.element('sessions-toggle').onclick();
+  await page.type('alphaw');
+  closeSheet(page);
+  page.element('interrupt').onclick();
+  await drain(socket);
+  assert.deepEqual(socket.sent.map(request => [request.action, request.text]),
+    [['state', undefined], ['chats', 'a'], ['key', 'interrupt']]);
+  assert.equal(page.element('saved-empty').hidden, true);
+  assert.deepEqual(page.element('saved-list').children, []);
+  assert.equal(page.element('error').hidden, true);
+});
+
+test('reopening the sheet leaves the old query unsent, and a session tapped there waits only for the search out', async () => {
+  const page = await browser();
+  const socket = await page.authorize({ tabs: [tab('tab-1'), tab('tab-2', 'Other')], selectedTabID: 'tab-1', terminal: 'READY' });
+  socket.sent[0].answered = true;
+  page.element('sessions-toggle').onclick();
+  await page.type('alphaw');
+  closeSheet(page);
+  page.element('sessions-toggle').onclick();
+  page.element('session-list').children.find(row => row.dataset.tabId === 'tab-2').onclick();
+  await drain(socket);
+  assert.deepEqual(socket.sent.map(request => [request.action, request.text ?? request.tabID]),
+    [['state', undefined], ['chats', 'a'], ['select', 'tab-2']]);
+  assert.deepEqual(page.element('saved-list').children, []);
   assert.equal(page.element('error').hidden, true);
 });
 

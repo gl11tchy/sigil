@@ -393,11 +393,11 @@ function searchSaved() {
   renderSessionList();
   const query = $('session-search').value.trim();
   const token = ++searchToken;
-  if (!query || !$('sessions-dialog').open) { renderSaved([]); return; }
+  if (!query || !$('sessions-dialog').open) { dropWaitingSearch(); renderSaved([]); return; }
   renderSaved([], { pending: true });
   // The Mac reads 200 characters, and text over 8 KB drops the connection.
   request('chats', utf8Limited(takeGraphemes(query, 200), 8192)).then(reply => {
-    if (token !== searchToken || $('session-search').value.trim() !== query) return;
+    if (reply.stale || token !== searchToken || $('session-search').value.trim() !== query) return;
     renderSaved(reply.chats, { truncated: reply.chatsTruncated === true });
   }).catch(error => { if (token === searchToken) showError(error.message); });
 }
@@ -585,7 +585,7 @@ $('sessions-toggle').onclick = () => {
   if (hasFinePointer()) $('session-search').focus();
 };
 $('sessions-close').onclick = () => $('sessions-dialog').close();
-$('sessions-dialog').addEventListener('close', () => { if (!$('sessions-toggle').hidden) $('sessions-toggle').focus(); });
+$('sessions-dialog').addEventListener('close', () => { dropWaitingSearch(); if (!$('sessions-toggle').hidden) $('sessions-toggle').focus(); });
 $('session-search').oninput = searchSaved;
 $('find-toggle').onclick = () => {
   $('find-bar').hidden = false; $('find-toggle').setAttribute('aria-expanded', 'true');
@@ -608,6 +608,8 @@ $('connection').addEventListener('toggle', () => { if ($('connection').open) $('
 
 // The saved search that has not been sent yet.
 let waitingSearch = null;
+// A cleared box or a closed sheet ends the query; skip it at its turn.
+function dropWaitingSearch() { if (waitingSearch) waitingSearch.stale = true; waitingSearch = null; }
 function request(action, text, tabID = selected, pairing = false, extra = {}) {
   if (action !== 'chats') return enqueue(() => transmit(action, text, tabID, pairing, extra));
   // Typing can outrun the Mac. Last in line, the waiting search takes the newest query;
