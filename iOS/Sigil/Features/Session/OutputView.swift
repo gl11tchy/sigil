@@ -418,6 +418,22 @@ final class OutputTextView: UITextView {
     }
 }
 
+/// Where the composer floats over the output: reports its frame in the window, or
+/// nil with nothing in it. Read from this one slot, not from the composer: SwiftUI
+/// builds the composer again when the screen above it changes, and the copy it
+/// drops afterwards must not clear the one on screen.
+struct CoverSlot<Content: View>: View {
+    @ViewBuilder let content: Content
+    let changed: (CGRect?) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) { content }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                changed($0.height > 0 ? $0 : nil)
+            }
+    }
+}
+
 extension NSAttributedString.Key {
     static let outputPanel = NSAttributedString.Key("SigilOutputPanel")
 }

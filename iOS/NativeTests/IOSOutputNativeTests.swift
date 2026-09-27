@@ -63,6 +63,7 @@ enum IOSOutputNativeTests {
             await run("show past the screen cap lays out only the end") { try showPastCapLaysOutOnlyTheEnd(shown) }
             await run("find marks leave the text as it was") { try await findLeavesTheText(shown) }
             await run("find scrolls once the search lands") { try await findScrollsOnceTheSearchLands(shown) }
+            await run("a dropped composer keeps the cover") { try await aDroppedComposerKeepsTheCover() }
         } catch {
             failed += 1
             print("FAIL setup: \(error)")
