@@ -1,7 +1,9 @@
 import http from 'node:http';
-import { readFile } from 'node:fs/promises';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { readFile, stat } from 'node:fs/promises';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
+import { brotliCompress, gzip } from 'node:zlib';
 import { WebSocketServer, WebSocket } from 'ws';
 import { importKey, open } from './public/crypto.mjs';
 import { loadRevision } from './revision.mjs';
@@ -23,6 +25,48 @@ const assets = new Map([
   ...['Inter-Regular', 'Inter-Medium', 'Inter-SemiBold', 'JetBrainsMono-Regular', 'JetBrainsMono-Medium']
     .map(name => [`/fonts/${name}.woff2`, [`fonts/${name}.woff2`, 'font/woff2']]),
 ]);
+const compressors = { br: promisify(brotliCompress), gzip: promisify(gzip) };
+const compressible = type => type.startsWith('text/') || type.endsWith('+xml') || type.endsWith('+json');
+// The first of br and gzip the client accepts; otherwise the file goes out as it is.
+function encoding(header) {
+  const accepted = new Map(String(header || '').split(',').map(part => {
+    const [name, ...params] = part.toLowerCase().split(';').map(value => value.trim());
+    const q = params.find(value => value.startsWith('q='));
+    return [name, q ? Number(q.slice(2)) : 1];
+  }));
+  return ['br', 'gzip'].find(name => accepted.get(name) > 0);
+}
+// If-None-Match uses the weak comparison: W/"x" matches "x".
+const unchanged = (header, etag) => typeof header === 'string' &&
+  header.split(',').some(tag => ['*', etag, `W/${etag}`].includes(tag.trim()));
+// Each file is read, hashed and compressed once per version on disk. A changed size, mtime,
+// ctime or inode reloads it, so a new deployment's code is never answered from an old copy.
+function publicFiles() {
+  const files = new Map();
+  return async (name, wanted) => {
+    const url = new URL(`public/${name}`, import.meta.url);
+    const { size, mtimeMs, ctimeMs, ino } = await stat(url);
+    const version = `${size}:${mtimeMs}:${ctimeMs}:${ino}`;
+    let file = files.get(name);
+    if (file?.version !== version) {
+      const identity = readFile(url).then(body => ({ body, etag: `"${createHash('sha256').update(body).digest('base64url')}"` }));
+      file = { version, identity, encoded: new Map() };
+      files.set(name, file);
+    }
+    try {
+      const plain = await file.identity;
+      if (!wanted) return plain;
+      if (!file.encoded.has(wanted)) {
+        file.encoded.set(wanted, compressors[wanted](plain.body).then(body => body.byteLength < plain.body.byteLength
+          ? { body, etag: `${plain.etag.slice(0, -1)}-${wanted}"`, encoding: wanted } : plain));
+      }
+      return await file.encoded.get(wanted);
+    } catch (error) {
+      if (files.get(name) === file) files.delete(name);
+      throw error;
+    }
+  };
+}
 
 export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns = null } = {}) {
   const origin = new URL(publicOrigin);
@@ -34,6 +78,7 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
   const tickets = new Map();
   let creationWindow = now(), creations = 0;
   const wss = new WebSocketServer({ noServer: true, maxPayload: 110000, perMessageDeflate: false });
+  const files = publicFiles();
   // No request, header, or frame logging. Proxies must log paths only, never queries.
   const server = http.createServer(async (req, res) => {
     req.url = req.url.split('?')[0];
@@ -62,11 +107,17 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
     const asset = req.method === 'GET' && assets.get(req.url);
     if (!asset) { res.writeHead(404).end(); return; }
     try {
-      const data = await readFile(new URL(`public/${asset[0]}`, import.meta.url));
+      const compress = compressible(asset[1]);
+      const file = await files(asset[0], compress && encoding(req.headers['accept-encoding']));
       const font = asset[1].startsWith('font/');
       // Fonts never change under one name and weigh ~500 KB; let the phone keep them.
-      if (font) res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
-      res.writeHead(200, { 'Content-Type': font ? asset[1] : `${asset[1]}; charset=utf-8` }).end(data);
+      // Everything else is kept but checked on each use, so a new deployment's code loads at once.
+      res.setHeader('Cache-Control', font ? 'public, max-age=604800, immutable' : 'no-cache');
+      res.setHeader('ETag', file.etag);
+      if (compress) res.setHeader('Vary', 'Accept-Encoding');
+      if (unchanged(req.headers['if-none-match'], file.etag)) { res.writeHead(304).end(); return; }
+      if (file.encoding) res.setHeader('Content-Encoding', file.encoding);
+      res.writeHead(200, { 'Content-Type': font ? asset[1] : `${asset[1]}; charset=utf-8`, 'Content-Length': file.body.byteLength }).end(file.body);
     } catch { res.writeHead(500).end(); }
   });
   server.requestTimeout = 10000;
