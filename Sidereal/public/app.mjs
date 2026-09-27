@@ -2,6 +2,7 @@ import { importKey, randomKey, seal, open } from './crypto.mjs';
 import { readableOutput } from './output.mjs';
 import { pairingFromText } from './pairing.mjs';
 const $ = id => document.getElementById(id);
+const STATUS_LABELS = { working: 'Working', starting: 'Starting…', idle: 'Ready', exited: 'Session ended', unknown: 'Status unknown', waitingForApproval: 'Needs approval', interrupted: 'Stopped', failed: 'Failed', disconnected: 'Disconnected' };
 const drafts = new Map();
 const attachmentDrafts = new Map();
 const MAX_REMOTE_BYTES = 4 * 1024 * 1024;
@@ -92,7 +93,7 @@ function updateControls() {
   $('restart').hidden = !ended || !canRestart || selectedCapabilities?.resume === false;
   $('copy-output').hidden = !selected;
   $('sessions-toggle').hidden = !connected;
-  $('session-status').textContent = !connected ? 'Reconnecting…' : ({ working: 'Working', starting: 'Starting…', idle: 'Ready', exited: 'Session ended', unknown: 'Status unknown', waitingForApproval: 'Needs approval', interrupted: 'Stopped', failed: 'Failed', disconnected: 'Disconnected' }[selectedStatus] || 'No session');
+  $('session-status').textContent = !connected ? 'Reconnecting…' : (STATUS_LABELS[selectedStatus] || 'No session');
   $('session-status').dataset.state = connected ? selectedStatus || '' : 'offline';
   if (document.body) document.body.dataset.connected = String(connected && !$('controls').hidden);
   // An ended session already says so in the bar above, and Send is off.
@@ -266,10 +267,11 @@ function renderInteraction(prompt) {
     button.type = 'button'; button.textContent = choice.label;
     button.onclick = () => void perform(async () => {
       if (selected !== target || currentPrompt?.id !== prompt.id) throw new Error('The terminal changed. Check it before sending.');
+      const current = generation, epoch = commandEpoch;
       if (verified) await request('answer', choice.key, target, false, { name: prompt.id });
       else {
         await request('key', choice.key, target);
-        if (prompt.style === 'yesNo') await request('key', 'enter', target);
+        if (prompt.style === 'yesNo') { requireConnection(current, epoch); await request('key', 'enter', target); }
       }
     });
     return button;
@@ -371,7 +373,7 @@ function renderOutput(changedSession = false, prepended = false) {
   $('empty-output').hidden = Boolean(output);
   const ended = Boolean(selected) && (selectedRunning === false || selectedStatus === 'exited');
   $('empty-output').querySelector('h2').textContent = ended ? (selectedStatus === 'failed' ? 'Session failed' : 'Session ended') : selectedStatus === 'unknown' ? 'Status unknown' : selectedStatus === 'working' ? 'Working…' : selectedStatus === 'starting' ? 'Starting session…' : selected ? 'Ready when you are.' : 'No open sessions.';
-  $('empty-output').querySelector('p').textContent = ended ? (canRestart ? 'Resume this conversation.' : 'Restart this session in Sigil on your Mac.') : selectedStatus === 'working' || selectedStatus === 'starting' ? 'Output will appear here.' : selected ? 'Send a message to this session.' : 'Choose New to start a session.';
+  $('empty-output').querySelector('p').textContent = ended ? (selectedCapabilities?.resume === false ? (selectedCapabilities.history ? 'Open this conversation from Chats.' : 'Choose New to start another session.') : canRestart ? 'Resume this conversation.' : 'Restart this session in Sigil on your Mac.') : selectedStatus === 'working' || selectedStatus === 'starting' ? 'Output will appear here.' : selected ? 'Send a message to this session.' : 'Choose New to start a session.';
   terminal.dataset.raw = String(rawMode);
   if (displayedOutput !== output || changedSession) {
     // A repaint replaces the text and drops a selection the reader is making. Append
@@ -414,7 +416,7 @@ function renderSessionList() {
     const title = document.createElement('span');
     title.textContent = tab.title;
     const status = document.createElement('small');
-    status.textContent = { idle: 'Ready', working: 'Working', starting: 'Starting…', exited: 'Ended' }[tab.status];
+    status.textContent = STATUS_LABELS[tab.status] ?? 'Status unknown';
     button.append(title, status);
     button.onclick = () => {
       if (!connected || busy) return;
@@ -670,8 +672,11 @@ async function transmit(action, text, tabID, pairing, extra = {}) {
   if (current !== generation || epoch !== commandEpoch || ws.readyState !== WebSocket.OPEN) throw new Error('Connection lost.');
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
+      if (current !== generation || epoch !== commandEpoch || socket !== ws) return;
       pending.delete(seq);
       reject(new Error('No response. Check the terminal before sending again.'));
+      commandEpoch++;
+      ws.close();
     }, 10000);
     pending.set(seq, { resolve, reject, timer, action, tabID });
     ws.send(JSON.stringify({ data }));
@@ -719,7 +724,7 @@ function connect() {
         ws.send(JSON.stringify({ route }));
       } else if (typeof frame.hello === 'string' && /^[a-f0-9]{64}$/.test(frame.hello)) {
         if (challenge === frame.hello) return;
-        commandEpoch++;
+        offline('Connecting…');
         for (const item of pending.values()) {
           clearTimeout(item.timer);
           item.reject(new Error('Connection changed. Check the terminal before sending again.'));
@@ -729,9 +734,10 @@ function connect() {
         clientNonce = randomKey();
         sequence = 0;
         freshHandshake = true;
+        const authorizationEpoch = commandEpoch;
         const authorization = bootstrap ? request('pair', newDeviceKey, undefined, true) : request('state');
         authorization.then(() => {
-          if (current !== generation) return;
+          if (current !== generation || authorizationEpoch !== commandEpoch) return;
           bootstrap = null; newDeviceKey = null;
           if (replacingMemory) {
             for (const list of replacingMemory.attachments.values()) for (const item of list) if (item.preview) URL.revokeObjectURL(item.preview);
@@ -744,7 +750,7 @@ function connect() {
           $('status').textContent = $('status-live').textContent = 'Connected'; $('status').dataset.connected = 'true';
           showError(''); updateControls(); poll();
         }).catch(error => {
-          if (current !== generation) return;
+          if (current !== generation || authorizationEpoch !== commandEpoch) return;
           if (replacingMemory) {
             const saved = replacingMemory; replacingMemory = null;
             credential = saved.credential; bootstrap = null; newDeviceKey = null; unsaved = false; stopped = false;
@@ -788,6 +794,8 @@ function connect() {
           credential.ticket = reply.ticket;
           try { await storage('put', credential); } catch { /* keep the in-memory ticket */ }
         }
+        if (current !== generation || reply.clientNonce !== clientNonce || reply.challenge !== challenge
+          || socket !== ws || ws.readyState !== WebSocket.OPEN) return;
         if (item.action === 'earlier') pendingEarlier = {
           tabID: item.tabID, slice: typeof reply.earlier === 'string' ? reply.earlier : '',
         };
@@ -795,7 +803,7 @@ function connect() {
           // Restart replaces the Mac tab ID. Move drafts before pruning closed tabs.
           const next = reply.restartedTabID;
           const originalTab = sessionTabs.find(tab => tab.id === item.tabID);
-          const restartedTab = reply.state.tabs?.find(tab => tab.id === next);
+          const restartedTab = reply.state.tabs?.find(tab => tab.id === next) ?? reply.restartedSession;
           const movedRestart = item.action === 'restart' && typeof next === 'string'
             && next.length > 0 && next.length <= 64 && next !== item.tabID
             && sameConversation(originalTab, restartedTab);
@@ -829,11 +837,11 @@ function connect() {
 }
 async function perform(work) {
   if (!connected || busy) return;
-  const current = generation;
+  const current = generation, epoch = commandEpoch;
   busy = true; updateControls(); showError('');
   try { await work(); }
   catch (error) { showError(error.message); $('tabs').value = selected || ''; }
-  finally { if (generation === current) { busy = false; updateControls(); } }
+  finally { if (generation === current && commandEpoch === epoch) { busy = false; updateControls(); } }
 }
 function isImageFile(file) {
   return (file.type || '').startsWith('image/') || /\.(png|jpe?g|gif|webp|heic|heif|bmp|tiff?)$/i.test(file.name || '');
@@ -868,7 +876,12 @@ async function prepareFile(file) {
   if (file.size > MAX_REMOTE_BYTES) throw new Error('Keep files under 4 MB.');
   return { name: remoteFileName(file.name), bytes: new Uint8Array(await file.arrayBuffer()) };
 }
-async function uploadFile(payload, tabID) {
+function requireConnection(current, epoch) {
+  if (current !== generation || epoch !== commandEpoch || !connected) {
+    throw new Error('Connection changed. Check the terminal before sending again.');
+  }
+}
+async function uploadFile(payload, tabID, current = generation, epoch = commandEpoch) {
   const transfer = randomKey().slice(0, 32);
   const count = Math.max(1, Math.ceil(payload.bytes.length / CHUNK));
   for (let index = 0; index < count; index++) {
@@ -876,6 +889,7 @@ async function uploadFile(payload, tabID) {
     // The relay closes a socket over 30 frames/s, and the Mac replies once per chunk.
     const wait = lastChunkAt + 50 - Date.now();
     if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+    requireConnection(current, epoch);
     lastChunkAt = Date.now();
     await request('file', bytesToBase64(piece), tabID, false, { name: payload.name, index, count, transfer });
   }
@@ -926,26 +940,31 @@ async function sendText(submit) {
   // Check the text as sent: after attachments it gains a leading space.
   const payload = files.length ? ` ${text}` : text;
   if (new TextEncoder().encode(payload).length > 8192) { showError('Keep the message under 8 KB.'); return; }
-  const target = selected, current = generation;
+  const target = selected, current = generation, epoch = commandEpoch;
   // Size-check every file before the Mac pastes any of them into the prompt.
   const payloads = [];
-  for (const item of files) payloads.push(await prepareFile(item.file));
+  for (const item of files) {
+    payloads.push(await prepareFile(item.file));
+    requireConnection(current, epoch);
+  }
   for (const [index, item] of files.entries()) {
-    await uploadFile(payloads[index], target);
+    await uploadFile(payloads[index], target, current, epoch);
+    requireConnection(current, epoch);
     // The Mac has pasted this file, so a retry must not send it again.
     const list = attachmentDrafts.get(target);
     const at = list ? list.indexOf(item) : -1;
     if (at >= 0) { list.splice(at, 1); if (item.preview) URL.revokeObjectURL(item.preview); }
     if (selected === target) renderAttachments();
   }
-  if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
+  requireConnection(current, epoch);
   if (text.trim()) await request('input', payload, target);
-  if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
+  requireConnection(current, epoch);
   if (submit) {
     await new Promise(resolve => setTimeout(resolve, 100));
-    if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
+    requireConnection(current, epoch);
     await request('key', 'enter', target);
   }
+  requireConnection(current, epoch);
   if (selected === target) {
     if ($('message').value === text) { $('message').value = ''; resizeMessage(); }
     if (files.length) clearAttachments();

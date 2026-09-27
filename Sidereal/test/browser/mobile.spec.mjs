@@ -67,7 +67,7 @@ async function pair(page, origin, initialOutput, options = {}) {
           { provider: 'grokBuild', sessionID: 'native-one', cwd: '/tmp/one', capabilities: { resume: true }, id: outputs.restarted ? 'restarted' : 'one', title: 'Mobile layout review', status: outputs.restarted ? 'idle' : options.statuses?.one ?? 'working' },
           { provider: 'grokBuild', sessionID: 'native-two', cwd: '/tmp/two', capabilities: { resume: true }, id: 'two', title: 'Release checks', status: options.statuses?.two ?? 'idle' }],
           selectedTabID: selected, terminal: outputs[selected], capabilities: options.restart ? ['restart'] : [] };
-        const payload = { challenge, sequence: request.sequence, clientNonce: options.omitNonce ? undefined : request.clientNonce, ok: true, ticket, state, restartedTabID: request.action === 'restart' && options.restart ? 'restarted' : undefined };
+        const payload = { challenge, sequence: request.sequence, clientNonce: options.omitNonce ? undefined : request.clientNonce, ok: true, ticket, state, restartedTabID: request.action === 'restart' && options.restart ? 'restarted' : undefined, restartedSession: request.action === 'restart' && options.restart ? { provider: 'grokBuild', sessionID: 'native-one', cwd: '/tmp/one' } : undefined };
         if (projects) payload.projects = projects;
         if (request.action === 'options' && options.providers) {
           payload.options = { providers: options.providers, provider: options.providers[0].id, models: [], model: '', efforts: [], effort: '', locations: [] };
@@ -1031,7 +1031,7 @@ test('restart keeps drafts with their own sessions when the Mac changes selectio
 
 test('restart retains draft and attachments while its tab is outside the capped list', async ({ page, baseURL }) => {
   const tabs = Array.from({ length: 99 }, (_, i) => ({ id: `tab-${i}`, title: `Session ${i}`, status: 'idle' }));
-  const original = { id: 'one', title: 'Hidden restart', status: 'idle' };
+  const original = { id: 'one', title: 'Hidden restart', status: 'idle', provider: 'grokBuild', sessionID: 'native-one', cwd: '/tmp/one' };
   const state = { tabs: [...tabs, original], selectedTabID: 'one', terminal: '', capabilities: ['restart'], tabsTruncated: true };
   const options = { state, restart: true, onRequest(request) {
     if (request.action === 'restart') {
@@ -1049,7 +1049,7 @@ test('restart retains draft and attachments while its tab is outside the capped 
     await expect(page.locator('#tabs')).toHaveValue('tab-0');
     const polls = mac.actions.filter(a => a.action === 'state').length;
     await expect.poll(() => mac.actions.filter(a => a.action === 'state').length).toBeGreaterThan(polls);
-    state.tabs = [...tabs, { id: 'restarted', title: 'Hidden restart', status: 'idle' }];
+    state.tabs = [...tabs, { id: 'restarted', title: 'Hidden restart', status: 'idle', provider: 'grokBuild', sessionID: 'native-one', cwd: '/tmp/one' }];
     state.selectedTabID = 'restarted';
     await expect(page.locator('#tabs')).toHaveValue('restarted');
     await expect(page.locator('#message')).toHaveValue('Keep my hidden-session draft');
@@ -1058,7 +1058,7 @@ test('restart retains draft and attachments while its tab is outside the capped 
     state.selectedTabID = 'tab-0';
     state.tabsTruncated = false;
     await expect(page.locator('#tabs')).toHaveValue('tab-0');
-    state.tabs = [tabs[0], { id: 'restarted', title: 'Hidden restart', status: 'idle' }];
+    state.tabs = [tabs[0], { id: 'restarted', title: 'Hidden restart', status: 'idle', provider: 'grokBuild', sessionID: 'native-one', cwd: '/tmp/one' }];
     state.selectedTabID = 'restarted';
     await expect(page.locator('#tabs')).toHaveValue('restarted');
     await expect(page.locator('#message')).toHaveValue('');
@@ -1091,7 +1091,7 @@ test('unverified menu shows the full operation and only literal terminal choices
 
 test('unknown lifecycle stays explicit and unsupported restart stays hidden', async ({ page, baseURL }) => {
   const state = { tabs: [{ id: 'one', title: 'Codex', status: 'unknown', provider: 'codex',
-    processRunning: true, capabilities: { resume: false } }], selectedTabID: 'one', terminal: 'Provider output',
+    processRunning: true, capabilities: { resume: false, history: true } }], selectedTabID: 'one', terminal: 'Provider output',
     capabilities: ['restart'] };
   const mac = await pair(page, baseURL, '', { state });
   try {
@@ -1099,6 +1099,8 @@ test('unknown lifecycle stays explicit and unsupported restart stays hidden', as
     state.tabs[0].status = 'exited'; state.tabs[0].processRunning = false;
     await expect(page.locator('#session-status')).toHaveText('Session ended');
     await expect(page.locator('#restart')).toBeHidden();
+    state.terminal = '';
+    await expect(page.locator('#empty-output')).toContainText('Open this conversation from Chats.');
   } finally { mac.close(); }
 });
 
