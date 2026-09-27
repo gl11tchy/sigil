@@ -373,7 +373,8 @@ for (const api of [true, false]) {
         await expect(page.locator('#find-count')).toHaveText(`${matches.length} of ${matches.length}`);
         const [start, end] = matches.at(-1);
         await expect.poll(async () => (await findState(page)).current).toEqual({ start, end, text: 'needle', visible: true });
-        expect(await coverage(page, matches)).toMatchObject({ missing: 0, far: 0 });
+        // The jump scrolls at once; the matches around it are highlighted on the next frame.
+        await expect.poll(() => coverage(page, matches)).toMatchObject({ missing: 0, far: 0 });
         expect(await selected()).toBe(sparse.slice(0, 30));
         // Back at the top, the text under the selection is marked again and the selection stays.
         await page.locator('#terminal').evaluate(el => { el.scrollTop = 0; });
