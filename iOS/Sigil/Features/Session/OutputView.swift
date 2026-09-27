@@ -233,36 +233,43 @@ struct OutputView: UIViewRepresentable {
             scrollToEnd = parent.scrollToEnd
         }
 
-        /// Styles only the changed lines and swaps them in, in one edit, so TextKit
-        /// lays out only those again. A new look styles it all.
+        /// Styles only the changed lines and swaps them in, in one transaction, so
+        /// TextKit lays out only those again. A new look styles it all.
         func show(_ output: OutputView, in view: UITextView) {
             let look = Look(
                 palette: output.palette, foreground: output.foreground, background: output.background,
                 size: OutputView.font(bold: false).pointSize)
             defer { self.look = look }
             if look == self.look, let held = shown, view.textStorage.length == held.text.utf16.count,
-                let edit = held.edit(to: output.styled)
+                let all = held.edits(to: output.styled)
             {
                 shown = output.styled
-                guard !edit.isEmpty else { return }
-                let lines = OutputView.attributed(
-                    edit.replacement, palette: output.palette, foreground: output.foreground,
-                    background: output.background)
-                let range = NSRange(location: edit.range.lowerBound, length: edit.range.count)
+                let edits = all.filter { !$0.isEmpty }
+                guard let top = edits.last else { return }
+                // Last first, so each range still holds when its turn comes.
+                let changes = edits.map { edit in
+                    (NSRange(location: edit.range.lowerBound, length: edit.range.count), OutputView.attributed(
+                        edit.replacement, palette: output.palette, foreground: output.foreground,
+                        background: output.background))
+                }
                 let storage = view.textStorage
                 if let manager = view.textLayoutManager, let content = manager.textContentManager {
-                    content.performEditingTransaction { storage.replaceCharacters(in: range, with: lines) }
+                    content.performEditingTransaction {
+                        for (range, lines) in changes { storage.replaceCharacters(in: range, with: lines) }
+                    }
                     // TextKit can leave a line after the edit where it was; place them again.
-                    if let start = content.location(content.documentRange.location, offsetBy: range.location),
+                    if let start = content.location(content.documentRange.location, offsetBy: top.range.lowerBound),
                         let rest = NSTextRange(location: start, end: content.documentRange.endLocation)
                     {
                         manager.invalidateLayout(for: rest)
                     }
                 } else {
-                    storage.replaceCharacters(in: range, with: lines)
+                    for (range, lines) in changes { storage.replaceCharacters(in: range, with: lines) }
                 }
                 // Marks move with their text until the search of the new text lands.
-                if !matches.isEmpty { mark(OutputFind.matches(matches, after: edit), in: view) }
+                if !matches.isEmpty {
+                    mark(edits.reduce(matches) { OutputFind.matches($0, after: $1) }, in: view)
+                }
                 return
             }
             view.attributedText = OutputView.attributed(
