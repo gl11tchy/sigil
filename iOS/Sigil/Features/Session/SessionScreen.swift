@@ -112,6 +112,8 @@ struct SessionScreen: View {
             )
             // Under the composer to the page's foot; the page clips it to its corners.
             .ignoresSafeArea(.container, edges: .bottom)
+            // A new output view lands at the end; the last one's place must not hold it back.
+            .onAppear { atBottom = true }
             .privacySensitive()
         }
     }
