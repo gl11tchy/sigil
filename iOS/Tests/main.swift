@@ -51,6 +51,9 @@ enum TestMain {
 
         run("output worker matches the main thread") { try IOSOutputWorkerTests.workerMatchesTheMainThread() }
         run("output worker skips replaced snapshots in order") { try IOSOutputWorkerTests.workerSkipsReplacedSnapshotsInOrder() }
+        run("output edit equals a full rebuild over random diffs") { try IOSOutputEditTests.editEqualsFullRebuildOverRandomDiffs() }
+        run("text-only output edit equals a full rebuild") { try IOSOutputEditTests.textOnlyEditEqualsFullRebuild() }
+        run("output edit touches only changed lines") { try IOSOutputEditTests.editTouchesOnlyChangedLines() }
 
         run("screen model applies windows and diffs") { try ScreenTests.modelAppliesWindowsAndDiffs() }
         run("screen model prepends older rows until exhausted") { try ScreenTests.modelPrependsOlderRowsUntilExhausted() }

@@ -38,9 +38,10 @@ enum IOSOutputFixtures {
         return String((indent + marker + capital + body.joined(separator: " ")).prefix(width - 2))
     }
 
-    /// One row, styled as a Grok-like program paints it when `grounded`.
-    static func row(_ index: Int, grounded: Bool, using rng: inout Seeded) -> RemoteScreenRow {
-        let kind = Int.random(in: 0..<12, using: &rng)
+    /// One row, styled as a Grok-like program paints it when `grounded`. `kind` 0 is
+    /// blank, 1 and 2 are panels, 3 is a soft wrap; random when nil.
+    static func row(_ index: Int, grounded: Bool, kind: Int? = nil, using rng: inout Seeded) -> RemoteScreenRow {
+        let kind = kind ?? Int.random(in: 0..<12, using: &rng)
         var content = kind == 0 ? "" : text(using: &rng)
         var runs: [[Int]] = []
         let background = grounded ? ground : -1
@@ -87,11 +88,13 @@ enum IOSOutputFixtures {
     }
 
     /// A fresh screen of `count` rows.
-    static func model(count: Int, grounded: Bool, footer: Bool, using rng: inout Seeded) -> ScreenModel {
-        var rows = (0..<count).map { row($0, grounded: grounded, using: &rng) }
-        if footer { rows += footerRows(from: count) }
+    static func model(count: Int, grounded: Bool, footer: Bool, from base: Int = 0, using rng: inout Seeded)
+        -> ScreenModel
+    {
+        var rows = (base..<(base + count)).map { row($0, grounded: grounded, using: &rng) }
+        if footer { rows += footerRows(from: base + count) }
         var model = ScreenModel()
-        model.apply(screen(gen: 1, first: 0, end: rows.count, rows: rows))
+        model.apply(screen(gen: 1, first: base, end: base + rows.count, rows: rows))
         return model
     }
 

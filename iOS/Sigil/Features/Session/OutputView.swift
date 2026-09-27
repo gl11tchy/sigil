@@ -61,16 +61,15 @@ struct OutputView: UIViewRepresentable {
         if changed, !selecting {
             let wasAtBottom = coordinator.isAtBottom(view)
             let fromEnd = view.contentSize.height - view.contentOffset.y
-            let prepended = coordinator.text.count < text.count && text.hasSuffix(coordinator.text) && !coordinator.text.isEmpty
+            let previous = coordinator.text
             coordinator.revision = revision
             coordinator.highlight = highlight
             coordinator.text = text
-            view.attributedText = Self.attributed(
-                styled, palette: palette, foreground: foreground, background: background, highlight: highlight)
+            coordinator.show(self, in: view)
             view.layoutIfNeeded()
             if wasAtBottom || coordinator.first {
                 coordinator.scrollToBottom(view)
-            } else if prepended {
+            } else if previous.count < text.count && text.hasSuffix(previous) && !previous.isEmpty {
                 // Older text went in above the reader. Keep the lines they were reading in place.
                 view.contentOffset.y = max(0, view.contentSize.height - fromEnd)
             }
@@ -220,10 +219,52 @@ struct OutputView: UIViewRepresentable {
         var text = ""
         var first = true
         var scrollToEnd = 0
+        /// What the text view holds and the look it was styled with, so the next
+        /// output replaces only the lines that changed.
+        private var shown: StyledText?
+        private var look: Look?
+
+        private struct Look: Equatable {
+            var palette: [String]
+            var foreground: String
+            var background: String
+            var size: CGFloat
+        }
 
         init(_ parent: OutputView) {
             self.parent = parent
             scrollToEnd = parent.scrollToEnd
+        }
+
+        /// Styles only the changed lines and swaps them in, in one edit, so TextKit
+        /// lays out only those again. A new look or a find highlight styles it all.
+        func show(_ output: OutputView, in view: UITextView) {
+            let look = Look(
+                palette: output.palette, foreground: output.foreground, background: output.background,
+                size: OutputView.font(bold: false).pointSize)
+            defer { self.look = look }
+            if output.highlight.isEmpty, look == self.look, let held = shown,
+                view.textStorage.length == held.text.utf16.count, let edit = held.edit(to: output.styled)
+            {
+                shown = output.styled
+                guard !edit.isEmpty else { return }
+                let lines = OutputView.attributed(
+                    edit.replacement, palette: output.palette, foreground: output.foreground,
+                    background: output.background, highlight: "")
+                let range = NSRange(location: edit.range.lowerBound, length: edit.range.count)
+                let storage = view.textStorage
+                if let content = view.textLayoutManager?.textContentManager {
+                    content.performEditingTransaction { storage.replaceCharacters(in: range, with: lines) }
+                } else {
+                    storage.replaceCharacters(in: range, with: lines)
+                }
+                return
+            }
+            view.attributedText = OutputView.attributed(
+                output.styled, palette: output.palette, foreground: output.foreground, background: output.background,
+                highlight: output.highlight)
+            // A highlighted text is not the plain one the next edit starts from.
+            shown = output.highlight.isEmpty ? output.styled : nil
         }
 
         func isAtBottom(_ view: UITextView) -> Bool {
