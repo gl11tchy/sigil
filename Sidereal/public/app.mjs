@@ -38,7 +38,7 @@ let findIndex = 0, findMatches = [], displayedOutput = null;
 let rawOutput = '', rawMode = false;
 let credential, bootstrap, newDeviceKey, replacingMemory, socket, challenge, clientNonce, sequence = 0, selected;
 let selectedStatus = null, selectedRunning, selectedCapabilities, currentPrompt = null, promptSignature = null, tabCount = 0;
-let connected = false, busy = false, stopped = false, revoked = false, unsaved = false, reconnectTimer, pollTimer, connectTimer, generation = 0;
+let connected = false, busy = false, selectingSession = false, stopped = false, revoked = false, unsaved = false, reconnectTimer, pollTimer, connectTimer, generation = 0;
 let commandEpoch = 0, queuedCommands = 0, reconnectDelay = 500;
 let incoming = Promise.resolve(), outgoing = Promise.resolve(), pending = new Map();
 // A modal sheet makes the page inert, so its errors show inside the sheet.
@@ -76,13 +76,13 @@ function updateControls() {
   const ended = selectedRunning === false || selectedStatus === 'exited';
   document.querySelectorAll('#controls button, #controls textarea, #session-toolbar button, #session-toolbar select').forEach(element => {
     // Never disable a focused editor while a command is pending: it closes the phone keyboard.
-    if (element.id === 'message') { element.disabled = !selected; return; }
+    if (element.id === 'message') { element.disabled = !selected; element.readOnly = Boolean(selectingSession); return; }
     if (['keys-toggle', 'latest', 'find-toggle', 'find-close', 'find-next', 'find-previous', 'sessions-toggle'].includes(element.id)) { element.disabled = false; return; }
     if (element.id === 'restart') { element.disabled = disabled || !ended; return; }
     if (element.id === 'new') { element.disabled = disabled; return; }
     if (element.id === 'tabs') { element.disabled = disabled || tabCount === 0; return; }
     if (element.id === 'stop' || element.id === 'interrupt') {
-      element.disabled = !connected || !selected || ended; return;
+      element.disabled = !connected || !selected || ended || Boolean(selectingSession); return;
     }
     // Keys queue behind each other, but never land between a send's files and its Enter.
     if (element.dataset.key) { element.disabled = disabled || !selected || ended; return; }
@@ -97,7 +97,7 @@ function updateControls() {
   $('session-status').dataset.state = connected ? selectedStatus || '' : 'offline';
   if (document.body) document.body.dataset.connected = String(connected && !$('controls').hidden);
   // An ended session already says so in the bar above, and Send is off.
-  const composeStatus = busy ? 'Sending…' : !connected && selected ? 'Offline · draft kept' : '';
+  const composeStatus = selectingSession ? 'Switching…' : busy ? 'Sending…' : !connected && selected ? 'Offline · draft kept' : '';
   $('compose-status').textContent = composeStatus;
   // The row under the composer only exists when it has something to say: a
   // status on the phone, or the send shortcut where a hardware keyboard is likely.
@@ -133,6 +133,8 @@ function isStandaloneApp() {
   return isiOS && window.matchMedia('(display-mode: standalone)').matches;
 }
 function offline(message = 'Disconnected') {
+  if (selectingSession) $('tabs').value = selected || '';
+  selectingSession = false;
   connected = false;
   commandEpoch++;
   $('status').textContent = $('status-live').textContent = message;
@@ -421,9 +423,8 @@ function renderSessionList() {
     button.onclick = () => {
       if (!connected || busy) return;
       void perform(async () => {
-        await request('select', undefined, tab.id);
-        $('sessions-dialog').close();
-        $('sessions-toggle').focus();
+        if (!await changeSession('select', undefined, tab.id)) return;
+        if ($('sessions-dialog').open) { $('sessions-dialog').close(); $('sessions-toggle').focus(); }
       });
     };
     return button;
@@ -482,7 +483,7 @@ function renderSaved(chats, options = {}) {
       if (!connected || busy) return;
       const id = chat.id, folderPath = chat.folder;
       void perform(async () => {
-        await request('open', folderPath, undefined, false, { name: id, ...(chat.provider ? { provider: chat.provider } : {}) });
+        if (!await changeSession('open', folderPath, undefined, { name: id, ...(chat.provider ? { provider: chat.provider } : {}) })) return;
         $('sessions-dialog').close();
       });
     };
@@ -835,6 +836,26 @@ function connect() {
   };
   ws.onerror = () => { if (current === generation) showError('Cannot reach Sigil. Keep the Mac awake and connected.'); };
 }
+// The displayed picker can change before the Mac confirms its selection. Keep
+// the old draft readable and focused, but do not accept edits for an uncertain target.
+async function changeSession(action, text, tabID, extra = {}) {
+  const current = generation, epoch = commandEpoch;
+  const selection = selectingSession = { current, epoch };
+  updateControls();
+  try {
+    await request(action, text, tabID, false, extra);
+    return current === generation && epoch === commandEpoch;
+  } catch (error) {
+    if (current === generation && epoch === commandEpoch) throw error;
+    return false;
+  } finally {
+    // A timed-out socket may still be closing. Release only this selection's
+    // editor guard; never unlock a newer connection's pending selection.
+    if (selectingSession === selection) {
+      selectingSession = false; $('tabs').value = selected || ''; updateControls();
+    }
+  }
+}
 async function perform(work) {
   if (!connected || busy) return;
   const current = generation, epoch = commandEpoch;
@@ -1035,7 +1056,7 @@ $('keys-toggle').onclick = () => {
 };
 $('compose').onsubmit = event => { event.preventDefault(); void perform(() => sendText(true)); };
 $('paste').onclick = () => void perform(() => sendText(false));
-$('tabs').onchange = () => void perform(() => request('select', undefined, $('tabs').value));
+$('tabs').onchange = () => void perform(() => changeSession('select', undefined, $('tabs').value));
 $('new').onclick = () => void perform(async () => {
   let reply;
   try { reply = await request('projects'); } catch (error) {
@@ -1055,7 +1076,7 @@ $('provider').onchange = () => { providerChoice = $('provider').value; showProvi
 $('project-cancel').onclick = () => $('project-dialog').close();
 $('project-dialog').addEventListener('close', () => { if (!$('new').disabled) $('new').focus(); });
 async function interrupt() {
-  if (!connected || !selected) return;
+  if (!connected || !selected || selectingSession) return;
   try { await request('key', 'interrupt'); }
   catch (error) { showError(error.message); }
 }

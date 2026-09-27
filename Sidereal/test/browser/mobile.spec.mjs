@@ -42,9 +42,9 @@ async function pair(page, origin, initialOutput, options = {}) {
           ws.send(JSON.stringify({ peer, data: replayData })); return;
         }
         actions.push(request);
-        options.onRequest?.(request);
+        await options.onRequest?.(request);
         if (request.action === 'pair') key = await importKey(request.text);
-        if (request.action === 'select') selected = request.tabID;
+        if (request.action === 'select' && options.rejectAction !== 'select') selected = request.tabID;
         if (request.action === 'new') selected = 'two';
         const projects = request.action === 'projects'
           ? (options.projects ?? [{ name: 'Release checks', folder: '/tmp/release' }]) : undefined;
@@ -934,6 +934,64 @@ test('folder paths in the project and chats sheets use the mono face', async ({ 
     await page.screenshot({ path: testInfo.outputPath('saved.png'), animations: 'disabled' });
   } finally { mac.close(); }
 });
+
+for (const entry of ['picker', 'browse']) {
+  for (const outcome of ['success', 'failure']) {
+    test(`pending ${entry} session selection preserves readonly drafts through ${outcome}`, async ({ page, baseURL }, testInfo) => {
+      let hold = false, release;
+      const gate = new Promise(resolve => { release = resolve; });
+      const options = { onRequest: async request => { if (hold && request.action === 'select') await gate; } };
+      const mac = await pair(page, baseURL, undefined, options);
+      try {
+        const message = page.locator('#message');
+        await message.fill('First draft');
+        await page.locator('#tabs').selectOption('two');
+        await expect(page.locator('#terminal')).toContainText('Release checks');
+        await message.fill('Second draft');
+        await page.locator('#tabs').selectOption('one');
+        await expect(message).toHaveValue('First draft');
+        hold = true;
+        if (outcome === 'failure') options.rejectAction = 'select';
+        const count = mac.actions.filter(action => action.action === 'select').length;
+        if (entry === 'picker') await page.locator('#tabs').selectOption('two');
+        else {
+          await page.getByRole('button', { name: 'Browse open and saved chats' }).click();
+          await page.locator('#session-list button').filter({ hasText: 'Release checks' }).click();
+          // A person can dismiss Chats while the Mac's selection reply is pending.
+          await page.locator('#sessions-dialog').evaluate(el => {
+            el.dataset.testClosed = 'false';
+            el.addEventListener('close', () => { el.dataset.testClosed = 'true'; }, { once: true });
+          });
+          await page.keyboard.press('Escape');
+          await expect(page.locator('#sessions-dialog')).toHaveAttribute('data-test-closed', 'true');
+        }
+        await expect.poll(() => mac.actions.filter(action => action.action === 'select').length).toBe(count + 1);
+        await expect(message).not.toBeEditable();
+        await expect(message).toBeEnabled();
+        await message.focus();
+        await page.keyboard.type('Typing before the Mac replies');
+        await expect(message).toBeFocused();
+        await expect(message).toHaveValue('First draft');
+        await expect(page.locator('#send')).toBeDisabled();
+        await expect(page.locator('#stop')).toBeDisabled();
+        await expect(page.locator('#interrupt')).toBeDisabled();
+        await expect(page.locator('#compose-status')).toHaveText('Switching…');
+        await page.screenshot({ path: testInfo.outputPath('selection-pending.png') });
+        release();
+        await expect(message).toBeEditable();
+        await expect(message).toBeFocused();
+        await expect(message).toHaveValue(outcome === 'success' ? 'Second draft' : 'First draft');
+        await expect(page.locator('#tabs')).toHaveValue(outcome === 'success' ? 'two' : 'one');
+        if (outcome === 'failure') await expect(page.locator('#error')).toHaveText('Test action refused.');
+        options.rejectAction = null; hold = false;
+        await page.locator('#tabs').selectOption(outcome === 'success' ? 'one' : 'two');
+        await expect(message).toHaveValue(outcome === 'success' ? 'First draft' : 'Second draft');
+        expect(mac.actions.filter(action => ['input', 'key'].includes(action.action))).toEqual([]);
+        expect(mac.errors).toEqual([]);
+      } finally { release(); mac.close(); }
+    });
+  }
+}
 
 test('session search switches conversations and keeps each draft', async ({ page, baseURL }) => {
   const mac = await pair(page, baseURL);
