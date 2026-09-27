@@ -76,10 +76,14 @@ struct MacStartupTests {
         let blockingExecutable = AppSettings(defaults: defaults).executablePath
         unsetenv("GROK_HOME")
 
+        var launchVariable: String?
         let launch = AppLaunch(
             environment: profile.environment,
             makeModel: {
-                AppModel(
+                // Read in the adopt's own main-actor turn: other suites'
+                // fixtures set GROK_HOME while this test awaits.
+                launchVariable = ProcessInfo.processInfo.environment["GROK_HOME"]
+                return AppModel(
                     settings: AppSettings(defaults: defaults),
                     store: SessionStore(),
                     panel: RightPanel(defaults: defaults, notesStore: ConversationNotesStore(root: notes)),
@@ -91,7 +95,7 @@ struct MacStartupTests {
         #expect(blockingRoot.path == profile.grokHome + "/sessions")
         #expect(model.store.root == blockingRoot)
         // A CLI launch reads the process environment, as it did before.
-        #expect(ProcessInfo.processInfo.environment["GROK_HOME"] == blockingVariable)
+        #expect(launchVariable == blockingVariable)
         #expect(model.settings.executablePath == blockingExecutable)
     }
 
