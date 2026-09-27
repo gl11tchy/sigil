@@ -25,7 +25,7 @@ async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { devic
   const sealed = [];
   const element = id => {
     if (!elements.has(id)) elements.set(id, {
-      id, value: '', textContent: '', hidden: false, disabled: false, dataset: {}, style: {},
+      id, value: '', textContent: '', hidden: false, disabled: false, readOnly: false, dataset: {}, style: {},
       open: false, focus() {}, contains() { return false; },
       getAttribute(name) { return this[name]; }, setAttribute(name, value) { this[name] = value; },
       addEventListener() {},
@@ -51,7 +51,7 @@ async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { devic
       focus() {}, scrollIntoView() {},
     }),
     querySelectorAll: selector => selector === '[data-key]' ? [] :
-      ['new', 'tabs', 'message', 'send', 'paste', 'interrupt'].map(element),
+      ['new', 'tabs', 'message', 'send', 'paste', 'interrupt', 'stop'].map(element),
     addEventListener: (name, callback) => events.set(name, callback),
   };
   class FakeSocket {
@@ -526,6 +526,138 @@ test('an empty session list keeps a labelled placeholder and disables the picker
   assert.equal(page.element('empty-output-h2').textContent, 'No open sessions.');
 });
 
+async function selectionFixture(entry = 'picker') {
+  const page = await browser();
+  const socket = await page.authorize();
+  const tabs = [
+    { id: 'tab-1', title: 'One', status: 'idle' }, { id: 'tab-2', title: 'Two', status: 'idle' },
+  ];
+  const state = selectedTabID => ({ tabs, selectedTabID, terminal: selectedTabID });
+  page.element('message').value = 'First draft';
+  page.app.render(state('tab-2')); page.element('message').value = 'Second draft';
+  page.app.render(state('tab-1'));
+  const select = () => {
+    if (entry === 'picker') { page.element('tabs').value = 'tab-2'; page.element('tabs').onchange(); }
+    else if (entry === 'browse') {
+      page.element('sessions-dialog').open = true; page.app.renderSessionList();
+      page.element('session-list').children[1].onclick();
+    } else {
+      page.element('sessions-dialog').open = true; page.element('session-search').value = 'Two';
+      page.app.renderSaved([{ id: 'native-two', title: 'Two', folder: '/tmp/two' }]);
+      page.element('saved-list').children[0].onclick();
+    }
+  };
+  const reply = (request, selectedTabID, ws = socket) => ws.receive({ data: JSON.stringify({
+    challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: true, state: state(selectedTabID),
+  }) });
+  return { page, socket, state, select, reply };
+}
+
+for (const entry of ['picker', 'browse', 'saved']) {
+  test(`pending ${entry} selection makes the composer readonly without losing either draft`, async () => {
+    const { page, socket, state, select, reply } = await selectionFixture(entry);
+    select(); await settle();
+    const request = socket.sent.at(-1);
+    assert.equal(request.action, entry === 'saved' ? 'open' : 'select');
+    assert.equal(page.element('message').readOnly, true);
+    assert.equal(page.element('message').disabled, false);
+    assert.equal(page.element('compose-status').textContent, 'Switching…');
+    assert.equal(page.element('message').value, 'First draft');
+    page.app.render(state('tab-1')); // An old state poll must not unlock the pending selection.
+    assert.equal(page.element('message').readOnly, true);
+    reply(request, 'tab-2'); await settle();
+    assert.equal(page.element('message').readOnly, false);
+    assert.equal(page.element('message').value, 'Second draft');
+    page.app.render(state('tab-1'));
+    assert.equal(page.element('message').value, 'First draft');
+    assert.equal(socket.sent.some(r => ['input', 'key'].includes(r.action)), false);
+  });
+
+  test(`failed ${entry} selection restores an editable composer for the old target`, async () => {
+    const { page, socket, select } = await selectionFixture(entry);
+    select(); await settle();
+    assert.equal(page.element('message').readOnly, true);
+    const request = socket.sent.at(-1);
+    socket.receive({ data: JSON.stringify({ challenge: request.challenge, clientNonce: request.clientNonce,
+      sequence: request.sequence, ok: false, error: 'This tab is closed.' }) });
+    await settle();
+    assert.equal(page.element('message').readOnly, false);
+    assert.equal(page.element('tabs').value, 'tab-1');
+    assert.equal(page.element('message').value, 'First draft');
+    assert.equal(page.element('send').disabled, false);
+    assert.equal(socket.sent.some(r => ['input', 'key'].includes(r.action)), false);
+  });
+}
+
+for (const end of ['disconnect', 'timeout']) {
+  test(`selection ${end} restores the old target and never replays the selection`, async () => {
+    const { page, socket, select, reply } = await selectionFixture();
+    select(); await settle();
+    assert.equal(page.element('message').readOnly, true);
+    const oldRequest = socket.sent.at(-1);
+    if (end === 'disconnect') socket.close(); else await page.fireTimer(10000);
+    await settle();
+    assert.equal(page.element('message').readOnly, false);
+    assert.equal(page.element('message').disabled, false);
+    assert.equal(page.element('tabs').value, 'tab-1');
+    assert.equal(page.element('message').value, 'First draft');
+    page.app.connect(); const current = page.sockets.at(-1);
+    current.receive({ hello: 'c'.repeat(64) }); await settle(); reply(current.sent.at(-1), 'tab-1', current); await settle();
+    assert.equal(current.sent.some(r => r.action === 'select'), false);
+    select(); await settle(); const pending = current.sent.at(-1);
+    reply(oldRequest, 'tab-2'); await settle();
+    assert.equal(page.element('message').readOnly, true);
+    assert.equal(page.element('message').value, 'First draft');
+    reply(pending, 'tab-2', current); await settle();
+    assert.equal(page.element('message').readOnly, false);
+    assert.equal(page.element('message').value, 'Second draft');
+  });
+}
+
+test('pending selection blocks Stop and Interrupt without queuing a key for the old target', async () => {
+  const { page, socket, select, reply } = await selectionFixture();
+  select(); await settle();
+  const request = socket.sent.at(-1);
+  assert.equal(page.element('stop').disabled, true);
+  assert.equal(page.element('interrupt').disabled, true);
+  void page.element('stop').onclick(); void page.element('interrupt').onclick();
+  await settle(); reply(request, 'tab-2'); await settle();
+  assert.equal(socket.sent.some(r => r.action === 'key'), false);
+});
+
+test('a selection timeout releases its draft before the socket close event arrives', async () => {
+  const { page, socket, select } = await selectionFixture();
+  select(); await settle();
+  assert.equal(page.element('message').readOnly, true);
+  // Browser WebSocket.close() initiates an asynchronous close handshake.
+  const close = socket.close.bind(socket);
+  socket.close = () => { socket.readyState = 2; };
+  await page.fireTimer(10000);
+  assert.equal(page.element('message').readOnly, false);
+  assert.equal(page.element('tabs').value, 'tab-1');
+  assert.equal(page.element('message').value, 'First draft');
+  assert.equal(socket.sent.some(r => ['input', 'key'].includes(r.action)), false);
+  close();
+});
+
+test('an old selection completion cannot unlock a newer connection selection', async () => {
+  const { page, select, reply } = await selectionFixture();
+  const original = page.app.request;
+  let release;
+  page.app.request = () => new Promise(resolve => { release = resolve; });
+  select(); await settle(); assert.equal(page.element('message').readOnly, true);
+  page.app.request = original;
+  page.app.connect(); const current = page.sockets.at(-1);
+  current.receive({ hello: 'c'.repeat(64) }); await settle(); reply(current.sent.at(-1), 'tab-1', current); await settle();
+  select(); await settle(); const pending = current.sent.at(-1);
+  release({ ok: true }); await settle();
+  assert.equal(page.element('message').readOnly, true);
+  assert.equal(page.element('send').disabled, true);
+  reply(pending, 'tab-2', current); await settle();
+  assert.equal(page.element('message').readOnly, false);
+  assert.equal(page.element('message').value, 'Second draft');
+});
+
 test('a failed selection restores the picker to the displayed session', async () => {
   const page = await browser();
   const socket = await page.authorize();
@@ -617,6 +749,9 @@ test('sending never disables the editor or erases a newer draft', async () => {
   page.submit();
   await settle();
   assert.equal(page.element('message').disabled, false);
+  assert.equal(page.element('message').readOnly, false);
+  assert.equal(page.element('stop').disabled, false);
+  assert.equal(page.element('interrupt').disabled, false);
   page.element('message').value = 'My next thought';
   socket.reply();
   await settle();
