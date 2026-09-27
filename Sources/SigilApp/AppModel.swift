@@ -293,13 +293,31 @@ final class AppModel {
     /// Archived is open. A search ranks the closest title first and includes
     /// every folder.
     var sidebarSessions: [GrokSession] {
-        var result = store.search(searchText) { self.title(for: $0) }
-            .filter { passesSidebarFilters($0) }
+        sidebarSessions(index: sidebarIndex())
+    }
+
+    /// Archives and names grouped by chat id, built once per sidebar pass so
+    /// each chat is one lookup, not a scan of every entry.
+    private struct SidebarIndex {
+        var archived: ConversationIndex<OpenTabsSnapshot.Entry>
+        var names: ConversationIndex<ConversationName>
+    }
+
+    private func sidebarIndex() -> SidebarIndex {
+        SidebarIndex(
+            archived: ConversationIndex(settings.archivedConversations, sessionID: \.sessionID, cwd: \.cwd),
+            names: ConversationIndex(settings.conversationNames, sessionID: \.sessionID, cwd: \.cwd)
+        )
+    }
+
+    private func sidebarSessions(index: SidebarIndex) -> [GrokSession] {
+        var result = store.search(searchText) { self.title(for: $0, in: index) }
+            .filter { passesSidebarFilters($0, in: index) }
         if !SidebarOrganization.isSearching(searchText) {
             if sidebarSurface == .archived {
-                result = result.filter { isArchived($0) }
+                result = result.filter { isArchived($0, in: index) }
             } else {
-                result = result.filter { !isArchived($0) }
+                result = result.filter { !isArchived($0, in: index) }
             }
         }
         return result
@@ -307,11 +325,12 @@ final class AppModel {
 
     /// The empty, worktree and subagent filters. Shared by the list and the
     /// Archived count so the count never includes rows the list hides.
-    private func passesSidebarFilters(_ session: GrokSession) -> Bool {
+    /// `index` is the pass's name lookup; without one, names are scanned.
+    private func passesSidebarFilters(_ session: GrokSession, in index: SidebarIndex? = nil) -> Bool {
         // A session you have open is always worth listing, even before the CLI
         // has written a summary for it. Otherwise the row marking the
         // conversation on screen is the one row the list refuses to show.
-        if !settings.showEmptySessions, !(isReal(session) || isOpen(session)) {
+        if !settings.showEmptySessions, !(isReal(session, in: index) || isOpen(session)) {
             return false
         }
         if !settings.showWorktreeSessions, isEphemeral(path: session.cwd), !isOpen(session) {
@@ -325,10 +344,10 @@ final class AppModel {
 
     /// A session worth listing: it has a summary, a name the user chose, or more
     /// than the opening exchange.
-    private func isReal(_ session: GrokSession) -> Bool {
+    private func isReal(_ session: GrokSession, in index: SidebarIndex?) -> Bool {
         !session.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || session.messageCount > 2
-            || hasCustomName(session)
+            || (index.map { customName(for: session, in: $0) != nil } ?? hasCustomName(session))
     }
 
     func isOpen(_ session: GrokSession) -> Bool {
@@ -420,6 +439,10 @@ final class AppModel {
     func isArchived(_ session: GrokSession) -> Bool {
         SidebarOrganization.contains(
             settings.archivedConversations, session: session, samePath: samePath)
+    }
+
+    private func isArchived(_ session: GrokSession, in index: SidebarIndex) -> Bool {
+        index.archived.contains(sessionID: session.id, cwd: session.cwd, samePath: samePath)
     }
 
     func archive(_ session: GrokSession) {
@@ -523,7 +546,11 @@ final class AppModel {
 
     /// Archived conversations the Archived list will show.
     var archivedCount: Int {
-        store.sessions.filter { isArchived($0) && passesSidebarFilters($0) }.count
+        archivedCount(index: sidebarIndex())
+    }
+
+    private func archivedCount(index: SidebarIndex) -> Int {
+        store.sessions.filter { isArchived($0, in: index) && passesSidebarFilters($0, in: index) }.count
     }
 
     /// Pinned conversations still in the current sidebar filter, in pin order.
@@ -671,7 +698,8 @@ final class AppModel {
 
     /// Every list one sidebar render reads, from a single search and grouping.
     func sidebarSnapshot() -> SidebarSnapshot {
-        let sessions = sidebarSessions
+        let index = sidebarIndex()
+        let sessions = sidebarSessions(index: index)
         let projects = sidebarProjects(from: sessions)
         return SidebarSnapshot(
             listKind: SidebarOrganization.listKind(
@@ -684,7 +712,7 @@ final class AppModel {
             pinnedConversations: settings.pinnedConversations,
             pinnedProjectPaths: settings.pinnedProjects,
             openTabRowIDs: tabs.map { SidebarOrganization.openTabRowID($0.id) },
-            archivedCount: archivedCount,
+            archivedCount: archivedCount(index: index),
             samePath: samePath,
             sessionKey: sessionKey
         )
@@ -925,6 +953,16 @@ final class AppModel {
     func customName(for session: GrokSession) -> String? {
         ConversationNaming.name(
             for: session, in: settings.conversationNames, samePath: samePath)
+    }
+
+    private func title(for session: GrokSession, in index: SidebarIndex) -> String {
+        ConversationNaming.displayedTitle(for: session, customName: customName(for: session, in: index))
+    }
+
+    /// `customName(for:)` from the pass's index: the first record, normalized.
+    private func customName(for session: GrokSession, in index: SidebarIndex) -> String? {
+        index.names.first(sessionID: session.id, cwd: session.cwd, samePath: samePath)
+            .flatMap { ConversationNaming.normalized($0.name) }
     }
 
     func hasCustomName(_ session: GrokSession) -> Bool {
