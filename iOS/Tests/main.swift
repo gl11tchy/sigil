@@ -52,6 +52,21 @@ enum TestMain {
         run("file chunks") { try OutputTests.fileChunks() }
         run("safe file names") { try OutputTests.safeFileNames() }
 
+        run("output worker matches the main thread") { try IOSOutputWorkerTests.workerMatchesTheMainThread() }
+        run("output worker skips replaced snapshots in order") { try IOSOutputWorkerTests.workerSkipsReplacedSnapshotsInOrder() }
+        run("output edit equals a full rebuild over random diffs") { try IOSOutputEditTests.editEqualsFullRebuildOverRandomDiffs() }
+        run("text-only output edit equals a full rebuild") { try IOSOutputEditTests.textOnlyEditEqualsFullRebuild() }
+        run("output edit touches only changed lines") { try IOSOutputEditTests.editTouchesOnlyChangedLines() }
+        run("output edits at the screen cap cut only the ends") { try IOSOutputCapTests.screenAtCapEditsOnlyTheEnds() }
+        run("rows past the screen cap leave a slack at a time") { try IOSOutputCapSlackTests.rowsLeaveASlackAtATime() }
+        run("output edits at the history cap cut only the ends") { try IOSOutputCapTests.historyAtCapEditsOnlyTheEnds() }
+        run("output edits below the cap are the one edit") { try IOSOutputCapTests.editsMatchTheSingleEditBelowTheCap() }
+        run("find matches equal the old highlight") { try IOSOutputFindTests.matchesEqualTheOldHighlight() }
+        run("find marks the matches near the screen once") { try IOSOutputFindTests.nearbyMarksCoverTheMatches() }
+        run("find marks follow output edits") { try IOSOutputFindTests.marksFollowEdits() }
+        run("find skips replaced queries") { try IOSOutputFindTests.finderSkipsReplacedQueries() }
+        run("find scrolls to where the old search did") { try IOSOutputFindScrollTests.lastMatchIsWhereTheOldSearchScrolled() }
+
         run("screen model applies windows and diffs") { try ScreenTests.modelAppliesWindowsAndDiffs() }
         run("screen model prepends older rows until exhausted") { try ScreenTests.modelPrependsOlderRowsUntilExhausted() }
         run("screen model stays under cap") { try ScreenTests.modelStaysUnderCapAndForgetsOldestFirst() }
@@ -70,6 +85,10 @@ enum TestMain {
         run("alert opens with the right key only") { try ScreenTests.alertOpensWithTheRightKeyOnly() }
         run("pairing list rules") { try ScreenTests.pairingListRules() }
         run("alert names the Mac that sent it") { try ScreenTests.alertNamesTheMacThatSentIt() }
+
+        for (name, test) in ScreenCacheTests.all {
+            do { try await test(); passed += 1; print("PASS \(name)") } catch { failed += 1; print("FAIL \(name): \(error)") }
+        }
 
         if let port = ProcessInfo.processInfo.environment["SIGIL_RELAY_PORT"] {
             do {

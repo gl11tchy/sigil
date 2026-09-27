@@ -32,3 +32,5 @@ stage "Xcode 26+ toolchain" toolchain
 stage "typecheck" scripts/typecheck.sh
 stage "test (with the real relay)" scripts/relay-e2e.sh
 stage "native app, extensions, and simulator tests" scripts/native-test.sh
+
+stage "native TextKit output, Find, and cover tests" scripts/native-output-test.sh

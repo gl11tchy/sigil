@@ -61,21 +61,22 @@ struct OutputView: UIViewRepresentable {
         if changed, !selecting {
             let wasAtBottom = coordinator.isAtBottom(view)
             let fromEnd = view.contentSize.height - view.contentOffset.y
-            let prepended = coordinator.text.count < text.count && text.hasSuffix(coordinator.text) && !coordinator.text.isEmpty
+            let previous = coordinator.text
+            let repaint = coordinator.revision != revision
             coordinator.revision = revision
             coordinator.highlight = highlight
             coordinator.text = text
-            view.attributedText = Self.attributed(
-                styled, palette: palette, foreground: foreground, background: background, highlight: highlight)
+            // A new query leaves the text alone; only its marks change.
+            if repaint { coordinator.show(self, in: view) }
+            coordinator.find(highlight, in: view)
             view.layoutIfNeeded()
             if wasAtBottom || coordinator.first {
                 coordinator.scrollToBottom(view)
-            } else if prepended {
+            } else if previous.count < text.count && text.hasSuffix(previous) && !previous.isEmpty {
                 // Older text went in above the reader. Keep the lines they were reading in place.
                 view.contentOffset.y = max(0, view.contentSize.height - fromEnd)
             }
             coordinator.first = false
-            if !highlight.isEmpty { coordinator.scrollToFirstMatch(view, highlight) }
         }
         if coordinator.scrollToEnd != scrollToEnd {
             coordinator.scrollToEnd = scrollToEnd
@@ -84,7 +85,7 @@ struct OutputView: UIViewRepresentable {
     }
 
     nonisolated static func attributed(
-        _ styled: StyledText, palette: [String], foreground: String = "", background: String = "", highlight: String
+        _ styled: StyledText, palette: [String], foreground: String = "", background: String = ""
     ) -> NSAttributedString {
         let text = styled.text
         let defaultText = UInt32(foreground, radix: 16).map(Self.color) ?? UIColor.label
@@ -122,17 +123,6 @@ struct OutputView: UIViewRepresentable {
         }
         let base = StyledOutput.rgb(styled.ground, palette: palette) ?? UInt32(background, radix: 16)
         Self.shapeParagraphs(result, panels: styled.panels, palette: palette, base: base, font: font)
-        if !highlight.isEmpty {
-            let source = text as NSString
-            var range = NSRange(location: 0, length: source.length)
-            while true {
-                let found = source.range(of: highlight, options: [.caseInsensitive], range: range)
-                guard found.location != NSNotFound, found.length > 0 else { break }
-                result.addAttributes([.backgroundColor: Self.match], range: found)
-                let next = found.location + found.length
-                range = NSRange(location: next, length: source.length - next)
-            }
-        }
         return result
     }
 
@@ -220,10 +210,133 @@ struct OutputView: UIViewRepresentable {
         var text = ""
         var first = true
         var scrollToEnd = 0
+        /// What the text view holds and the look it was styled with, so the next
+        /// output replaces only the lines that changed.
+        private var shown: StyledText?
+        private var look: Look?
+        /// The find matches, in order, the text whose matches TextKit marks, and
+        /// the search that finds them. A test may hold the search's queue.
+        private var matches: [NSRange] = []
+        private var marked = IndexSet()
+        var finder = OutputFinder()
+
+        private struct Look: Equatable {
+            var palette: [String]
+            var foreground: String
+            var background: String
+            var size: CGFloat
+        }
 
         init(_ parent: OutputView) {
             self.parent = parent
             scrollToEnd = parent.scrollToEnd
+        }
+
+        /// Styles only the changed lines and swaps them in, in one transaction, so
+        /// TextKit lays out only those again. A new look styles it all.
+        func show(_ output: OutputView, in view: UITextView) {
+            let look = Look(
+                palette: output.palette, foreground: output.foreground, background: output.background,
+                size: OutputView.font(bold: false).pointSize)
+            defer { self.look = look }
+            if look == self.look, let held = shown, view.textStorage.length == held.text.utf16.count,
+                let all = held.edits(to: output.styled)
+            {
+                shown = output.styled
+                let edits = all.filter { !$0.isEmpty }
+                guard let top = edits.last else { return }
+                // Last first, so each range still holds when its turn comes.
+                let changes = edits.map { edit in
+                    (NSRange(location: edit.range.lowerBound, length: edit.range.count), OutputView.attributed(
+                        edit.replacement, palette: output.palette, foreground: output.foreground,
+                        background: output.background))
+                }
+                let storage = view.textStorage
+                if let manager = view.textLayoutManager, let content = manager.textContentManager {
+                    content.performEditingTransaction {
+                        for (range, lines) in changes { storage.replaceCharacters(in: range, with: lines) }
+                    }
+                    // TextKit can leave a line after the edit where it was; place them again.
+                    // A top cut in an edit of its own, the last of two, moves every line
+                    // under it alike, and TextKit places those itself. Laying all of them
+                    // out again takes tens of milliseconds and can leave none on screen.
+                    var from = top.range.lowerBound
+                    if edits.count > 1 {
+                        let (cut, lead) = changes[changes.count - 1]
+                        from = edits[edits.count - 2].range.lowerBound + lead.length - cut.length
+                    }
+                    if let start = content.location(content.documentRange.location, offsetBy: from),
+                        let rest = NSTextRange(location: start, end: content.documentRange.endLocation)
+                    {
+                        manager.invalidateLayout(for: rest)
+                    }
+                } else {
+                    for (range, lines) in changes { storage.replaceCharacters(in: range, with: lines) }
+                }
+                // Marks move with their text until the search of the new text lands.
+                if !matches.isEmpty {
+                    mark(edits.reduce(matches) { OutputFind.matches($0, after: $1) }, in: view)
+                }
+                return
+            }
+            view.attributedText = OutputView.attributed(
+                output.styled, palette: output.palette, foreground: output.foreground, background: output.background)
+            shown = output.styled
+            if !matches.isEmpty { mark([], in: view) }
+        }
+
+        /// Searches the output off the main thread, marks what it finds and shows
+        /// the last match, unless the output or the query moved on meanwhile.
+        func find(_ query: String, in view: UITextView) {
+            guard !query.isEmpty else {
+                if !matches.isEmpty { mark([], in: view) }
+                return
+            }
+            let text = text
+            let revision = revision
+            Task { [weak self, weak view] in
+                guard let found = await self?.finder.matches(of: query, in: text), let self, let view,
+                    self.highlight == query, self.revision == revision
+                else { return }
+                if found != self.matches { self.mark(found, in: view) }
+                if let last = found.last { view.scrollRangeToVisible(last) }
+            }
+        }
+
+        /// Swaps the marks. They are TextKit rendering attributes, drawn over the
+        /// text, so the terminal's own colours are back the moment they go.
+        private func mark(_ found: [NSRange], in view: UITextView) {
+            matches = found
+            marked = IndexSet()
+            guard let manager = view.textLayoutManager else { return }
+            manager.removeRenderingAttribute(.backgroundColor, for: manager.documentRange)
+            markNearby(in: view)
+            // Lines on screen draw again only when laid out.
+            manager.textViewportLayoutController.layoutViewport()
+        }
+
+        /// Marks the matches within a screen of what shows, where not marked yet;
+        /// scrolling marks the rest as it comes near.
+        private func markNearby(in view: UITextView) {
+            guard !matches.isEmpty, let manager = view.textLayoutManager, let content = manager.textContentManager
+            else { return }
+            let bottom = max(0, manager.usageBoundsForTextContainer.maxY - 1)
+            let top = view.contentOffset.y - view.textContainerInset.top - view.bounds.height
+            let origin = content.documentRange.location
+            let first = manager.textLayoutFragment(for: CGPoint(x: 0, y: min(max(0, top), bottom)))
+            let last = manager.textLayoutFragment(for: CGPoint(x: 0, y: min(max(0, top + 3 * view.bounds.height), bottom)))
+            let start = content.offset(from: origin, to: first?.rangeInElement.location ?? origin)
+            let end = content.offset(from: origin, to: last?.rangeInElement.endLocation ?? content.documentRange.endLocation)
+            guard start < end else { return }
+            let near = NSRange(location: start, length: end - start)
+            for match in OutputFind.matches(matches, in: near, besides: marked) {
+                guard let from = content.location(origin, offsetBy: match.location),
+                    let to = content.location(from, offsetBy: match.length),
+                    let range = NSTextRange(location: from, end: to)
+                else { continue }
+                manager.addRenderingAttribute(.backgroundColor, value: OutputView.match, for: range)
+            }
+            marked.insert(integersIn: start..<end)
         }
 
         func isAtBottom(_ view: UITextView) -> Bool {
@@ -259,15 +372,10 @@ struct OutputView: UIViewRepresentable {
             return NSTextLayoutFragment(textElement: textElement, range: textElement.elementRange)
         }
 
-        func scrollToFirstMatch(_ view: UITextView, _ query: String) {
-            let found = (text as NSString).range(of: query, options: [.caseInsensitive, .backwards])
-            guard found.location != NSNotFound else { return }
-            view.scrollRangeToVisible(found)
-        }
-
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             guard let view = scrollView as? UITextView else { return }
             report(view)
+            markNearby(in: view)
             if view.contentOffset.y + view.adjustedContentInset.top < 48, view.contentSize.height > view.bounds.height {
                 parent.onNearTop()
             }
@@ -307,6 +415,22 @@ final class OutputTextView: UITextView {
     override func adjustedContentInsetDidChange() {
         super.adjustedContentInsetDidChange()
         insetChanged?(self)
+    }
+}
+
+/// Where the composer floats over the output: reports its frame in the window, or
+/// nil with nothing in it. Read from this one slot, not from the composer: SwiftUI
+/// builds the composer again when the screen above it changes, and the copy it
+/// drops afterwards must not clear the one on screen.
+struct CoverSlot<Content: View>: View {
+    @ViewBuilder let content: Content
+    let changed: (CGRect?) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) { content }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                changed($0.height > 0 ? $0 : nil)
+            }
     }
 }
 

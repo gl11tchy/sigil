@@ -24,16 +24,13 @@ struct SessionScreen: View {
         NavigationStack {
             content
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    if store.selectedTab != nil, !store.isRevoked {
-                        ComposerBar(upperLimit: pageHeight.map { $0 * 0.4 } ?? .infinity)
-                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
-                                composerHeight = $0.height
-                                composerTop = $0.minY
-                            }
-                            .onDisappear {
-                                composerHeight = 0
-                                composerTop = nil
-                            }
+                    CoverSlot {
+                        if store.selectedTab != nil, !store.isRevoked {
+                            ComposerBar(upperLimit: pageHeight.map { $0 * 0.4 } ?? .infinity)
+                        }
+                    } changed: {
+                        composerHeight = $0?.height ?? 0
+                        composerTop = $0?.minY
                     }
                 }
                 .page()
@@ -115,6 +112,8 @@ struct SessionScreen: View {
             )
             // Under the composer to the page's foot; the page clips it to its corners.
             .ignoresSafeArea(.container, edges: .bottom)
+            // A new output view lands at the end; the last one's place must not hold it back.
+            .onAppear { atBottom = true }
             .privacySensitive()
         }
     }

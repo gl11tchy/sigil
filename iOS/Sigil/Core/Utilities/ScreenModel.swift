@@ -37,6 +37,10 @@ struct ScreenModel: Codable, Equatable {
 
     /// About 400 KB of text at 100 characters a row.
     static let cap = 4_000
+    /// Rows held past the cap before the oldest go, down to the cap. Cutting the
+    /// top of the view's text costs several times what adding to its end does,
+    /// so that happens once in this many rows rather than with every row.
+    static let slack = 256
 
     var isEmpty: Bool { rows.isEmpty }
     var oldestIndex: Int? { rows.keys.min() }
@@ -74,7 +78,7 @@ struct ScreenModel: Codable, Equatable {
     }
 
     private mutating func trim() {
-        guard rows.count > Self.cap else { return }
+        guard rows.count > Self.cap + Self.slack else { return }
         let keep = rows.keys.sorted().suffix(Self.cap)
         guard let floor = keep.first else { return }
         rows = rows.filter { $0.key >= floor }

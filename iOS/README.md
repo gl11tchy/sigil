@@ -76,6 +76,7 @@ scripts/typecheck.sh     # app/shared sources against the simulator SDK
 scripts/test.sh          # shared logic, compiled as a macOS executable
 scripts/relay-e2e.sh     # shared logic and a real local relay
 scripts/native-test.sh   # actual app, both extensions, app-hosted simulator tests
+scripts/native-output-test.sh # UIKit/TextKit output, Find, and cover tests
 scripts/build.sh         # standalone unsigned simulator build
 scripts/ci.sh            # required native verification gate
 scripts/ship.sh          # signed archive and App Store Connect upload
@@ -85,7 +86,8 @@ Xcode 26+ and an installed iOS 26+ simulator runtime are required. Native tests
 create and remove their own simulator. They never use a personal pairing or paid
 provider session. The native gate verifies `Sigil.app`, `SigilNotifications.appex`,
 and `SigilWidgets.appex`, then runs the real app's networking and store against a
-real relay with a deterministic Mac fixture. Result bundles contain test evidence
+real relay with a deterministic Mac fixture. The separate TextKit harness preserves native output, Find, scrolling, and cover tests.
+Result bundles contain test evidence
 and a synthetic accessibility-size composer screenshot.
 
 The configured `sigil-vm` CI runner still uses `macos-sequoia-xcode16.4`.

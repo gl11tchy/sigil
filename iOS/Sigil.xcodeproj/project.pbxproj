@@ -79,7 +79,7 @@
 			sourceTree = "<group>";
 		};
         C0A200000000000000000003 /* Tests */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (C0A200000000000000000005,); path = Tests; sourceTree = "<group>"; };
-        C0A200000000000000000004 /* NativeTests */ = {isa = PBXFileSystemSynchronizedRootGroup; path = NativeTests; sourceTree = "<group>"; };
+        C0A200000000000000000004 /* NativeTests */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (C0A20000000000000000000E,); path = NativeTests; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -100,6 +100,16 @@
 			target = C0A1000000000000000000E4 /* SigilWidgets */;
 		};
 		C0A200000000000000000005 = {isa = PBXFileSystemSynchronizedBuildFileExceptionSet; membershipExceptions = (main.swift,); target = C0A200000000000000000009; };
+        C0A20000000000000000000E = {
+            isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+            membershipExceptions = (
+                IOSCoverSlotNativeTests.swift,
+                IOSOutputCapSlackNativeTests.swift,
+                IOSOutputFindScrollNativeTests.swift,
+                IOSOutputNativeTests.swift,
+            );
+            target = C0A200000000000000000009;
+        };
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFrameworksBuildPhase section */
