@@ -717,6 +717,13 @@ final class RemoteStore {
         reflectLiveActivity()
     }
 
+    /// Streamed output is formatted and styled here, off the main thread. Each refresh
+    /// takes the next generation; a result lands only if it is newer than the output
+    /// on screen and was built for the Mac, tab and mode still on screen.
+    @ObservationIgnored private let worker = OutputWorker { ReadableOutput.bundled() }
+    @ObservationIgnored private var outputGeneration = 0
+    @ObservationIgnored private var shownGeneration = 0
+
     /// Output changes arrive many times a second; one repaint per burst is enough.
     private func scheduleRefresh() {
         guard refreshTask == nil else { return }
@@ -724,30 +731,37 @@ final class RemoteStore {
             try? await Task.sleep(for: .milliseconds(40))
             guard let self, !Task.isCancelled else { return }
             self.refreshTask = nil
-            self.refreshOutput()
+            let snapshot = self.outputSnapshot()
+            let key = (self.activeMacID, self.selectedTabID, self.rawMode)
+            self.outputGeneration += 1
+            let generation = self.outputGeneration
+            guard let next = await self.worker.render(snapshot, generation: generation),
+                generation > self.shownGeneration
+            else { return }
+            // The tab or the mode changed meanwhile: build again for what is on screen now.
+            guard key == (self.activeMacID, self.selectedTabID, self.rawMode) else { return self.scheduleRefresh() }
+            self.show(next, from: snapshot, generation: generation)
         }
     }
 
+    /// Builds the output at once, on the main thread; a result still on the worker is then dropped.
     func refreshOutput() {
-        let next: StyledText
-        var colours: [String] = []
-        var fg = ""
-        var bg = ""
-        if let id = selectedTabID, let screen = screens[id] {
-            let prepared = StyledOutput.prepare(screen.lines)
-            colours = screen.palette
-            fg = screen.foreground
-            bg = screen.background
-            if rawMode {
-                next = StyledOutput.raw(prepared)
-            } else {
-                next = StyledOutput.readable(
-                    formatter.format(ScreenModel.text(of: prepared.lines)), screen: prepared)
-            }
-        } else {
-            let raw = selectedTabID.flatMap { histories[$0]?.text } ?? ""
-            next = StyledText(text: rawMode ? raw : formatter.format(raw), spans: [])
-        }
+        outputGeneration += 1
+        let snapshot = outputSnapshot()
+        show(snapshot.render(with: formatter), from: snapshot, generation: outputGeneration)
+    }
+
+    private func outputSnapshot() -> OutputSnapshot {
+        let screen = selectedTabID.flatMap { screens[$0] }
+        let history = screen == nil ? selectedTabID.flatMap { histories[$0] } : nil
+        return OutputSnapshot(screen: screen, history: history, raw: rawMode)
+    }
+
+    private func show(_ next: StyledText, from snapshot: OutputSnapshot, generation: Int) {
+        shownGeneration = generation
+        let colours = snapshot.screen?.palette ?? []
+        let fg = snapshot.screen?.foreground ?? ""
+        let bg = snapshot.screen?.background ?? ""
         if next != styledOutput || colours != palette || fg != themeForeground || bg != themeBackground {
             styledOutput = next
             palette = colours

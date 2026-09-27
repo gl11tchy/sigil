@@ -49,6 +49,9 @@ enum TestMain {
         run("file chunks") { try OutputTests.fileChunks() }
         run("safe file names") { try OutputTests.safeFileNames() }
 
+        run("output worker matches the main thread") { try IOSOutputWorkerTests.workerMatchesTheMainThread() }
+        run("output worker skips replaced snapshots in order") { try IOSOutputWorkerTests.workerSkipsReplacedSnapshotsInOrder() }
+
         run("screen model applies windows and diffs") { try ScreenTests.modelAppliesWindowsAndDiffs() }
         run("screen model prepends older rows until exhausted") { try ScreenTests.modelPrependsOlderRowsUntilExhausted() }
         run("screen model stays under cap") { try ScreenTests.modelStaysUnderCapAndForgetsOldestFirst() }
