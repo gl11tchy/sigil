@@ -205,10 +205,13 @@ struct WindowContent: View {
                 ZStack(alignment: .top) {
                     ForEach(model.tabs) { tab in
                         let isSelected = tab.id == model.selectedTab?.id
-                        TerminalScreen(tab: tab, theme: model.settings.theme)
-                            .opacity(isSelected ? 1 : 0)
-                            .allowsHitTesting(isSelected)
-                            .accessibilityHidden(!isSelected)
+                        TerminalScreen(
+                            tab: tab, theme: model.settings.theme,
+                            onWindowAttachment: { model.terminalViewDidAttach(tabID: tab.id) }
+                        )
+                        .opacity(isSelected ? 1 : 0)
+                        .allowsHitTesting(isSelected)
+                        .accessibilityHidden(!isSelected)
                     }
                     if model.isFindBarVisible, model.selectedTab != nil {
                         HStack {

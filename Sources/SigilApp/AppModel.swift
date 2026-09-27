@@ -1982,6 +1982,13 @@ final class AppModel {
         }
     }
 
+    /// Selection can precede AppKit attachment, after the window already became
+    /// key. Retry that pending request when its actual terminal view arrives.
+    func terminalViewDidAttach(tabID: TerminalTab.ID) {
+        guard needsTerminalFocus, selectedTab?.id == tabID else { return }
+        focusSelectedTerminal()
+    }
+
     /// Hiding a column removes its views. When one of them had focus, the
     /// window would be left with no first responder and every key would beep.
     private func refocusTerminalAfterHiding(_ column: KeyboardFocus.Column) {
