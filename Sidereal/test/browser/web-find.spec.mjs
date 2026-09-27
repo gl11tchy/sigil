@@ -323,6 +323,32 @@ for (const api of [true, false]) {
       } finally { mac.close(); }
     });
 
+    test('Find marks the match it jumped to once the reader lets go of a selection', async ({ page, baseURL }) => {
+      const matches = count(sparse, 'needle').map(match => [match.index, match.index + 6]);
+      const mac = await pair(page, baseURL, { terminal: () => sparse });
+      try {
+        await expect(page.locator('#terminal')).toHaveText(sparse);
+        await openFind(page, 'needle');
+        await expect(page.locator('#find-count')).toHaveText(`1 of ${matches.length}`);
+        await frames(page);
+        await page.evaluate(() => {
+          const text = document.getElementById('terminal').firstChild;
+          getSelection().setBaseAndExtent(text, 0, text, 'line'.length);
+        });
+        // Previous wraps to the last match, far from the marks painted so far. Marks would replace
+        // the text under the selection, so they wait; without a scroll they waited for good. A click
+        // takes focus from the search field, as a drag in the output would have.
+        await page.getByRole('button', { name: 'Previous match' }).click();
+        await expect(page.locator('#find-count')).toHaveText(`${matches.length} of ${matches.length}`);
+        await frames(page);
+        expect(await page.evaluate(() => getSelection().toString())).toBe('line');
+        await page.evaluate(() => getSelection().removeAllRanges());
+        const [start, end] = matches.at(-1);
+        await expect.poll(async () => (await findState(page)).current).toEqual({ start, end, text: 'needle', visible: true });
+        expect(await coverage(page, matches)).toMatchObject({ missing: 0, far: 0 });
+      } finally { mac.close(); }
+    });
+
     test('Find keeps the reader in place while earlier history loads', async ({ page, baseURL }) => {
       // One earlier slice, then the start of history.
       let batch = 0;

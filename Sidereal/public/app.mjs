@@ -676,6 +676,12 @@ function showVisibleMatches() {
   if (!findMatches.length || !height) return;
   const scroll = [terminal.scrollTop, terminal.scrollLeft];
   if (findShown && Math.abs(scroll[0] - findBand[0]) <= findBand[2] * height && Math.abs(scroll[1] - findBand[1]) <= findBand[2] * width) return;
+  // Replacing the text for marks drops a selection the reader is making; they wait until it is made.
+  const selection = findHighlight ? null : globalThis.getSelection?.();
+  if (selection && !selection.isCollapsed && terminal.contains(selection.anchorNode)) {
+    document.addEventListener('selectionchange', showMatchesSoon, { once: true });
+    return;
+  }
   const frame = terminal.getBoundingClientRect();
   const top = frame.top + terminal.clientTop, bottom = top + height;
   const left = frame.left + terminal.clientLeft, right = left + width;
@@ -735,9 +741,6 @@ function showVisibleMatches() {
     findHighlight.match.clear();
     for (const index of shown) findHighlight.match.add(findRange(index));
   } else {
-    // Replacing the text drops a selection the reader is making; the next scroll tries again.
-    const selection = globalThis.getSelection?.();
-    if (selection && !selection.isCollapsed && terminal.contains(selection.anchorNode)) return;
     paintText(findText, shown);
     findMarked = findIndex;
   }
