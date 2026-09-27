@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SigilKit
+import SwiftUI
 import Testing
 
 @testable import SigilApp
@@ -217,6 +218,67 @@ struct MacStartupTests {
         try await Task.sleep(for: .milliseconds(600))
         #expect(!launch.isSlow)
     }
+
+    /// The window SigilApp shows, hosted in a real window, while a `.zshenv`
+    /// sleeps past the probe's ceiling: it lays out at once with no model,
+    /// then shows its content once the model is built.
+    @Test func theRealWindowLaysOutBeforeTheLoginShellAnswers() async throws {
+        let profile = try ShellProfile(delay: 2.5)
+        defer { profile.cleanup() }
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        _ = NSApplication.shared
+        var appeared = 0
+        var wired: AppModel?
+
+        let started = ContinuousClock.now
+        let launch = AppLaunch(
+            environment: profile.environment,
+            adopt: { _ in },
+            makeModel: { fixture.model() })
+        // As SigilApp.body builds it, with the delegate wiring it passes.
+        let host = NSHostingView(
+            rootView: SigilApp.mainWindow(launch: launch) {
+                appeared += 1
+                launch.whenReady { wired = $0 }
+            })
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 640),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        let firstWindow = ContinuousClock.now - started
+
+        // Laid out and drawn while the shell still sleeps: the canvas only.
+        #expect(firstWindow < .milliseconds(500))
+        #expect(launch.model == nil)
+        #expect(host.frame.size == NSSize(width: 1000, height: 640))
+        #expect(!holds(WindowCloseGuard.GuardView.self, host))
+        #expect(await waitUntil { appeared == 1 })
+        #expect(wired == nil)
+        let canvas = Palette(theme: AppSettings.storedTheme()).canvasNSColor
+        #expect(await waitUntil { window.backgroundColor == canvas })
+        #expect(await waitUntil { launch.isSlow })
+        #expect(launch.model == nil)
+
+        // The probe passes its ceiling with no answer; the model comes anyway.
+        let model = await ready(launch)
+        #expect(await waitUntil { holds(WindowCloseGuard.GuardView.self, host) })
+        #expect(wired === model)
+        #expect(appeared == 1)
+    }
+}
+
+/// True when `view`, or a view anywhere under it, is a `T`.
+@MainActor
+private func holds<T: NSView>(_ type: T.Type, _ view: NSView) -> Bool {
+    view is T || view.subviews.contains { holds(type, $0) }
 }
 
 /// Waits for the model through the same path the menus and window use.
