@@ -39,6 +39,10 @@ final class RemoteStore {
     private(set) var attachments: [String: [Attachment]] = [:]
     @ObservationIgnored private var draftsByMac: [String: [String: String]] = [:]
     @ObservationIgnored private var attachmentsByMac: [String: [String: [Attachment]]] = [:]
+    /// Identity for unsent work survives a Mac switch even when its disk cache
+    /// has not loaded. This metadata never restores tabs or output as live state.
+    @ObservationIgnored private var sessionReferences: [String: ProviderSessionReference] = [:]
+    @ObservationIgnored private var referencesByMac: [String: [String: ProviderSessionReference]] = [:]
 
     private(set) var chatList = ChatList()
     private(set) var loadingChats = false
@@ -87,6 +91,14 @@ final class RemoteStore {
     @ObservationIgnored private var searchToken = 0
     @ObservationIgnored private var chatQuery = ""
     @ObservationIgnored private var lastChunkAt = Date.distantPast
+    private struct PendingRestart {
+        let id = UUID()
+        let tabID: String
+        let macID: String?
+        let epoch: Int
+        let reference: ProviderSessionReference?
+    }
+    @ObservationIgnored private var pendingRestart: PendingRestart?
     @ObservationIgnored private var freshHandshake = false
     @ObservationIgnored private var foreground = true
     /// True once this connection's `watch` was accepted: no more polling.
@@ -114,6 +126,7 @@ final class RemoteStore {
         activeMacID = saved.id
         drafts = draftsByMac[saved.id] ?? [:]
         attachments = attachmentsByMac[saved.id] ?? [:]
+        sessionReferences = referencesByMac[saved.id] ?? [:]
         hasPairing = true
         credential = saved
         macAddress = saved.origin.host
@@ -147,12 +160,15 @@ final class RemoteStore {
         if let activeMacID {
             draftsByMac[activeMacID] = drafts
             attachmentsByMac[activeMacID] = attachments
+            referencesByMac[activeMacID] = sessionReferences
         }
         drafts = [:]
         attachments = [:]
+        sessionReferences = [:]
         tabs = []
         selectedTabID = nil
         pendingTabID = nil
+        pendingRestart = nil
         screens = [:]
         histories = [:]
         prompt = nil
@@ -247,6 +263,7 @@ final class RemoteStore {
             macs.removeAll { $0.id == credential.id }
             draftsByMac[credential.id] = nil
             attachmentsByMac[credential.id] = nil
+            referencesByMac[credential.id] = nil
         } else {
             CredentialStore.delete()
             macs = []
@@ -413,8 +430,13 @@ final class RemoteStore {
     }
 
     func restart() {
-        guard let id = selectedTabID else { return }
-        perform { _ = try await $0.request("restart", tabID: id) }
+        guard isConnected, !busy, !isDemo, let id = selectedTabID else { return }
+        let pending = PendingRestart(tabID: id, macID: activeMacID, epoch: connection.commandEpoch, reference: sessionReferences[id])
+        pendingRestart = pending
+        perform { connection in
+            defer { if self.pendingRestart?.id == pending.id { self.pendingRestart = nil } }
+            _ = try await connection.request("restart", tabID: id)
+        }
     }
 
     func close(_ tab: RemoteTab) {
@@ -731,6 +753,20 @@ final class RemoteStore {
         do { try await work(connection) } catch { errorMessage = error.localizedDescription }
     }
 
+    /// Keep edits made on either side of a confirmed conversation replacement.
+    /// An identical fragment or attachment ID is kept only once.
+    private func mergeUnsentWork(from oldID: String, to newID: String) {
+        guard oldID != newID else { return }
+        let old = drafts[oldID] ?? ""
+        let new = drafts[newID] ?? ""
+        if !old.isEmpty {
+            drafts[newID] = new.isEmpty || new == old ? old : old + "\n\n" + new
+        }
+        var seen = Set<UUID>()
+        let files = ((attachments[oldID] ?? []) + (attachments[newID] ?? [])).filter { seen.insert($0.id).inserted }
+        if !files.isEmpty { attachments[newID] = files }
+    }
+
     /// Any snapshot from the Mac: a reply or an event. `olderRows` marks a `rows`
     /// reply, whose screen goes before what is loaded instead of replacing it.
     fileprivate func apply(
@@ -739,24 +775,31 @@ final class RemoteStore {
     ) {
         let ids = Set(state.tabs.map(\.id))
         let complete = state.tabListIsComplete
+        let pending = pendingRestart.flatMap {
+            $0.macID == activeMacID && $0.epoch == connection.commandEpoch ? $0 : nil
+        }
         // A tab UUID can change after restart. Only a unique provider-native
         // conversation and canonical project match can inherit unsent work.
         if freshHandshake, complete {
-            for previous in tabs where !ids.contains(previous.id) {
-                let matches = state.tabs.filter { $0.hasSameConversation(as: previous) }
+            for (previousID, reference) in sessionReferences where !ids.contains(previousID) {
+                let matches = state.tabs.filter { $0.sessionReference == reference }
                 guard matches.count == 1, let next = matches.first else { continue }
-                if (drafts[next.id] ?? "").isEmpty { drafts[next.id] = drafts[previous.id] }
-                if (attachments[next.id] ?? []).isEmpty { attachments[next.id] = attachments[previous.id] }
+                mergeUnsentWork(from: previousID, to: next.id)
             }
         }
         freshHandshake = false
-        if let oldID, let newID,
-            let previous = tabs.first(where: { $0.id == oldID }), let reference = previous.sessionReference,
+        let previousReference = pending?.tabID == oldID ? pending?.reference : oldID.flatMap { sessionReferences[$0] }
+        if let oldID, let newID, oldID != newID,
+            let reference = previousReference,
             reference == (restartedSession ?? state.tabs.first(where: { $0.id == newID })?.sessionReference)
         {
-            if let draft = drafts[oldID] { drafts[newID] = draft }
-            if let files = attachments[oldID] { attachments[newID] = files }
+            mergeUnsentWork(from: oldID, to: newID)
+            sessionReferences[newID] = reference
+            drafts[oldID] = nil
+            attachments[oldID] = nil
+            sessionReferences[oldID] = nil
         }
+        for tab in state.tabs { sessionReferences[tab.id] = tab.sessionReference }
         // Live, even with no tabs: a cache still being read must not replace it.
         // A launch wait holds until `show` draws this state's output.
         restoreGate.supersede()
@@ -787,8 +830,13 @@ final class RemoteStore {
         if complete {
             screens = screens.filter { ids.contains($0.key) }
             histories = histories.filter { ids.contains($0.key) }
-            drafts = drafts.filter { ids.contains($0.key) }
-            attachments = attachments.filter { ids.contains($0.key) }
+            // A replacement event may precede the restart receipt. Keep the old
+            // unsent work until that same Mac/connection proves the replacement.
+            var unsentIDs = ids
+            if let pending { unsentIDs.insert(pending.tabID) }
+            drafts = drafts.filter { unsentIDs.contains($0.key) }
+            attachments = attachments.filter { unsentIDs.contains($0.key) }
+            sessionReferences = sessionReferences.filter { unsentIDs.contains($0.key) }
         }
         scheduleRefresh()
         scheduleSave()
@@ -908,6 +956,9 @@ final class RemoteStore {
         defer { restoreGate.finish(ticket) }
         guard let cached else { return }
         tabs = cached.tabs
+        for tab in cached.tabs where sessionReferences[tab.id] == nil {
+            sessionReferences[tab.id] = tab.sessionReference
+        }
         selectedTabID = cached.selectedTabID
         macName = cached.mac
         screens = cached.screens
@@ -993,6 +1044,7 @@ extension RemoteStore: RemoteConnectionDelegate {
             streaming = false
             if foreground { Task { await startStreaming() } }
         case .connecting:
+            pendingRestart = nil
             prompt = nil
             freshHandshake = true
             streaming = false
@@ -1011,9 +1063,6 @@ extension RemoteStore: RemoteConnectionDelegate {
             state, earlier: action == "earlier" && tabID == state.selectedTabID ? (reply.earlier ?? "") : nil,
             olderRows: action == "rows" && tabID == state.selectedTabID,
             restartedFrom: restarted == nil ? nil : tabID, restartedTo: restarted, restartedSession: reply.restartedSession)
-        if let restarted, let tabID, restarted != tabID {
-            drafts[tabID] = nil
-        }
     }
 
     func connection(_ connection: RemoteConnection, didReceiveEvent reply: RemoteReply) {

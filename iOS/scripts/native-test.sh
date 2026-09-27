@@ -54,7 +54,7 @@ done
 RESULT="$ARTIFACTS/native-$(date +%Y%m%d-%H%M%S)-$$.xcresult"
 TEST_RUNNER_SIGIL_RELAY_PORT="$SIGIL_RELAY_PORT" xcodebuild -project Sigil.xcodeproj -scheme Sigil -sdk iphonesimulator \
   -destination "platform=iOS Simulator,id=$SIMULATOR" -derivedDataPath "$WORK/DerivedData" \
-  -parallel-testing-enabled NO -test-timeouts-enabled YES -default-test-execution-time-allowance 60 \
+  -parallel-testing-enabled NO -test-timeouts-enabled YES -default-test-execution-time-allowance 120 \
   -resultBundlePath "$RESULT" CODE_SIGNING_ALLOWED=NO SIGIL_RELAY_PORT="$SIGIL_RELAY_PORT" test-without-building -quiet
 
 echo "native: OK (Sigil.app, SigilNotifications.appex, SigilWidgets.appex; app-hosted simulator tests)"

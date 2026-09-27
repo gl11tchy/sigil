@@ -26,7 +26,7 @@ enum RelayTests {
         try Expect.equal(mac.deviceKey, watcher.saved?.deviceKey, "Mac holds the phone's device key")
 
         // The Mac retires the QR room after pairing; the phone must find it by ticket.
-        mac.retireAndReRegister()
+        try await mac.retireAndReRegister()
         try await until("reconnected by ticket") { mac.connections >= 2 && phone.phase == .connected }
 
         let reply = try await phone.request("input", text: "hello", tabID: "T1")
@@ -64,7 +64,7 @@ enum RelayTests {
         phone.delegate = watcher
         phone.pair(link)
         try await until("Mac accepted the device key") { mac.deviceKey != nil }
-        mac.retireAndReRegister()
+        try await mac.retireAndReRegister()
         try await until("phone gives up and asks for a new code", timeout: 20) { phone.phase == .revoked }
         try Expect.true(watcher.saved == nil, "nothing saved without a ticket")
         try Expect.equal(watcher.failure, "Pairing did not finish. Scan a new code in Sigil.", "told to scan again")
@@ -158,7 +158,7 @@ enum RelayTests {
         phone.pair(link)
         try await until("paired") { phone.phase == .connected }
         mac.rememberHandshake()
-        mac.retireAndReRegister()
+        try await mac.retireAndReRegister()
         try await until("fresh connection") { mac.connections >= 2 && phone.phase == .connected }
         try await mac.replayOldHandshake()
         try await until("old sealed state rejected", timeout: 2) { watcher.failure != nil }
@@ -248,7 +248,7 @@ enum RelayTests {
         try await until("paired") { phone.phase == .connected }
         coalesceNextReply = true
         mac.rotateAfterState = true
-        mac.retireAndReRegister()
+        try await mac.retireAndReRegister()
         try await until("newest auth is pending") { mac.requests.filter { $0.action == "state" }.count >= 2 }
         try await Task.sleep(for: .milliseconds(50))
         try Expect.equal(phone.phase, .connecting, "old auth continuation must not connect an unacknowledged newer epoch")
@@ -260,7 +260,8 @@ enum RelayTests {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition() {
             if Date() > deadline { throw TestFailure("timed out waiting: \(what)") }
-            try await Task.sleep(for: .milliseconds(50))
+            do { try await Task.sleep(for: .milliseconds(50)) }
+            catch { throw TestFailure("cancelled waiting: \(what): \(error)") }
         }
     }
 
@@ -302,6 +303,9 @@ final class FakeMac {
             let id: String
             let title: String
             let status: String
+            var provider: String?
+            var sessionID: String?
+            var cwd: String?
         }
         struct Row: Encodable {
             let i: Int
@@ -318,7 +322,7 @@ final class FakeMac {
             let selectedTabID: String?
             let terminal: String
             var capabilities = ["restart", "screen", "eventSequence"]
-            let tabsTruncated = false
+            var tabsTruncated = false
             var screen: Screen?
             var prompt: Prompt?
         }
@@ -340,6 +344,8 @@ final class FakeMac {
         var event: Bool?
         var eventSequence: Int?
         var clientNonce: String?
+        var restartedTabID: String?
+        var restartedSession: ProviderSessionReference?
     }
 
     let origin: URL
@@ -353,8 +359,14 @@ final class FakeMac {
     var rotateAfterInput = false
     var pauseState = false
     var rotateAfterState = false
+    var pauseRestart = false
+    var truncatedTabs = false
+    private var delayedRestart: Request?
     private var delayedState: Request?
     private(set) var requests: [Request] = []
+    var firstTab = Reply.Tab(id: "T1", title: "Test", status: "idle") {
+        didSet { if selected == oldValue.id { selected = firstTab.id } }
+    }
     private var selected = "T1"
     private var clientNonce: String?
     private var savedHello: String?
@@ -372,19 +384,41 @@ final class FakeMac {
     init(origin: URL) { self.origin = origin }
 
     func register() async throws -> String {
-        var request = URLRequest(url: origin.appendingPathComponent("rooms"))
-        request.httpMethod = "POST"
-        let (data, response) = try await session.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 201 else { throw TestFailure("room not created") }
-        let registered = try JSONDecoder().decode(Registered.self, from: data)
-        connect(registered)
-        return registered.room
+        // This expanded fixture suite can legitimately allocate more than the
+        // production relay's 20 rooms/minute. Retry refused setup only; never a
+        // command or a transport failure, and keep workflow deadlines unchanged.
+        let deadline = Date().addingTimeInterval(75)
+        while true {
+            let remaining = deadline.timeIntervalSinceNow
+            guard remaining > 0 else { throw TestFailure("relay room setup deadline expired") }
+            var request = URLRequest(url: origin.appendingPathComponent("rooms"))
+            request.timeoutInterval = min(15, remaining)
+            request.httpMethod = "POST"
+            let (data, response) = try await session.data(for: request)
+            let http = response as? HTTPURLResponse
+            if http?.statusCode == 429 {
+                let header = http?.value(forHTTPHeaderField: "Retry-After")
+                let format = DateFormatter()
+                format.locale = Locale(identifier: "en_US_POSIX")
+                format.timeZone = TimeZone(secondsFromGMT: 0)
+                format.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+                let wait = max(0.1, header.flatMap(Double.init)
+                    ?? header.flatMap { format.date(from: $0)?.timeIntervalSinceNow } ?? 60)
+                guard wait <= deadline.timeIntervalSinceNow else { throw TestFailure("relay room setup rate limit did not clear") }
+                try await Task.sleep(for: .seconds(wait))
+                continue
+            }
+            guard http?.statusCode == 201 else { throw TestFailure("room not created: HTTP \(http?.statusCode ?? 0)") }
+            let registered = try JSONDecoder().decode(Registered.self, from: data)
+            connect(registered)
+            return registered.room
+        }
     }
 
-    func retireAndReRegister() {
+    func retireAndReRegister() async throws {
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
-        Task { _ = try? await register() }
+        _ = try await register()
     }
 
     /// Disconnect in Sigil tells the phone at once, then closes.
@@ -416,6 +450,19 @@ final class FakeMac {
         pauseState = false
         let reply = Reply(challenge: request.challenge, sequence: request.sequence,
                           state: state("ready"), ticket: ticket, clientNonce: request.clientNonce)
+        let sealed = try RemoteCrypto.seal(reply, key: deviceKey, direction: "mac")
+        try await send(["peer": peer, "data": sealed], on: socket)
+    }
+
+    func releaseRestart() async throws {
+        guard let request = delayedRestart, let socket, let peer, let deviceKey else { throw TestFailure("no delayed restart") }
+        delayedRestart = nil
+        let reference = firstTab.provider.flatMap { provider in
+            firstTab.sessionID.flatMap { sessionID in firstTab.cwd.map { ProviderSessionReference(provider: provider, sessionID: sessionID, cwd: $0) } }
+        }
+        let reply = Reply(challenge: request.challenge, sequence: request.sequence,
+                          state: state("restarted"), ticket: ticket, clientNonce: request.clientNonce,
+                          restartedTabID: firstTab.id, restartedSession: reference)
         let sealed = try RemoteCrypto.seal(reply, key: deviceKey, direction: "mac")
         try await send(["peer": peer, "data": sealed], on: socket)
     }
@@ -496,12 +543,19 @@ final class FakeMac {
         requests.append(request)
         if pauseInput, request.action == "input" { return }
         if pauseState, request.action == "state" { delayedState = request; return }
+        if pauseRestart, request.action == "restart" {
+            delayedRestart = request
+            firstTab = Reply.Tab(id: firstTab.id + "-restarted", title: firstTab.title, status: "idle",
+                                 provider: firstTab.provider, sessionID: firstTab.sessionID, cwd: firstTab.cwd)
+            try await pushEvent(rows: ["restart event before receipt"])
+            return
+        }
         switch request.action {
         case "pair", "state", "watch":
             reply.state = state("ready")
         case "malformed":
             reply.state = Reply.State(tabs: [], selectedTabID: "missing", terminal: "bad")
-        case "select" where request.tabID == "T1" || request.tabID == "T2":
+        case "select" where request.tabID == firstTab.id || request.tabID == "T2":
             selected = request.tabID!
             reply.state = state("selected: \(selected)")
         case "input":
@@ -531,8 +585,9 @@ final class FakeMac {
 
     private func state(_ terminal: String) -> Reply.State {
         var state = Reply.State(
-            tabs: [Reply.Tab(id: "T1", title: "Test", status: "idle"), Reply.Tab(id: "T2", title: "Second", status: "unknown")],
+            tabs: [firstTab, Reply.Tab(id: "T2", title: "Second", status: "unknown")],
             selectedTabID: selected, terminal: terminal)
+        state.tabsTruncated = truncatedTabs
         if !orderedEvents { state.capabilities.removeAll { $0 == "eventSequence" } }
         if presentTerminalMenu { state.prompt = Reply.Prompt() }
         return state
