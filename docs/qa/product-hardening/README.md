@@ -13,9 +13,10 @@ Work began at `be132383565d9d4cb4e253ae3f7f1b7183207c8f`. The branch
 asynchronous startup, native output/Find and screen-cache improvements were
 preserved, not replaced. The existing native TextKit harness still runs alongside
 the new shipping-app XCTest gate.
-The final implementation revision is `98c1b527c5067fbed6bd45061e75b63f9342a3e6`;
+The final implementation revision is `02022a923b82f705d65448c938545992b83eb8c4`;
 the remaining delivery commit contains documentation and screenshot evidence only.
-The Mac/web gate ran at `e5954f0`; its covered code is unchanged in `98c1b52`.
+The native app source is unchanged from `98c1b52`. The Mac/web gate was repeated
+for the watcher repair; the full native gate also passed again on unchanged native code.
 
 Local tools: Apple silicon, macOS 26.5.1, Xcode 26.6, Swift 6.3.3, Node 22.23.1,
 Metal 32023.883 and iOS simulator 26.5. Provider contracts: Claude Code 2.1.283,
@@ -51,7 +52,7 @@ The Mac/web gate and native gate are separate; neither substitutes for the other
 
 | Command | Verified result |
 |---|---|
-| `Scripts/verify.sh` | Passed: 888 Swift Testing cases, 37 XCTest cases, 161 Sidereal Node tests, 18 Site tests, 114 Chromium/WebKit cases; audits, shell/format checks, debug bundle/signature and isolated smoke passed |
+| `Scripts/verify.sh` | Passed: 892 Swift Testing cases, 37 XCTest cases, 161 Sidereal Node tests, 18 Site tests, 114 Chromium/WebKit cases; audits, shell/format checks, debug bundle/signature and isolated smoke passed |
 | `iOS/scripts/ci.sh` | Passed: 85 shared/real-relay cases, 18 app-hosted simulator cases, 7 native TextKit cases, no skips |
 | `Scripts/verify-provider-contracts.sh` | Installed version/help/resume contracts passed; no model calls |
 | `xcrun --sdk macosx metal --version` | Metal compiler available |
@@ -99,6 +100,12 @@ authorization epochs, cross-Mac draft mutation and project-archive capability
 boundaries. Confirmed archive operations leave unsupported running tabs alone.
 Post-PR #120 review also repaired asynchronous-cache identity loss, restart events
 arriving before their receipts, draft overwrite and retired attachment resurrection.
+Automated PR review then found that the original Grok watcher policy ignored native
+JSONL writes. Real FSEvents regressions failed for Claude/Codex appends and the adjacent
+Codex title index after startup events settled. Scoped policies now cover append,
+create, delete and index-only renames, while preserving Grok filtering and excluding
+unrelated Codex-home files. The 32-test focused watcher/store run and independent
+review passed before the full gates were repeated.
 Documentation was checked
 against the implemented capability limits. No reported code finding remains open.
 
@@ -115,12 +122,15 @@ PTYs: scan 94 ms; 100 searches 922 ms total (12.3 ms maximum single search);
 The main-actor 5 ms ticker's longest interval was 29.6 ms. Test-process RSS was
 79.7 MiB; that is not standalone app memory or a long-duration leak measurement.
 
-The final integrated Mac suite, alongside native verification, repeated that
+An integrated Mac suite, alongside native verification, repeated that
 fixture: scan 183.2 ms; 100 searches 1,211.8 ms (19.8 ms maximum); 20 snapshots
 351.8 ms (24.5 ms maximum); longest ticker interval 37.9 ms; test-process RSS
 112.4 MiB after earlier suites. Native-history scan repeated at 246.9 ms cold,
 43.1 ms cached and 8.8 ms search. These
-two runs show local variation, not a statistical latency percentile.
+runs show local variation, not a statistical latency percentile. The final
+watcher-repair gate recorded scan 63.4 ms, maximum search 10.3 ms, maximum snapshot
+9.0 ms, longest ticker interval 24.5 ms and RSS 112.6 MiB. Its native-history scan
+took 247.4 ms cold, 44.3 ms cached and 9.1 ms search.
 
 The original harness ran all 120 UI operations without yielding and recorded a
 964 ms synthetic actor stall. The corrected harness yields between separate user
@@ -142,6 +152,10 @@ streaming workloads remain unmeasured.
   The old green workflow did not establish that capability. The new gate fails
   explicitly instead of skipping the shipping targets. External runner changes
   and paid hosted capacity were not part of this task.
+  [PR CI run 36331776892](https://github.com/gl11tchy-team/sigil/actions/runs/36331776892)
+  confirmed the Mac/web gate passed and the native preflight failed specifically
+  because the selected Xcode was 16.4. No native result artifact existed on that
+  incompatible runner; upload failed for the same reason.
 - **Provider limits:** all parsed approvals remain unverified terminal controls.
   Claude has no integrated final-completion observer. A new Codex tab cannot
   acquire a native ID by guesswork; open its discovered history to resume it.

@@ -12,7 +12,8 @@ This integration has not been merged, installed or deployed.
   stop, unknown state and attention hints stay distinct.
 - Claude Code and Codex history can be found, reopened and restored by native
   conversation identity. Missing references remain saved. Provider histories stay
-  read-only; Sigil's notes, names and archives stay separate.
+  read-only; Sigil's notes, names and archives stay separate. Native transcript and
+  Codex title-index changes refresh automatically without a manual reload.
 - Fresh client nonces and ordered events reject replayed host traffic. Uploads
   bind to a connection and tab. Timeouts do not dispatch queued keys or retry work.
 - Phone drafts stay with the correct Mac and native conversation, including

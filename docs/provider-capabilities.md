@@ -64,6 +64,10 @@ files may therefore use a folder fallback instead of an inaccessible title.
 Search covers discovered titles and project paths, not every transcript message.
 Subagent directories are excluded. Cached entries survive read errors and
 unrecognized rewrites. Native transcripts are never rewritten or deleted.
+Filesystem events refresh native JSONL changes and the adjacent Codex title index.
+The Codex watcher excludes unrelated files in its parent directory. Grok still
+watches summaries rather than its frequently changing journals. Scanner and watcher
+use the same captured roots, including canonical paths for symlinked locations.
 
 ## Lifecycle truth
 
