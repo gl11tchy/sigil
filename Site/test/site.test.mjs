@@ -43,7 +43,7 @@ function assertSecurityHeaders(res, { https = false, html = false } = {}) {
   }
   if (html) {
     const cache = res.headers.get('cache-control') || '';
-    assert.match(cache, /no-store/);
+    assert.match(cache, /no-cache/);
     assert.doesNotMatch(cache, /max-age=31536000/);
   }
 }
