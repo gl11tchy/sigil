@@ -18,7 +18,7 @@ async function pair(page, origin, initialOutput, options = {}) {
   }
   const bootstrap = randomKey();
   const ticket = randomKey();
-  let key = await importKey(bootstrap), selected = 'one', peer, challenge, serial = Promise.resolve();
+  let key = await importKey(bootstrap), selected = 'one', peer, challenge, replayData, serial = Promise.resolve();
   const actions = [], errors = [];
   const terminal = title => `${title}\n\n${Array.from({ length: 35 }, (_, i) => `Line ${i + 1}: Verified the mobile layout and terminal output.`).join('\n')}\n\nReady for your next message.`;
   const outputs = { one: initialOutput ?? terminal('Mobile layout review'), two: terminal('Release checks') };
@@ -33,11 +33,14 @@ async function pair(page, origin, initialOutput, options = {}) {
       } else if (frame.type === 'ready') {
         ready();
       } else if (frame.type === 'peer') {
-        peer = frame.peer; challenge = randomKey();
+        peer = frame.peer; challenge = options.reuseChallenge && challenge ? challenge : randomKey();
         ws.send(JSON.stringify({ peer, hello: challenge }));
       } else if (frame.data) {
         const request = await open(frame.data, key, 'phone');
         expect(request.challenge).toBe(challenge);
+        if (options.replayReplies && replayData) {
+          ws.send(JSON.stringify({ peer, data: replayData })); return;
+        }
         actions.push(request);
         options.onRequest?.(request);
         if (request.action === 'pair') key = await importKey(request.text);
@@ -52,7 +55,7 @@ async function pair(page, origin, initialOutput, options = {}) {
           ? (typeof options.earlier === 'function' ? options.earlier(request)
             : typeof options.earlier === 'string' ? options.earlier : '') : undefined;
         if (options.rejectAction === request.action) {
-          ws.send(JSON.stringify({ peer, data: await seal({ challenge, sequence: request.sequence, ok: false, error: 'Test action refused.' }, key, 'mac') }));
+          ws.send(JSON.stringify({ peer, data: await seal({ challenge, sequence: request.sequence, clientNonce: request.clientNonce, ok: false, error: 'Test action refused.' }, key, 'mac') }));
           return;
         }
         if (request.action === 'restart' && options.restart) {
@@ -61,17 +64,19 @@ async function pair(page, origin, initialOutput, options = {}) {
         if (request.action === 'input') outputs[selected] += `\n\nYou: ${request.text}`;
         if (request.action === 'file') outputs[selected] += `\n\nAttached ${request.name || 'file'}`;
         const state = options.state ?? { tabs: [
-          { id: outputs.restarted ? 'restarted' : 'one', title: 'Mobile layout review', status: outputs.restarted ? 'idle' : options.statuses?.one ?? 'working' },
-          { id: 'two', title: 'Release checks', status: options.statuses?.two ?? 'idle' }],
+          { provider: 'grokBuild', sessionID: 'native-one', cwd: '/tmp/one', capabilities: { resume: true }, id: outputs.restarted ? 'restarted' : 'one', title: 'Mobile layout review', status: outputs.restarted ? 'idle' : options.statuses?.one ?? 'working' },
+          { provider: 'grokBuild', sessionID: 'native-two', cwd: '/tmp/two', capabilities: { resume: true }, id: 'two', title: 'Release checks', status: options.statuses?.two ?? 'idle' }],
           selectedTabID: selected, terminal: outputs[selected], capabilities: options.restart ? ['restart'] : [] };
-        const payload = { challenge, sequence: request.sequence, ok: true, ticket, state, restartedTabID: request.action === 'restart' && options.restart ? 'restarted' : undefined };
+        const payload = { challenge, sequence: request.sequence, clientNonce: options.omitNonce ? undefined : request.clientNonce, ok: true, ticket, state, restartedTabID: request.action === 'restart' && options.restart ? 'restarted' : undefined };
         if (projects) payload.projects = projects;
         if (request.action === 'options' && options.providers) {
           payload.options = { providers: options.providers, provider: options.providers[0].id, models: [], model: '', efforts: [], effort: '', locations: [] };
         }
         if (chats) payload.chats = chats;
         if (earlier !== undefined) payload.earlier = earlier;
-        ws.send(JSON.stringify({ peer, data: await seal(payload, key, 'mac') }));
+        const sealedReply = await seal(payload, key, 'mac');
+        replayData ??= sealedReply;
+        ws.send(JSON.stringify({ peer, data: sealedReply }));
       }
     }).catch(error => errors.push(error));
   };
@@ -1058,5 +1063,65 @@ test('restart retains draft and attachments while its tab is outside the capped 
     await expect(page.locator('#tabs')).toHaveValue('restarted');
     await expect(page.locator('#message')).toHaveValue('');
     await expect(page.locator('#attachments')).toBeHidden();
+  } finally { mac.close(); }
+});
+
+test('unverified menu shows the full operation and only literal terminal choices', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const operation = `Inspect ${'long-path/'.repeat(36)}critical-end.txt`;
+  const mac = await pair(page, baseURL, '', { state: {
+    tabs: [{ id: 'one', title: 'Review', status: 'working', provider: 'codex', processRunning: true,
+      capabilities: { structuredApproval: false, resume: true } }],
+    selectedTabID: 'one', terminal: 'Which file?\n1. README.md\n2. CHANGELOG.md',
+    prompt: { id: 'instance-one', question: 'Which file?', operation, verified: false,
+      style: 'menu', choices: [{ label: 'README.md', key: '1' }, { label: 'CHANGELOG.md', key: '2' }] },
+  } });
+  try {
+    await expect(page.locator('#interaction')).toBeVisible();
+    await expect(page.locator('#interaction-heading')).toHaveText('Terminal controls');
+    await expect(page.locator('#interaction-operation')).toHaveText(operation);
+    await expect(page.locator('#interaction').getByRole('button', { name: 'Yes', exact: true })).toHaveCount(0);
+    await page.locator('#interaction').getByRole('button', { name: 'README.md', exact: true }).click();
+    await expect.poll(() => mac.actions.filter(a => a.action === 'key' && a.text === '1').length).toBe(1);
+    expect(mac.actions.some(a => a.action === 'answer')).toBe(false);
+    expect(mac.actions.find(a => a.action === 'key' && a.text === '1').text).toBe('1');
+    await page.screenshot({ path: testInfo.outputPath('unverified-operation.png') });
+  } finally { mac.close(); }
+});
+
+test('unknown lifecycle stays explicit and unsupported restart stays hidden', async ({ page, baseURL }) => {
+  const state = { tabs: [{ id: 'one', title: 'Codex', status: 'unknown', provider: 'codex',
+    processRunning: true, capabilities: { resume: false } }], selectedTabID: 'one', terminal: 'Provider output',
+    capabilities: ['restart'] };
+  const mac = await pair(page, baseURL, '', { state });
+  try {
+    await expect(page.locator('#session-status')).toHaveText('Status unknown');
+    state.tabs[0].status = 'exited'; state.tabs[0].processRunning = false;
+    await expect(page.locator('#session-status')).toHaveText('Session ended');
+    await expect(page.locator('#restart')).toBeHidden();
+  } finally { mac.close(); }
+});
+
+
+test('a replayed old hello and sealed reply cannot authenticate a fresh browser connection', async ({ page, baseURL }) => {
+  const options = { reuseChallenge: true };
+  const mac = await pair(page, baseURL, 'AUTHENTICATED_OUTPUT', options);
+  try {
+    await expect(page.locator('#terminal')).toContainText('AUTHENTICATED_OUTPUT');
+    options.replayReplies = true;
+    await page.reload();
+    await page.waitForTimeout(1200);
+    await expect(page.locator('#status')).not.toHaveText('Connected');
+    await expect(page.locator('#terminal')).not.toContainText('AUTHENTICATED_OUTPUT');
+    expect(mac.actions.some(a => ['input', 'answer', 'key'].includes(a.action))).toBe(false);
+  } finally { mac.close(); }
+});
+
+test('an old Mac without the authenticated client nonce gets a clear upgrade error', async ({ page, baseURL }) => {
+  const mac = await pair(page, baseURL, '', { omitNonce: true, skipNavigate: true });
+  try {
+    await page.goto(`${baseURL}/#room=${mac.room}&key=${mac.bootstrap}`);
+    await expect(page.locator('#error')).toContainText('Update Sigil on your Mac');
+    await expect(page.locator('#controls')).toBeHidden();
   } finally { mac.close(); }
 });

@@ -461,3 +461,12 @@ body[data-compact="true"] #compose { padding-bottom: 6px; }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes pixel { 0% { opacity: 1; } 40%, 100% { opacity: .25; } }
 @keyframes shimmer { from { -webkit-mask-position: 100% 0; mask-position: 100% 0; } to { -webkit-mask-position: 0 0; mask-position: 0 0; } }
+
+/* Operation context stays readable without covering the phone composer. */
+#interaction { flex: 0 1 auto; max-height: 32vh; overflow: auto; margin: 0 8px 8px; padding: 8px 12px;
+  background: var(--surface); border-radius: var(--radius-control); }
+#interaction h2 { margin: 0; font-size: 13px; }
+#interaction p { margin: 6px 0; color: var(--ink2); }
+#interaction-operation { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+#interaction-choices { display: flex; flex-wrap: wrap; gap: 4px; }
+#interaction-choices button { min-height: 44px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }

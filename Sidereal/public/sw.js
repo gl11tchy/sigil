@@ -1,4 +1,4 @@
-const CACHE = 'sidereal-shell-v25';
+const CACHE = 'sidereal-shell-v26';
 const SHELL = ['/', '/app.mjs', '/output.mjs', '/crypto.mjs', '/pairing.mjs', '/style.css', '/manifest.webmanifest', '/icon.svg', '/icon-180.png', '/icon-192.png', '/icon-512.png',
   '/fonts/Inter-Regular.woff2', '/fonts/Inter-Medium.woff2', '/fonts/Inter-SemiBold.woff2',
   '/fonts/JetBrainsMono-Regular.woff2', '/fonts/JetBrainsMono-Medium.woff2'];
