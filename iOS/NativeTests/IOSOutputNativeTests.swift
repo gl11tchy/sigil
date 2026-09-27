@@ -123,13 +123,65 @@ enum IOSOutputNativeTests {
             try await until("the query \"\(query)\" reaches the view") { self.coordinator.highlight == query }
         }
 
-        /// Fails with where the view's text first differs from `styled` styled whole.
+        /// Fails with where the view's text first differs from `styled` styled whole,
+        /// or where one of its laid-out lines sits apart from that line's place there.
         func check(_ styled: StyledText, _ label: String) throws {
             reference.attributedText = OutputView.attributed(
                 styled, palette: Fixtures.palette, foreground: IOSOutputNativeTests.foreground,
                 background: IOSOutputNativeTests.background)
             if let difference = IOSOutputNativeTests.difference(view.textStorage, reference.textStorage) {
                 throw TestFailure("\(label): the view differs from a full rebuild: \(difference)")
+            }
+            try checkLayout(label)
+        }
+
+        /// Compares the lines the view lays out where it is, then for each screen
+        /// from the top down as a reader who jumps back up sees them, with the
+        /// same lines laid out whole: each has the same size, and sits as far from
+        /// the screen's first line as it does there. TextKit 2 places only a screen's
+        /// lines; one off screen may keep an old place until it scrolls in, and a
+        /// screen may sit on an estimate of the lines above. The view goes back
+        /// to where it was.
+        private func checkLayout(_ label: String) throws {
+            reference.bounds.size = view.bounds.size
+            reference.textContainerInset = view.textContainerInset
+            reference.textContainer.lineFragmentPadding = view.textContainer.lineFragmentPadding
+            reference.textLayoutManager?.delegate = coordinator
+            reference.layoutIfNeeded()
+            view.layoutIfNeeded()
+            try Expect.equal(
+                reference.textContainer.size.width, view.textContainer.size.width, "\(label): both views wrap alike")
+            let whole = Dictionary(uniqueKeysWithValues: IOSOutputNativeTests.frames(reference, all: true))
+            let was = view.contentOffset
+            defer {
+                view.setContentOffset(was, animated: false)
+                view.layoutIfNeeded()
+            }
+            var y = was.y
+            var jumped = false
+            while true {
+                let shown = IOSOutputNativeTests.frames(view, all: false)
+                guard let (start, first) = shown.first, let firstWhole = whole[start], shown.count > 1 else {
+                    throw TestFailure("\(label): the view laid out \(shown.count) lines at \(y)")
+                }
+                for (at, frame) in shown {
+                    guard let other = whole[at] else { throw TestFailure("\(label): no whole line starts at unit \(at)") }
+                    let apart = [
+                        frame.minX - other.minX, frame.minY - first.minY - (other.minY - firstWhole.minY),
+                        frame.width - other.width, frame.height - other.height,
+                    ]
+                    guard apart.allSatisfy({ abs($0) < 0.5 }) else {
+                        throw TestFailure(
+                            "\(label): at \(y) the line at unit \(at) is at \(frame) below \(first), not at \(other) below \(firstWhole)"
+                        )
+                    }
+                }
+                let end = view.contentSize.height - view.bounds.height + view.adjustedContentInset.bottom
+                guard !jumped || y < end else { return }
+                y = jumped ? min(end, y + view.bounds.height / 2) : -view.adjustedContentInset.top
+                jumped = true
+                view.setContentOffset(CGPoint(x: 0, y: y), animated: false)
+                view.layoutIfNeeded()
             }
         }
 
@@ -155,6 +207,24 @@ enum IOSOutputNativeTests {
             }
             throw TestFailure("timed out waiting until \(what)")
         }
+    }
+
+    /// Each layout fragment's first unit and frame, first to last: of all of the
+    /// text laid out, or of the fragments the view laid out for what it shows.
+    static func frames(_ view: UITextView, all: Bool) -> [(Int, CGRect)] {
+        guard let manager = view.textLayoutManager, let content = manager.textContentManager,
+            let range = all ? manager.documentRange : manager.textViewportLayoutController.viewportRange
+        else { return [] }
+        if all { manager.ensureLayout(for: range) }
+        let origin = content.documentRange.location
+        var result: [(Int, CGRect)] = []
+        manager.enumerateTextLayoutFragments(from: range.location, options: all ? [.ensuresLayout] : []) { fragment in
+            let start = fragment.rangeInElement.location
+            guard all || start.compare(range.endLocation) == .orderedAscending else { return false }
+            result.append((content.offset(from: origin, to: start), fragment.layoutFragmentFrame))
+            return true
+        }
+        return result
     }
 
     /// Where two text storages first differ, in text or in any attribute, or nil.
