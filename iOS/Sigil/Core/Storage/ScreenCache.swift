@@ -28,28 +28,40 @@ enum ScreenCache {
         return folder
     }
 
-    static func load(for credential: PairingCredential) -> CachedScreen? {
-        guard let url = directory?.appendingPathComponent(fileName(for: credential)),
-            let data = try? Data(contentsOf: url)
-        else { return nil }
+    /// Every save, delete and load goes through one writer, off the main actor and in order.
+    static let writer = ScreenCacheWriter { directory }
+
+    /// Reads and decodes off the main actor. The cache comes back only if `isCurrent`
+    /// still holds once it is read: the screen may have moved on meanwhile.
+    @MainActor
+    static func restore(for credential: PairingCredential, if isCurrent: () -> Bool) async -> CachedScreen? {
+        await writer.restore(for: credential, if: isCurrent)
+    }
+
+    /// Returns at once. The writer encodes and writes later, and only the newest snapshot.
+    @MainActor
+    static func save(_ cached: CachedScreen, for credential: PairingCredential) {
+        writer.save(cached, for: credential)
+    }
+
+    @MainActor
+    static func delete(for credential: PairingCredential) {
+        writer.delete(for: credential)
+    }
+
+    static func read(_ url: URL) -> CachedScreen? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
         return try? decoder.decode(CachedScreen.self, from: data)
     }
 
     @discardableResult
-    static func save(_ cached: CachedScreen, for credential: PairingCredential) -> Bool {
-        guard let url = directory?.appendingPathComponent(fileName(for: credential)),
-            let data = try? encoder.encode(cached)
-        else { return false }
+    static func write(_ cached: CachedScreen, to url: URL) -> Bool {
+        guard let data = try? encoder.encode(cached) else { return false }
         var options: Data.WritingOptions = [.atomic]
         #if os(iOS)
             options.insert(.completeFileProtectionUntilFirstUserAuthentication)
         #endif
         return (try? data.write(to: url, options: options)) != nil
-    }
-
-    static func delete(for credential: PairingCredential) {
-        guard let url = directory?.appendingPathComponent(fileName(for: credential)) else { return }
-        try? FileManager.default.removeItem(at: url)
     }
 
     private static var encoder: JSONEncoder {

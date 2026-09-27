@@ -83,6 +83,10 @@ enum TestMain {
         run("pairing list rules") { try ScreenTests.pairingListRules() }
         run("alert names the Mac that sent it") { try ScreenTests.alertNamesTheMacThatSentIt() }
 
+        for (name, test) in ScreenCacheTests.all {
+            do { try await test(); passed += 1; print("PASS \(name)") } catch { failed += 1; print("FAIL \(name): \(error)") }
+        }
+
         if let port = ProcessInfo.processInfo.environment["SIGIL_RELAY_PORT"] {
             do {
                 try await RelayTests.pairsAndReconnectsByTicket(port: port)
