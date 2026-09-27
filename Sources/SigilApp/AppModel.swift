@@ -696,8 +696,65 @@ final class AppModel {
         SidebarOrganization.sessions(sidebarSessions, in: focusedProject, samePath: samePath)
     }
 
+    /// Everything a sidebar snapshot reads apart from the file system. Equal
+    /// inputs build an equal snapshot.
+    private struct SidebarInputs: Equatable {
+        var sessions: [GrokSession]
+        var searchText: String
+        var focusedProjectPath: String
+        var pinnedConversations: [OpenTabsSnapshot.Entry]
+        var pinnedProjects: [String]
+        var addedProjects: [AddedProject]
+        var archivedConversations: [OpenTabsSnapshot.Entry]
+        var conversationNames: [ConversationName]
+        var showEmptySessions: Bool
+        var showWorktreeSessions: Bool
+        var showSubagentSessions: Bool
+        var tabIDs: [UUID]
+    }
+
+    private func sidebarInputs() -> SidebarInputs {
+        SidebarInputs(
+            sessions: store.sessions,
+            searchText: searchText,
+            focusedProjectPath: settings.focusedProjectPath,
+            pinnedConversations: settings.pinnedConversations,
+            pinnedProjects: settings.pinnedProjects,
+            addedProjects: settings.addedProjects,
+            archivedConversations: settings.archivedConversations,
+            conversationNames: settings.conversationNames,
+            showEmptySessions: settings.showEmptySessions,
+            showWorktreeSessions: settings.showWorktreeSessions,
+            showSubagentSessions: settings.showSubagentSessions,
+            tabIDs: tabs.map(\.id)
+        )
+    }
+
+    /// The last snapshot built and the inputs it was built from.
+    @ObservationIgnored private var lastSidebarSnapshot: (inputs: SidebarInputs, snapshot: SidebarSnapshot)?
+    /// Snapshots built so far. Tests read it to prove events reuse one.
+    @ObservationIgnored private(set) var sidebarSnapshotBuildCount = 0
+
+    /// Event-time row order (arrow keys, row-list cleanup): the last snapshot
+    /// while none of its inputs has changed, else a new one. A render always
+    /// builds its own, so worktree and symlink checks stay fresh on screen.
+    func eventSidebarSnapshot() -> SidebarSnapshot {
+        if let last = lastSidebarSnapshot, last.inputs == sidebarInputs() {
+            return last.snapshot
+        }
+        return sidebarSnapshot()
+    }
+
     /// Every list one sidebar render reads, from a single search and grouping.
     func sidebarSnapshot() -> SidebarSnapshot {
+        let inputs = sidebarInputs()
+        let snapshot = buildSidebarSnapshot()
+        sidebarSnapshotBuildCount += 1
+        lastSidebarSnapshot = (inputs, snapshot)
+        return snapshot
+    }
+
+    private func buildSidebarSnapshot() -> SidebarSnapshot {
         let index = sidebarIndex()
         let sessions = sidebarSessions(index: index)
         let projects = sidebarProjects(from: sessions)

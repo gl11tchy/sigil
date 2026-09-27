@@ -850,7 +850,7 @@ struct SidebarView: View {
 
     /// Event-time row order. A render reads `SidebarSnapshot.rowIDs` instead.
     private func visibleRowIDs() -> [String] {
-        model.sidebarSnapshot().rowIDs
+        model.eventSidebarSnapshot().rowIDs
     }
 
     private func dismissSession(_ session: GrokSession) {
@@ -1159,7 +1159,7 @@ struct SidebarView: View {
     }
 
     private func session(for id: String) -> GrokSession? {
-        model.sidebarSnapshot().listed.first { model.sessionKey($0) == id }
+        model.eventSidebarSnapshot().listed.first { model.sessionKey($0) == id }
     }
 
     private func project(for id: String) -> SidebarProject? {
@@ -1221,7 +1221,7 @@ struct SidebarView: View {
     private func bulkSelection(containing session: GrokSession) -> [GrokSession] {
         let key = model.sessionKey(session)
         guard multiSelection.count > 1, multiSelection.contains(key) else { return [session] }
-        let snapshot = model.sidebarSnapshot()
+        let snapshot = model.eventSidebarSnapshot()
         let order = snapshot.rowIDs
         return
             snapshot.listed
