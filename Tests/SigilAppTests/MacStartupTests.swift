@@ -194,6 +194,17 @@ struct MacStartupTests {
         _ = await ready(launch)
     }
 
+    /// The canvas before the model exists wears the theme the model will.
+    @Test(arguments: [nil, TerminalTheme.all.last?.name, "No Such Theme"] as [String?])
+    func theWaitingWindowUsesTheSavedTheme(saved: String?) throws {
+        let suite = "MacStartupTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        if let saved { defaults.set(saved, forKey: "terminal.theme") }
+
+        #expect(AppSettings.storedTheme(defaults: defaults).name == AppSettings(defaults: defaults).theme.name)
+    }
+
     @Test func aQuickShellShowsNoSpinner() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
