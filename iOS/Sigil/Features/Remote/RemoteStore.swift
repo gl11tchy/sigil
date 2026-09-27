@@ -770,14 +770,24 @@ final class RemoteStore {
 
     // MARK: Cache
 
+    /// Read and decoded off the main actor. It lands only on the screen it was read
+    /// for: the same Mac and tab, before anything live replaced them.
     private func restoreCache(for credential: PairingCredential) {
-        guard let cached = ScreenCache.load(for: credential) else { return }
-        tabs = cached.tabs
-        selectedTabID = cached.selectedTabID
-        macName = cached.mac
-        screens = cached.screens
-        cachedAt = cached.savedAt
-        refreshOutput()
+        let tab = selectedTabID
+        Task { [weak self] in
+            guard
+                let cached = await ScreenCache.restore(for: credential, if: {
+                    self?.activeMacID == credential.id && self?.selectedTabID == tab && self?.tabs.isEmpty == true
+                }),
+                let self
+            else { return }
+            self.tabs = cached.tabs
+            self.selectedTabID = cached.selectedTabID
+            self.macName = cached.mac
+            self.screens = cached.screens
+            self.cachedAt = cached.savedAt
+            self.refreshOutput()
+        }
     }
 
     private func scheduleSave() {
