@@ -55,6 +55,7 @@ enum TestMain {
         run("text-only output edit equals a full rebuild") { try IOSOutputEditTests.textOnlyEditEqualsFullRebuild() }
         run("output edit touches only changed lines") { try IOSOutputEditTests.editTouchesOnlyChangedLines() }
         run("output edits at the screen cap cut only the ends") { try IOSOutputCapTests.screenAtCapEditsOnlyTheEnds() }
+        run("rows past the screen cap leave a slack at a time") { try IOSOutputCapSlackTests.rowsLeaveASlackAtATime() }
         run("output edits at the history cap cut only the ends") { try IOSOutputCapTests.historyAtCapEditsOnlyTheEnds() }
         run("output edits below the cap are the one edit") { try IOSOutputCapTests.editsMatchTheSingleEditBelowTheCap() }
         run("find matches equal the old highlight") { try IOSOutputFindTests.matchesEqualTheOldHighlight() }

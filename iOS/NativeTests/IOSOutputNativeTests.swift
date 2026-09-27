@@ -59,6 +59,8 @@ enum IOSOutputNativeTests {
             let shown = try await Shown(output)
             await run("show equals a full rebuild over random diffs") { try await showEqualsFullRebuild(shown) }
             await run("show at the screen cap edits only the ends") { try await showAtCapEditsOnlyTheEnds(shown) }
+            await run("show past the screen cap keeps the end in view") { try await showPastCapKeepsTheEnd(shown) }
+            await run("show past the screen cap lays out only the end") { try showPastCapLaysOutOnlyTheEnd(shown) }
             await run("find marks leave the text as it was") { try await findLeavesTheText(shown) }
             await run("find scrolls once the search lands") { try await findScrollsOnceTheSearchLands(shown) }
         } catch {
@@ -153,9 +155,14 @@ enum IOSOutputNativeTests {
                 reference.textContainer.size.width, view.textContainer.size.width, "\(label): both views wrap alike")
             let whole = Dictionary(uniqueKeysWithValues: IOSOutputNativeTests.frames(reference, all: true))
             let was = view.contentOffset
+            let atBottom = coordinator.isAtBottom(view)
             defer {
-                view.setContentOffset(was, animated: false)
-                view.layoutIfNeeded()
+                if atBottom {
+                    coordinator.scrollToBottom(view)
+                } else {
+                    view.setContentOffset(was, animated: false)
+                    view.layoutIfNeeded()
+                }
             }
             var y = was.y
             var jumped = false

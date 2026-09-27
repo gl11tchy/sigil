@@ -31,18 +31,22 @@ enum IOSOutputCapTests {
         }
     }
 
-    /// Streams rows into a model already at `ScreenModel.cap`, in both modes: the
-    /// edits give exactly the new output and replace a few lines, not the history.
+    /// Streams rows into a model already at `ScreenModel.cap` and near the end of
+    /// its slack, in both modes: the edits give exactly the new output and replace
+    /// a few lines, not the history. The row that passes the slack cuts the top
+    /// in an edit of its own, which takes out only the rows that left.
     static func screenAtCapEditsOnlyTheEnds() throws {
         let formatter = try Fixtures.formatter()
         var rng = Fixtures.Seeded(state: 4_000)
-        var model = Fixtures.model(count: ScreenModel.cap, grounded: true, footer: false, from: 10_000, using: &rng)
-        try Expect.equal(model.rows.count, ScreenModel.cap, "the model is at its cap")
+        var model = Fixtures.model(
+            count: ScreenModel.cap + ScreenModel.slack - 4, grounded: true, footer: false, from: 10_000, using: &rng)
+        try Expect.equal(model.rows.count, ScreenModel.cap + ScreenModel.slack - 4, "the model is past its cap")
         var shown = [false, true].map { OutputSnapshot(screen: model, history: nil, raw: $0).render(with: formatter) }
         var cut = 0
         for step in 0..<10 {
             let first = model.first
             let end = model.end
+            let oldest = try Expect.notNil(model.oldestIndex, "step \(step): rows")
             let count = [1, 1, 1, 2, 3][step % 5]
             if step % 4 == 3 {
                 // The last row is redrawn as a new one arrives.
@@ -53,7 +57,11 @@ enum IOSOutputCapTests {
                 let rows = (end..<(end + count)).map { Fixtures.row($0, grounded: true, using: &rng) }
                 model.apply(Fixtures.screen(gen: model.gen, first: first + count, end: end + count, rows: rows, palette: nil))
             }
-            try Expect.equal(model.rows.count, ScreenModel.cap, "step \(step): still at the cap")
+            let left = try Expect.notNil(model.oldestIndex, "step \(step): rows") - oldest
+            try Expect.true(
+                (ScreenModel.cap...(ScreenModel.cap + ScreenModel.slack)).contains(model.rows.count),
+                "step \(step): \(model.rows.count) rows, from the cap to its slack")
+            try Expect.true(left == 0 || model.rows.count == ScreenModel.cap, "step \(step): rows leave down to the cap")
             for (mode, raw) in [false, true].enumerated() {
                 let label = "step \(step) raw \(raw)"
                 let next = OutputSnapshot(screen: model, history: nil, raw: raw).render(with: formatter)
@@ -65,12 +73,14 @@ enum IOSOutputCapTests {
                 let replaced = edits.reduce(0) { $0 + $1.range.count + $1.replacement.text.utf16.count }
                 // A row is at most 40 units; the rows that left, the rows that came, and a line either side.
                 try Expect.true(
-                    replaced <= (2 * count + 4) * 2 * Fixtures.width,
+                    replaced <= (2 * count + left + 4) * 2 * Fixtures.width,
                     "\(label): \(replaced) of \(next.text.utf16.count) units replaced")
-                if edits.contains(where: { $0.range.lowerBound == 0 && !$0.range.isEmpty }) { cut += 1 }
+                let top = edits.filter { $0.range.lowerBound == 0 && !$0.range.isEmpty }.count
+                try Expect.equal(top, left > 0 ? 1 : 0, "\(label): the top is cut only as \(left) rows leave")
+                cut += top
             }
         }
-        try Expect.true(cut >= 10, "the top was cut in its own edit (\(cut) times)")
+        try Expect.equal(cut, 2, "the top was cut in its own edit, once in each mode")
     }
 
     /// Text from a Mac that answers polls, at `TerminalHistory.cap`: history is cut
