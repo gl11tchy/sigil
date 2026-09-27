@@ -307,3 +307,68 @@ test('closing the relay answers queued pushes as closed and sends nothing more t
   assert.equal(apns.sent.length, 1);
   assert.equal(apns.held.length, 0);
 });
+
+test('a host that disconnects sends none of its queued pushes to Apple', async t => {
+  const apns = heldAPNs();
+  const { base, room, hostToken } = await setup(t, { apns });
+  const mac = host(base, room, hostToken);
+  await until(() => mac.frames.some(frame => frame.type === 'ready'), 'ready');
+  mac.send(JSON.stringify({ pushToken: alertToken(1), pushEnvironment: 'development' }));
+  for (const data of ['AAAA', 'BBBB', 'CCCC']) mac.send(alert(data));
+  mac.send(activity('update', 'working'));
+  await until(() => apns.sent.length === 1, 'first push');
+  await settle();
+  // Disconnect on the Mac only closes its socket; the relay must stop there.
+  mac.close();
+  await once(mac, 'close');
+  await settle();
+  apns.answer(200);
+  await settle();
+  assert.equal(apns.sent.length, 1);
+  assert.equal(apns.held.length, 0);
+
+  // The room's next host connection pushes at once; nothing is left in front of it.
+  const again = host(base, room, hostToken);
+  await until(() => again.frames.some(frame => frame.type === 'ready'), 'ready again');
+  again.send(JSON.stringify({ pushToken: alertToken(2), pushEnvironment: 'development' }));
+  again.send(alert('DDDD'));
+  await until(() => apns.sent.length === 2, 'new host push');
+  apns.answer(200);
+  await until(() => pushes(again).length === 1, 'new host answer');
+  assert.deepEqual(apns.sent.map(request => [request.token, request.payload.sigil.data]), [
+    [alertToken(1), 'AAAA'], [alertToken(2), 'DDDD'],
+  ]);
+  assert.deepEqual(pushes(again), [{ type: 'push', ok: true, status: 200 }]);
+  again.close();
+});
+
+test('a host connection replaced by a new one sends none of its queued pushes to Apple', async t => {
+  const apns = heldAPNs();
+  const { base, room, hostToken } = await setup(t, { apns });
+  const old = host(base, room, hostToken);
+  await until(() => old.frames.some(frame => frame.type === 'ready'), 'ready');
+  old.send(JSON.stringify({ pushToken: alertToken(1), pushEnvironment: 'development' }));
+  for (const data of ['AAAA', 'BBBB', 'CCCC']) old.send(alert(data));
+  await until(() => apns.sent.length === 1, 'first push');
+  await settle();
+  // A second connection with the room's credentials takes the host slot while the old one is open.
+  const closed = once(old, 'close');
+  const mac = host(base, room, hostToken);
+  await until(() => mac.frames.some(frame => frame.type === 'ready'), 'ready again');
+  await closed;
+  mac.send(JSON.stringify({ pushToken: alertToken(2), pushEnvironment: 'development' }));
+  mac.send(alert('DDDD'));
+  await settle();
+  assert.equal(apns.sent.length, 1);
+  apns.answer(200);
+  await until(() => apns.sent.length === 2, 'new host push');
+  apns.answer(200);
+  await until(() => pushes(mac).length === 1, 'new host answer');
+  await settle();
+  assert.deepEqual(apns.sent.map(request => [request.token, request.payload.sigil.data]), [
+    [alertToken(1), 'AAAA'], [alertToken(2), 'DDDD'],
+  ]);
+  assert.deepEqual(pushes(mac), [{ type: 'push', ok: true, status: 200 }]);
+  assert.equal(apns.held.length, 0);
+  mac.close();
+});

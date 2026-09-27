@@ -154,8 +154,10 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
     while (queue.length) {
       const { ws, build, registration } = queue[0];
       let answer;
-      if (now() - (room.pushWindow || 0) >= 60000) { room.pushWindow = now(); room.pushCount = 0; }
-      if (room.closed) answer = { ok: false, reason: 'closed' };
+      // A host connection that closed or was replaced sends nothing more, and its pushes do not count.
+      const live = !room.closed && room.host === ws;
+      if (live && now() - (room.pushWindow || 0) >= 60000) { room.pushWindow = now(); room.pushCount = 0; }
+      if (!live) answer = { ok: false, reason: 'closed' };
       else if (++room.pushCount > 60) answer = { ok: false, reason: 'rate' };
       else if (!apns || !registration || registration.gone) answer = { ok: false, reason: apns ? 'token' : 'off' };
       else {
