@@ -87,32 +87,38 @@ final class ScreenCacheWriter: @unchecked Sendable {
         if idle { releaseAppWhenIdle() }
     }
 
+    /// Queued work keeps the app running: iOS suspends it soon after it leaves the
+    /// screen, and the save made on the way out must reach the disk. Only the system
+    /// call is iOS; the bookkeeping runs in the tests too.
+    @MainActor private(set) var holdingApp = false
     #if os(iOS)
-        /// Queued work keeps the app running: iOS suspends it soon after it leaves the
-        /// screen, and the save made on the way out must reach the disk.
         @MainActor private var backgroundTask = UIBackgroundTaskIdentifier.invalid
+    #endif
 
-        @MainActor private func holdApp() {
-            guard backgroundTask == .invalid else { return }
+    @MainActor private func holdApp() {
+        guard !holdingApp else { return }
+        #if os(iOS)
             backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Save screen") { [weak self] in
                 self?.releaseApp()
             }
-        }
-
-        @MainActor private func releaseApp() {
             guard backgroundTask != .invalid else { return }
+        #endif
+        holdingApp = true
+    }
+
+    @MainActor private func releaseApp() {
+        guard holdingApp else { return }
+        holdingApp = false
+        #if os(iOS)
             UIApplication.shared.endBackgroundTask(backgroundTask)
             backgroundTask = .invalid
-        }
+        #endif
+    }
 
-        private func releaseAppWhenIdle() {
-            Task { @MainActor in
-                // A change made since the queue went idle keeps the hold until it is written.
-                if self.lock.withLock({ self.queued == 0 }) { self.releaseApp() }
-            }
+    private func releaseAppWhenIdle() {
+        Task { @MainActor in
+            // A change made since the queue went idle keeps the hold until it is written.
+            if self.lock.withLock({ self.queued == 0 }) { self.releaseApp() }
         }
-    #else
-        @MainActor private func holdApp() {}
-        private func releaseAppWhenIdle() {}
-    #endif
+    }
 }

@@ -13,6 +13,7 @@ enum ScreenCacheTests {
         ("cache: restore lands only while current", restoreLandsOnlyWhileCurrent),
         ("cache: only the newest restore of the Mac on screen is current", onlyTheNewestRestoreIsCurrent),
         ("cache: live state with no tabs keeps a late restore off screen", liveEmptyStateBeatsALateRestore),
+        ("cache: queued work holds the app until the last change is written", queuedWorkHoldsTheApp),
     ]
 
     /// Holds the writer's queue once everything queued before it has run.
@@ -299,5 +300,46 @@ enum ScreenCacheTests {
         let fresh = shown.gate.begin(macID: a.id)
         let restored = await writer.restore(for: a) { shown.gate.isCurrent(fresh, activeMacID: shown.activeMacID) }
         try Expect.equal(restored, snapshot("yesterday"), "a restore with nothing live lands")
+    }
+
+    /// The hold is let go from a main-actor task once the queue is idle.
+    private static func waitForRelease(_ writer: ScreenCacheWriter) async throws {
+        for _ in 0..<200 where writer.holdingApp {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    /// The save made on the way to the background must reach the disk before iOS
+    /// may suspend the app.
+    static func queuedWorkHoldsTheApp() async throws {
+        let (writer, folder) = try makeWriter()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let mac = mac()
+        let file = folder.appendingPathComponent(ScreenCache.fileName(for: mac))
+        try Expect.true(!writer.holdingApp, "no hold with nothing queued")
+
+        let first = Gate(on: writer.queue)
+        writer.save(snapshot("a"), for: mac)
+        try Expect.true(writer.holdingApp, "a queued save holds the app")
+        try await Task.sleep(for: .milliseconds(20))
+        try Expect.true(writer.holdingApp, "still held while the save waits")
+        first.release()
+        _ = await load(writer, mac)
+        try await waitForRelease(writer)
+        try Expect.true(!writer.holdingApp, "let go once the save is written")
+        try Expect.equal(ScreenCache.read(file), snapshot("a"), "the save is on disk")
+
+        // The queue goes idle and asks to let go; a save made before that request runs keeps the hold.
+        writer.save(snapshot("b"), for: mac)
+        writer.queue.sync {}
+        let second = Gate(on: writer.queue)
+        writer.save(snapshot("c"), for: mac)
+        try await Task.sleep(for: .milliseconds(20))
+        try Expect.true(writer.holdingApp, "a save queued as the queue went idle keeps the hold")
+        second.release()
+        _ = await load(writer, mac)
+        try await waitForRelease(writer)
+        try Expect.true(!writer.holdingApp, "let go once the last save is written")
+        try Expect.equal(ScreenCache.read(file), snapshot("c"), "the last save is on disk")
     }
 }
