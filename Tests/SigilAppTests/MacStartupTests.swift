@@ -289,14 +289,15 @@ struct MacStartupTests {
         // The sidebar search leads the key view loop unless keyboard
         // navigation is on (as on the CI runners): then a control does.
         let shown: KeyboardFocus = NSApplication.shared.isFullKeyboardAccessEnabled ? .elsewhere : .sidebar
+        let settled: KeyboardFocus = restoredTab ? .sessionTerminal : shown
+        let expected = key ? [settled] : [shown, settled]
         for away in WindowAway.allCases {
             let blocking = try await startupFocus(
-                waitsForShell: false, restoredTab: restoredTab, key: key, away: away)
+                waitsForShell: false, restoredTab: restoredTab, key: key, away: away, expecting: expected)
             let waiting = try await startupFocus(
-                waitsForShell: true, restoredTab: restoredTab, key: key, away: away)
+                waitsForShell: true, restoredTab: restoredTab, key: key, away: away, expecting: expected)
 
-            let settled: KeyboardFocus = restoredTab ? .sessionTerminal : shown
-            #expect(blocking == (key ? [settled] : [shown, settled]), "\(away)")
+            #expect(blocking == expected, "\(away)")
             #expect(waiting == blocking, "\(away)")
         }
     }
@@ -310,7 +311,8 @@ struct MacStartupTests {
     /// lets the launch finish, brings it back, and reads where focus lands;
     /// for a window that was not key, again once it becomes key.
     private func startupFocus(
-        waitsForShell: Bool, restoredTab: Bool, key: Bool, away: WindowAway
+        waitsForShell: Bool, restoredTab: Bool, key: Bool, away: WindowAway,
+        expecting expected: [KeyboardFocus]
     ) async throws -> [KeyboardFocus] {
         let fixture = try ModelFixture(script: "#!/bin/sh\nread line\n")
         defer { fixture.cleanup() }
@@ -380,20 +382,25 @@ struct MacStartupTests {
                 NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
             }
         }
-        func focus() async -> KeyboardFocus {
-            // Focus moves on the main queue's next turns; let them run.
-            try? await Task.sleep(for: .milliseconds(300))
-            return KeyboardFocus.classify(
+        func focus() -> KeyboardFocus {
+            KeyboardFocus.classify(
                 window.firstResponder, in: window,
                 sessionView: model.selectedTab?.controller.view,
                 panelShellView: model.panel.shell?.view,
                 sidebarHasFocus: model.isSidebarFocused || model.isSidebarDividerFocused)
         }
-        var seen = [await focus()]
+        func settledFocus(_ want: KeyboardFocus) async -> KeyboardFocus {
+            // Focus moves on the main queue's next turns; let them run, and
+            // give a slow runner longer to land it.
+            try? await Task.sleep(for: .milliseconds(300))
+            _ = await waitUntil(timeout: .seconds(3)) { focus() == want }
+            return focus()
+        }
+        var seen = [await settledFocus(expected[0])]
         if !key {
             window.reportsKey = true
             NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
-            seen.append(await focus())
+            seen.append(await settledFocus(expected[1]))
         }
         return seen
     }
