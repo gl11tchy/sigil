@@ -54,6 +54,10 @@ enum TestMain {
         run("output edit equals a full rebuild over random diffs") { try IOSOutputEditTests.editEqualsFullRebuildOverRandomDiffs() }
         run("text-only output edit equals a full rebuild") { try IOSOutputEditTests.textOnlyEditEqualsFullRebuild() }
         run("output edit touches only changed lines") { try IOSOutputEditTests.editTouchesOnlyChangedLines() }
+        run("find matches equal the old highlight") { try IOSOutputFindTests.matchesEqualTheOldHighlight() }
+        run("find marks the matches near the screen once") { try IOSOutputFindTests.nearbyMarksCoverTheMatches() }
+        run("find marks follow output edits") { try IOSOutputFindTests.marksFollowEdits() }
+        run("find skips replaced queries") { try IOSOutputFindTests.finderSkipsReplacedQueries() }
 
         run("screen model applies windows and diffs") { try ScreenTests.modelAppliesWindowsAndDiffs() }
         run("screen model prepends older rows until exhausted") { try ScreenTests.modelPrependsOlderRowsUntilExhausted() }
