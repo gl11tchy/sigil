@@ -92,7 +92,9 @@ function findState(page) {
     for (const walker = document.createTreeWalker(terminal, NodeFilter.SHOW_TEXT); walker.nextNode();) texts.push(walker.currentNode.length);
     return {
       api, text, count: document.getElementById('find-count').textContent,
-      elements: terminal.querySelectorAll('*').length, longestText: Math.max(0, ...texts),
+      // Long output is in blocks of whole lines; the elements Find adds are the others.
+      blocks: terminal.querySelectorAll(':scope > span').length, elements: terminal.querySelectorAll(':not(:scope > span)').length,
+      longestText: Math.max(0, ...texts),
       shown: matches.length, shownVisible: matches.filter(visible).length,
       current: current ? { ...describe(current), visible: visible(current) } : null,
       lineHeight: parseFloat(getComputedStyle(terminal).lineHeight), height: terminal.clientHeight,
@@ -205,6 +207,9 @@ for (const api of [true, false]) {
         expect(inView.visible).toBeGreaterThan(0);
         expect(state.shown - inView.visible).toBeLessThanOrEqual(500);
         expect(state.longestText).toBeLessThanOrEqual(4096);
+        // Blocks of whole lines of about 1,024 characters: a mark lays out its block again, not all the text.
+        expect(state.blocks).toBeGreaterThan(1);
+        expect(state.blocks).toBeLessThanOrEqual(Math.ceil(dense.length / 1024));
         if (api) {
           expect(state.elements).toBe(0);
           expect(await page.evaluate(() => document.querySelectorAll('*').length)).toBe(nodesBefore);
@@ -704,6 +709,26 @@ for (const api of [true, false]) {
       });
     }
 
+    // In WebKit a match inside a grapheme cluster, as 'है' in 'हैं', is marked with the whole cluster.
+    // When that sent every match in view to highlights, a frame took over 50 ms. Chromium highlights
+    // every match, over any text, as the tests above time.
+    if (api) test('Find stays under 50 ms a frame when Hindi matches fall inside clusters', async ({ page, baseURL, browserName }) => {
+      test.skip(browserName !== 'webkit', 'Only WebKit marks matches');
+      const line = 'यह एक परीक्षण है और वे सही हैं '.repeat(3), lines = Math.floor(58_000 / (new TextEncoder().encode(line).length + 1));
+      const text = Array.from({ length: lines }, () => line).join('\n'), shown = readableOutput(text);
+      const mac = await pair(page, baseURL, { terminal: () => text });
+      try {
+        await page.setViewportSize({ width: 1280, height: 844 });
+        await expect(page.locator('#terminal')).toHaveText(shown);
+        await openFind(page, 'है');
+        await expect(page.locator('#find-count')).toHaveText(`1 of ${count(shown, 'है').length}`);
+        await frames(page);
+        const times = { next: Math.round(await longestFrame(page, 6, 0)), scrolled: Math.round(await longestFrame(page, 12, 1 / 4)) };
+        expect(Object.values(times).filter(time => time >= 50), JSON.stringify(times)).toEqual([]);
+        expect(await page.locator('#terminal').evaluate(el => el.textContent)).toBe(shown);
+      } finally { mac.close(); }
+    });
+
     test('Find paints again only the chunks whose marks change as the reader scrolls', async ({ page, baseURL }) => {
       const mac = await pair(page, baseURL, { terminal: () => dense });
       try {
@@ -722,15 +747,48 @@ for (const api of [true, false]) {
           .toEqual([true, 0, 0]);
       } finally { mac.close(); }
     });
+
+    // A new mark lays out its block again. In one inline run of all 400,000 characters kept, each
+    // new window laid out all of them: over 50 ms a frame in WebKit.
+    if (!api) test('Find scrolls 400,000 characters of marks a screen a frame in under 50 ms', async ({ page, baseURL }) => {
+      test.setTimeout(120_000);
+      // 34 slices of 11,900 characters, each under the 12 KB a slice may hold.
+      const slice = name => Array.from({ length: 150 }, (_, i) => `${name} line ${String(i).padStart(4, '0')}: alpha verified project output with trace details and data.`)
+        .join('\n').slice(0, 11_899) + '\n';
+      let slices = 0;
+      const tail = slice('TAIL');
+      const mac = await pair(page, baseURL, { terminal: () => tail, earlier: () => slices < 33 ? slice(`HISTORY-${++slices}`) : '' });
+      try {
+        await expect(page.locator('#terminal')).toHaveText(tail);
+        // Each scroll to the top loads one earlier slice, paced under the relay's 30 messages a second.
+        for (let loaded = tail.length; slices < 33;) {
+          await page.waitForTimeout(100);
+          await page.locator('#terminal').evaluate(el => { el.scrollTop = 0; el.dispatchEvent(new Event('scroll')); });
+          await page.waitForFunction(length => document.getElementById('terminal').textContent.length > length, loaded);
+          loaded = await page.locator('#terminal').evaluate(el => el.textContent.length);
+        }
+        const text = await page.locator('#terminal').evaluate(el => el.textContent);
+        expect(text.length).toBeGreaterThan(400_000);
+        await openFind(page, 'a');
+        await expect(page.locator('#find-count')).toHaveText(`1 of ${count(text, 'a').length}`);
+        await page.locator('#terminal').evaluate(el => { el.scrollTop = el.scrollHeight / 3; });
+        await frames(page);
+        const scrolled = await longestFrame(page, 60, 1);
+        expect(scrolled).toBeLessThan(50);
+        await expect.poll(async () => { const state = await coverage(page, count(text, 'a').map(match => [match.index, match.index + 1])); return [state.visible > 0, state.missing, state.far]; })
+          .toEqual([true, 0, 0]);
+      } finally { mac.close(); }
+    });
   });
 }
 
 test('Find paints long output as short text nodes that lay out as one node would', async ({ page, baseURL }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   // Long lines with spaces, with ASCII and no spaces, with no ASCII at all, and mixed; Cyrillic and
-  // Hebrew words; a combining mark after each space; emoji joined into one cluster.
-  const output = ['word '.repeat(600), 'x'.repeat(3000), '🙂é日本'.repeat(600), 'ab🙂'.repeat(750), 'привет мир '.repeat(300),
-    'שלום עולם '.repeat(300), 'ж \u0301'.repeat(1000), '👩\u200d💻'.repeat(700), 'end'].join('\n');
+  // Hebrew words; a combining mark after each space; emoji joined into one cluster; short and blank lines.
+  const short = Array.from({ length: 120 }, (_, i) => i % 7 ? `line ${i}: ${'ab '.repeat(i % 25)}` : '').join('\n');
+  const output = ['word '.repeat(600), 'x'.repeat(3000), short, '🙂é日本'.repeat(600), 'ab🙂'.repeat(750), 'привет мир '.repeat(300),
+    'שלום עולם '.repeat(300), short, 'ж \u0301'.repeat(1000), '👩\u200d💻'.repeat(700), 'end'].join('\n');
   expect(new TextEncoder().encode(output).length).toBeLessThan(60_000);
   const mac = await pair(page, baseURL, { terminal: () => output });
   try {
@@ -738,11 +796,12 @@ test('Find paints long output as short text nodes that lay out as one node would
       if (raw) await toggleRaw(page);
       await expect(page.locator('#terminal')).toHaveText(raw ? output : readableOutput(output));
       const layout = await page.locator('#terminal').evaluate(el => {
-        const text = el.textContent, pieces = [...el.childNodes], ends = [];
+        const text = el.textContent, children = [...el.childNodes], pieces = [], ends = [];
+        for (const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT); walker.nextNode();) pieces.push(walker.currentNode);
         for (let total = 0; ends.length < pieces.length;) ends.push(total += pieces[ends.length].length);
         // The box of the character after each boundary and of the last character.
-        const boxes = () => [...ends.slice(0, -1), text.length - 1].map(offset => {
-          const nodes = [...el.childNodes], range = document.createRange();
+        const boxes = nodes => [...ends.slice(0, -1), text.length - 1].map(offset => {
+          const range = document.createRange();
           let node = 0, at = offset;
           while (at >= nodes[node].length) at -= nodes[node++].length;
           range.setStart(nodes[node], at);
@@ -750,13 +809,28 @@ test('Find paints long output as short text nodes that lay out as one node would
           const box = range.getBoundingClientRect();
           return [box.top, box.left];
         });
-        const chunked = { height: el.scrollHeight, width: el.scrollWidth, boxes: boxes() };
+        getSelection().selectAllChildren(el);
+        const copied = getSelection().toString();
+        getSelection().removeAllRanges();
+        // Block elements of text nodes, then the text nodes of the last block.
+        const elements = children.filter(child => child.nodeType === 1), tail = children.slice(elements.length);
+        const blocks = [...elements.map(child => ({ text: child.textContent,
+          block: child.localName === 'span' && getComputedStyle(child).display === 'block' && [...child.childNodes].every(node => node.nodeType === 3) })),
+        { text: tail.map(node => node.textContent).join(''), block: tail.length > 0 && tail.every(node => node.nodeType === 3) }];
+        const chunked = { height: el.scrollHeight, width: el.scrollWidth, boxes: boxes(pieces) };
         el.replaceChildren(document.createTextNode(text));
-        const single = { height: el.scrollHeight, width: el.scrollWidth, boxes: boxes() };
-        el.replaceChildren(...pieces);
-        return { text, types: pieces.map(piece => piece.nodeType), ends, chunked, single };
+        const single = { height: el.scrollHeight, width: el.scrollWidth, boxes: boxes([el.firstChild]) };
+        el.replaceChildren(...children);
+        return { text, copied, blocks, ends, chunked, single };
       });
-      expect(layout.types.every(type => type === 3)).toBe(true);
+      // The text nodes are in blocks of whole lines, the last in the terminal itself: each ends after a
+      // line feed, and holds one line or under 2,048 characters. A selection copies the text as it came.
+      expect(layout.blocks.length).toBeGreaterThan(8);
+      expect(layout.blocks.filter(block => !block.block)).toEqual([]);
+      expect(layout.blocks.slice(0, -1).filter(block => !block.text.endsWith('\n'))).toEqual([]);
+      expect(layout.blocks.filter(block => block.text.length >= 2048 && block.text.slice(0, -1).includes('\n'))).toEqual([]);
+      expect(layout.blocks.filter(block => block.text.slice(0, -1).includes('\n')).length).toBeGreaterThan(0);
+      expect(layout.copied).toBe(layout.text);
       expect(layout.ends.length).toBeGreaterThan(8);
       // The same lines at the same heights, to a layout unit (1/64 px). A box, or the widest line, may
       // move to the side by one layout unit where glyph advances add up in another order, rounded out

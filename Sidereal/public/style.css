@@ -300,6 +300,10 @@ mark[data-current="true"] { box-shadow: 0 0 0 1.5px var(--accent); }
 }
 #terminal:focus-visible { outline-offset: -2px; border-radius: 4px; }
 #terminal[data-raw="true"] { white-space: pre; overflow-wrap: normal; font-size: 12.5px; line-height: 18px; }
+/* Find paints long output in blocks of whole lines, so a mark lays out one block again, not all of it.
+   A raw block is as wide as its longest line, so the padding after that line scrolls into view. */
+#terminal > span { display: block; }
+#terminal[data-raw="true"] > span { width: max-content; }
 #latest {
   position: absolute; right: 12px; bottom: 12px; z-index: 1; border-radius: 999px; padding: 0 16px;
   background-color: var(--surface); box-shadow: var(--shadow-raised); font-size: 13px;
