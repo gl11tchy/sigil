@@ -280,9 +280,11 @@ test('loading earlier output keeps the text the reader was on in place', async (
     await expect.poll(() => mac.actions.filter(a => a.action === 'state').length).toBeGreaterThan(1);
     const measure = (marker, top) => page.locator('#terminal').evaluate((el, [wanted, scrollToTop]) => {
       if (scrollToTop) el.scrollTop = 0;
-      const node = el.firstChild;
-      const text = wanted || node.textContent.split('\n')[0];
-      const at = node.textContent.indexOf(text);
+      // The output is painted as short text nodes; measure in the one that holds the line.
+      const text = wanted || el.textContent.split('\n')[0];
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode() && !walker.currentNode.data.includes(text));
+      const node = walker.currentNode, at = node.data.indexOf(text);
       const range = document.createRange();
       range.setStart(node, at); range.setEnd(node, at + 6);
       const offset = range.getBoundingClientRect().top - el.getBoundingClientRect().top;
