@@ -279,3 +279,86 @@ test('a coalesced search still trims an oversized query to what the Mac reads', 
   assert.ok(new TextEncoder().encode(sent.text).length <= 8192);
   assert.equal(socket.readyState, 1);
 });
+
+test('unchanged polls neither format the output again nor rebuild the session picker', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  const options = page.element('tabs').children;
+  assert.deepEqual(page.formatted, ['READY']);
+  page.formatted.length = 0;
+  page.created.length = 0;
+  for (let poll = 0; poll < 5; poll++) {
+    await page.fireTimer(1000);
+    assert.equal(socket.sent.at(-1).action, 'state');
+    socket.answer(socket.sent.at(-1));
+    await settle();
+  }
+  assert.equal(socket.sent.filter(request => request.action === 'state').length, 6);
+  assert.deepEqual(page.formatted, []);
+  assert.deepEqual(page.created, []);
+  assert.equal(page.element('tabs').children, options);
+  assert.equal(page.element('terminal').textContent, readableOutput('READY'));
+  assert.equal(page.element('session-status').textContent, 'Ready');
+});
+
+test('changed text, status, tabs, mode and earlier history show exactly what a fresh format shows', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  const terminal = page.element('terminal');
+  const poll = async (state, fields = {}) => {
+    page.formatted.length = 0;
+    page.created.length = 0;
+    await page.fireTimer(1000);
+    socket.answer(socket.sent.at(-1), fields, state);
+    await settle();
+  };
+  const grown = 'READY\n│ ❯ fix the widget │\nDone.';
+  await poll({ tabs: [tab('tab-1')], selectedTabID: 'tab-1', terminal: grown });
+  assert.deepEqual(page.formatted, [grown]);
+  assert.deepEqual(page.created, []);
+  assert.equal(terminal.textContent, readableOutput(grown));
+  // Status alone rebuilds the picker but not the output.
+  await poll({ tabs: [tab('tab-1', 'Fixture', 'exited')], selectedTabID: 'tab-1', terminal: grown });
+  assert.deepEqual(page.formatted, []);
+  assert.deepEqual(page.created, ['option']);
+  assert.equal(page.element('tabs').children[0].textContent, 'Fixture · Ended');
+  assert.equal(page.element('session-status').textContent, 'Session ended');
+  assert.equal(terminal.textContent, readableOutput(grown));
+  // Raw mode shows the text itself, and readable mode returns without formatting again.
+  page.formatted.length = 0;
+  page.element('raw-toggle').onclick();
+  assert.equal(terminal.textContent, grown);
+  page.element('raw-toggle').onclick();
+  assert.equal(terminal.textContent, readableOutput(grown));
+  assert.deepEqual(page.formatted, []);
+  // Text that changes while raw is showing is formatted when readable returns.
+  page.element('raw-toggle').onclick();
+  const later = `${grown}\nMore.`;
+  await poll({ tabs: [tab('tab-1', 'Fixture', 'exited')], selectedTabID: 'tab-1', terminal: later });
+  assert.deepEqual(page.formatted, []);
+  assert.equal(terminal.textContent, later);
+  page.element('raw-toggle').onclick();
+  assert.deepEqual(page.formatted, [later]);
+  assert.equal(terminal.textContent, readableOutput(later));
+  // A new tab rebuilds the picker; switching to it formats its own text once.
+  await poll({ tabs: [tab('tab-1', 'Fixture', 'exited'), tab('tab-2', 'Other')], selectedTabID: 'tab-2', terminal: 'SECOND' });
+  assert.deepEqual(page.formatted, ['SECOND']);
+  assert.deepEqual(page.created, ['option', 'option']);
+  assert.deepEqual(page.element('tabs').children.map(option => option.value), ['tab-1', 'tab-2']);
+  assert.equal(page.element('tabs').value, 'tab-2');
+  assert.equal(terminal.textContent, readableOutput('SECOND'));
+  // Earlier history changes the text above the same tail.
+  terminal.scrollHeight = 800;
+  terminal.clientHeight = 200;
+  terminal.scrollTop = 0;
+  terminal.onscroll();
+  await settle();
+  const request = socket.sent.at(-1);
+  assert.equal(request.action, 'earlier');
+  page.formatted.length = 0;
+  socket.answer(request, { earlier: 'EARLY\n' },
+    { tabs: [tab('tab-1', 'Fixture', 'exited'), tab('tab-2', 'Other')], selectedTabID: 'tab-2', terminal: 'SECOND' });
+  await settle();
+  assert.deepEqual(page.formatted, ['EARLY\nSECOND']);
+  assert.equal(terminal.textContent, readableOutput('EARLY\nSECOND'));
+});

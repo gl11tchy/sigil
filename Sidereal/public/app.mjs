@@ -297,16 +297,18 @@ function render(state) {
       attachmentDrafts.delete(id);
     }
   }
-  const tabs = state.tabs.map(tab => {
-    const option = document.createElement('option');
-    option.value = tab.id;
-    const suffix = tab.status === 'exited' ? ' · Ended' : '';
-    option.textContent = tab.title + suffix;
-    return option;
-  });
-  if (!tabs.length) { const empty = document.createElement('option'); empty.value = ''; empty.textContent = 'No open sessions'; tabs.push(empty); }
   const signature = JSON.stringify(state.tabs);
-  if (signature !== tabsSignature) { $('tabs').replaceChildren(...tabs); tabsSignature = signature; }
+  if (signature !== tabsSignature) {
+    const tabs = state.tabs.map(tab => {
+      const option = document.createElement('option');
+      option.value = tab.id;
+      const suffix = tab.status === 'exited' ? ' · Ended' : '';
+      option.textContent = tab.title + suffix;
+      return option;
+    });
+    if (!tabs.length) { const empty = document.createElement('option'); empty.value = ''; empty.textContent = 'No open sessions'; tabs.push(empty); }
+    $('tabs').replaceChildren(...tabs); tabsSignature = signature;
+  }
   $('tabs').value = selected || '';
   $('welcome').hidden = true;
   $('controls').hidden = false;
@@ -319,11 +321,14 @@ function render(state) {
   if (changedSession) { resizeMessage(); renderAttachments(); }
   updateControls();
 }
+// Polls usually return the same text; format it again only when it changes.
+let readableFrom = null, readableText = '';
 function renderOutput(changedSession = false, prepended = false) {
   const terminal = $('terminal');
   const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
   const fromEnd = terminal.scrollHeight - terminal.scrollTop;
-  const output = rawMode ? rawOutput : readableOutput(rawOutput);
+  if (!rawMode && readableFrom !== rawOutput) { readableText = readableOutput(rawOutput); readableFrom = rawOutput; }
+  const output = rawMode ? rawOutput : readableText;
   $('empty-output').hidden = Boolean(output);
   const ended = Boolean(selected) && selectedStatus === 'exited';
   $('empty-output').querySelector('h2').textContent = ended ? 'Session ended' : selectedStatus === 'working' ? 'Working…' : selectedStatus === 'starting' ? 'Starting session…' : selected ? 'Ready when you are.' : 'No open sessions.';
@@ -1028,7 +1033,7 @@ async function forget() {
   selectedStatus = null; tabCount = 0;
   $('keys').hidden = true; $('keys-toggle').setAttribute('aria-expanded', 'false');
   clearAttachments();
-  rawOutput = ''; rawMode = false; displayedOutput = null;
+  rawOutput = ''; rawMode = false; displayedOutput = null; readableFrom = null; readableText = '';
   histories.clear(); pendingEarlier = null; earlierFlight = false; searchToken++;
   sessionTabs = []; $('sessions-dialog').close(); $('project-dialog').close(); closeFind();
   $('raw-toggle').setAttribute('aria-pressed', 'false'); $('raw-toggle').textContent = 'Show raw terminal';
