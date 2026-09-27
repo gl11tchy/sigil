@@ -257,7 +257,15 @@ struct OutputView: UIViewRepresentable {
                         for (range, lines) in changes { storage.replaceCharacters(in: range, with: lines) }
                     }
                     // TextKit can leave a line after the edit where it was; place them again.
-                    if let start = content.location(content.documentRange.location, offsetBy: top.range.lowerBound),
+                    // A top cut in an edit of its own, the last of two, moves every line
+                    // under it alike, and TextKit places those itself. Laying all of them
+                    // out again takes tens of milliseconds and can leave none on screen.
+                    var from = top.range.lowerBound
+                    if edits.count > 1 {
+                        let (cut, lead) = changes[changes.count - 1]
+                        from = edits[edits.count - 2].range.lowerBound + lead.length - cut.length
+                    }
+                    if let start = content.location(content.documentRange.location, offsetBy: from),
                         let rest = NSTextRange(location: start, end: content.documentRange.endLocation)
                     {
                         manager.invalidateLayout(for: rest)
