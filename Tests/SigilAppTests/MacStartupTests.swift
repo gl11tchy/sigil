@@ -278,7 +278,7 @@ struct MacStartupTests {
         #expect(appeared == 1)
     }
 
-    /// The window takes focus as a blocking launch's did: the sidebar search
+    /// The window takes focus as a blocking launch's did: the first key view
     /// when the window shows, then the restored tab's terminal once the
     /// window is key. That holds too when the app was hidden or the window
     /// minimized or ordered out while the launch waited. A test window need
@@ -286,14 +286,17 @@ struct MacStartupTests {
     /// notification AppKit posts.
     @Test(arguments: [false, true], [false, true])
     func theWindowFocusesAsABlockingLaunchDid(restoredTab: Bool, key: Bool) async throws {
+        // The sidebar search leads the key view loop unless keyboard
+        // navigation is on (as on the CI runners): then a control does.
+        let shown: KeyboardFocus = NSApplication.shared.isFullKeyboardAccessEnabled ? .elsewhere : .sidebar
         for away in WindowAway.allCases {
             let blocking = try await startupFocus(
                 waitsForShell: false, restoredTab: restoredTab, key: key, away: away)
             let waiting = try await startupFocus(
                 waitsForShell: true, restoredTab: restoredTab, key: key, away: away)
 
-            let settled: KeyboardFocus = restoredTab ? .sessionTerminal : .sidebar
-            #expect(blocking == (key ? [settled] : [.sidebar, settled]), "\(away)")
+            let settled: KeyboardFocus = restoredTab ? .sessionTerminal : shown
+            #expect(blocking == (key ? [settled] : [shown, settled]), "\(away)")
             #expect(waiting == blocking, "\(away)")
         }
     }
