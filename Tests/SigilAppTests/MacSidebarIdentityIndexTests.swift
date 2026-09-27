@@ -118,7 +118,8 @@ struct MacSidebarIdentityIndexTests {
 
         compared = 0
         let archived = ConversationIndex(pins, sessionID: \.sessionID, cwd: \.cwd)
-        #expect(sessions.filter { archived.contains(sessionID: $0.id, cwd: $0.cwd, samePath: samePath) }.count == pinCount)
+        #expect(
+            sessions.filter { archived.contains(sessionID: $0.id, cwd: $0.cwd, samePath: samePath) }.count == pinCount)
         #expect(compared == pinCount)
     }
 

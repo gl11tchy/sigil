@@ -110,13 +110,15 @@ struct MacSidebarRowOrderTests {
         // Next to a-one on disk: other suites move GROK_HOME while this one waits.
         let fresh = try session("a-one").directory.deletingLastPathComponent().appendingPathComponent("a-new")
         try FileManager.default.createDirectory(at: fresh, withIntermediateDirectories: true)
-        try JSONSerialization.data(withJSONObject: [
-            "info": ["id": "a-new", "cwd": alpha.path],
-            "session_summary": "Fresh",
-            "created_at": "2026-08-05T00:00:00Z",
-            "updated_at": "2026-08-05T00:00:00Z",
-            "num_chat_messages": 4,
-        ] as [String: Any]).write(to: fresh.appendingPathComponent("summary.json"))
+        try JSONSerialization.data(
+            withJSONObject: [
+                "info": ["id": "a-new", "cwd": alpha.path],
+                "session_summary": "Fresh",
+                "created_at": "2026-08-05T00:00:00Z",
+                "updated_at": "2026-08-05T00:00:00Z",
+                "num_chat_messages": 4,
+            ] as [String: Any]
+        ).write(to: fresh.appendingPathComponent("summary.json"))
         await fixture.store.reload()
         expectRebuilt("sessions")
 

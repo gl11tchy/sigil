@@ -15,7 +15,11 @@ struct MacSidebarSnapshotEquivalenceTests {
 
     @Test func indexedSnapshotMatchesTheScanOnRandomLists() async throws {
         // What the random lists covered, so a weak seed range cannot pass quietly.
-        var linkedRows = 0, sharedIDs = 0, pinnedRows = 0, archivedRows = 0, namedRows = 0
+        var linkedRows = 0
+        var sharedIDs = 0
+        var pinnedRows = 0
+        var archivedRows = 0
+        var namedRows = 0
         for seed in UInt64(1)...8 {
             var rng = SplitMix64(seed: seed)
             let fixture = try ModelFixture()
@@ -149,9 +153,11 @@ private func expectMatchesTheScan(
         rowIDs = (pinned + unpinned).map(model.sessionKey)
     case .archived:
         let listedDirectories = Set(unpinned.map(\.directory))
-        rowIDs = (pinned + (pinnedProjects + unpinnedProjects).flatMap {
-            SidebarOrganization.listedRows(in: $0, listed: listedDirectories)
-        }).map(model.sessionKey)
+        rowIDs =
+            (pinned
+            + (pinnedProjects + unpinnedProjects).flatMap {
+                SidebarOrganization.listedRows(in: $0, listed: listedDirectories)
+            }).map(model.sessionKey)
     }
 
     #expect(snapshot.listKind == kind, comment, sourceLocation: sourceLocation)
