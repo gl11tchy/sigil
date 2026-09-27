@@ -172,17 +172,18 @@ for (const api of [true, false]) {
         await expect(page.locator('#terminal')).toHaveText(dense);
         const nodesBefore = await page.evaluate(() => document.querySelectorAll('*').length);
         await openFind(page, 'a');
-        const total = count(dense, 'a').length;
+        const total = count(dense, 'a').length, matches = count(dense, 'a').map(match => [match.index, match.index + 1]);
         expect(total).toBe(31_200);
         await expect(page.locator('#find-count')).toHaveText(`1 of ${total}`);
         const state = await findState(page);
         expect(state.api).toBe(api);
         expect(state.text).toBe(dense);
-        // At most 500 matches in view are highlighted, never every match. In WebKit, text nodes of
-        // tens of thousands of characters made each highlighted range slow to paint.
-        expect(state.shown).toBeGreaterThan(0);
-        expect(state.shown).toBeLessThanOrEqual(500);
-        expect(state.shownVisible).toBeGreaterThan(0);
+        // Every match in view is highlighted, and at most 500 out of view, never every match. In
+        // WebKit, text nodes of tens of thousands of characters made each highlighted range slow to paint.
+        const inView = await coverage(page, matches);
+        expect(inView).toMatchObject({ shown: state.shown, missing: 0 });
+        expect(inView.visible).toBeGreaterThan(0);
+        expect(state.shown - inView.visible).toBeLessThanOrEqual(500);
         expect(state.longestText).toBeLessThanOrEqual(4096);
         if (api) {
           expect(state.elements).toBe(0);
@@ -200,8 +201,10 @@ for (const api of [true, false]) {
         const last = count(dense, 'a').at(-1).index;
         const wrapped = await findState(page);
         expect(wrapped.current).toEqual({ start: last, end: last + 1, text: 'a', visible: true });
-        expect(wrapped.shownVisible).toBeGreaterThan(0);
-        expect(wrapped.shown).toBeLessThanOrEqual(500);
+        const wrappedInView = await coverage(page, matches);
+        expect(wrappedInView).toMatchObject({ shown: wrapped.shown, missing: 0 });
+        expect(wrappedInView.visible).toBeGreaterThan(0);
+        expect(wrapped.shown - wrappedInView.visible).toBeLessThanOrEqual(500);
         expect(wrapped.longestText).toBeLessThanOrEqual(4096);
         await page.getByRole('button', { name: 'Next match' }).click();
         await expect(page.locator('#find-count')).toHaveText(`1 of ${total}`);
@@ -376,6 +379,40 @@ for (const api of [true, false]) {
             const state = await coverage(page, matches);
             return [state.visible > 0, state.missing, state.far];
           }).toEqual([true, 0, 0]);
+        }
+      } finally { mac.close(); }
+    });
+
+    test('Find highlights every match in view on dense output, readable and raw, narrow and wide', async ({ page, baseURL }) => {
+      // Up to 1,320 matches in view: more than the 500 out of view that are highlighted with them.
+      const matches = count(dense, 'a').map(match => [match.index, match.index + 1]);
+      const mac = await pair(page, baseURL, { terminal: () => dense });
+      const covered = async () => {
+        const state = await coverage(page, matches);
+        return { inView: state.visible > 0, missing: state.missing, far: state.far, outOfView: state.shown - state.visible };
+      };
+      try {
+        await expect(page.locator('#terminal')).toHaveText(dense);
+        await openFind(page, 'a');
+        await expect(page.locator('#find-count')).toHaveText(`1 of ${matches.length}`);
+        for (const raw of [false, true]) {
+          if (raw) await toggleRaw(page);
+          await expect(page.locator('#terminal')).toHaveAttribute('data-raw', String(raw));
+          for (const size of [{ width: 390, height: 844 }, { width: 1200, height: 844 }]) {
+            await page.setViewportSize(size);
+            await page.locator('#terminal').evaluate(el => { el.scrollTop = el.scrollHeight / 2; el.scrollLeft = 0; });
+            await frames(page);
+            // A font that loads late chooses the highlights again for the view as it is now.
+            await page.evaluate(() => document.fonts.dispatchEvent(new Event('loadingdone')));
+            await frames(page);
+            const fresh = await covered();
+            expect(fresh).toMatchObject({ inView: true, missing: 0, far: 0 });
+            expect(fresh.outOfView).toBeLessThanOrEqual(500);
+            // A fifth of a screen down, and across where a raw line is wider than the view.
+            await page.locator('#terminal').evaluate(el => { el.scrollTop += el.clientHeight / 5; el.scrollLeft += el.clientWidth / 5; });
+            await expect.poll(async () => { const { inView, missing, far } = await covered(); return { inView, missing, far }; })
+              .toEqual({ inView: true, missing: 0, far: 0 });
+          }
         }
       } finally { mac.close(); }
     });

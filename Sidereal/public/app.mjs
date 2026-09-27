@@ -543,10 +543,11 @@ if (findHighlight) {
 }
 // The output is painted as text nodes of at most findChunk characters: in WebKit, a range's
 // paint and box cost grow with its offset inside its text node. WebKit also repaints every
-// highlighted range for each line it paints, so at most findCap matches are highlighted.
+// highlighted range for each line it paints, so at most findCap matches out of view are highlighted.
 const findChunk = 4096, findCap = 500;
 // findPieces: the painted text nodes and their offsets in findText, which starts a chunk at each
-// of findStarts. findShown: the highlighted match indices, chosen at the scroll offsets findBand.
+// of findStarts. findShown: the highlighted match indices, chosen at the scroll offsets findBand[0]
+// and findBand[1]; they hold every match in view until a scroll of over findBand[2] screens.
 // Without the Highlight API, findMarks maps each shown index to its mark.
 let findText = null, findStarts = [], findPieces = [], findShown = null, findBand = null;
 let findMarks = new Map(), findMarked = -1, findFrame = 0;
@@ -657,16 +658,17 @@ function scrollToMatch(index) {
 function showMatchesSoon() {
   if (!findFrame) findFrame = globalThis.requestAnimationFrame?.(showVisibleMatches) ?? 0;
 }
-// Highlight the matches in view and a quarter screen around it, so a smaller scroll keeps them.
+// Highlight every match in view and those up to a quarter screen around it, so a smaller scroll
+// keeps them. Past findCap matches out of view, only the nearest are kept, for a shorter scroll.
 function showVisibleMatches() {
   findFrame = 0;
   const terminal = $('terminal'), height = terminal.clientHeight, width = terminal.clientWidth;
   if (!findMatches.length || !height) return;
   const scroll = [terminal.scrollTop, terminal.scrollLeft];
-  if (findShown && Math.abs(scroll[0] - findBand[0]) <= height / 4 && Math.abs(scroll[1] - findBand[1]) <= width / 4) return;
+  if (findShown && Math.abs(scroll[0] - findBand[0]) <= findBand[2] * height && Math.abs(scroll[1] - findBand[1]) <= findBand[2] * width) return;
   const frame = terminal.getBoundingClientRect();
-  const top = frame.top + terminal.clientTop - height / 4, bottom = top + 1.5 * height;
-  const left = frame.left + terminal.clientLeft - width / 4, right = left + 1.5 * width;
+  const top = frame.top + terminal.clientTop, bottom = top + height;
+  const left = frame.left + terminal.clientLeft, right = left + width;
   // Matches are in document order, so their boxes run top to bottom, and left to right on a line.
   const first = (low, high, test) => {
     while (low < high) {
@@ -675,30 +677,40 @@ function showVisibleMatches() {
     }
     return low;
   };
-  const from = first(0, findMatches.length, box => box.bottom >= top);
-  const to = first(from, findMatches.length, box => box.top > bottom);
   // Raw output does not wrap, so a line wider than the view also needs the columns in view.
   const wide = terminal.scrollWidth > width;
-  let shown = [];
-  for (let index = from; index < to;) {
-    let next = to;
-    if (wide) {
-      const end = findText.indexOf('\n', findMatches[index].start);
-      for (let low = index + 1; end >= 0 && low < next;) {
-        const middle = (low + next) >> 1;
-        if (findMatches[middle].start > end) next = middle; else low = middle + 1;
-      }
-      const low = first(index, next, box => box.right >= left);
-      for (let at = low, high = first(low, next, box => box.left > right); at < high; at++) shown.push(at);
-    } else for (let at = index; at < next; at++) shown.push(at);
-    index = next;
-  }
-  if (shown.length > findCap) {
-    // Keep the findCap matches nearest the middle of the view.
-    const middle = first(from, to, box => box.bottom >= frame.top + terminal.clientTop + height / 2);
-    const at = shown.findIndex(index => index >= middle);
-    const skip = Math.max(0, Math.min((at < 0 ? shown.length : at) - findCap / 2, shown.length - findCap));
-    shown = shown.slice(skip, skip + findCap);
+  // The matches that meet the view grown by `margin` screens on each side.
+  const near = margin => {
+    const shown = [], y = margin * height, x = margin * width;
+    const from = first(0, findMatches.length, box => box.bottom > top - y);
+    const to = first(from, findMatches.length, box => box.top >= bottom + y);
+    for (let index = from; index < to;) {
+      let next = to;
+      if (wide) {
+        const end = findText.indexOf('\n', findMatches[index].start);
+        for (let low = index + 1; end >= 0 && low < next;) {
+          const middle = (low + next) >> 1;
+          if (findMatches[middle].start > end) next = middle; else low = middle + 1;
+        }
+        const low = first(index, next, box => box.right > left - x);
+        for (let at = low, high = first(low, next, box => box.left >= right + x); at < high; at++) shown.push(at);
+      } else for (let at = index; at < next; at++) shown.push(at);
+      index = next;
+    }
+    return shown;
+  };
+  const view = near(0);
+  let shown = near(1 / 4), margin = 1 / 4;
+  if (shown.length - view.length > findCap) {
+    // Keep the findCap matches out of view nearest to it, in screens on either axis. A scroll
+    // shorter than the nearest one left out still has every match in view highlighted.
+    const inView = new Set(view), distance = index => {
+      const box = findRange(index).getBoundingClientRect();
+      return Math.max((top - box.bottom) / height, (box.top - bottom) / height, (left - box.right) / width, (box.left - right) / width);
+    };
+    const out = shown.filter(index => !inView.has(index)).map(index => [distance(index), index]).sort((a, b) => a[0] - b[0]);
+    margin = out[findCap][0];
+    shown = view.concat(out.slice(0, findCap).map(([, index]) => index)).sort((a, b) => a - b);
   }
   if (findHighlight) {
     findHighlight.match.clear();
@@ -710,7 +722,7 @@ function showVisibleMatches() {
     paintText(findText, shown);
     findMarked = findIndex;
   }
-  findShown = shown; findBand = scroll;
+  findShown = shown; findBand = [...scroll, margin];
 }
 // A new width or font wraps the text again under the same scroll offset.
 function refindVisible() {
