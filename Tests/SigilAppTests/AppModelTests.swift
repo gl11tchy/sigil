@@ -4523,7 +4523,8 @@ final class ModelFixture {
                     defaults: defaults,
                     notesStore: ConversationNotesStore(root: notesRoot)
                 ),
-                pairingStore: InMemoryRemotePairingStore()
+                pairingStore: InMemoryRemotePairingStore(),
+                providerInstallations: fixtureProviderInstallations(executable)
             )
         }
         if let canonicalPath {
@@ -4537,7 +4538,8 @@ final class ModelFixture {
                     defaults: defaults,
                     notesStore: ConversationNotesStore(root: notesRoot)
                 ),
-                pairingStore: InMemoryRemotePairingStore()
+                pairingStore: InMemoryRemotePairingStore(),
+                providerInstallations: fixtureProviderInstallations(executable)
             )
         }
         return AppModel(
@@ -4549,7 +4551,8 @@ final class ModelFixture {
                 defaults: defaults,
                 notesStore: ConversationNotesStore(root: notesRoot)
             ),
-            pairingStore: InMemoryRemotePairingStore()
+            pairingStore: InMemoryRemotePairingStore(),
+            providerInstallations: fixtureProviderInstallations(executable)
         )
     }
 

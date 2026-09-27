@@ -185,6 +185,8 @@ enum RemoteCommands {
             }
             let remembered = model.settings.defaultDirectory
             let focused = model.settings.focusedProjectPath
+            // A provider refresh may have started while the worktree was created.
+            if let problem = startProblem(provider, model: model) { return failure(request, problem) }
             guard model.newTab(in: start, model: chosenModel, effort: chosenEffort, provider: provider) != nil
             else { return failure(request, "Could not start a session. Check Sigil on your Mac.") }
             if !named.isEmpty {
@@ -277,8 +279,7 @@ enum RemoteCommands {
             }
             guard AppModel.isUsableDirectory(tab.workingDirectory)
             else { return failure(request, "Restore the folder on your Mac, then try again.") }
-            guard tab.spec.provider != .grokBuild || model.settings.executableExists
-            else { return failure(request, "Restore the Grok CLI on your Mac, then try again.") }
+            if let problem = startProblem(tab.spec.provider, model: model) { return failure(request, problem) }
             model.restartTab(id: tab.id)
             guard index < model.tabs.count, model.tabs[index].id != tab.id else {
                 return failure(request, "Could not restart this session. Check Sigil on your Mac.")
@@ -443,10 +444,7 @@ enum RemoteCommands {
     /// Why `provider` cannot start now. Checked here because AppModel reports
     /// these with a modal alert, which would block this loop.
     static func startProblem(_ provider: CLIProvider, model: AppModel) -> String? {
-        if let problem = model.providerInstallations[provider]?.problem { return problem }
-        if provider == .grokBuild, !model.settings.executableExists {
-            return "Restore the Grok CLI on your Mac, then try again."
-        }
+        if let problem = model.providerLaunchProblem(provider) { return problem }
         if !model.hasSignIn(provider) {
             return "Set up \(provider.name) sign-in in Sigil on your Mac, then try again."
         }

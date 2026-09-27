@@ -109,8 +109,14 @@ struct NewSessionSheet: View {
             }
             .padding(.bottom, 16)
 
-            providerRow
-                .padding(.bottom, 16)
+            VStack(alignment: .leading, spacing: 4) {
+                providerRow
+                if let problem = model.providerLaunchProblem(provider) {
+                    Text(problem).ui(12).foregroundStyle(palette.ink2)
+                        .accessibilityIdentifier("new-session-provider-problem")
+                }
+            }
+            .padding(.bottom, 16)
 
             VStack(spacing: 0) {
                 folderRow
@@ -198,7 +204,7 @@ struct NewSessionSheet: View {
                 Button("Start") { start(provider) }
                     .buttonStyle(.primary)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(!canStart)
+                    .disabled(!canStart || model.providerLaunchProblem(provider) != nil)
             }
             .padding(.top, 20)
         }
@@ -325,7 +331,7 @@ struct NewSessionSheet: View {
     }
 
     private func start(_ provider: CLIProvider) {
-        guard canStart, model.canSignIn(provider) else { return }
+        guard canStart, model.providerLaunchProblem(provider) == nil, model.canSignIn(provider) else { return }
         let launch = menu(for: provider)?.launch(choice(for: provider)) ?? (model: "", effort: "", fastMode: false)
         let project = directory
         let useWorktree = startsInWorktree && isRepository

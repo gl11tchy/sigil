@@ -121,7 +121,8 @@ private final class ContinuityFixture {
     func makeModel() -> AppModel {
         AppModel(
             settings: settings, store: store, presentError: { _ in }, panel: RightPanel(defaults: defaults),
-            pairingStore: InMemoryRemotePairingStore())
+            pairingStore: InMemoryRemotePairingStore(),
+            providerInstallations: fixtureProviderInstallations(root.appendingPathComponent("zsh")))
     }
 
     func cleanup() {

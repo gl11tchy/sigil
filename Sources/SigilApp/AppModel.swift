@@ -107,6 +107,9 @@ final class AppModel {
     /// count when this copy first read them. See `awaitsScan`.
     @ObservationIgnored private var sharedArrivals: [String: Int] = [:]
     private(set) var providerInstallations: [CLIProvider: ProviderInstallation] = [:]
+    private(set) var checkingProviders: Set<CLIProvider> = []
+    typealias ProviderProbe = @Sendable (CLIProvider, URL?) async -> ProviderInstallation
+    @ObservationIgnored private let providerProbe: ProviderProbe
     @ObservationIgnored private var providerCheckGeneration = UUID()
 
     init(
@@ -126,11 +129,20 @@ final class AppModel {
         canonicalPath: (@Sendable (String) -> String)? = nil,
         panel: RightPanel? = nil,
         pairingStore: (any RemotePairingStore)? = nil,
-        kimiKeyStore: (any KimiKeyStore)? = nil
+        kimiKeyStore: (any KimiKeyStore)? = nil,
+        providerInstallations: [CLIProvider: ProviderInstallation] = [:],
+        providerProbe: ProviderProbe? = nil
     ) {
         self.settings = settings
         self.store = store
         self.panel = panel ?? RightPanel()
+        self.providerInstallations = providerInstallations
+        self.providerProbe =
+            providerProbe ?? { provider, executable in
+                await Task.detached(priority: .utility) {
+                    ProviderInstallation.detect(provider: provider, configuredExecutable: executable)
+                }.value
+            }
         if let pairingStore {
             self.remoteControl = RemoteControl(store: pairingStore)
         } else if Self.isRunningAutomatedTests {
@@ -1697,14 +1709,17 @@ final class AppModel {
         let generation = UUID()
         providerCheckGeneration = generation
         let executable = settings.executableURL
+        let probe = providerProbe
+        // A prior result does not authorize launches while its replacement is pending.
+        checkingProviders = Set(CLIProvider.allCases)
+        providerInstallations.removeAll()
+        defer {
+            if providerCheckGeneration == generation { checkingProviders.removeAll() }
+        }
         let found = await withTaskGroup(of: (CLIProvider, ProviderInstallation).self) { group in
             for provider in CLIProvider.allCases {
                 group.addTask {
-                    let result = await Task.detached(priority: .utility) {
-                        ProviderInstallation.detect(
-                            provider: provider,
-                            configuredExecutable: provider == .grokBuild ? executable : nil)
-                    }.value
+                    let result = await probe(provider, provider == .grokBuild ? executable : nil)
                     return (provider, result)
                 }
             }
@@ -1713,8 +1728,32 @@ final class AppModel {
             return result
         }
         guard providerCheckGeneration == generation, !Task.isCancelled else { return }
+        // Publish together: restoration must keep saved order, not probe completion
+        // order, including when a history scan finishes while checks are in flight.
         providerInstallations = found
+        checkingProviders.removeAll()
         if !deferredOpenTabs.isEmpty { restoreOpenTabs() }
+    }
+
+    /// Shared by desktop, phone, and restoration. An absent result is unknown,
+    /// never permission to launch. Existing open tabs remain usable during checks.
+    func providerLaunchProblem(_ provider: CLIProvider) -> String? {
+        if provider == .grokBuild, !settings.executableExists {
+            return "Restore the Grok CLI on your Mac, then try again."
+        }
+        guard !checkingProviders.contains(provider), let installation = providerInstallations[provider] else {
+            return "Checking \(provider.name)… Try again shortly."
+        }
+        guard installation.isAvailable else {
+            return installation.problem ?? "\(provider.name) is unavailable."
+        }
+        return nil
+    }
+
+    private func canLaunchProvider(_ provider: CLIProvider) -> Bool {
+        guard let problem = providerLaunchProblem(provider) else { return true }
+        showError(title: "\(provider.name) is unavailable", message: problem)
+        return false
     }
 
     /// ⇧⌘N: choose the folder first, then open the new-session sheet on it.
@@ -1728,14 +1767,7 @@ final class AppModel {
         in directory: URL, model: String? = nil, effort: String? = nil, fastMode: Bool = false,
         provider: CLIProvider = .grokBuild
     ) -> TerminalTab? {
-        if let problem = providerInstallations[provider]?.problem {
-            showError(title: "\(provider.name) is unavailable", message: problem)
-            return nil
-        }
-        guard provider != .grokBuild || settings.executableExists else {
-            showError(title: "Grok CLI is unavailable", message: "Choose it in Settings, then try again.")
-            return nil
-        }
+        guard canLaunchProvider(provider) else { return nil }
         guard Self.isUsableDirectory(directory) else {
             showError(title: "Folder is unavailable", message: "Choose another folder.")
             return nil
@@ -1768,14 +1800,7 @@ final class AppModel {
             select(existing.id)
             return
         }
-        if let problem = providerInstallations[session.provider]?.problem {
-            showError(title: "\(session.provider.name) is unavailable", message: problem)
-            return
-        }
-        guard session.provider != .grokBuild || settings.executableExists else {
-            showError(title: "Grok CLI is unavailable", message: "Choose it in Settings, then try again.")
-            return
-        }
+        guard canLaunchProvider(session.provider) else { return }
         let workingDirectory = URL(fileURLWithPath: session.cwd)
         guard Self.isUsableDirectory(workingDirectory) else {
             showError(
@@ -1841,10 +1866,7 @@ final class AppModel {
                 message: "This tab's Codex session ID is not known. Find the conversation in the sidebar.")
             return
         }
-        guard old.spec.provider != .grokBuild || settings.executableExists else {
-            showError(title: "Grok CLI is unavailable", message: "Choose it in Settings, then try again.")
-            return
-        }
+        guard canLaunchProvider(old.spec.provider) else { return }
         // `.new` tabs already have a UUID the CLI wrote a session directory for.
         guard old.spec.provider != .grokBuild || old.sessionID != nil else { return }
         guard Self.isUsableDirectory(old.workingDirectory) else {
@@ -2847,6 +2869,13 @@ final class AppModel {
                 deferredLegacySelectedSessionID = snapshot.selectedSessionID
             }
         }
+        // Native paths come from the initial history scan. Starting Grok first
+        // would reorder a mixed saved snapshot before those paths can be known.
+        // A completed (even failed) scan lets genuinely missing entries defer
+        // individually without holding back the available conversations.
+        if store.appliedScanSequence == 0, deferredOpenTabs.contains(where: { $0.provider != .grokBuild }) {
+            return
+        }
         let candidates = deferredOpenTabs
         let previousSelection = selectedTabID
         let hadSavedSelection = deferredSelectedEntry != nil || deferredLegacySelectedSessionID != nil
@@ -2871,8 +2900,7 @@ final class AppModel {
             let workingDirectory = URL(fileURLWithPath: entry.cwd)
             let historyExists = directory.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
             guard historyExists, Self.isUsableDirectory(workingDirectory),
-                providerInstallations[entry.provider]?.problem == nil,
-                entry.provider != .grokBuild || settings.executableExists
+                providerLaunchProblem(entry.provider) == nil
             else {
                 deferredOpenTabs.append(entry)
                 continue

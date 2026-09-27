@@ -31,7 +31,8 @@ struct RemoteCommandsTests {
         let settings = AppSettings(defaults: defaults)
         settings.executablePath = executable.path
         settings.defaultDirectory = root.path
-        let model = AppModel(settings: settings, presentError: { _ in })
+        let model = AppModel(
+            settings: settings, presentError: { _ in }, providerInstallations: fixtureProviderInstallations(executable))
         defer { model.closeAllTabsAndWait() }
         let tab = try #require(model.newTab(in: root))
         for _ in 0..<100 {
@@ -107,7 +108,8 @@ struct RemoteCommandsTests {
         let settings = AppSettings(defaults: defaults)
         settings.executablePath = executable.path
         settings.defaultDirectory = root.path
-        let model = AppModel(settings: settings, presentError: { _ in })
+        let model = AppModel(
+            settings: settings, presentError: { _ in }, providerInstallations: fixtureProviderInstallations(executable))
         defer { model.closeAllTabsAndWait() }
         let tab = try #require(model.newTab(in: link))
         tab.terminateAndWait()
@@ -140,7 +142,8 @@ struct RemoteCommandsTests {
         let settings = AppSettings(defaults: defaults)
         settings.executablePath = executable.path
         settings.defaultDirectory = root.path
-        let model = AppModel(settings: settings, presentError: { _ in })
+        let model = AppModel(
+            settings: settings, presentError: { _ in }, providerInstallations: fixtureProviderInstallations(executable))
         defer { model.closeAllTabsAndWait() }
         let tab = try #require(model.newTab(in: root))
         for _ in 0..<100 {
@@ -692,7 +695,7 @@ final class PhoneCommandFixture {
         self.alerts = alerts
         model = AppModel(
             settings: settings, store: store, presentError: { _ in alerts.count += 1 },
-            pairingStore: InMemoryRemotePairingStore())
+            pairingStore: InMemoryRemotePairingStore(), providerInstallations: fixtureProviderInstallations(executable))
     }
 
     func cleanup() {

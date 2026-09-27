@@ -314,5 +314,5 @@ upgrade error rather than dispatching commands. Terminal menu text is unverified
 with full available operation context and literal choices, not a verified approval.
 See [the protocol and trust boundary](docs/remote-control.md).
 
-See the [unreleased changes](docs/release-notes-2026-09-27.md) and
+See the [release notes](docs/release-notes-2026-09-27.md) and
 [local verification evidence](docs/qa/product-hardening/README.md).

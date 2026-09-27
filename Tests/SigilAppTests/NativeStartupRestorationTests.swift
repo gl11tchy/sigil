@@ -48,7 +48,7 @@ struct NativeStartupRestorationTests {
             tabs: [entry], selectedSessionID: entry.sessionID, selectedCWD: root.path, selectedProvider: provider)
         let model = AppModel(
             settings: settings, store: store, presentError: { _ in }, panel: RightPanel(defaults: defaults),
-            pairingStore: InMemoryRemotePairingStore())
+            pairingStore: InMemoryRemotePairingStore(), providerInstallations: fixtureProviderInstallations(shell))
         defer { model.closeAllTabsAndWait() }
         #expect(store.sessions.isEmpty)
         await model.onAppear()

@@ -21,6 +21,8 @@ Release status and exact artifact receipts are recorded in
   delayed replies, reconnects and restarts outside the visible tab-list limit.
 - A restored terminal receives its pending keyboard focus when it joins an already
   active window. Late view attachment no longer loses that startup request.
+- Sessions start only after their CLI check passes. Startup checks and history
+  loading preserve saved tab order. Failed checks leave existing work running.
 - CI now requires the actual iPhone app and notification/Live Activity extensions,
   plus app-hosted simulator tests through the real relay.
 

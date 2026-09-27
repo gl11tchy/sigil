@@ -14,8 +14,8 @@ Work began at `be132383565d9d4cb4e253ae3f7f1b7183207c8f`. The branch
 asynchronous startup, native output/Find and screen-cache improvements were
 preserved, not replaced. The existing native TextKit harness still runs alongside
 the new shipping-app XCTest gate.
-The product implementation revision is `6bacc71ea0f6f5ec70caeb333e54fc92377811b8`.
-Follow-up CI/cache and documentation changes do not alter that application source.
+Revision `6bacc71ea0f6f5ec70caeb333e54fc92377811b8` repaired startup focus.
+The release follow-up also closes the unprobed-provider launch race described below.
 The native app source is unchanged from `98c1b52`. The Mac/web gate was repeated
 for the watcher and startup-focus repairs; the full native gate also passed again on unchanged native code.
 
@@ -53,7 +53,7 @@ The Mac/web gate and native gate are separate; neither substitutes for the other
 
 | Command | Verified result |
 |---|---|
-| `Scripts/verify.sh` | Passed: 893 Swift Testing cases, 37 XCTest cases, 161 Sidereal Node tests, 18 Site tests, 114 Chromium/WebKit cases; audits, shell/format checks, debug bundle/signature and isolated smoke passed |
+| `Scripts/verify.sh` | Passed: 903 Swift Testing cases, 37 XCTest cases, 161 Sidereal Node tests, 18 Site tests, 114 Chromium/WebKit cases; audits, shell/format checks, debug bundle/signature and isolated smoke passed |
 | `iOS/scripts/ci.sh` | Passed: 85 shared/real-relay cases, 18 app-hosted simulator cases, 7 native TextKit cases, no skips |
 | `Scripts/verify-provider-contracts.sh` | Installed version/help/resume contracts passed; no model calls |
 | `xcrun --sdk macosx metal --version` | Metal compiler available |
@@ -79,6 +79,7 @@ test also checks the unverified Terminal controls label and absence of invented 
 | Approval context and lifetime | `RemotePromptTests`, `RemoteInteractionTests`, `RemoteSessionOpsTests`: changed commands, changes past old display bounds, repeated/replaced prompts, duplicate/wrong-session answers, partial/wrapped menus and literal PTY bytes |
 | No false completion | `TerminalTabTests`, `ProviderLifecycleJournalTests`: silence/title never complete; matched native turn events, duplicates, delayed writes, missing files, replaced/truncated/same-inode rewritten files, crashes and real subprocess journal writes |
 | Native continuity | `NativeSessionScannerTests`, `ProviderContinuityIntegrationTests`, `NativeStartupRestorationTests`, `NativeHistoryVisibilityTests`: separate native identities, missing projects, deferred restore, unknown formats, mixed metadata, image-only history and no replacement session |
+| Provider readiness | `ProviderLaunchAvailabilityTests`: unknown/checking launch rejection, no-modal remote failures, restart without stopping existing work, stale/cancelled probes, mixed-provider saved order across probe and history completion |
 | Notes and capabilities | `ConversationNotesStoreTests`, `ProviderAdapterTests`, `ProviderBoundaryTests`: provider isolation, traversal rejection, supported controls only and unchanged Grok paths |
 | Remote freshness and routing | `RemoteRelayTests`, `RemoteStreamOrderingTests`, browser/native tests: client nonce, replayed hello/replies/events, re-watch ordering, revocation during notification registration and no stale socket work |
 | Upload and lost-response safety | `RemoteUploadTests`, web tests and native flow tests: connection/tab-bound transfers, orphan/duplicate tails, bounded online queues, no blind retry, same-socket epoch changes and ambiguous timeouts |
@@ -113,6 +114,15 @@ failed before repair. Attachment now retries only pending focus for the selected
 tab, retaining existing key-window, Find, sheet and selection guards. The original
 startup focus matrix is unchanged. All 29 focused cases and independent review
 passed, followed by both full local gates.
+Automated review of `695048a` found that an absent installation result allowed
+launches before startup probes finished. Desktop, phone, history reopening and
+restart now share a fail-closed readiness check. Held-probe regressions failed
+before repair. Independent review also reproduced two saved-order races: reversed
+provider completion and probes finishing before native history. Probe results now
+publish together, and mixed-provider restoration waits for the initial history
+scan. Missing histories remain saved without blocking available conversations
+after that scan. Existing running work is not stopped by a failed readiness check.
+The 241-case focused run and both full local gates passed after these repairs.
 Documentation was checked
 against the implemented capability limits. No reported code finding remains open.
 
@@ -187,6 +197,10 @@ streaming workloads remain unmeasured.
   [Run 36332912140](https://github.com/gl11tchy-team/sigil/actions/runs/36332912140)
   then caught the startup focus race described above before reaching native
   preflight. That failure was repaired, not attributed to Xcode or skipped.
+  [Run 36343235244](https://github.com/gl11tchy-team/sigil/actions/runs/36343235244)
+  passed both full gates on Xcode 26.5 at `695048a`, including the native result
+  artifact. The subsequent provider-readiness repair requires its own final-head
+  CI and review receipt in the PR record.
 - **Provider limits:** all parsed approvals remain unverified terminal controls.
   Claude has no integrated final-completion observer. A new Codex tab cannot
   acquire a native ID by guesswork; open its discovered history to resume it.
@@ -200,6 +214,7 @@ streaming workloads remain unmeasured.
   The separately authorized release must record its actual artifacts and activation.
   Mac and phone clients must be released together for the nonce requirement.
 
-Local raw gate logs are in `/tmp/sigil-hardening-evidence/`; native result bundles
+Local raw gate logs are in `/tmp/sigil-hardening-evidence/` and
+`/tmp/sigil-release-evidence/`; native result bundles
 are under `.build/native-verification/`. These transient artifacts are not committed.
 Committed fixtures, commands and screenshots make the checks reproducible.

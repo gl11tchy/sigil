@@ -312,7 +312,8 @@ private struct ProviderFixture {
             settings: settings, store: SessionStore(root: root.appendingPathComponent("sessions")),
             presentError: { errors.titles.append($0.localizedDescription) },
             panel: RightPanel(defaults: defaults),
-            pairingStore: InMemoryRemotePairingStore(), kimiKeyStore: InMemoryKimiKeyStore())
+            pairingStore: InMemoryRemotePairingStore(), kimiKeyStore: InMemoryKimiKeyStore(),
+            providerInstallations: fixtureProviderInstallations(shell))
         oldShell = ProcessInfo.processInfo.environment["SHELL"]
         setenv("SHELL", shell.path, 1)
     }
