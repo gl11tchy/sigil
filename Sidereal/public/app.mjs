@@ -297,16 +297,18 @@ function render(state) {
       attachmentDrafts.delete(id);
     }
   }
-  const tabs = state.tabs.map(tab => {
-    const option = document.createElement('option');
-    option.value = tab.id;
-    const suffix = tab.status === 'exited' ? ' · Ended' : '';
-    option.textContent = tab.title + suffix;
-    return option;
-  });
-  if (!tabs.length) { const empty = document.createElement('option'); empty.value = ''; empty.textContent = 'No open sessions'; tabs.push(empty); }
   const signature = JSON.stringify(state.tabs);
-  if (signature !== tabsSignature) { $('tabs').replaceChildren(...tabs); tabsSignature = signature; }
+  if (signature !== tabsSignature) {
+    const tabs = state.tabs.map(tab => {
+      const option = document.createElement('option');
+      option.value = tab.id;
+      const suffix = tab.status === 'exited' ? ' · Ended' : '';
+      option.textContent = tab.title + suffix;
+      return option;
+    });
+    if (!tabs.length) { const empty = document.createElement('option'); empty.value = ''; empty.textContent = 'No open sessions'; tabs.push(empty); }
+    $('tabs').replaceChildren(...tabs); tabsSignature = signature;
+  }
   $('tabs').value = selected || '';
   $('welcome').hidden = true;
   $('controls').hidden = false;
@@ -319,11 +321,14 @@ function render(state) {
   if (changedSession) { resizeMessage(); renderAttachments(); }
   updateControls();
 }
+// Polls usually return the same text; format it again only when it changes.
+let readableFrom = null, readableText = '';
 function renderOutput(changedSession = false, prepended = false) {
   const terminal = $('terminal');
   const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
   const fromEnd = terminal.scrollHeight - terminal.scrollTop;
-  const output = rawMode ? rawOutput : readableOutput(rawOutput);
+  if (!rawMode && readableFrom !== rawOutput) { readableText = readableOutput(rawOutput); readableFrom = rawOutput; }
+  const output = rawMode ? rawOutput : readableText;
   $('empty-output').hidden = Boolean(output);
   const ended = Boolean(selected) && selectedStatus === 'exited';
   $('empty-output').querySelector('h2').textContent = ended ? 'Session ended' : selectedStatus === 'working' ? 'Working…' : selectedStatus === 'starting' ? 'Starting session…' : selected ? 'Ready when you are.' : 'No open sessions.';
@@ -388,11 +393,11 @@ function searchSaved() {
   renderSessionList();
   const query = $('session-search').value.trim();
   const token = ++searchToken;
-  if (!query || !$('sessions-dialog').open) { renderSaved([]); return; }
+  if (!query || !$('sessions-dialog').open) { dropWaitingSearch(); renderSaved([]); return; }
   renderSaved([], { pending: true });
   // The Mac reads 200 characters, and text over 8 KB drops the connection.
   request('chats', utf8Limited(takeGraphemes(query, 200), 8192)).then(reply => {
-    if (token !== searchToken || $('session-search').value.trim() !== query) return;
+    if (reply.stale || token !== searchToken || $('session-search').value.trim() !== query) return;
     renderSaved(reply.chats, { truncated: reply.chatsTruncated === true });
   }).catch(error => { if (token === searchToken) showError(error.message); });
 }
@@ -580,7 +585,7 @@ $('sessions-toggle').onclick = () => {
   if (hasFinePointer()) $('session-search').focus();
 };
 $('sessions-close').onclick = () => $('sessions-dialog').close();
-$('sessions-dialog').addEventListener('close', () => { if (!$('sessions-toggle').hidden) $('sessions-toggle').focus(); });
+$('sessions-dialog').addEventListener('close', () => { dropWaitingSearch(); if (!$('sessions-toggle').hidden) $('sessions-toggle').focus(); });
 $('session-search').oninput = searchSaved;
 $('find-toggle').onclick = () => {
   $('find-bar').hidden = false; $('find-toggle').setAttribute('aria-expanded', 'true');
@@ -601,7 +606,29 @@ $('copy-output').onclick = async () => {
 };
 $('connection').addEventListener('toggle', () => { if ($('connection').open) $('copy-output').textContent = 'Copy output'; });
 
-async function request(action, text, tabID = selected, pairing = false, extra = {}) {
+// The saved search that has not been sent yet.
+let waitingSearch = null;
+// A cleared box or a closed sheet ends the query; skip it at its turn.
+function dropWaitingSearch() { if (waitingSearch) waitingSearch.stale = true; waitingSearch = null; }
+function request(action, text, tabID = selected, pairing = false, extra = {}) {
+  if (action !== 'chats') return enqueue(() => transmit(action, text, tabID, pairing, extra));
+  // Typing can outrun the Mac. Last in line, the waiting search takes the newest query;
+  // behind a later command it is skipped at its turn. Its callers see a stale token.
+  const waiting = waitingSearch;
+  if (waiting?.tail === outgoing && waiting.generation === generation && waiting.epoch === commandEpoch) {
+    Object.assign(waiting, { text, tabID });
+    return waiting.reply;
+  }
+  if (waiting) waiting.stale = true;
+  const search = waitingSearch = { text, tabID, generation, epoch: commandEpoch };
+  search.reply = enqueue(async () => {
+    if (waitingSearch === search) waitingSearch = null;
+    return search.stale ? { stale: true } : transmit(action, search.text, search.tabID, pairing, extra);
+  });
+  search.tail = outgoing;
+  return search.reply;
+}
+async function enqueue(send) {
   const current = generation;
   const epoch = commandEpoch;
   const previous = outgoing;
@@ -612,7 +639,7 @@ async function request(action, text, tabID = selected, pairing = false, extra = 
     if (current !== generation || epoch !== commandEpoch) {
       throw new Error("Connection changed. Check the terminal before sending again.");
     }
-    return await transmit(action, text, tabID, pairing, extra);
+    return await send();
   } finally { release(); }
 }
 async function transmit(action, text, tabID, pairing, extra = {}) {
@@ -1008,7 +1035,7 @@ async function forget() {
   selectedStatus = null; tabCount = 0;
   $('keys').hidden = true; $('keys-toggle').setAttribute('aria-expanded', 'false');
   clearAttachments();
-  rawOutput = ''; rawMode = false; displayedOutput = null;
+  rawOutput = ''; rawMode = false; displayedOutput = null; readableFrom = null; readableText = '';
   histories.clear(); pendingEarlier = null; earlierFlight = false; searchToken++;
   sessionTabs = []; $('sessions-dialog').close(); $('project-dialog').close(); closeFind();
   $('raw-toggle').setAttribute('aria-pressed', 'false'); $('raw-toggle').textContent = 'Show raw terminal';
