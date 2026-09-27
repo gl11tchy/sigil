@@ -9,6 +9,7 @@ enum ScreenCacheTests {
         ("cache: the newest snapshot wins", newestSnapshotWins),
         ("cache: forgetting a Mac drops its waiting save", forgettingDropsAWaitingSave),
         ("cache: each Mac keeps its own file", eachMacKeepsItsOwnFile),
+        ("cache: a Mac's ground is there at once and goes with its cache", groundIsThereAtOnce),
         ("cache: a corrupt or truncated file is ignored", corruptOrTruncatedFileIsIgnored),
         ("cache: restore lands only while current", restoreLandsOnlyWhileCurrent),
         ("cache: only the newest restore of the Mac on screen is current", onlyTheNewestRestoreIsCurrent),
@@ -56,13 +57,13 @@ enum ScreenCacheTests {
             deviceKey: RemoteCrypto.randomKey(), ticket: nil)
     }
 
-    private static func snapshot(_ label: String, rows: Int = 40) -> CachedScreen {
+    private static func snapshot(_ label: String, rows: Int = 40, ground: String? = nil) -> CachedScreen {
         var model = ScreenModel()
         model.apply(
             RemoteScreen(
                 tab: "t1", gen: 1, alt: nil, first: 0, end: rows,
                 rows: (0..<rows).map { RemoteScreenRow(i: $0, t: "\(label) row \($0)", w: nil, s: nil) },
-                palette: nil, fg: nil, bg: nil))
+                palette: nil, fg: nil, bg: ground))
         return CachedScreen(
             tabs: [RemoteTab(id: "t1", title: label, status: .idle)], selectedTabID: "t1", mac: label,
             screens: ["t1": model], savedAt: Date(timeIntervalSince1970: 1_000))
@@ -160,6 +161,43 @@ enum ScreenCacheTests {
         let kept = await load(writer, laptop)
         try Expect.equal(forgotten, nil, "the forgotten Mac has no cache")
         try Expect.equal(kept, snapshot("laptop"), "the other Mac keeps its cache")
+    }
+
+    /// Launch colours its wait from this before the file is read, so it must not wait on the queue.
+    static func groundIsThereAtOnce() async throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sigil-cache-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let suite = folder.lastPathComponent
+        let grounds = try Expect.notNil(UserDefaults(suiteName: suite), "a throwaway defaults suite")
+        defer {
+            try? FileManager.default.removeItem(at: folder)
+            grounds.removePersistentDomain(forName: suite)
+        }
+        let writer = ScreenCacheWriter(directory: { folder }, grounds: grounds)
+        let studio = mac()
+        let laptop = mac()
+        try Expect.equal(writer.ground(for: studio), "", "no ground before a save")
+
+        let gate = Gate(on: writer.queue)
+        gate.waitUntilHeld()
+        writer.save(snapshot("studio", ground: "1E1E1E"), for: studio)
+        writer.save(snapshot("laptop", ground: "FAFAFA"), for: laptop)
+        try Expect.equal(writer.ground(for: studio), "1E1E1E", "the ground is there while the write waits")
+        try Expect.equal(writer.ground(for: laptop), "FAFAFA", "each Mac keeps its own ground")
+        try Expect.true(
+            !grounds.dictionaryRepresentation().keys.contains { $0.contains(studio.deviceKey) },
+            "the key never carries the device key")
+
+        writer.save(snapshot("studio"), for: studio)
+        try Expect.equal(writer.ground(for: studio), "", "a screen with no ground leaves none")
+        writer.save(snapshot("studio", ground: "1E1E1E"), for: studio)
+        writer.delete(for: studio)
+        try Expect.equal(writer.ground(for: studio), "", "forgetting the Mac drops its ground")
+        try Expect.equal(writer.ground(for: laptop), "FAFAFA", "the other Mac keeps its ground")
+        gate.release()
+        let forgotten = await load(writer, studio)
+        try Expect.equal(forgotten, nil, "and its cache")
     }
 
     static func corruptOrTruncatedFileIsIgnored() async throws {

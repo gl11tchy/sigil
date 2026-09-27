@@ -54,7 +54,8 @@ final class RemoteStore {
     private(set) var themeForeground = ""
     private(set) var themeBackground = ""
     /// The last theme background this Mac sent, for light or dark. It outlives a tab
-    /// with no screen yet, so the look does not flip; empty until the first one.
+    /// with no screen yet, so the look does not flip. A restore starts from the one
+    /// last saved for the Mac; empty until there is one.
     private(set) var appearanceGround = ""
 
     let isDemo: Bool
@@ -804,6 +805,9 @@ final class RemoteStore {
     /// replaced it. At launch, with a cache on disk, the screen waits for it rather
     /// than showing an empty Mac, but never longer than `RestoreGate.patience`.
     private func restoreCache(for credential: PairingCredential, awaitCache: Bool) {
+        // Light or dark from the first frame, as the cached screen will be, so the wait's cover matches it.
+        let ground = ScreenCache.ground(for: credential)
+        if !ground.isEmpty { appearanceGround = ground }
         let ticket = restoreGate.begin(
             macID: credential.id, awaited: awaitCache && ScreenCache.hasCache(for: credential))
         if awaitingCache {

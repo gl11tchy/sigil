@@ -41,6 +41,11 @@ enum ScreenCache {
         writer.hasCache(for: credential)
     }
 
+    /// The Mac's terminal ground as last saved, at once; empty when none.
+    static func ground(for credential: PairingCredential) -> String {
+        writer.ground(for: credential)
+    }
+
     /// Returns at once. The writer encodes and writes later, and only the newest snapshot.
     @MainActor
     static func save(_ cached: CachedScreen, for credential: PairingCredential) {

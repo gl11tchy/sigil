@@ -24,9 +24,12 @@ final class ScreenCacheWriter: @unchecked Sendable {
     /// Jobs on the queue that have not finished.
     private var queued = 0
     private var writes = 0
+    /// Each Mac's last terminal ground, beside its file, so launch can read it at once.
+    private let grounds: UserDefaults
 
-    init(directory: @escaping @Sendable () -> URL?) {
+    init(directory: @escaping @Sendable () -> URL?, grounds: UserDefaults = .standard) {
         self.directory = directory
+        self.grounds = grounds
     }
 
     /// Files written so far.
@@ -34,14 +37,34 @@ final class ScreenCacheWriter: @unchecked Sendable {
 
     @MainActor
     func save(_ cached: CachedScreen, for credential: PairingCredential) {
-        submit(.save(cached), to: ScreenCache.fileName(for: credential))
+        let name = ScreenCache.fileName(for: credential)
+        remember(ground: cached.selectedTabID.flatMap { cached.screens[$0]?.background } ?? "", for: name)
+        submit(.save(cached), to: name)
     }
 
     /// Also drops a save still waiting for the file, so a forgotten Mac's screen never comes back.
     @MainActor
     func delete(for credential: PairingCredential) {
-        submit(.delete, to: ScreenCache.fileName(for: credential))
+        let name = ScreenCache.fileName(for: credential)
+        remember(ground: "", for: name)
+        submit(.delete, to: name)
     }
+
+    /// The terminal ground of the screen last saved for the Mac, as `RRGGBB`; empty
+    /// when none. One defaults read, so launch has it before the file is read.
+    func ground(for credential: PairingCredential) -> String {
+        grounds.string(forKey: Self.groundKey(ScreenCache.fileName(for: credential))) ?? ""
+    }
+
+    /// Written only when it changes: a save costs one defaults read.
+    @MainActor
+    private func remember(ground: String, for name: String) {
+        let key = Self.groundKey(name)
+        guard (grounds.string(forKey: key) ?? "") != ground else { return }
+        if ground.isEmpty { grounds.removeObject(forKey: key) } else { grounds.set(ground, forKey: key) }
+    }
+
+    private static func groundKey(_ name: String) -> String { "ScreenGround." + name }
 
     /// Starts reading at once, behind every change already queued, so it sees the
     /// last save. `done` gets the cache, or nil, on the queue.
