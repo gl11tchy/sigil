@@ -110,21 +110,53 @@ struct EphemeralPathTests {
         let base = fm.homeDirectoryForCurrentUser.appendingPathComponent(
             "sigil-ephemeral-git-\(UUID().uuidString)")
         defer { try? fm.removeItem(at: base) }
-        let worktree = base.appendingPathComponent("repos/app/feature")
-        let submodule = base.appendingPathComponent("app/vendor/lib")
         let repo = base.appendingPathComponent("app")
+        let worktree = base.appendingPathComponent("repos/app/feature")
+        let nested = worktree.appendingPathComponent("vendor/lib")
+        let submodule = repo.appendingPathComponent("vendor/lib")
+        let separate = base.appendingPathComponent("separate")
+        try makeWorktree(worktree, of: repo, named: "feature")
         try fm.createDirectory(at: worktree.appendingPathComponent("web"), withIntermediateDirectories: true)
-        try fm.createDirectory(at: submodule, withIntermediateDirectories: true)
-        try fm.createDirectory(at: repo.appendingPathComponent(".git"), withIntermediateDirectories: true)
-        try "gitdir: /Users/someone/app/.git/worktrees/feature\n".write(
-            to: worktree.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
-        try "gitdir: ../../.git/modules/lib\n".write(
-            to: submodule.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
+        try gitFile(in: nested, pointingTo: repo.appendingPathComponent(".git/worktrees/feature/modules/lib"))
+        try gitFile(in: submodule, pointingTo: repo.appendingPathComponent(".git/modules/lib"))
+        // `git init --separate-git-dir` into a folder that happens to be named `worktrees`.
+        let metadata = base.appendingPathComponent("metadata/worktrees/separate")
+        try fm.createDirectory(at: metadata, withIntermediateDirectories: true)
+        try gitFile(in: separate, pointingTo: metadata)
 
         #expect(isEphemeral(path: worktree.path))
         #expect(isEphemeral(path: worktree.appendingPathComponent("web").path))
+        #expect(isEphemeral(path: nested.path))
         #expect(!isEphemeral(path: repo.path))
         #expect(!isEphemeral(path: submodule.path))
+        #expect(!isEphemeral(path: separate.path))
+    }
+
+    @Test func reclassifiesAFolderThatBecomesAWorktree() throws {
+        let fm = FileManager.default
+        let base = fm.homeDirectoryForCurrentUser.appendingPathComponent(
+            "sigil-ephemeral-late-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: base) }
+        let folder = base.appendingPathComponent("later")
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        #expect(!isEphemeral(path: folder.path))
+
+        Thread.sleep(forTimeInterval: 0.01)
+        try makeWorktree(folder, of: base.appendingPathComponent("app"), named: "later")
+        #expect(isEphemeral(path: folder.path))
+    }
+
+    private func makeWorktree(_ folder: URL, of repo: URL, named name: String) throws {
+        let admin = repo.appendingPathComponent(".git/worktrees/\(name)")
+        try FileManager.default.createDirectory(at: admin, withIntermediateDirectories: true)
+        try "../..\n".write(to: admin.appendingPathComponent("commondir"), atomically: true, encoding: .utf8)
+        try gitFile(in: folder, pointingTo: admin)
+    }
+
+    private func gitFile(in folder: URL, pointingTo target: URL) throws {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try "gitdir: \(target.path)\n".write(
+            to: folder.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
     }
 
     @Test func keepsSigilWorktreesWithTheirProject() throws {
@@ -133,9 +165,7 @@ struct EphemeralPathTests {
             "%2FUsers%2Fsomeone%2Fsigil-ephemeral-\(UUID().uuidString)")
         defer { try? fm.removeItem(at: project) }
         let worktree = project.appendingPathComponent("abcd1234")
-        try fm.createDirectory(at: worktree, withIntermediateDirectories: true)
-        try "gitdir: /Users/someone/sigil/.git/worktrees/abcd1234\n".write(
-            to: worktree.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
+        try makeWorktree(worktree, of: project.appendingPathComponent("repo"), named: "abcd1234")
 
         #expect(!isEphemeral(path: worktree.path))
     }

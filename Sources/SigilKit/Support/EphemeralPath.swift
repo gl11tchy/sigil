@@ -9,14 +9,16 @@ public func isEphemeral(path: String) -> Bool {
     let identity = filesystemIdentity(path)
     if let cached = ephemeralPathCache.withLock({ $0[path] }),
         cached.device == identity.device,
-        cached.inode == identity.inode
+        cached.inode == identity.inode,
+        cached.modified == identity.modified
     {
         return cached.value
     }
     let value = computeIsEphemeral(path: path)
     ephemeralPathCache.withLock {
         $0[path] = EphemeralCacheEntry(
-            value: value, device: identity.device, inode: identity.inode)
+            value: value, device: identity.device, inode: identity.inode,
+            modified: identity.modified)
     }
     return value
 }
@@ -25,6 +27,7 @@ private struct EphemeralCacheEntry {
     var value: Bool
     var device: UInt64?
     var inode: UInt64?
+    var modified: Int?
 }
 
 private let ephemeralPathCache = OSAllocatedUnfairLock(
@@ -32,10 +35,14 @@ private let ephemeralPathCache = OSAllocatedUnfairLock(
 )
 
 /// Follows symlinks so a retarget changes identity and misses the cache.
-private func filesystemIdentity(_ path: String) -> (device: UInt64?, inode: UInt64?) {
+/// The modified time changes when `git worktree add` fills an existing folder.
+private func filesystemIdentity(
+    _ path: String
+) -> (device: UInt64?, inode: UInt64?, modified: Int?) {
     var st = stat()
-    guard stat(path, &st) == 0 else { return (nil, nil) }
-    return (UInt64(bitPattern: Int64(st.st_dev)), st.st_ino)
+    guard stat(path, &st) == 0 else { return (nil, nil, nil) }
+    let modified = st.st_mtimespec.tv_sec * 1_000_000_000 + st.st_mtimespec.tv_nsec
+    return (UInt64(bitPattern: Int64(st.st_dev)), st.st_ino, modified)
 }
 
 private func computeIsEphemeral(path: String) -> Bool {
@@ -64,16 +71,27 @@ private func isLinkedGitWorktree(_ path: String) -> Bool {
         let git = folder.appendingPathComponent(".git")
         var isDirectory: ObjCBool = false
         if FileManager.default.fileExists(atPath: git.path, isDirectory: &isDirectory) {
-            guard !isDirectory.boolValue,
-                let text = try? String(contentsOf: git, encoding: .utf8),
-                text.hasPrefix("gitdir:")
-            else { return false }
-            let target = text.dropFirst("gitdir:".count).trimmingCharacters(in: .whitespacesAndNewlines)
-            return URL(fileURLWithPath: target).deletingLastPathComponent().lastPathComponent == "worktrees"
+            // A `.git` folder is a main checkout. A `.git` file that is not a
+            // worktree (a submodule) may still sit inside one, so keep going.
+            if isDirectory.boolValue { return false }
+            if isWorktreeGitFile(git, in: folder) { return true }
         }
         folder.deleteLastPathComponent()
     }
     return false
+}
+
+/// True when `.git` points at `<common git dir>/worktrees/<id>`. Git writes a
+/// `commondir` file only there, so a `--separate-git-dir` checkout that
+/// happens to live in a folder named `worktrees` does not match.
+private func isWorktreeGitFile(_ git: URL, in folder: URL) -> Bool {
+    guard let text = try? String(contentsOf: git, encoding: .utf8), text.hasPrefix("gitdir:") else {
+        return false
+    }
+    let target = text.dropFirst("gitdir:".count).trimmingCharacters(in: .whitespacesAndNewlines)
+    let admin = URL(fileURLWithPath: target, relativeTo: folder).standardizedFileURL
+    return admin.deletingLastPathComponent().lastPathComponent == "worktrees"
+        && FileManager.default.fileExists(atPath: admin.appendingPathComponent("commondir").path)
 }
 
 private func isTemporaryVariant(_ path: String) -> Bool {
