@@ -40,7 +40,7 @@ async function slowMac(page, origin) {
         if (request.action === 'pair') key = await importKey(request.text);
         await new Promise(resolve => setTimeout(resolve, DELAY));
         if (request.action === 'select') selected = request.tabID;
-        const payload = { challenge, sequence: request.sequence, ok: true, ticket,
+        const payload = { challenge, sequence: request.sequence, clientNonce: request.clientNonce, ok: true, ticket,
           state: { tabs, selectedTabID: selected, terminal: `Session ${selected}\nReady.`, capabilities: [] } };
         if (request.action === 'chats') {
           payload.chats = Array.from({ length: 3 }, (_, i) => ({ id: `chat-${i}`, title: `${request.text} saved ${i}`, folder: '/tmp/fixture' }));

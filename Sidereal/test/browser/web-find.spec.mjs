@@ -36,7 +36,7 @@ async function pair(page, origin, options) {
         actions.push(request);
         if (request.action === 'pair') key = await importKey(request.text);
         const state = { tabs: [{ id: 'one', title: 'Find fixture', status: 'idle' }], selectedTabID: 'one', terminal: options.terminal(), capabilities: [] };
-        const payload = { challenge, sequence: request.sequence, ok: true, ticket, state };
+        const payload = { challenge, sequence: request.sequence, clientNonce: request.clientNonce, ok: true, ticket, state };
         if (request.action === 'earlier') payload.earlier = options.earlier ? options.earlier(request) : '';
         ws.send(JSON.stringify({ peer, data: await seal(payload, key, 'mac') }));
       }
