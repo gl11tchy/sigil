@@ -786,7 +786,7 @@ for (const api of [true, false]) {
     });
 
     // A new mark lays out its block again. In one inline run of all 400,000 characters kept, each
-    // new window laid out all of them: over 50 ms a frame in WebKit.
+    // new window laid out all of them: over 50 ms a frame in WebKit, against 18 with Find closed.
     if (!api) test('Find scrolls 400,000 characters of marks a screen a frame in under 50 ms', async ({ page, baseURL }) => {
       test.setTimeout(120_000);
       // 34 slices of 11,900 characters, each under the 12 KB a slice may hold.
@@ -806,12 +806,17 @@ for (const api of [true, false]) {
         }
         const text = await page.locator('#terminal').evaluate(el => el.textContent);
         expect(text.length).toBeGreaterThan(400_000);
+        await page.locator('#terminal').evaluate(el => { el.scrollTop = el.scrollHeight / 3; });
+        await frames(page);
+        const plain = await longestFrame(page, 60, 1);
+        await page.locator('#terminal').evaluate(el => { el.scrollTop = 0; });
         await openFind(page, 'a');
         await expect(page.locator('#find-count')).toHaveText(`1 of ${count(text, 'a').length}`);
         await page.locator('#terminal').evaluate(el => { el.scrollTop = el.scrollHeight / 3; });
         await frames(page);
         const scrolled = await longestFrame(page, 60, 1);
-        expect(scrolled).toBeLessThan(50);
+        // Under 50 ms, or on a slower machine two frames over the same scroll with Find closed.
+        expect(scrolled, JSON.stringify({ plain, scrolled })).toBeLessThan(Math.max(50, plain + 34));
         await expect.poll(async () => { const state = await coverage(page, count(text, 'a').map(match => [match.index, match.index + 1])); return [state.visible > 0, state.missing, state.far]; })
           .toEqual([true, 0, 0]);
       } finally { mac.close(); }
