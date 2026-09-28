@@ -13,13 +13,16 @@ final class AppModel {
 
     typealias TrashConversation = (URL) throws -> Void
     typealias ErrorPresenter = (Error) -> Void
-    typealias ConfirmStopWorking = () -> Bool
+    typealias ConfirmStopWorking = (StopWorkingPrompt) -> Bool
 
     let settings: AppSettings
     let store: SessionStore
     /// The right-hand utility column: scratch shell and per-conversation notes.
     let panel: RightPanel
     let remoteControl: RemoteControl
+    @ObservationIgnored private let kimiKeyStore: any KimiKeyStore
+    /// True while the Keychain holds a Kimi API key.
+    private(set) var hasKimiAPIKey = false
 
     private(set) var tabs: [TerminalTab] = []
     var selectedTabID: TerminalTab.ID? {
@@ -31,11 +34,17 @@ final class AppModel {
     }
     var searchText: String = ""
     var isShowingNewSessionSheet = false
+    var isShowingTabList = false
     private(set) var pendingSessionDirectory: URL?
     /// Find-in-terminal bar for the selected tab.
     var isFindBarVisible = false
     /// True when a tab was selected while the main window could not take focus.
     var needsTerminalFocus = false
+    /// True when the panel shell was opened before its view reached the window.
+    @ObservationIgnored private var needsPanelShellFocus = false
+    private let transcriptExports = TranscriptExports()
+    /// Grok tabs that kept the old theme because they were busy or held messages.
+    @ObservationIgnored private var themeRestartsWhenSettled: Set<TerminalTab.ID> = []
     var findQuery = ""
     var findMatchIndex = 0
     var findMatchCount = 0
@@ -47,11 +56,18 @@ final class AppModel {
             ) {
                 clearRenameSelectAllPending()
             }
+            if oldValue, !isSidebarVisible { refocusTerminalAfterHiding(.sidebar) }
         }
     }
+    /// Set by the sidebar and its divider from their SwiftUI focus, so hiding
+    /// the sidebar moves focus only when it leaves with the column.
+    @ObservationIgnored var isSidebarFocused = false
+    @ObservationIgnored var isSidebarDividerFocused = false
     /// Bumped by Find Conversations so the search field takes focus even when
     /// the sidebar just became visible, or already had it.
     private(set) var searchFocusToken = 0
+    /// The last token the sidebar acted on, so a remount does not replay it.
+    @ObservationIgnored private var consumedSearchFocusToken = 0
 
     /// True while this process owns the tab-messaging socket.
     private(set) var isTabMessagingAvailable = false
@@ -71,9 +87,12 @@ final class AppModel {
     private var deferredLegacySelectedSessionID: String?
     private let trashConversation: TrashConversation
     private let presentError: ErrorPresenter
-    /// Shown before a close or archive kills a tab that is mid-turn.
+    /// Shown before a close, archive or shell restart stops work still running.
     @ObservationIgnored
-    var confirmStopWorking: ConfirmStopWorking = { AppModel.promptToStopWorking() }
+    var confirmStopWorking: ConfirmStopWorking = { $0.runModal() }
+    /// True while the stop prompt is up. Its modal loop still runs main-queue
+    /// work, so a theme relaunch waits rather than replace the tab in question.
+    @ObservationIgnored private var isAskingToStop = false
     @ObservationIgnored private let registrationRunner: BridgeRegistration.Runner
     @ObservationIgnored private let mcpBinaryOverride: URL?
     @ObservationIgnored private let tabMessagingSocketURL: URL
@@ -84,6 +103,14 @@ final class AppModel {
     /// Refreshes what a crash report would say Sigil was doing. Observation
     /// ignores it: nothing in the UI reads it.
     @ObservationIgnored private var crashStateTask: Task<Void, Never>?
+    /// Shared-list entries another running copy added, with the store's scan
+    /// count when this copy first read them. See `awaitsScan`.
+    @ObservationIgnored private var sharedArrivals: [String: Int] = [:]
+    private(set) var providerInstallations: [CLIProvider: ProviderInstallation] = [:]
+    private(set) var checkingProviders: Set<CLIProvider> = []
+    typealias ProviderProbe = @Sendable (CLIProvider, URL?) async -> ProviderInstallation
+    @ObservationIgnored private let providerProbe: ProviderProbe
+    @ObservationIgnored private var providerCheckGeneration = UUID()
 
     init(
         settings: AppSettings = AppSettings(),
@@ -101,17 +128,28 @@ final class AppModel {
         tabMessagingSocketURL: URL? = nil,
         canonicalPath: (@Sendable (String) -> String)? = nil,
         panel: RightPanel? = nil,
-        pairingStore: (any RemotePairingStore)? = nil
+        pairingStore: (any RemotePairingStore)? = nil,
+        kimiKeyStore: (any KimiKeyStore)? = nil,
+        providerInstallations: [CLIProvider: ProviderInstallation] = [:],
+        providerProbe: ProviderProbe? = nil
     ) {
         self.settings = settings
         self.store = store
         self.panel = panel ?? RightPanel()
+        self.providerInstallations = providerInstallations
+        self.providerProbe =
+            providerProbe ?? { provider, executable in
+                await Task.detached(priority: .utility) {
+                    ProviderInstallation.detect(provider: provider, configuredExecutable: executable)
+                }.value
+            }
         if let pairingStore {
             self.remoteControl = RemoteControl(store: pairingStore)
         } else if Self.isRunningAutomatedTests {
             self.remoteControl = RemoteControl(store: InMemoryRemotePairingStore())
         } else {
-            self.remoteControl = RemoteControl(store: KeychainRemotePairingStore())
+            self.remoteControl = RemoteControl(
+                store: KeychainRemotePairingStore(), notifications: DistributedNotificationCenter.default())
         }
         self.trashConversation = trashConversation
         self.presentError = presentError
@@ -119,6 +157,46 @@ final class AppModel {
         self.mcpBinaryOverride = mcpBinary
         self.tabMessagingSocketURL = tabMessagingSocketURL ?? BridgePaths.configuredSocket
         self.resolveCanonicalPath = canonicalPath ?? { GrokPaths.canonicalPath($0) }
+        self.kimiKeyStore =
+            kimiKeyStore ?? (Self.isRunningAutomatedTests ? InMemoryKimiKeyStore() : KeychainKimiKeyStore())
+        hasKimiAPIKey = self.kimiKeyStore.load() != nil
+    }
+
+    /// Stores a Kimi Platform API key in the Keychain. Returns false when it was not stored.
+    @discardableResult
+    func saveKimiAPIKey(_ key: String) -> Bool {
+        guard let key = key.nilIfEmpty else { return false }
+        let saved = kimiKeyStore.save(key)
+        hasKimiAPIKey = kimiKeyStore.load() != nil
+        return saved
+    }
+
+    func removeKimiAPIKey() {
+        kimiKeyStore.clear()
+        hasKimiAPIKey = kimiKeyStore.load() != nil
+    }
+
+    /// Variables a Kimi Code tab needs for the chosen sign-in. Nil when an
+    /// API-key sign-in has no key to pass.
+    private func providerEnvironment(for provider: CLIProvider) -> [String: String]? {
+        guard provider == .kimi, settings.kimiSignIn == .apiKey else { return [:] }
+        guard let key = kimiKeyStore.load() else { return nil }
+        return KimiCode.apiKeyEnvironment(key: key, model: settings.kimiModel)
+    }
+
+    /// Whether `provider` has a sign-in to start with. Never shows an alert.
+    func hasSignIn(_ provider: CLIProvider) -> Bool {
+        providerEnvironment(for: provider) != nil
+    }
+
+    /// False, after saying why, when `provider` has no sign-in to start with.
+    /// New Session asks before it makes a worktree.
+    func canSignIn(_ provider: CLIProvider) -> Bool {
+        guard providerEnvironment(for: provider) == nil else { return true }
+        showError(
+            title: "Kimi API key is missing",
+            message: "Add it in Settings, or sign in with a Kimi account.")
+        return false
     }
 
     func onAppear() async {
@@ -128,6 +206,9 @@ final class AppModel {
         if Self.isSmokeTest { return }
         observeStoreForHousekeeping()
         store.start()
+        if !Self.isRunningAutomatedTests {
+            Task { [weak self] in await self?.refreshProviderInstallations() }
+        }
         // Bind the local socket before restoring tabs so they inherit it.
         // Registration is add-or-update and can take seconds; do not wait on it.
         if settings.isTabMessagingEnabled {
@@ -218,41 +299,72 @@ final class AppModel {
     /// Displayed title at fresh begin. Unedited Return/blur is a no-op even if
     /// the CLI summary moved. Same-key begin must not clear this.
     var renameCommitBaseline: String?
+    /// Where keyboard focus goes when an inline rename ends.
+    enum RenameReturnFocus { case list, terminal }
+    /// Set by each beginRename: ⌘⇧R starts from the terminal and returns there;
+    /// F2 and the row menu start from the list.
+    private(set) var renameReturnFocus: RenameReturnFocus = .list
 
     /// Conversations for the sidebar, one-shot noise filtered out.
     /// An empty query stays newest first. Archived chats stay hidden unless
     /// Archived is open. A search ranks the closest title first and includes
     /// every folder.
     var sidebarSessions: [GrokSession] {
-        var result = store.search(searchText) { self.title(for: $0) }
-        if !settings.showEmptySessions {
-            // A session you have open is always worth listing, even before the CLI
-            // has written a summary for it. Otherwise the row marking the
-            // conversation on screen is the one row the list refuses to show.
-            result = result.filter { isReal($0) || isOpen($0) }
-        }
-        if !settings.showWorktreeSessions {
-            result = result.filter { !isEphemeral(path: $0.cwd) || isOpen($0) }
-        }
-        if !settings.showSubagentSessions {
-            result = result.filter { !$0.isSubagent || isOpen($0) }
-        }
+        sidebarSessions(index: sidebarIndex())
+    }
+
+    /// Archives and names grouped by chat id, built once per sidebar pass so
+    /// each chat is one lookup, not a scan of every entry.
+    private struct SidebarIndex {
+        var archived: ConversationIndex<OpenTabsSnapshot.Entry>
+        var names: ConversationIndex<ConversationName>
+    }
+
+    private func sidebarIndex() -> SidebarIndex {
+        SidebarIndex(
+            archived: ConversationIndex(settings.archivedConversations, sessionID: \.sessionID, cwd: \.cwd),
+            names: ConversationIndex(settings.conversationNames, sessionID: \.sessionID, cwd: \.cwd)
+        )
+    }
+
+    private func sidebarSessions(index: SidebarIndex) -> [GrokSession] {
+        var result = store.search(searchText) { self.title(for: $0, in: index) }
+            .filter { passesSidebarFilters($0, in: index) }
         if !SidebarOrganization.isSearching(searchText) {
             if sidebarSurface == .archived {
-                result = result.filter { isArchived($0) }
+                result = result.filter { isArchived($0, in: index) }
             } else {
-                result = result.filter { !isArchived($0) }
+                result = result.filter { !isArchived($0, in: index) }
             }
         }
         return result
     }
 
+    /// The empty, worktree and subagent filters. Shared by the list and the
+    /// Archived count so the count never includes rows the list hides.
+    /// `index` is the pass's name lookup; without one, names are scanned.
+    private func passesSidebarFilters(_ session: GrokSession, in index: SidebarIndex? = nil) -> Bool {
+        // A session you have open is always worth listing, even before the CLI
+        // has written a summary for it. Otherwise the row marking the
+        // conversation on screen is the one row the list refuses to show.
+        if !settings.showEmptySessions, !(isReal(session, in: index) || isOpen(session)) {
+            return false
+        }
+        if !settings.showWorktreeSessions, isEphemeral(path: session.cwd), !isOpen(session) {
+            return false
+        }
+        if !settings.showSubagentSessions, session.isSubagent, !isOpen(session) {
+            return false
+        }
+        return true
+    }
+
     /// A session worth listing: it has a summary, a name the user chose, or more
     /// than the opening exchange.
-    private func isReal(_ session: GrokSession) -> Bool {
+    private func isReal(_ session: GrokSession, in index: SidebarIndex?) -> Bool {
         !session.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || session.messageCount > 2
-            || hasCustomName(session)
+            || session.messageCount > 2 || session.hasObservedMessages
+            || (index.map { customName(for: session, in: $0) != nil } ?? hasCustomName(session))
     }
 
     func isOpen(_ session: GrokSession) -> Bool {
@@ -281,10 +393,6 @@ final class AppModel {
         entryKey(.init(sessionID: session.id, cwd: session.cwd))
     }
 
-    func isCurrentFolder(_ cwd: String) -> Bool {
-        samePath(cwd, currentDirectory.path)
-    }
-
     func activity(of session: GrokSession) -> TerminalTab.Activity? {
         tabs.first { tabMatches($0, sessionID: session.id, cwd: session.cwd) }?.activity
     }
@@ -300,6 +408,7 @@ final class AppModel {
 
     func isWorking(_ project: SidebarProject) -> Bool {
         project.sessions.contains { isWorking($0) }
+            || tabs.contains { $0.activity == .working && inProject($0.workingDirectory.path, project.cwd) }
     }
 
     func isPinned(_ session: GrokSession) -> Bool {
@@ -308,12 +417,14 @@ final class AppModel {
     }
 
     func pin(_ session: GrokSession) {
+        settings.reloadSharedLists()
         unarchive(session)
         settings.pinnedConversations = SidebarOrganization.inserting(
             session, onto: settings.pinnedConversations, samePath: samePath)
     }
 
     func unpin(_ session: GrokSession) {
+        settings.reloadSharedLists()
         settings.pinnedConversations = SidebarOrganization.removing(
             session, from: settings.pinnedConversations, samePath: samePath)
     }
@@ -327,11 +438,13 @@ final class AppModel {
     }
 
     func pin(_ project: SidebarProject) {
+        settings.reloadSharedLists()
         settings.pinnedProjects = SidebarOrganization.inserting(
             project.cwd, onto: settings.pinnedProjects, samePath: samePath)
     }
 
     func unpin(_ project: SidebarProject) {
+        settings.reloadSharedLists()
         settings.pinnedProjects = SidebarOrganization.removing(
             project.cwd, from: settings.pinnedProjects, samePath: samePath)
     }
@@ -345,26 +458,54 @@ final class AppModel {
             settings.archivedConversations, session: session, samePath: samePath)
     }
 
+    private func isArchived(_ session: GrokSession, in index: SidebarIndex) -> Bool {
+        index.archived.contains(sessionID: session.id, cwd: session.cwd, samePath: samePath)
+    }
+
     func archive(_ session: GrokSession) {
         archive(session, confirmIfWorking: true)
     }
 
     private func archive(_ session: GrokSession, confirmIfWorking: Bool) {
         let matching = tabs.filter { tabMatches($0, sessionID: session.id, cwd: session.cwd) }
-        if confirmIfWorking, matching.contains(where: \.shouldWarnBeforeStopping),
-            !confirmStopWorking()
+        if confirmIfWorking, let prompt = StopWorkingPrompt(action: .archive, stopping: matching),
+            !confirmStop(prompt)
         {
             return
         }
-        unpin(session)
-        settings.archivedConversations = SidebarOrganization.inserting(
-            session, onto: settings.archivedConversations, samePath: samePath)
-        for tab in matching { closeTab(tab.id) }
-        dropDeferred(matching: session)
+        archiveWithoutAsking([session])
+    }
+
+    /// Archives `sessions` and closes their tabs, writing each setting once
+    /// however many sessions there are.
+    private func archiveWithoutAsking(_ sessions: [GrokSession]) {
+        settings.reloadSharedLists()
+        var pinned = settings.pinnedConversations
+        var archived = settings.archivedConversations
+        for session in sessions {
+            pinned = SidebarOrganization.removing(session, from: pinned, samePath: samePath)
+            archived = SidebarOrganization.inserting(session, onto: archived, samePath: samePath)
+        }
+        settings.pinnedConversations = pinned
+        settings.archivedConversations = archived
+        stopAndWait(
+            tabs.filter { tab in
+                sessions.contains { tabMatches(tab, sessionID: $0.id, cwd: $0.cwd) }
+            })
+        for session in sessions {
+            while let index = tabs.firstIndex(where: {
+                tabMatches($0, sessionID: session.id, cwd: session.cwd)
+            }) {
+                removeTab(at: index)
+            }
+            dropDeferred(matching: session)
+        }
+        refreshDockIndicator()
         persistOpenTabs()
     }
 
     func unarchive(_ session: GrokSession) {
+        settings.reloadSharedLists()
         settings.archivedConversations = SidebarOrganization.removing(
             session, from: settings.archivedConversations, samePath: samePath)
     }
@@ -375,14 +516,15 @@ final class AppModel {
 
     /// Archives a multi-selection with at most one working-session prompt.
     func archive(_ sessions: [GrokSession]) {
-        let anyWorking = sessions.contains { session in
-            tabs.contains {
-                tabMatches($0, sessionID: session.id, cwd: session.cwd)
-                    && $0.shouldWarnBeforeStopping
-            }
+        let matching = tabs.filter { tab in
+            sessions.contains { tabMatches(tab, sessionID: $0.id, cwd: $0.cwd) }
         }
-        if anyWorking && !confirmStopWorking() { return }
-        for session in sessions { archive(session, confirmIfWorking: false) }
+        if let prompt = StopWorkingPrompt(action: .archive, stopping: matching),
+            !confirmStop(prompt)
+        {
+            return
+        }
+        archiveWithoutAsking(sessions)
     }
 
     func unarchive(_ sessions: [GrokSession]) {
@@ -391,17 +533,22 @@ final class AppModel {
 
     func archive(_ project: SidebarProject) {
         let projectTabs = tabs.filter {
-            $0.spec.provider == .grokBuild && samePath($0.workingDirectory.path, project.cwd)
+            $0.capabilities.archive && inProject($0.workingDirectory.path, project.cwd)
         }
-        if projectTabs.contains(where: \.shouldWarnBeforeStopping), !confirmStopWorking() {
+        if let prompt = StopWorkingPrompt(action: .archive, stopping: projectTabs),
+            !confirmStop(prompt)
+        {
             return
         }
         unpin(project)
-        for session in store.sessions where samePath(session.cwd, project.cwd) {
-            archive(session, confirmIfWorking: false)
+        removeAddedProject(project.cwd)
+        stopAndWait(projectTabs)
+        archiveWithoutAsking(store.sessions.filter { inProject($0.cwd, project.cwd) })
+        for tab in projectTabs {
+            if let index = tabs.firstIndex(where: { $0.id == tab.id }) { removeTab(at: index) }
         }
-        for tab in projectTabs { closeTab(tab.id) }
         dropDeferred(inProjectPath: project.cwd)
+        refreshDockIndicator()
         persistOpenTabs()
         if focusedProject.map({ samePath($0.cwd, project.cwd) }) == true {
             leaveProject()
@@ -409,29 +556,28 @@ final class AppModel {
     }
 
     func unarchive(_ project: SidebarProject) {
-        for session in store.sessions where samePath(session.cwd, project.cwd) {
+        for session in store.sessions where inProject(session.cwd, project.cwd) {
             unarchive(session)
         }
     }
 
-    /// Archived conversations still on disk, in archive order.
+    /// Archived conversations the Archived list will show.
     var archivedCount: Int {
-        store.sessions.filter { isArchived($0) }.count
+        archivedCount(index: sidebarIndex())
+    }
+
+    private func archivedCount(index: SidebarIndex) -> Int {
+        store.sessions.filter { isArchived($0, in: index) && passesSidebarFilters($0, in: index) }.count
     }
 
     /// Pinned conversations still in the current sidebar filter, in pin order.
     func pinnedSessions(in project: SidebarProject? = nil) -> [GrokSession] {
-        let pinned = SidebarOrganization.matching(
+        SidebarOrganization.pinned(
             sessions: sidebarSessions,
             entries: settings.pinnedConversations,
+            in: project,
             samePath: samePath
         )
-        guard let project else { return pinned }
-        return pinned.filter { session in
-            project.sessions.contains {
-                $0.id == session.id && samePath($0.cwd, session.cwd)
-            }
-        }
     }
 
     func unpinnedSessions(from sessions: [GrokSession]) -> [GrokSession] {
@@ -460,17 +606,100 @@ final class AppModel {
     }
 
     var sidebarProjects: [SidebarProject] {
-        SidebarOrganization.projects(from: sidebarSessions, canonicalPath: canonicalPath)
+        sidebarProjects(from: sidebarSessions)
+    }
+
+    /// Folders grouped from `sessions`, plus added folders with no chat yet.
+    private func sidebarProjects(from sessions: [GrokSession]) -> [SidebarProject] {
+        let projects = SidebarOrganization.projects(from: sessions, canonicalPath: canonicalPath)
+        // A search ranks by match and Archived lists only archived chats.
+        guard !SidebarOrganization.isSearching(searchText), sidebarSurface != .archived else {
+            return projects
+        }
+        return SidebarOrganization.merging(
+            added: settings.addedProjects, into: projects, canonicalPath: canonicalPath)
+    }
+
+    /// Adds a folder to Projects before it has a chat. A Sigil worktree adds its project.
+    func addProject(_ directory: URL) {
+        let path = SigilWorktree.projectPath(of: directory.path) ?? directory.path
+        settings.reloadSharedLists()
+        var added = settings.addedProjects
+        added.removeAll { samePath($0.path, path) }
+        added.insert(AddedProject(path: path, addedAt: Date()), at: 0)
+        settings.addedProjects = added
+    }
+
+    func chooseProjectToAdd() {
+        if let directory = pickDirectory(prompt: "Add Project") { addProject(directory) }
+    }
+
+    private func removeAddedProject(_ path: String) {
+        settings.reloadSharedLists()
+        let added = settings.addedProjects.filter { !samePath($0.path, path) }
+        if added != settings.addedProjects { settings.addedProjects = added }
+    }
+
+    /// An added folder with no conversations at all, hidden ones included.
+    /// Removing it drops only the folder entry, never a chat.
+    func isRemovableOnly(_ project: SidebarProject) -> Bool {
+        isAddedProject(project.cwd) && !store.sessions.contains { inProject($0.cwd, project.cwd) }
+    }
+
+    /// The row's archive control: removal for a chatless added folder.
+    func archiveOrRemove(_ project: SidebarProject) {
+        if isRemovableOnly(project) { removeProject(project) } else { archive(project) }
+    }
+
+    /// Drops an added folder and closes every tab in it, whatever the CLI.
+    func removeProject(_ project: SidebarProject) {
+        let projectTabs = tabs.filter { inProject($0.workingDirectory.path, project.cwd) }
+        if let prompt = StopWorkingPrompt(action: .closeTab, stopping: projectTabs),
+            !confirmStop(prompt)
+        {
+            return
+        }
+        unpin(project)
+        removeAddedProject(project.cwd)
+        stopAndWait(projectTabs)
+        for tab in projectTabs {
+            if let index = tabs.firstIndex(where: { $0.id == tab.id }) { removeTab(at: index) }
+        }
+        refreshDockIndicator()
+        persistOpenTabs()
+        if focusedProject.map({ samePath($0.cwd, project.cwd) }) == true {
+            leaveProject()
+        }
+    }
+
+    /// The selected tab runs in this folder, whatever the CLI.
+    func hasSelectedTab(in project: SidebarProject) -> Bool {
+        selectedTab.map { inProject($0.workingDirectory.path, project.cwd) } ?? false
+    }
+
+    private func isAddedProject(_ path: String) -> Bool {
+        settings.addedProjects.contains { samePath($0.path, path) }
     }
 
     var focusedProject: SidebarProject? {
+        focusedProject(in: { sidebarProjects })
+    }
+
+    /// `projects` are the folders grouped from `sidebarSessions`. They are
+    /// only read when a folder is open.
+    private func focusedProject(in projects: () -> [SidebarProject]) -> SidebarProject? {
         let path = settings.focusedProjectPath
         guard !path.isEmpty,
             path != SidebarOrganization.recentsID,
             path != SidebarOrganization.archivedID
         else { return nil }
-        return project(at: path, from: sidebarSessions)
+        let focused = canonicalPath(path)
+        return projects().first { $0.id == focused || samePath($0.cwd, path) }
             ?? project(at: path, from: store.sessions)
+            ?? SidebarOrganization.merging(
+                added: settings.addedProjects.filter { samePath($0.path, path) },
+                into: [], canonicalPath: canonicalPath
+            ).first
     }
 
     private func project(at path: String, from sessions: [GrokSession]) -> SidebarProject? {
@@ -481,14 +710,97 @@ final class AppModel {
 
     /// Chats in the open project, or the full sidebar list.
     var focusedSidebarSessions: [GrokSession] {
-        guard let project = focusedProject else { return sidebarSessions }
-        return sidebarSessions.filter { samePath($0.cwd, project.cwd) }
+        SidebarOrganization.sessions(sidebarSessions, in: focusedProject, samePath: samePath)
+    }
+
+    /// Everything a sidebar snapshot reads apart from the file system. Equal
+    /// inputs build an equal snapshot.
+    private struct SidebarInputs: Equatable {
+        var sessions: [GrokSession]
+        var searchText: String
+        var focusedProjectPath: String
+        var pinnedConversations: [OpenTabsSnapshot.Entry]
+        var pinnedProjects: [String]
+        var addedProjects: [AddedProject]
+        var archivedConversations: [OpenTabsSnapshot.Entry]
+        var conversationNames: [ConversationName]
+        var showEmptySessions: Bool
+        var showWorktreeSessions: Bool
+        var showSubagentSessions: Bool
+        var tabIDs: [UUID]
+    }
+
+    private func sidebarInputs() -> SidebarInputs {
+        SidebarInputs(
+            sessions: store.sessions,
+            searchText: searchText,
+            focusedProjectPath: settings.focusedProjectPath,
+            pinnedConversations: settings.pinnedConversations,
+            pinnedProjects: settings.pinnedProjects,
+            addedProjects: settings.addedProjects,
+            archivedConversations: settings.archivedConversations,
+            conversationNames: settings.conversationNames,
+            showEmptySessions: settings.showEmptySessions,
+            showWorktreeSessions: settings.showWorktreeSessions,
+            showSubagentSessions: settings.showSubagentSessions,
+            tabIDs: tabs.map(\.id)
+        )
+    }
+
+    /// The last snapshot built and the inputs it was built from.
+    @ObservationIgnored private var lastSidebarSnapshot: (inputs: SidebarInputs, snapshot: SidebarSnapshot)?
+    /// Snapshots built so far. Tests read it to prove events reuse one.
+    @ObservationIgnored private(set) var sidebarSnapshotBuildCount = 0
+
+    /// Event-time row order (arrow keys, row-list cleanup): the last snapshot
+    /// while none of its inputs has changed, else a new one. A render always
+    /// builds its own, so worktree and symlink checks stay fresh on screen.
+    func eventSidebarSnapshot() -> SidebarSnapshot {
+        if let last = lastSidebarSnapshot, last.inputs == sidebarInputs() {
+            return last.snapshot
+        }
+        return sidebarSnapshot()
+    }
+
+    /// Every list one sidebar render reads, from a single search and grouping.
+    func sidebarSnapshot() -> SidebarSnapshot {
+        let inputs = sidebarInputs()
+        let snapshot = buildSidebarSnapshot()
+        sidebarSnapshotBuildCount += 1
+        lastSidebarSnapshot = (inputs, snapshot)
+        return snapshot
+    }
+
+    private func buildSidebarSnapshot() -> SidebarSnapshot {
+        let index = sidebarIndex()
+        let sessions = sidebarSessions(index: index)
+        let projects = sidebarProjects(from: sessions)
+        return SidebarSnapshot(
+            listKind: SidebarOrganization.listKind(
+                surface: sidebarSurface,
+                isSearching: SidebarOrganization.isSearching(searchText)
+            ),
+            sessions: sessions,
+            projects: projects,
+            focusedProject: focusedProject(in: { projects }),
+            pinnedConversations: settings.pinnedConversations,
+            pinnedProjectPaths: settings.pinnedProjects,
+            openTabRowIDs: tabs.map { SidebarOrganization.openTabRowID($0.id) },
+            archivedCount: archivedCount(index: index),
+            samePath: samePath,
+            sessionKey: sessionKey
+        )
     }
 
     /// Folder a new chat should start in: the open project, else the current tab.
     var newSessionDirectory: URL {
         if let project = focusedProject {
             return URL(fileURLWithPath: project.cwd)
+        }
+        if let project = SigilWorktree.projectPath(of: currentDirectory.path),
+            Self.isUsableDirectory(URL(fileURLWithPath: project))
+        {
+            return URL(fileURLWithPath: project)
         }
         return currentDirectory
     }
@@ -535,15 +847,37 @@ final class AppModel {
     /// Drops pins, archives, and names whose conversations are gone, after a successful scan.
     func pruneMissingPins() {
         guard !store.isLoading, store.loadError == nil else { return }
-        let remainingPins = pruningMissing(settings.pinnedConversations)
+        // A missing folder lists nothing without an error; that is no proof
+        // the pinned chats are gone.
+        guard FileManager.default.fileExists(atPath: store.root.path) else { return }
+        let held = sharedListKeys()
+        settings.reloadSharedLists()
+        for key in sharedListKeys().subtracting(held) where sharedArrivals[key] == nil {
+            sharedArrivals[key] = store.scanSequence
+        }
+        let remainingPins = pruningMissing(settings.pinnedConversations, list: "pin")
         if remainingPins != settings.pinnedConversations {
             settings.pinnedConversations = remainingPins
         }
-        let remainingProjectPins = pruningMissingProjects(settings.pinnedProjects)
+        // Earlier builds added a Sigil worktree as its own project, which
+        // could then be pinned or left open. Each becomes its project.
+        let remainingAdded = SidebarOrganization.foldingWorktrees(
+            settings.addedProjects, path: \.path,
+            moving: { AddedProject(path: $1, addedAt: $0.addedAt) }, samePath: samePath
+        ).filter { Self.isUsableDirectory(URL(fileURLWithPath: $0.path)) }
+        if remainingAdded != settings.addedProjects {
+            settings.addedProjects = remainingAdded
+        }
+        let remainingProjectPins = pruningMissingProjects(
+            SidebarOrganization.foldingWorktrees(
+                settings.pinnedProjects, path: { $0 }, moving: { $1 }, samePath: samePath))
         if remainingProjectPins != settings.pinnedProjects {
             settings.pinnedProjects = remainingProjectPins
         }
-        let remainingArchives = pruningMissing(settings.archivedConversations)
+        if let project = SigilWorktree.projectPath(of: settings.focusedProjectPath) {
+            settings.focusedProjectPath = project
+        }
+        let remainingArchives = pruningMissing(settings.archivedConversations, list: "archive")
         if remainingArchives != settings.archivedConversations {
             settings.archivedConversations = remainingArchives
         }
@@ -554,11 +888,33 @@ final class AppModel {
         let focused = settings.focusedProjectPath
         if !focused.isEmpty,
             !SidebarOrganization.isSentinel(focused),
-            !store.sessions.contains(where: { samePath($0.cwd, focused) })
+            !store.sessions.contains(where: { inProject($0.cwd, focused) }),
+            !isAddedProject(focused)
         {
             settings.focusedProjectPath = ""
         }
+        sharedArrivals = sharedArrivals.filter { $0.value >= store.appliedScanSequence }
         migrateLegacyPanelNotes()
+    }
+
+    /// One key per entry in the lists running copies share, tagged by list.
+    private func sharedListKeys() -> Set<String> {
+        Set(settings.pinnedConversations.map { sharedKey("pin", $0.sessionID, $0.cwd) })
+            .union(settings.pinnedProjects.map { sharedKey("project", $0) })
+            .union(settings.archivedConversations.map { sharedKey("archive", $0.sessionID, $0.cwd) })
+            .union(settings.conversationNames.map { sharedKey("name", $0.sessionID, $0.cwd) })
+    }
+
+    private func sharedKey(_ parts: String...) -> String {
+        parts.joined(separator: "\u{0}")
+    }
+
+    /// True while the shown scan began before this copy read the entry from
+    /// another copy. That copy may have created the conversation after the
+    /// scan started, so a missing match is not yet proof the entry is stale.
+    private func awaitsScan(_ key: String) -> Bool {
+        guard let seen = sharedArrivals[key] else { return false }
+        return store.appliedScanSequence <= seen
     }
 
     /// Pruning and legacy-note migration follow the store's own loading, not a
@@ -572,26 +928,37 @@ final class AppModel {
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                if !self.store.isLoading { self.pruneMissingPins() }
+                if !self.store.isLoading {
+                    self.pruneMissingPins()
+                    // Native history is loaded asynchronously. A startup's
+                    // first restoration attempt may precede the first scan.
+                    if !self.deferredOpenTabs.isEmpty { self.restoreOpenTabs() }
+                }
                 self.observeStoreForHousekeeping()
             }
         }
     }
 
     /// One-time move of UserDefaults folder notes onto per-conversation files.
-    /// Each folder note lands on the newest conversation in that folder; when
-    /// that conversation already has a note the legacy text is appended, not
-    /// dropped. Folders with no conversation yet keep their entry for a later
-    /// launch.
+    /// Each folder note lands on the newest conversation the sidebar lists in
+    /// that folder (an open one first); when that conversation already has a
+    /// note the legacy text is appended, not dropped. Folders with no listed
+    /// conversation yet, or whose note file could not be written, keep their
+    /// entry for a later launch.
     func migrateLegacyPanelNotes() {
         let legacy = panel.legacyFolderNotes
         guard !legacy.isEmpty else { return }
         var remaining = legacy
+        var moved: [String: GrokSession] = [:]
         for (folder, text) in legacy {
+            let listed = store.sessions.filter {
+                samePath($0.cwd, folder) && !isArchived($0) && passesSidebarFilters($0)
+            }
+            let newest = { (sessions: [GrokSession]) in
+                sessions.max(by: { $0.updatedAt < $1.updatedAt })
+            }
             guard !text.isEmpty,
-                let session = store.sessions
-                    .filter({ samePath($0.cwd, folder) })
-                    .max(by: { $0.updatedAt < $1.updatedAt })
+                let session = newest(listed.filter { isOpen($0) }) ?? newest(listed)
             else { continue }
             let existing = panel.notes(forSessionID: session.id, cwd: session.cwd)
             let section = "\n\n---\n\n" + text
@@ -602,45 +969,64 @@ final class AppModel {
             } else if existing != text && !existing.hasSuffix(section) {
                 panel.setNotes(existing + section, forSessionID: session.id, cwd: session.cwd)
             }
-            remaining.removeValue(forKey: folder)
+            moved[folder] = session
         }
-        if remaining.count != legacy.count {
+        if !moved.isEmpty {
             // Persist before the legacy source goes away: a crash between a
             // debounced write and clearing UserDefaults would lose the note.
             panel.flushNotes()
-            panel.setLegacyFolderNotes(remaining)
+            for (folder, session) in moved
+            where panel.notesStore.isSaved(for: session.id, cwd: session.cwd) {
+                remaining.removeValue(forKey: folder)
+            }
+            if remaining.count != legacy.count {
+                panel.setLegacyFolderNotes(remaining)
+            }
         }
     }
 
-    private func pruningMissing(_ entries: [OpenTabsSnapshot.Entry]) -> [OpenTabsSnapshot.Entry] {
+    private func pruningMissing(
+        _ entries: [OpenTabsSnapshot.Entry], list: String
+    ) -> [OpenTabsSnapshot.Entry] {
         entries.filter { entry in
-            store.sessions.contains { $0.id == entry.sessionID && samePath($0.cwd, entry.cwd) }
+            isNativeHistoryID(sidebarID(entry))
+                || store.sessions.contains { $0.id == entry.sessionID && samePath($0.cwd, entry.cwd) }
                 || tabs.contains { tabMatches($0, sessionID: entry.sessionID, cwd: entry.cwd) }
+                || awaitsScan(sharedKey(list, entry.sessionID, entry.cwd))
         }
     }
 
     private func pruningMissingProjects(_ paths: [String]) -> [String] {
         paths.filter { path in
-            store.sessions.contains { samePath($0.cwd, path) }
-                || tabs.contains { samePath($0.workingDirectory.path, path) }
+            store.sessions.contains { inProject($0.cwd, path) }
+                || tabs.contains { inProject($0.workingDirectory.path, path) }
+                || isAddedProject(path)
+                || awaitsScan(sharedKey("project", path))
         }
+    }
+
+    private func isNativeHistoryID(_ id: String) -> Bool {
+        [CLIProvider.claudeCode, .codex].contains { id.hasPrefix($0.rawValue + ":") }
     }
 
     private func pruningMissingNames(_ names: [ConversationName]) -> [ConversationName] {
         names.filter { record in
-            store.sessions.contains { $0.id == record.sessionID && samePath($0.cwd, record.cwd) }
+            isNativeHistoryID(record.sessionID)
+                || store.sessions.contains { $0.id == record.sessionID && samePath($0.cwd, record.cwd) }
                 || tabs.contains { tabMatches($0, sessionID: record.sessionID, cwd: record.cwd) }
+                || awaitsScan(sharedKey("name", record.sessionID, record.cwd))
         }
     }
 
     /// The deleted conversation still sits in `store` until the next scan.
     private func dropOrphanedProjectPin(for session: GrokSession) {
         let othersRemain =
-            store.sessions.contains { $0.id != session.id && samePath($0.cwd, session.cwd) }
-            || tabs.contains { samePath($0.workingDirectory.path, session.cwd) }
+            store.sessions.contains { $0.id != session.id && inProject($0.cwd, session.projectPath) }
+            || tabs.contains { inProject($0.workingDirectory.path, session.projectPath) }
         if !othersRemain {
+            settings.reloadSharedLists()
             settings.pinnedProjects = SidebarOrganization.removing(
-                session.cwd, from: settings.pinnedProjects, samePath: samePath)
+                session.projectPath, from: settings.pinnedProjects, samePath: samePath)
         }
     }
 
@@ -654,6 +1040,16 @@ final class AppModel {
             for: session, in: settings.conversationNames, samePath: samePath)
     }
 
+    private func title(for session: GrokSession, in index: SidebarIndex) -> String {
+        ConversationNaming.displayedTitle(for: session, customName: customName(for: session, in: index))
+    }
+
+    /// `customName(for:)` from the pass's index: the first record, normalized.
+    private func customName(for session: GrokSession, in index: SidebarIndex) -> String? {
+        index.names.first(sessionID: session.id, cwd: session.cwd, samePath: samePath)
+            .flatMap { ConversationNaming.normalized($0.name) }
+    }
+
     func hasCustomName(_ session: GrokSession) -> Bool {
         customName(for: session) != nil
     }
@@ -661,6 +1057,7 @@ final class AppModel {
     /// Empty, whitespace, or a name equal to the CLI title clears the override
     /// (a matching submit with no overlay is a no-op). Otherwise stores the name.
     func rename(_ session: GrokSession, to raw: String) {
+        settings.reloadSharedLists()
         let next = ConversationNaming.setting(
             raw, on: session, onto: settings.conversationNames, samePath: samePath)
         guard
@@ -691,6 +1088,7 @@ final class AppModel {
         if renamingSessionKey == sessionKey(live) {
             endRenameSession()
         }
+        settings.reloadSharedLists()
         let next = ConversationNaming.removing(
             live, from: settings.conversationNames, samePath: samePath)
         guard
@@ -704,8 +1102,9 @@ final class AppModel {
     /// Single draft owner for a fresh key. prepareRename only hands off the
     /// surface — it must not rewrite `renameDraft`, or typing that lands
     /// before that task runs is clobbered.
-    func beginRename(_ session: GrokSession) {
+    func beginRename(_ session: GrokSession, returnFocus: RenameReturnFocus = .list) {
         isSidebarVisible = true
+        renameReturnFocus = returnFocus
         let key = sessionKey(session)
         let isFreshKey = renamingSessionKey != key
         renameAlertDismissGeneration += 1
@@ -1079,11 +1478,6 @@ final class AppModel {
         !isFreshKey && !showRenameAlert && preparedSurface == .prompt
     }
 
-    /// Focus steal may suppress blur-commit; the select-all wait must not.
-    static func shouldSuppressBlurCommitDuringRenameSelectAllWait() -> Bool {
-        false
-    }
-
     /// One frame between retries. The first ready check is immediate.
     static let renameSelectAllRetryInterval: Duration = .milliseconds(16)
 
@@ -1230,10 +1624,48 @@ final class AppModel {
 
     /// The conversation on screen, when the store knows it. Menu-bar Rename uses this.
     func sessionForSelectedTab() -> GrokSession? {
-        guard let tab = selectedTab, let id = tab.sessionID else { return nil }
+        guard let tab = selectedTab else { return nil }
+        return session(for: tab)
+    }
+
+    /// The saved Grok chat behind `tab`, when the store knows it.
+    func session(for tab: TerminalTab) -> GrokSession? {
+        guard let id = tab.sessionID else { return nil }
         return store.sessions.first {
             $0.id == id && samePath($0.cwd, tab.workingDirectory.path)
         }
+    }
+
+    /// Output and status changes reach the phone through the remote stream.
+    private func wireRemoteStream(_ tab: TerminalTab) {
+        tab.onActivityChange = { [weak self, weak tab] in
+            guard let self, let tab else { return }
+            self.remoteControl.noteChange()
+            self.remoteControl.noteTab(tab, model: self)
+        }
+        tab.controller.onRemoteOutput = { [weak self, weak tab] in
+            guard let self, let tab else { return }
+            if self.selectedTabID == tab.id { self.remoteControl.noteChange() }
+            self.remoteControl.noteTab(tab, model: self)
+        }
+    }
+
+    /// The phone's rename. A saved chat keeps the name; any other tab keeps it
+    /// for as long as it is open. An empty name restores the default.
+    func renameFromRemote(_ tab: TerminalTab, to name: String) {
+        if let session = session(for: tab) {
+            rename(session, to: name)
+        } else {
+            tab.sessionTitle = name.isEmpty ? nil : name
+        }
+    }
+
+    /// The phone's archive: never asks, because a modal alert would block the
+    /// remote loop. Returns false for a tab with no saved chat to archive.
+    func archiveFromRemote(_ tab: TerminalTab) -> Bool {
+        guard let session = session(for: tab) else { return false }
+        archiveWithoutAsking([session])
+        return true
     }
 
     /// A tab's label. New sessions start out named after their folder; once the CLI
@@ -1267,29 +1699,94 @@ final class AppModel {
     func requestNewSession(in directory: URL? = nil) {
         pendingSessionDirectory = directory ?? newSessionDirectory
         isShowingNewSessionSheet = true
+        if !Self.isRunningAutomatedTests {
+            Task { [weak self] in await self?.refreshProviderInstallations() }
+        }
+    }
+
+    /// CLI lookup and version checks never block window drawing or input.
+    func refreshProviderInstallations() async {
+        let generation = UUID()
+        providerCheckGeneration = generation
+        let executable = settings.executableURL
+        let probe = providerProbe
+        // A prior result does not authorize launches while its replacement is pending.
+        checkingProviders = Set(CLIProvider.allCases)
+        providerInstallations.removeAll()
+        defer {
+            if providerCheckGeneration == generation { checkingProviders.removeAll() }
+        }
+        let found = await withTaskGroup(of: (CLIProvider, ProviderInstallation).self) { group in
+            for provider in CLIProvider.allCases {
+                group.addTask {
+                    let result = await probe(provider, provider == .grokBuild ? executable : nil)
+                    return (provider, result)
+                }
+            }
+            var result: [CLIProvider: ProviderInstallation] = [:]
+            for await (provider, installation) in group { result[provider] = installation }
+            return result
+        }
+        guard providerCheckGeneration == generation, !Task.isCancelled else { return }
+        // Publish together: restoration must keep saved order, not probe completion
+        // order, including when a history scan finishes while checks are in flight.
+        providerInstallations = found
+        checkingProviders.removeAll()
+        if !deferredOpenTabs.isEmpty { restoreOpenTabs() }
+    }
+
+    /// Shared by desktop, phone, and restoration. An absent result is unknown,
+    /// never permission to launch. Existing open tabs remain usable during checks.
+    func providerLaunchProblem(_ provider: CLIProvider) -> String? {
+        if provider == .grokBuild, !settings.executableExists {
+            return "Restore the Grok CLI on your Mac, then try again."
+        }
+        guard !checkingProviders.contains(provider), let installation = providerInstallations[provider] else {
+            return "Checking \(provider.name)… Try again shortly."
+        }
+        guard installation.isAvailable else {
+            return installation.problem ?? "\(provider.name) is unavailable."
+        }
+        return nil
+    }
+
+    private func canLaunchProvider(_ provider: CLIProvider) -> Bool {
+        guard let problem = providerLaunchProblem(provider) else { return true }
+        showError(title: "\(provider.name) is unavailable", message: problem)
+        return false
+    }
+
+    /// ⇧⌘N: choose the folder first, then open the new-session sheet on it.
+    func requestNewSessionInFolder(choose: () -> URL?) {
+        guard let folder = choose() else { return }
+        requestNewSession(in: folder)
     }
 
     @discardableResult
     func newTab(
-        in directory: URL, model: String? = nil, effort: String? = nil,
+        in directory: URL, model: String? = nil, effort: String? = nil, fastMode: Bool = false,
         provider: CLIProvider = .grokBuild
     ) -> TerminalTab? {
-        guard provider != .grokBuild || settings.executableExists else {
-            showError(title: "Grok CLI is unavailable", message: "Choose it in Settings, then try again.")
-            return nil
-        }
+        guard canLaunchProvider(provider) else { return nil }
         guard Self.isUsableDirectory(directory) else {
             showError(title: "Folder is unavailable", message: "Choose another folder.")
             return nil
         }
+        guard canSignIn(provider), let providerEnvironment = providerEnvironment(for: provider) else {
+            return nil
+        }
+        // Settings holds Grok's defaults. Another CLI keeps its own unless the caller names one.
+        let isGrok = provider == .grokBuild
         let spec = GrokLaunchSpec(
-            executable: provider == .grokBuild ? settings.executableURL : nil,
+            executable: isGrok ? settings.executableURL : nil,
             workingDirectory: directory,
             mode: .new(sessionID: UUID()),
-            model: (model ?? settings.model).nilIfEmpty,
-            reasoningEffort: (effort ?? settings.effort).nilIfEmpty,
+            model: (model ?? (isGrok ? settings.model : "")).nilIfEmpty,
+            reasoningEffort: (effort ?? (isGrok ? settings.effort : "")).nilIfEmpty,
+            fastMode: fastMode,
             themeName: settings.theme.grokThemeName,
             themeVariables: settings.theme.grokThemeEnvironment,
+            providerEnvironment: providerEnvironment,
             provider: provider
         )
         return add(spec)
@@ -1303,10 +1800,7 @@ final class AppModel {
             select(existing.id)
             return
         }
-        guard settings.executableExists else {
-            showError(title: "Grok CLI is unavailable", message: "Choose it in Settings, then try again.")
-            return
-        }
+        guard canLaunchProvider(session.provider) else { return }
         let workingDirectory = URL(fileURLWithPath: session.cwd)
         guard Self.isUsableDirectory(workingDirectory) else {
             showError(
@@ -1316,13 +1810,14 @@ final class AppModel {
             return
         }
         let spec = GrokLaunchSpec(
-            executable: settings.executableURL,
+            executable: session.provider == .grokBuild ? settings.executableURL : nil,
             workingDirectory: workingDirectory,
-            mode: .resume(sessionID: session.id),
-            model: settings.model.nilIfEmpty,
-            reasoningEffort: settings.effort.nilIfEmpty,
+            mode: .resume(sessionID: session.nativeSessionID),
+            model: session.provider == .grokBuild ? settings.model.nilIfEmpty : nil,
+            reasoningEffort: session.provider == .grokBuild ? settings.effort.nilIfEmpty : nil,
             themeName: settings.theme.grokThemeName,
-            themeVariables: settings.theme.grokThemeEnvironment
+            themeVariables: settings.theme.grokThemeEnvironment,
+            provider: session.provider, sessionFile: session.provider == .grokBuild ? nil : session.directory
         )
         let tab = add(spec)
         tab.sessionTitle = title(for: session)
@@ -1333,10 +1828,25 @@ final class AppModel {
         let tabID = UUID()
         let tab = TerminalTab(id: tabID, spec: tagged(spec, tabID: tabID), settings: settings)
         tab.onUnseenActivityChange = { [weak self] in self?.refreshDockIndicator() }
+        tab.onSettle = { [weak self, weak tab] in
+            if let self, let tab { self.restartForThemeWhenSettled(tab) }
+        }
+        wireRemoteStream(tab)
         tabs.append(tab)
         selectedTabID = tab.id
         if !isRestoringTabs { clearDeferredSelection() }
         if !isRestoringTabs { rememberDefaultDirectory(spec.workingDirectory) }
+        // Grok writes a session the sidebar finds. Other CLIs do not, so
+        // record their folder or it never shows up in Projects.
+        if !isRestoringTabs, spec.provider != .grokBuild, !isEphemeral(path: spec.workingDirectory.path) {
+            addProject(spec.workingDirectory)
+        }
+        // Opened by hand now, so closing it must not bring the saved entry back.
+        if !isRestoringTabs, let sessionID = tab.sessionID {
+            deferredOpenTabs.removeAll {
+                entryMatches($0, sessionID: sessionID, cwd: spec.workingDirectory.path)
+            }
+        }
         let id = tab.id
         tab.start(isSelected: { [weak self] in
             self?.selectedTabID == id && NSApp.isActive
@@ -1350,10 +1860,13 @@ final class AppModel {
     func restartTab(id: TerminalTab.ID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let old = tabs[index]
-        guard old.spec.provider != .grokBuild || settings.executableExists else {
-            showError(title: "Grok CLI is unavailable", message: "Choose it in Settings, then try again.")
+        guard old.spec.provider != .codex || old.sessionReference != nil else {
+            showError(
+                title: "Open this conversation from history",
+                message: "This tab's Codex session ID is not known. Find the conversation in the sidebar.")
             return
         }
+        guard canLaunchProvider(old.spec.provider) else { return }
         // `.new` tabs already have a UUID the CLI wrote a session directory for.
         guard old.spec.provider != .grokBuild || old.sessionID != nil else { return }
         guard Self.isUsableDirectory(old.workingDirectory) else {
@@ -1363,6 +1876,7 @@ final class AppModel {
             )
             return
         }
+        guard canSignIn(old.spec.provider) else { return }
         let wasSelected = selectedTabID == old.id
         tabBridge?.noteTabClosed(id: old.id)
         old.terminateAndWait()
@@ -1389,11 +1903,20 @@ final class AppModel {
             spec.themeName = settings.theme.grokThemeName
             spec.themeVariables = settings.theme.grokThemeEnvironment
         }
+        if spec.provider != .grokBuild, let reference = old.sessionReference {
+            spec.mode = .resume(sessionID: reference.sessionID)
+        }
+        // A restart follows the current Kimi sign-in, not the one it started with.
+        spec.providerEnvironment = providerEnvironment(for: spec.provider) ?? [:]
         spec.bridgeTabID = nil
         spec.bridgeSocketPath = nil
         let tabID = UUID()
         let tab = TerminalTab(id: tabID, spec: tagged(spec, tabID: tabID), settings: settings)
         tab.onUnseenActivityChange = { [weak self] in self?.refreshDockIndicator() }
+        tab.onSettle = { [weak self, weak tab] in
+            if let self, let tab { self.restartForThemeWhenSettled(tab) }
+        }
+        wireRemoteStream(tab)
         tab.sessionTitle = old.sessionTitle
         tab.restoreUnseenActivity(from: old)
         let newID = tab.id
@@ -1406,7 +1929,16 @@ final class AppModel {
 
     func closeTab(_ id: TerminalTab.ID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        removeTab(at: index)
+        refreshDockIndicator()
+        persistOpenTabs()
+    }
+
+    /// Everything closing a tab does except writing the open-tab list.
+    private func removeTab(at index: Int) {
+        let id = tabs[index].id
         tabBridge?.noteTabClosed(id: id)
+        remoteControl.forgetTab(id)
         // Do not let a quick reopen overlap two Grok processes on one session.
         tabs[index].terminateAndWait()
         tabs.remove(at: index)
@@ -1419,23 +1951,28 @@ final class AppModel {
                 selectedTabID = nil
             }
         }
-        refreshDockIndicator()
-        persistOpenTabs()
+    }
+
+    /// Stops several tabs against one shared deadline. Every child gets SIGTERM
+    /// first, so a child that ignores it does not make the next one wait.
+    private func stopAndWait(_ stopping: [TerminalTab]) {
+        for tab in stopping { tab.terminate() }
+        let deadline = ContinuousClock.now + .milliseconds(1500)
+        for tab in stopping {
+            // A short floor still reaps a child killed after the deadline.
+            tab.terminateAndWait(timeout: max(deadline - .now, .milliseconds(100)))
+        }
     }
 
     /// User-facing close: warn when the agent is mid-turn so a click does not kill work.
     func requestCloseTab(_ id: TerminalTab.ID) {
         guard let tab = tabs.first(where: { $0.id == id }) else { return }
-        if tab.shouldWarnBeforeStopping, !confirmStopWorking() { return }
+        if let prompt = StopWorkingPrompt(action: .closeTab, stopping: [tab]),
+            !confirmStop(prompt)
+        {
+            return
+        }
         closeTab(id)
-    }
-
-    private static func promptToStopWorking() -> Bool {
-        let alert = NSAlert()
-        alert.messageText = "This session is still working."
-        alert.addButton(withTitle: "Close Tab")
-        alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn
     }
 
     func closeSelectedTab() {
@@ -1467,6 +2004,24 @@ final class AppModel {
         }
     }
 
+    /// Selection can precede AppKit attachment, after the window already became
+    /// key. Retry that pending request when its actual terminal view arrives.
+    func terminalViewDidAttach(tabID: TerminalTab.ID) {
+        guard needsTerminalFocus, selectedTab?.id == tabID else { return }
+        focusSelectedTerminal()
+    }
+
+    /// Hiding a column removes its views. When one of them had focus, the
+    /// window would be left with no first responder and every key would beep.
+    private func refocusTerminalAfterHiding(_ column: KeyboardFocus.Column) {
+        guard let view = selectedTab?.controller.view, let window = view.window else { return }
+        let focus = KeyboardFocus.classify(
+            window.firstResponder, in: window, sessionView: view,
+            panelShellView: panel.shell?.view,
+            sidebarHasFocus: isSidebarFocused || isSidebarDividerFocused)
+        if focus.needsTerminalAfterHiding(column) { focusSelectedTerminal() }
+    }
+
     func select(index: Int) {
         guard tabs.indices.contains(index) else { return }
         select(tabs[index].id)
@@ -1479,19 +2034,6 @@ final class AppModel {
         select(tabs[next].id)
     }
 
-    func closeAllTabs() {
-        for tab in tabs {
-            tabBridge?.noteTabClosed(id: tab.id)
-            tab.terminateAndWait()
-        }
-        tabs.removeAll()
-        selectedTabID = nil
-        deferredOpenTabs.removeAll()
-        clearDeferredSelection()
-        refreshDockIndicator()
-        persistOpenTabs()
-    }
-
     /// Quit path: no `grok` process may outlive the app, and there is no run loop
     /// left to finish an asynchronous kill. Does not persist — the last user
     /// mutation already wrote the tabs that should come back next launch.
@@ -1500,7 +2042,8 @@ final class AppModel {
         stopTabMessaging()
         panel.closeShellAndWait()
         panel.flushNotes()
-        for tab in tabs { tab.terminateAndWait() }
+        transcriptExports.stopAll()
+        stopAndWait(tabs)
         tabs.removeAll()
         selectedTabID = nil
         refreshDockIndicator()
@@ -1531,6 +2074,9 @@ final class AppModel {
             } else {
                 // Remove the global entry before stopping the working local server.
                 // A failed removal therefore leaves all three states consistently on.
+                // The registration is shared, so only the copy holding the socket
+                // may remove it; taking the socket throws while another copy has it.
+                try startTabMessaging()
                 try await removeTabMessagingRegistration()
                 stopTabMessaging()
             }
@@ -1606,19 +2152,31 @@ final class AppModel {
         guard let helper = mcpBinaryOverride ?? BridgeRegistration.bundledMCPBinary else {
             throw TabMessagingChangeError.helperMissing
         }
-        try await Task.detached(priority: .userInitiated) {
+        try await Self.runOffCooperativePool {
             let registration = BridgeRegistration(executable: executable, runner: runner)
             try registration.install(mcpBinary: helper)
-        }.value
+        }
     }
 
     private func removeTabMessagingRegistration() async throws {
         let executable = settings.executableURL
         let runner = registrationRunner
-        try await Task.detached(priority: .userInitiated) {
+        try await Self.runOffCooperativePool {
             let registration = BridgeRegistration(executable: executable, runner: runner)
             try registration.remove()
-        }.value
+        }
+    }
+
+    /// `grok mcp` waits on semaphores for up to about a minute. A Swift task
+    /// would park one of the few cooperative-pool threads for that long.
+    private nonisolated static func runOffCooperativePool(
+        _ work: @escaping @Sendable () throws -> Void
+    ) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(with: Result { try work() })
+            }
+        }
     }
 
     private func stopTabMessaging() {
@@ -1744,8 +2302,13 @@ final class AppModel {
         retryPendingTerminalFocus()
     }
 
+    /// A panel shell opened while the sheet was up takes focus once it closes.
+    func newSessionSheetDidClose() {
+        if needsPanelShellFocus { focusPanelShell() } else { focusSelectedTerminal() }
+    }
+
     func windowDidBecomeKey() {
-        retryPendingTerminalFocus()
+        if needsPanelShellFocus { focusPanelShell() } else { retryPendingTerminalFocus() }
     }
 
     private func retryPendingTerminalFocus() {
@@ -1769,31 +2332,67 @@ final class AppModel {
 
     /// Shows `mode` in the panel, or hides the panel when that tool is already up.
     func showPanel(_ mode: RightPanelMode) {
-        panel.toggle(mode, in: currentDirectory)
+        let wasVisible = panel.isVisible
+        let wasShell = wasVisible && panel.mode == .shell
+        panel.toggle(mode)
         preparePanel()
+        // Switching away from the shell removes its view, just as hiding does.
+        let isShell = panel.isVisible && panel.mode == .shell
+        if wasVisible, !panel.isVisible || (wasShell && !isShell) {
+            refocusTerminalAfterHiding(.panel)
+        }
+        requestPanelShellFocusIfShown()
     }
 
     /// Opens or closes the panel on whatever tool it last showed.
     func togglePanel() {
-        panel.toggle(nil, in: currentDirectory)
+        let wasVisible = panel.isVisible
+        panel.toggle(nil)
         preparePanel()
+        if wasVisible, !panel.isVisible { refocusTerminalAfterHiding(.panel) }
+        requestPanelShellFocusIfShown()
     }
 
     /// Kills the scratch shell and starts a new one in the current folder.
     func restartPanelShell() {
+        if let prompt = StopWorkingPrompt(
+            action: .restartShell, stopping: [], panelJob: panel.shellHasForegroundJob),
+            !confirmStop(prompt)
+        {
+            return
+        }
         panel.restartShell(
             in: currentDirectory, theme: settings.theme, fontSize: settings.fontSize)
+        panel.shell?.optionAsMetaKey = settings.optionAsMetaKey
+        requestPanelShellFocusIfShown()
+    }
+
+    /// Opening the shell means typing into it, not into the tab behind it.
+    private func requestPanelShellFocusIfShown() {
+        needsPanelShellFocus = panel.isVisible && panel.mode == .shell
+        focusPanelShell()
+    }
+
+    /// Moves focus into the panel shell once its view is in the window. The
+    /// panel calls this again when a new shell view appears.
+    func focusPanelShell() {
+        guard needsPanelShellFocus else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.needsPanelShellFocus, !self.isShowingNewSessionSheet,
+                self.panel.isVisible, self.panel.mode == .shell, let shell = self.panel.shell,
+                let window = shell.view.window, window.attachedSheet == nil
+            else { return }
+            self.needsPanelShellFocus = false
+            shell.focus()
+        }
     }
 
     /// Starts whatever the visible tool needs, with the app's own theme and size.
     private func preparePanel() {
-        guard panel.isVisible else { return }
-        if panel.mode == .shell {
-            panel.startShellIfNeeded(
-                in: currentDirectory, theme: settings.theme, fontSize: settings.fontSize)
-        } else {
-            panel.prepare(in: currentDirectory)
-        }
+        guard panel.isVisible, panel.mode == .shell else { return }
+        panel.startShellIfNeeded(
+            in: currentDirectory, theme: settings.theme, fontSize: settings.fontSize)
+        panel.shell?.optionAsMetaKey = settings.optionAsMetaKey
     }
 
     // MARK: - Appearance
@@ -1808,6 +2407,11 @@ final class AppModel {
         applyAppearance()
     }
 
+    /// The View menu turns each font item off where it would do nothing.
+    var canIncreaseFontSize: Bool { settings.fontSize < 32 }
+    var canDecreaseFontSize: Bool { settings.fontSize > 8 }
+    var canResetFontSize: Bool { settings.fontSize != 13 }
+
     func applyAppearance() {
         // Sheets, alerts, menus, and the Settings window are system-rendered;
         // they follow the app appearance, so the shell picks it, not macOS.
@@ -1820,6 +2424,13 @@ final class AppModel {
         panel.shell?.apply(theme: settings.theme)
     }
 
+    func applyOptionAsMetaKey() {
+        for tab in tabs {
+            tab.controller.optionAsMetaKey = settings.optionAsMetaKey
+        }
+        panel.shell?.optionAsMetaKey = settings.optionAsMetaKey
+    }
+
     /// The Grok TUI reads `GROK_THEME` when the process starts. Recolouring
     /// SwiftTerm only changes the frame around it, so idle tabs are relaunched.
     /// A tab that is mid-turn is left alone so a theme click does not kill work.
@@ -1829,8 +2440,43 @@ final class AppModel {
         let vars = settings.theme.grokThemeEnvironment
         for tab in tabs where tab.spec.provider == .grokBuild {
             if tab.spec.themeName == name, tab.spec.themeVariables == vars { continue }
-            if tab.shouldWarnBeforeStopping { continue }
+            // A relaunch would drop queued messages and fail pending questions.
+            if tab.shouldWarnBeforeStopping || !tab.bridgeInbox.isEmpty {
+                themeRestartsWhenSettled.insert(tab.id)
+                continue
+            }
             restartTab(id: tab.id)
+        }
+    }
+
+    /// Asks before stopping work, then lets any theme relaunch that came due
+    /// during the prompt run against the answer.
+    private func confirmStop(_ prompt: StopWorkingPrompt) -> Bool {
+        isAskingToStop = true
+        defer {
+            isAskingToStop = false
+            for tab in tabs where themeRestartsWhenSettled.contains(tab.id) {
+                restartForThemeWhenSettled(tab)
+            }
+        }
+        return confirmStopWorking(prompt)
+    }
+
+    /// A tab that kept the old theme because it was busy relaunches on the new
+    /// one once it settles, unless the theme was changed back meanwhile.
+    private func restartForThemeWhenSettled(_ tab: TerminalTab) {
+        guard themeRestartsWhenSettled.contains(tab.id) else { return }
+        DispatchQueue.main.async { [weak self, weak tab] in
+            guard let self, let tab, !self.isAskingToStop, self.tabs.contains(where: { $0 === tab }),
+                !tab.shouldWarnBeforeStopping, tab.bridgeInbox.isEmpty
+            else { return }
+            self.themeRestartsWhenSettled.remove(tab.id)
+            let theme = self.settings.theme
+            guard
+                tab.spec.themeName != theme.grokThemeName
+                    || tab.spec.themeVariables != theme.grokThemeEnvironment
+            else { return }
+            self.restartTab(id: tab.id)
         }
     }
 
@@ -1849,7 +2495,7 @@ final class AppModel {
 
     func copySessionID(_ session: GrokSession) {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(session.id, forType: .string)
+        NSPasteboard.general.setString(session.nativeSessionID, forType: .string)
     }
 
     /// Shows the thread list if it is hidden, then asks the search field for focus.
@@ -1858,13 +2504,25 @@ final class AppModel {
         searchFocusToken += 1
     }
 
+    /// True once per Find Conversations request. The sidebar asks on mount and
+    /// on each new token; only a request it has not acted on moves focus.
+    func consumeSearchFocusRequest() -> Bool {
+        guard searchFocusToken > consumedSearchFocusToken else { return false }
+        consumedSearchFocusToken = searchFocusToken
+        return true
+    }
+
     // MARK: - Find
 
-    func toggleFindBar() {
+    /// Bumped by Cmd-F while the bar is open so its field takes focus again.
+    private(set) var findFocusToken = 0
+
+    /// Cmd-F opens the bar, or refocuses it; Escape and the close button dismiss it.
+    func showFindBar() {
+        guard selectedTab != nil else { return }
         if isFindBarVisible {
-            dismissFindBar()
+            findFocusToken += 1
         } else {
-            guard selectedTab != nil else { return }
             isFindBarVisible = true
         }
     }
@@ -1914,7 +2572,8 @@ final class AppModel {
     /// Closes any tab showing `session`, then moves its directory to the Trash.
     /// A permanent delete would be unrecoverable from here.
     @discardableResult
-    func deleteConversation(_ session: GrokSession) -> Bool {
+    func deleteConversation(_ session: GrokSession, reload: Bool = true) -> Bool {
+        guard session.provider.capabilities.delete else { return false }
         let matchingTabs = tabs.filter {
             tabMatches($0, sessionID: session.id, cwd: session.cwd)
         }
@@ -1973,7 +2632,7 @@ final class AppModel {
             }
             refreshDockIndicator()
             persistOpenTabs()
-            Task { await store.reload() }
+            if reload { Task { await store.reload() } }
             return true
         } catch {
             var replacementForSelection: TerminalTab.ID?
@@ -1997,7 +2656,9 @@ final class AppModel {
     @discardableResult
     func deleteConversations(_ sessions: [GrokSession]) -> Int {
         var deleted = 0
-        for session in sessions where deleteConversation(session) { deleted += 1 }
+        for session in sessions where deleteConversation(session, reload: false) { deleted += 1 }
+        // One rescan for the whole selection, not one per chat.
+        if deleted > 0 { Task { await store.reload() } }
         return deleted
     }
 
@@ -2006,6 +2667,7 @@ final class AppModel {
     /// The save panel stays on the main thread; the CLI itself runs off it so a
     /// long export cannot freeze the window.
     func exportTranscript(_ session: GrokSession) {
+        guard session.provider.capabilities.export else { return }
         exportTranscript(
             sessionID: session.id,
             title: title(for: session),
@@ -2013,10 +2675,14 @@ final class AppModel {
         )
     }
 
-    var canExportSelectedTranscript: Bool { selectedTab?.sessionID != nil }
+    var canExportSelectedTranscript: Bool {
+        selectedTab.map { $0.spec.provider.capabilities.export && $0.sessionID != nil } ?? false
+    }
 
     func exportSelectedTranscript() {
-        guard let tab = selectedTab, let sessionID = tab.sessionID else { return }
+        guard let tab = selectedTab, tab.spec.provider.capabilities.export, let sessionID = tab.nativeSessionID else {
+            return
+        }
         exportTranscript(
             sessionID: sessionID,
             title: title(for: tab),
@@ -2029,14 +2695,22 @@ final class AppModel {
         panel.nameFieldStringValue = Self.transcriptFilename(for: title)
         panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        startTranscriptExport(sessionID: sessionID, output: url, workingDirectory: workingDirectory)
+    }
+
+    func startTranscriptExport(sessionID: String, output url: URL, workingDirectory: URL) {
         let executable = settings.executableURL
+        let exports = transcriptExports
+        let id = UUID()
         Task {
+            defer { exports.remove(id) }
             do {
                 try await Self.runTranscriptExport(
                     executable: executable,
                     sessionID: sessionID,
                     output: url,
-                    workingDirectory: workingDirectory
+                    workingDirectory: workingDirectory,
+                    onStart: { exports.add(id, process: $0, temporaryOutput: $1) }
                 )
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             } catch {
@@ -2050,7 +2724,8 @@ final class AppModel {
         sessionID: String,
         output: URL,
         workingDirectory: URL,
-        timeout: Duration = .seconds(300)
+        timeout: Duration = .seconds(300),
+        onStart: (@Sendable (Process, URL) -> Void)? = nil
     ) async throws {
         let task = Task.detached(priority: .userInitiated) {
             let temporaryOutput = output.deletingLastPathComponent().appendingPathComponent(
@@ -2085,6 +2760,7 @@ final class AppModel {
             }
             do {
                 try process.run()
+                onStart?(process, temporaryOutput)
                 try? pipe.fileHandleForWriting.close()
             } catch {
                 try? pipe.fileHandleForWriting.close()
@@ -2185,15 +2861,24 @@ final class AppModel {
             let snapshot = settings.openTabs
             deferredOpenTabs = snapshot.tabs
             if let selectedCWD = snapshot.selectedCWD, let selectedID = snapshot.selectedSessionID {
-                deferredSelectedEntry = .init(sessionID: selectedID, cwd: selectedCWD)
+                deferredSelectedEntry = .init(
+                    sessionID: selectedID, cwd: selectedCWD, provider: snapshot.selectedProvider ?? .grokBuild)
                 deferredLegacySelectedSessionID = nil
             } else {
                 deferredSelectedEntry = nil
                 deferredLegacySelectedSessionID = snapshot.selectedSessionID
             }
         }
-        guard settings.executableExists else { return }
+        // Native paths come from the initial history scan. Starting Grok first
+        // would reorder a mixed saved snapshot before those paths can be known.
+        // A completed (even failed) scan lets genuinely missing entries defer
+        // individually without holding back the available conversations.
+        if store.appliedScanSequence == 0, deferredOpenTabs.contains(where: { $0.provider != .grokBuild }) {
+            return
+        }
         let candidates = deferredOpenTabs
+        let previousSelection = selectedTabID
+        let hadSavedSelection = deferredSelectedEntry != nil || deferredLegacySelectedSessionID != nil
         deferredOpenTabs.removeAll()
         isRestoringTabs = true
         defer {
@@ -2203,24 +2888,34 @@ final class AppModel {
         var restoredSelection: TerminalTab.ID?
         for entry in candidates {
             if tabs.contains(where: {
-                tabMatches($0, sessionID: entry.sessionID, cwd: entry.cwd)
+                tabMatches($0, sessionID: sidebarID(entry), cwd: entry.cwd)
             }) {
                 continue
             }
-            let directory = GrokPaths.sessionDirectory(cwd: entry.cwd, sessionID: entry.sessionID)
+            let known = store.sessions.first { $0.id == sidebarID(entry) && samePath($0.cwd, entry.cwd) }
+            let directory =
+                entry.provider == .grokBuild
+                ? GrokPaths.sessionDirectory(cwd: entry.cwd, sessionID: entry.sessionID)
+                : known?.directory
             let workingDirectory = URL(fileURLWithPath: entry.cwd)
-            guard Self.isUsableDirectory(directory), Self.isUsableDirectory(workingDirectory) else {
+            let historyExists = directory.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
+            guard historyExists, Self.isUsableDirectory(workingDirectory),
+                providerLaunchProblem(entry.provider) == nil
+            else {
                 deferredOpenTabs.append(entry)
                 continue
             }
             let spec = GrokLaunchSpec(
-                executable: settings.executableURL,
+                executable: entry.provider == .grokBuild ? settings.executableURL : nil,
                 workingDirectory: workingDirectory,
                 mode: .resume(sessionID: entry.sessionID),
-                model: settings.model.nilIfEmpty,
-                reasoningEffort: settings.effort.nilIfEmpty,
+                model: entry.model.map(\.nilIfEmpty)
+                    ?? (entry.provider == .grokBuild ? settings.model.nilIfEmpty : nil),
+                reasoningEffort: entry.effort.map(\.nilIfEmpty)
+                    ?? (entry.provider == .grokBuild ? settings.effort.nilIfEmpty : nil),
                 themeName: settings.theme.grokThemeName,
-                themeVariables: settings.theme.grokThemeEnvironment
+                themeVariables: settings.theme.grokThemeEnvironment,
+                provider: entry.provider, sessionFile: entry.provider == .grokBuild ? nil : directory
             )
             let tab = add(spec)
             if deferredSelectedEntry.map({ sameEntry($0, entry) }) == true
@@ -2233,14 +2928,18 @@ final class AppModel {
         }
         if let restoredSelection {
             select(restoredSelection)
+        } else if !hadSavedSelection, let previousSelection, tabs.contains(where: { $0.id == previousSelection }) {
+            select(previousSelection)
         }
     }
 
     private func persistOpenTabs() {
         guard !isRestoringTabs else { return }
         var entries = tabs.compactMap { tab -> OpenTabsSnapshot.Entry? in
-            guard let sessionID = tab.sessionID else { return nil }
-            return OpenTabsSnapshot.Entry(sessionID: sessionID, cwd: tab.workingDirectory.path)
+            guard let sessionID = tab.nativeSessionID else { return nil }
+            return OpenTabsSnapshot.Entry(
+                sessionID: sessionID, cwd: tab.workingDirectory.path,
+                model: tab.spec.model ?? "", effort: tab.spec.reasoningEffort ?? "", provider: tab.spec.provider)
         }
         let liveKeys = Set(entries.map { entryKey($0) })
         entries.append(
@@ -2249,20 +2948,20 @@ final class AppModel {
             }
         )
         let liveSelection = selectedTab.flatMap { tab -> OpenTabsSnapshot.Entry? in
-            guard let sessionID = tab.sessionID else { return nil }
-            return .init(sessionID: sessionID, cwd: tab.workingDirectory.path)
+            guard let sessionID = tab.nativeSessionID else { return nil }
+            return .init(sessionID: sessionID, cwd: tab.workingDirectory.path, provider: tab.spec.provider)
         }
         let exactSelection = deferredSelectedEntry ?? liveSelection
         settings.openTabs = OpenTabsSnapshot(
             tabs: entries,
             selectedSessionID: exactSelection?.sessionID ?? deferredLegacySelectedSessionID,
-            selectedCWD: exactSelection?.cwd
+            selectedCWD: exactSelection?.cwd, selectedProvider: exactSelection?.provider
         )
     }
 
     private func rememberDefaultDirectory(_ directory: URL) {
         if isEphemeral(path: directory.path) { return }
-        settings.defaultDirectory = directory.path
+        settings.defaultDirectory = SigilWorktree.projectPath(of: directory.path) ?? directory.path
     }
 
     private func tabMatches(_ tab: TerminalTab, sessionID: String, cwd: String) -> Bool {
@@ -2272,17 +2971,26 @@ final class AppModel {
     private func entryMatches(
         _ entry: OpenTabsSnapshot.Entry, sessionID: String, cwd: String
     ) -> Bool {
-        entry.sessionID == sessionID && samePath(entry.cwd, cwd)
+        sidebarID(entry) == sessionID && samePath(entry.cwd, cwd)
     }
 
     private func sameEntry(
         _ lhs: OpenTabsSnapshot.Entry, _ rhs: OpenTabsSnapshot.Entry
     ) -> Bool {
-        entryMatches(lhs, sessionID: rhs.sessionID, cwd: rhs.cwd)
+        entryMatches(lhs, sessionID: sidebarID(rhs), cwd: rhs.cwd)
+    }
+
+    private func sidebarID(_ entry: OpenTabsSnapshot.Entry) -> String {
+        ProviderSessionReference(provider: entry.provider, sessionID: entry.sessionID, cwd: entry.cwd).sidebarID
     }
 
     private func entryKey(_ entry: OpenTabsSnapshot.Entry) -> String {
-        entry.sessionID + "\u{0}" + canonicalPath(entry.cwd)
+        sidebarID(entry) + "\u{0}" + canonicalPath(entry.cwd)
+    }
+
+    /// True when `path` is `project` or a Sigil worktree made from it.
+    private func inProject(_ path: String, _ project: String) -> Bool {
+        samePath(SigilWorktree.projectPath(of: path) ?? path, project)
     }
 
     private func samePath(_ lhs: String, _ rhs: String) -> Bool {
@@ -2322,19 +3030,19 @@ final class AppModel {
     }
 
     private func dropDeferred(inProjectPath path: String) {
-        deferredOpenTabs.removeAll { samePath($0.cwd, path) }
-        if let deferredSelectedEntry, samePath(deferredSelectedEntry.cwd, path) {
+        deferredOpenTabs.removeAll { inProject($0.cwd, path) }
+        if let deferredSelectedEntry, inProject(deferredSelectedEntry.cwd, path) {
             clearDeferredSelection()
         }
     }
 
-    func pickDirectory(startingAt directory: URL? = nil) -> URL? {
+    func pickDirectory(startingAt directory: URL? = nil, prompt: String = "Open Session Here") -> URL? {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.directoryURL = directory ?? currentDirectory
-        panel.prompt = "Open Session Here"
+        panel.prompt = prompt
         return panel.runModal() == .OK ? panel.url : nil
     }
 
@@ -2350,13 +3058,13 @@ final class AppModel {
             || info.arguments.contains { $0.contains(".xctest") }
     }
 
-    private static func isUsableDirectory(_ url: URL) -> Bool {
+    static func isUsableDirectory(_ url: URL) -> Bool {
         var isDirectory: ObjCBool = false
         return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
             && isDirectory.boolValue
     }
 
-    private func showError(title: String, message: String) {
+    func showError(title: String, message: String) {
         presentError(AppActionError(title: title, message: message))
     }
 }
@@ -2387,7 +3095,7 @@ private struct AppActionError: Error, LocalizedError {
     let message: String
 
     var errorDescription: String? { title }
-    var failureReason: String? { message }
+    var recoverySuggestion: String? { message }
 }
 
 private struct TranscriptExportError: Error, LocalizedError, Sendable {

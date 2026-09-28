@@ -1,0 +1,57 @@
+b71: View menu font items. Sizes reached with AXPress on the menu items; enabled states read with the View menu opened (AXPress on the menu bar item, then AXCancel), because a closed SwiftUI menu reports stale states until it is validated. terminal.fontSize is read from the SigilUX defaults.
+
+== 1. After Actual Size: terminal.fontSize=13
+Menu (opened): View
+  Hide Sidebar | enabled=true
+  Show Panel | enabled=true
+  Panel | enabled=true
+  ---- | enabled=false
+  Increase Font Size | enabled=true
+  Decrease Font Size | enabled=true
+  Actual Size | enabled=false
+  ---- | enabled=false
+  Reload Conversations | enabled=true
+  Enter Full Screen | enabled=true
+
+
+== 2. After 19 x Increase Font Size: terminal.fontSize=32
+Menu (opened): View
+  Hide Sidebar | enabled=true
+  Show Panel | enabled=true
+  Panel | enabled=true
+  ---- | enabled=false
+  Increase Font Size | enabled=false
+  Decrease Font Size | enabled=true
+  Actual Size | enabled=true
+  ---- | enabled=false
+  Reload Conversations | enabled=true
+  Enter Full Screen | enabled=true
+
+
+== 3. After 24 x Decrease Font Size: terminal.fontSize=8
+Menu (opened): View
+  Hide Sidebar | enabled=true
+  Show Panel | enabled=true
+  Panel | enabled=true
+  ---- | enabled=false
+  Increase Font Size | enabled=true
+  Decrease Font Size | enabled=false
+  Actual Size | enabled=true
+  ---- | enabled=false
+  Reload Conversations | enabled=true
+  Enter Full Screen | enabled=true
+
+
+== 4. After Actual Size: terminal.fontSize=13
+Menu (opened): View
+  Hide Sidebar | enabled=true
+  Show Panel | enabled=true
+  Panel | enabled=true
+  ---- | enabled=false
+  Increase Font Size | enabled=true
+  Decrease Font Size | enabled=true
+  Actual Size | enabled=false
+  ---- | enabled=false
+  Reload Conversations | enabled=true
+  Enter Full Screen | enabled=true
+

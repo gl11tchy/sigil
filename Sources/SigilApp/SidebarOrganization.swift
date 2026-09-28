@@ -1,21 +1,6 @@
 import Foundation
 import SigilKit
 
-/// Recents is a time-ordered thread list. Projects is a folder list you open.
-enum SidebarMode: String, CaseIterable, Identifiable, Sendable {
-    case recents
-    case projects
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .recents: return "Recents"
-        case .projects: return "Projects"
-        }
-    }
-}
-
 /// Which list the sidebar is showing. Home is always the folder list.
 enum SidebarSurface: Equatable, Sendable {
     case folders
@@ -32,8 +17,6 @@ enum SidebarListKind: Equatable, Sendable {
     case projectList
     /// Chats in the open folder.
     case projectChats
-    /// Search hits grouped by folder.
-    case projectSearch
     /// Ranked hits from every folder, including archived chats.
     case search
     /// Archived chats, grouped by folder.
@@ -51,6 +34,125 @@ struct SidebarProject: Identifiable, Equatable, Sendable {
     var updatedAt: Date
 
     var count: Int { sessions.count }
+}
+
+/// A folder added to Projects before it has a Grok chat: by the Projects
+/// header's add button, or by starting another provider's CLI there.
+struct AddedProject: Codable, Equatable, Sendable {
+    var path: String
+    var addedAt: Date
+}
+
+/// Saved records (pins, archives, names) grouped by chat id, in stored order,
+/// built once per list pass. A lookup hashes the chat's id and compares
+/// folders only for records with that id: the records an
+/// `id == id && samePath` scan compares, so it finds the same first record.
+struct ConversationIndex<Record> {
+    private var byID: [String: [(cwd: String, record: Record)]] = [:]
+
+    init(_ records: [Record], sessionID: (Record) -> String, cwd: (Record) -> String) {
+        for record in records {
+            byID[sessionID(record), default: []].append((cwd(record), record))
+        }
+    }
+
+    /// The first stored record for the chat `sessionID` in `cwd`.
+    func first(sessionID: String, cwd: String, samePath: (String, String) -> Bool) -> Record? {
+        guard !byID.isEmpty, let records = byID[sessionID] else { return nil }
+        return records.first { samePath($0.cwd, cwd) }?.record
+    }
+
+    func contains(sessionID: String, cwd: String, samePath: (String, String) -> Bool) -> Bool {
+        first(sessionID: sessionID, cwd: cwd, samePath: samePath) != nil
+    }
+}
+
+/// Every list one sidebar render reads, built once per body pass so the search
+/// and the folder grouping run once instead of once per read.
+struct SidebarSnapshot: Equatable, Sendable {
+    /// Row counts for the Recents and Archived nav items.
+    struct Destinations: Equatable, Sendable {
+        var recentsCount: Int
+        var archivedCount: Int
+    }
+
+    var listKind: SidebarListKind
+    /// The searched and filtered conversations (`AppModel.sidebarSessions`).
+    var sessions: [GrokSession]
+    /// Folders grouped from `sessions`.
+    var projects: [SidebarProject]
+    var focusedProject: SidebarProject?
+    /// The open folder's chats in `.projectChats`, else `sessions`.
+    var listed: [GrokSession]
+    /// Pinned chats in pin order; only the open folder's in `.projectChats`.
+    var pinned: [GrokSession]
+    /// `listed` without the pinned chats.
+    var unpinned: [GrokSession]
+    var pinnedProjects: [SidebarProject]
+    var unpinnedProjects: [SidebarProject]
+    /// The nav items above the list show on every surface.
+    var destinations: Destinations
+    /// Every row, in keyboard order.
+    var rowIDs: [String]
+
+    var isListEmpty: Bool {
+        listKind == .projectList ? projects.isEmpty : listed.isEmpty
+    }
+
+    /// `sessions` is already searched and filtered, and `projects` is grouped
+    /// from it, so a snapshot never runs the search or the grouping again.
+    init(
+        listKind: SidebarListKind,
+        sessions: [GrokSession],
+        projects: [SidebarProject],
+        focusedProject: SidebarProject?,
+        pinnedConversations: [OpenTabsSnapshot.Entry],
+        pinnedProjectPaths: [String],
+        openTabRowIDs: [String],
+        archivedCount: Int,
+        samePath: (String, String) -> Bool,
+        sessionKey: (GrokSession) -> String
+    ) {
+        self.listKind = listKind
+        self.sessions = sessions
+        self.projects = projects
+        self.focusedProject = focusedProject
+        let inFolder = listKind == .projectChats
+        listed = SidebarOrganization.sessions(sessions, in: inFolder ? focusedProject : nil, samePath: samePath)
+        pinned = SidebarOrganization.pinned(
+            sessions: sessions,
+            entries: pinnedConversations,
+            in: inFolder ? focusedProject : nil,
+            samePath: samePath
+        )
+        unpinned = SidebarOrganization.without(sessions: listed, entries: pinnedConversations, samePath: samePath)
+        pinnedProjects = SidebarOrganization.matching(
+            projects: projects, paths: pinnedProjectPaths, samePath: samePath)
+        unpinnedProjects = SidebarOrganization.without(
+            projects: projects, paths: pinnedProjectPaths, samePath: samePath)
+        destinations = Destinations(recentsCount: sessions.count, archivedCount: archivedCount)
+        switch listKind {
+        case .projectList:
+            rowIDs = SidebarOrganization.homeRowIDs(
+                recentsCount: destinations.recentsCount,
+                archivedCount: destinations.archivedCount,
+                pinnedIDs: pinnedProjects.map(\.id),
+                restIDs: unpinnedProjects.map(\.id),
+                openTabIDs: openTabRowIDs
+            )
+        case .search:
+            rowIDs = listed.map(sessionKey)
+        case .recents, .projectChats:
+            rowIDs = (pinned + unpinned).map(sessionKey)
+        case .archived:
+            // Unpinned chats in the order the folder sections draw them.
+            let listedDirectories = Set(unpinned.map(\.directory))
+            let grouped = (pinnedProjects + unpinnedProjects).flatMap { project in
+                SidebarOrganization.listedRows(in: project, listed: listedDirectories)
+            }
+            rowIDs = (pinned + grouped).map(sessionKey)
+        }
+    }
 }
 
 /// Pure grouping for the sidebar. Path identity is injected so tests do not
@@ -92,8 +194,13 @@ enum SidebarOrganization {
         case leaveList
     }
 
-    static func escapeAction(isRenaming: Bool, surface: SidebarSurface) -> EscapeAction {
+    static func escapeAction(isRenaming: Bool, isSearching: Bool, surface: SidebarSurface)
+        -> EscapeAction
+    {
         if isRenaming { return .cancelRename }
+        // Results are global while searching; leaving the folder behind them
+        // would change nothing on screen and lose where the user was.
+        if isSearching { return .leaveList }
         if surface != .folders { return .leaveFolder }
         return .leaveList
     }
@@ -122,6 +229,23 @@ enum SidebarOrganization {
         return Set(rowIDs[min(a, b)...max(a, b)])
     }
 
+    /// The range anchor after ⌘-click drops the current one: the first row still
+    /// selected, in visible order (the rule `pruneMultiSelection` uses), so the
+    /// next ⇧-click selects the same range on every launch.
+    static func reanchor(selection: Set<String>, in rowIDs: [String]) -> String? {
+        rowIDs.first(where: selection.contains)
+    }
+
+    /// Rows ⌘⌫ acts on, in visible order: the ⌘/⇧ selection when there is one,
+    /// else the arrow-key row. Never a row the user just deselected.
+    static func trashTargets(keyboardRowID: String?, selection: Set<String>, in rowIDs: [String])
+        -> [String]
+    {
+        if !selection.isEmpty { return rowIDs.filter(selection.contains) }
+        guard let keyboardRowID, rowIDs.contains(keyboardRowID) else { return [] }
+        return [keyboardRowID]
+    }
+
     /// Recents and Archived are destinations, not folders.
     static func destinationRowIDs(recentsCount: Int, archivedCount: Int) -> [String] {
         var ids: [String] = []
@@ -134,10 +258,50 @@ enum SidebarOrganization {
         recentsCount: Int,
         archivedCount: Int,
         pinnedIDs: [String],
-        restIDs: [String]
+        restIDs: [String],
+        openTabIDs: [String] = []
     ) -> [String] {
-        folderListRowIDs(pinnedIDs: pinnedIDs, restIDs: restIDs)
-            + destinationRowIDs(recentsCount: recentsCount, archivedCount: archivedCount)
+        // Recents and Archived are nav items above the lists, so the arrow
+        // keys meet them first, in the order they are drawn.
+        destinationRowIDs(recentsCount: recentsCount, archivedCount: archivedCount)
+            + openTabIDs
+            + folderListRowIDs(pinnedIDs: pinnedIDs, restIDs: restIDs)
+    }
+
+    /// Where the arrow-key highlight sits once the list has focus. The list
+    /// draws no focus ring, so a focused list with no highlight shows nothing
+    /// and Return does nothing. Keep a visible highlight, else the active row,
+    /// else the first row.
+    static func keyboardRow(onFocus current: String?, activeRowID: String?, in rowIDs: [String])
+        -> String?
+    {
+        if let current, rowIDs.contains(current) { return current }
+        if let activeRowID, rowIDs.contains(activeRowID) { return activeRowID }
+        return rowIDs.first
+    }
+
+    /// The home row that stands for the surface being left, so the arrow-key
+    /// highlight lands back on the folder or destination the user opened.
+    static func homeRowID(leaving surface: SidebarSurface, projectID: String?) -> String? {
+        switch surface {
+        case .project: return projectID
+        case .recents: return recentsID
+        case .archived: return archivedID
+        case .folders: return nil
+        }
+    }
+
+    /// Home lists every open tab above the folders, so the sessions in flight
+    /// are one click away without opening a folder or reading the tab strip.
+    static let openTabPrefix = "sigil:tab:"
+
+    static func openTabRowID(_ id: UUID) -> String {
+        openTabPrefix + id.uuidString
+    }
+
+    static func openTabID(fromRowID rowID: String) -> UUID? {
+        guard rowID.hasPrefix(openTabPrefix) else { return nil }
+        return UUID(uuidString: String(rowID.dropFirst(openTabPrefix.count)))
     }
 
     static func activationKey(preferred: String?, in keys: [String]) -> String? {
@@ -181,9 +345,55 @@ enum SidebarOrganization {
         entries: [OpenTabsSnapshot.Entry],
         samePath: (String, String) -> Bool
     ) -> [GrokSession] {
-        entries.compactMap { entry in
-            sessions.first { $0.id == entry.sessionID && samePath($0.cwd, entry.cwd) }
+        firstMatches(for: entries.map { ($0.sessionID, $0.cwd) }, in: sessions, samePath: samePath)
+            .compactMap { $0 }
+    }
+
+    /// For each chat key, the first of `sessions` with its id in the same
+    /// folder, as a `first(where:)` scan per key finds it, in one pass over
+    /// `sessions`. Folders are compared only when the ids match.
+    private static func firstMatches(
+        for keys: [(sessionID: String, cwd: String)],
+        in sessions: [GrokSession],
+        samePath: (String, String) -> Bool
+    ) -> [GrokSession?] {
+        var matches = [GrokSession?](repeating: nil, count: keys.count)
+        guard !keys.isEmpty else { return matches }
+        let positions = Dictionary(grouping: keys.indices) { keys[$0].sessionID }
+        var unmatched = keys.count
+        for session in sessions {
+            guard let candidates = positions[session.id] else { continue }
+            for position in candidates where matches[position] == nil && samePath(session.cwd, keys[position].cwd) {
+                matches[position] = session
+                unmatched -= 1
+            }
+            if unmatched == 0 { break }
         }
+        return matches
+    }
+
+    /// `sessions` in `project`'s folder or its Sigil worktrees, or all of them
+    /// without a project.
+    static func sessions(
+        _ sessions: [GrokSession],
+        in project: SidebarProject?,
+        samePath: (String, String) -> Bool
+    ) -> [GrokSession] {
+        guard let project else { return sessions }
+        return sessions.filter { samePath($0.projectPath, project.cwd) }
+    }
+
+    /// Pinned chats still in `sessions`, in pin order, limited to `project`'s chats.
+    static func pinned(
+        sessions: [GrokSession],
+        entries: [OpenTabsSnapshot.Entry],
+        in project: SidebarProject?,
+        samePath: (String, String) -> Bool
+    ) -> [GrokSession] {
+        let pinned = matching(sessions: sessions, entries: entries, samePath: samePath)
+        guard let project else { return pinned }
+        let inProject = firstMatches(for: pinned.map { ($0.id, $0.cwd) }, in: project.sessions, samePath: samePath)
+        return zip(pinned, inProject).compactMap { session, match in match == nil ? nil : session }
     }
 
     static func without(
@@ -191,8 +401,9 @@ enum SidebarOrganization {
         entries: [OpenTabsSnapshot.Entry],
         samePath: (String, String) -> Bool
     ) -> [GrokSession] {
-        sessions.filter { session in
-            !contains(entries, session: session, samePath: samePath)
+        let pins = ConversationIndex(entries, sessionID: \.sessionID, cwd: \.cwd)
+        return sessions.filter { session in
+            !pins.contains(sessionID: session.id, cwd: session.cwd, samePath: samePath)
         }
     }
 
@@ -253,7 +464,7 @@ enum SidebarOrganization {
         var grouped: [String: [GrokSession]] = [:]
         var representative: [String: GrokSession] = [:]
         for session in sessions {
-            let key = canonicalPath(session.cwd)
+            let key = canonicalPath(session.projectPath)
             if grouped[key] == nil {
                 order.append(key)
                 grouped[key] = [session]
@@ -273,13 +484,72 @@ enum SidebarOrganization {
             return SidebarProject(
                 id: key,
                 name: duplicated.contains(sample.projectName)
-                    ? sample.displayPath : sample.projectName,
-                displayPath: sample.displayPath,
-                cwd: sample.cwd,
+                    ? sample.projectDisplayPath : sample.projectName,
+                displayPath: sample.projectDisplayPath,
+                cwd: sample.projectPath,
                 sessions: list,
                 updatedAt: list.first?.updatedAt ?? sample.updatedAt
             )
         }
+    }
+
+    /// Adds folders from `added` that have no project yet as empty projects,
+    /// and lets a newer add date lift a folder that has one. Newest first.
+    static func merging(
+        added: [AddedProject],
+        into projects: [SidebarProject],
+        canonicalPath: (String) -> String
+    ) -> [SidebarProject] {
+        var result = projects
+        for entry in added {
+            let key = canonicalPath(entry.path)
+            if let index = result.firstIndex(where: { $0.id == key }) {
+                result[index].updatedAt = max(result[index].updatedAt, entry.addedAt)
+                continue
+            }
+            let name = URL(fileURLWithPath: entry.path).lastPathComponent
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            var displayPath = entry.path
+            if entry.path == home {
+                displayPath = "~"
+            } else if entry.path.hasPrefix(home + "/") {
+                displayPath = "~" + entry.path.dropFirst(home.count)
+            }
+            let taken = result.contains { $0.name == name }
+            result.append(
+                SidebarProject(
+                    id: key,
+                    name: name.isEmpty || taken ? displayPath : name,
+                    displayPath: displayPath,
+                    cwd: entry.path,
+                    sessions: [],
+                    updatedAt: entry.addedAt
+                ))
+        }
+        return result.enumerated()
+            .sorted { lhs, rhs in
+                lhs.element.updatedAt != rhs.element.updatedAt
+                    ? lhs.element.updatedAt > rhs.element.updatedAt
+                    : lhs.offset < rhs.offset
+            }
+            .map(\.element)
+    }
+
+    /// Replaces each Sigil worktree entry with its project and keeps the
+    /// first entry per folder, so the newest entry wins.
+    static func foldingWorktrees<Entry>(
+        _ entries: [Entry],
+        path: (Entry) -> String,
+        moving: (Entry, String) -> Entry,
+        samePath: (String, String) -> Bool
+    ) -> [Entry] {
+        var result: [Entry] = []
+        for entry in entries {
+            let project = SigilWorktree.projectPath(of: path(entry)) ?? path(entry)
+            if result.contains(where: { samePath(path($0), project) }) { continue }
+            result.append(moving(entry, project))
+        }
+        return result
     }
 
     /// O(n) index so a row can find its project without walking every folder.
@@ -294,10 +564,10 @@ enum SidebarOrganization {
         return index
     }
 
-    /// Sessions from `project` that are also in `sessions`, in project order.
-    static func listedRows(in project: SidebarProject, from sessions: [GrokSession]) -> [GrokSession] {
-        let listed = Set(sessions.map(\.directory))
-        return project.sessions.filter { listed.contains($0.directory) }
+    /// Sessions from `project` whose directory is in `listed`, in project order.
+    /// Callers build `listed` once per pass, not once per project.
+    static func listedRows(in project: SidebarProject, listed: Set<URL>) -> [GrokSession] {
+        project.sessions.filter { listed.contains($0.directory) }
     }
 
     /// Unique name and path spellings for search paint, sample first, then each row.
@@ -319,7 +589,7 @@ enum SidebarOrganization {
         add(cwd)
         for session in sessions {
             add(session.projectName)
-            add(session.displayPath)
+            add(session.projectDisplayPath)
             add(session.cwd)
         }
         return ordered

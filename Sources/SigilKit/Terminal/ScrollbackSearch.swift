@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Locates plain-text matches in terminal rows while preserving cell positions.
 struct ScrollbackSearch: Equatable, Sendable {
@@ -26,12 +27,25 @@ struct ScrollbackSearch: Equatable, Sendable {
         let endColumn: Int
     }
 
-    private struct CellPosition: Equatable, Sendable {
+    /// Rows joined into logical lines once, so several searches of the same
+    /// buffer do not rebuild them. `version` names the buffer contents; hits
+    /// are reused only when a later search has the same version and query.
+    struct Text: Sendable {
+        let version: Int?
+        fileprivate let lines: [LogicalLine]
+
+        init(_ rows: [Row], version: Int? = nil) {
+            self.version = version
+            lines = ScrollbackSearch.logicalLines(rows)
+        }
+    }
+
+    fileprivate struct CellPosition: Equatable, Sendable {
         let row: Int
         let column: Int
     }
 
-    private struct LogicalLine: Sendable {
+    fileprivate struct LogicalLine: Sendable {
         var text = ""
         /// Boundary at each Character offset, including the exclusive end.
         var positions: [CellPosition] = []
@@ -42,6 +56,8 @@ struct ScrollbackSearch: Equatable, Sendable {
     private(set) var query: String = ""
     private(set) var matches: [Match] = []
     private(set) var current: Int?
+    /// Version of the text that produced `matches`, or nil when it had none.
+    private var matchedVersion: Int?
 
     var matchCount: Int { matches.count }
 
@@ -54,14 +70,27 @@ struct ScrollbackSearch: Equatable, Sendable {
         setQuery(query, in: lines.map { Row(text: $0) })
     }
 
-    mutating func setQuery(_ query: String, in rows: [Row]) {
+    /// Starts at the last hit on or above `line`, else the first hit below it.
+    mutating func setQuery(_ query: String, in rows: [Row], startingAtOrAbove line: Int? = nil) {
+        setQuery(query, in: Text(rows), startingAtOrAbove: line)
+    }
+
+    /// Starts at the last hit on or above `line`, else the first hit below it.
+    mutating func setQuery(_ query: String, in text: Text, startingAtOrAbove line: Int? = nil) {
         if query.isEmpty {
             clear()
             return
         }
+        matches = reusableMatches(for: query, in: text) ?? Self.locate(query, in: text.lines)
         self.query = query
-        matches = Self.locate(query, in: rows)
-        current = matches.isEmpty ? nil : 0
+        matchedVersion = text.version
+        if matches.isEmpty {
+            current = nil
+        } else if let line {
+            current = matches.lastIndex { $0.line <= line } ?? 0
+        } else {
+            current = 0
+        }
     }
 
     mutating func updateLines(_ lines: [String]) {
@@ -69,12 +98,19 @@ struct ScrollbackSearch: Equatable, Sendable {
     }
 
     mutating func updateRows(_ rows: [Row]) {
+        update(Text(rows))
+    }
+
+    /// Searches `text` again for the current query and keeps the current hit
+    /// when it is still there.
+    mutating func update(_ text: Text) {
         guard !query.isEmpty else {
             clear()
             return
         }
         let previous = currentMatch
-        matches = Self.locate(query, in: rows)
+        matches = reusableMatches(for: query, in: text) ?? Self.locate(query, in: text.lines)
+        matchedVersion = text.version
         if let previous, let index = matches.firstIndex(of: previous) {
             current = index
         } else if matches.isEmpty {
@@ -90,6 +126,7 @@ struct ScrollbackSearch: Equatable, Sendable {
         query = ""
         matches = []
         current = nil
+        matchedVersion = nil
     }
 
     @discardableResult
@@ -112,15 +149,41 @@ struct ScrollbackSearch: Equatable, Sendable {
         return currentMatch
     }
 
-    private static func locate(_ query: String, in rows: [Row]) -> [Match] {
-        logicalLines(rows).flatMap { logical in
+    /// The last hits, when they came from this exact query and buffer version.
+    private func reusableMatches(for query: String, in text: Text) -> [Match]? {
+        // Scalars, not `==`: canonically equivalent queries are different input.
+        guard let version = text.version, version == matchedVersion,
+            query.unicodeScalars.elementsEqual(self.query.unicodeScalars)
+        else { return nil }
+        return matches
+    }
+
+    /// Logical lines per search chunk. Chunks run on separate threads and
+    /// their hits are joined in line order, so the list is the one a single
+    /// pass over every line gives.
+    static let linesPerChunk = 512
+
+    private static func locate(_ query: String, in lines: [LogicalLine]) -> [Match] {
+        let chunkCount = (lines.count + linesPerChunk - 1) / linesPerChunk
+        guard chunkCount > 1 else { return locate(query, in: lines[...]) }
+        let chunks = OSAllocatedUnfairLock(initialState: [[Match]](repeating: [], count: chunkCount))
+        DispatchQueue.concurrentPerform(iterations: chunkCount) { chunk in
+            let start = chunk * linesPerChunk
+            let found = locate(query, in: lines[start..<min(start + linesPerChunk, lines.count)])
+            chunks.withLock { $0[chunk] = found }
+        }
+        return chunks.withLock { $0 }.flatMap { $0 }
+    }
+
+    private static func locate(_ query: String, in lines: ArraySlice<LogicalLine>) -> [Match] {
+        lines.flatMap { logical in
             var found: [Match] = []
             var searchRange = logical.text.startIndex..<logical.text.endIndex
+            // Offsets carry forward from the previous hit, so a long line stays linear.
+            var offset = 0
             while let hit = logical.text.range(of: query, options: fold, range: searchRange) {
-                let startOffset = logical.text.distance(
-                    from: logical.text.startIndex, to: hit.lowerBound)
-                let endOffset = logical.text.distance(
-                    from: logical.text.startIndex, to: hit.upperBound)
+                let startOffset = offset + logical.text.distance(from: searchRange.lowerBound, to: hit.lowerBound)
+                let endOffset = startOffset + logical.text.distance(from: hit.lowerBound, to: hit.upperBound)
                 guard logical.positions.indices.contains(startOffset),
                     logical.positions.indices.contains(endOffset)
                 else { break }
@@ -136,6 +199,7 @@ struct ScrollbackSearch: Equatable, Sendable {
                     )
                 )
                 searchRange = hit.upperBound..<logical.text.endIndex
+                offset = endOffset
             }
             return found
         }

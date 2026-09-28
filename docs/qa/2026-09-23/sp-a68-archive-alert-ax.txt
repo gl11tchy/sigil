@@ -1,0 +1,18 @@
+a68: acme-api project row > context menu (AXShowMenu) > Archive Project (AXPress). Two Grok tabs in acme-api are working (fake CLI keep-working mode).
+Alert window elements:
+WINDOW role=AXWindow | subrole=AXDialog
+  AXStaticText | title=missing value | value=2 sessions are still working. Archive anyway?
+  AXStaticText | title=missing value | value=The responses in progress will stop.
+  AXButton | title=Cancel | value=missing value
+  AXButton | title=Archive | value=missing value
+
+After AXPress on Cancel:
+sidebar list: rows(AXButton)=7, headings=1
+  row: Summarise the acme-api service and its layout [Working]
+  row: Make the sidebar search rank folders too [Working]
+  row: acme-api [Selected, Working]
+  row: /Users/Shared/sigil-ux/projects/acme-api [4 chats, one open, working, pinned]
+  row: /Users/Shared/sigil-ux/projects/sigil [4 chats, working]
+  row: /Users/Shared/sigil-ux/projects/acme-web [3 chats]
+  row: /Users/Shared/sigil-ux/projects/terraform-infra [2 chats]
+

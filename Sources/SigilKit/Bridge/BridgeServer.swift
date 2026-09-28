@@ -514,7 +514,6 @@ private final class ListenBox: @unchecked Sendable {
 
 enum UnixSocket {
     static let pathLimit = 104
-    static let acceptProbeMilliseconds: Int32 = 250
 
     static func address(path: String) throws -> sockaddr_un {
         try path.withCString { cString in
@@ -543,32 +542,6 @@ enum UnixSocket {
         }
     }
 
-    /// Non-blocking connect with a bounded poll. Timeout means "not accepting".
-    static func isAccepting(at path: String) -> Bool {
-        let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else { return false }
-        defer { Darwin.close(fd) }
-        applySocketFlags(fd)
-        guard setNonBlocking(fd) else { return false }
-        guard var addr = try? address(path: path) else { return false }
-        let deadline = DispatchTime.now() + .milliseconds(Int(acceptProbeMilliseconds))
-        var connectErrno: Int32 = 0
-        let rc = withUnsafePointer(to: &addr) { ptr in
-            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
-                let result = Darwin.connect(
-                    fd, sockPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
-                connectErrno = errno
-                return result
-            }
-        }
-        if rc == 0 { return true }
-        let code = connectErrno
-        if code != EINPROGRESS && code != EALREADY && code != EAGAIN {
-            return false
-        }
-        return waitUntilConnected(fd: fd, deadline: deadline)
-    }
-
     static func isStaleSocket(at path: String) -> Bool {
         let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return false }
@@ -595,29 +568,6 @@ enum UnixSocket {
             }
         }
         return delivered < 0 && errno == ECONNREFUSED
-    }
-
-    private static func waitUntilConnected(fd: Int32, deadline: DispatchTime) -> Bool {
-        while true {
-            let now = DispatchTime.now()
-            if now >= deadline { return false }
-            let remainingNs = deadline.uptimeNanoseconds - now.uptimeNanoseconds
-            let remainingMs = Int32(
-                min((remainingNs + 999_999) / 1_000_000, UInt64(acceptProbeMilliseconds)))
-            var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
-            let rc = Darwin.poll(&pfd, 1, remainingMs)
-            if rc == 0 { return false }
-            if rc < 0 {
-                if errno == EINTR { continue }
-                return false
-            }
-            var socketError: Int32 = 0
-            var length = socklen_t(MemoryLayout<Int32>.size)
-            guard Darwin.getsockopt(fd, SOL_SOCKET, SO_ERROR, &socketError, &length) == 0 else {
-                return false
-            }
-            return socketError == 0
-        }
     }
 }
 

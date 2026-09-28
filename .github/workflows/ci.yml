@@ -17,7 +17,9 @@ concurrency:
 jobs:
   verify:
     name: Build, test, and smoke check
-    runs-on: macos-15
+    # Requires a fresh Tart VM with Xcode 26+ and an iOS 26+ runtime on the owner's Mac
+    # (gl11tchy/gh-runner-broker mac/macos-supervisor.sh). Jobs wait while the Mac is off.
+    runs-on: [self-hosted, sigil-vm]
     timeout-minutes: 45
     steps:
       - name: Check out source
@@ -34,8 +36,12 @@ jobs:
             Sidereal/package-lock.json
             Site/package-lock.json
 
-      - name: Show Swift toolchain
-        run: swift --version
+      - name: Show Xcode and Swift toolchain
+        id: toolchain
+        run: |
+          toolchain="$(xcodebuild -version && swift --version)"
+          printf '%s\n' "$toolchain"
+          printf 'cache-key=%s\n' "$(printf '%s\n' "$toolchain" | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
       - name: Restore Swift build cache
         uses: actions/cache@v4
@@ -43,9 +49,9 @@ jobs:
           path: |
             .build
             ~/Library/Caches/org.swift.swiftpm
-          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.resolved') }}-${{ hashFiles('Package.swift') }}
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ hashFiles('Package.resolved') }}-${{ hashFiles('Package.swift') }}
           restore-keys: |
-            swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.resolved') }}-
+            swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ hashFiles('Package.resolved') }}-
 
       - name: Install shellcheck
         env:
@@ -57,6 +63,17 @@ jobs:
 
       - name: Verify
         run: Scripts/verify.sh
+
+      - name: iPhone app, shipping extensions, and native relay tests
+        run: iOS/scripts/ci.sh
+
+      - name: Upload native verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iPhone-native-verification
+          path: .build/native-verification/*.xcresult
+          if-no-files-found: error
 
       - name: Build release bundle
         if: github.event_name != 'pull_request'
@@ -83,8 +100,23 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete latest --yes --cleanup-tag || true
-          gh release create latest dist/Sigil.zip \
+          # A new release per run: gh uploads the zip to a draft and only then
+          # publishes it as Latest, so releases/latest/download/Sigil.zip never
+          # points at a release without the zip. Deleting first left it 404.
+          tag="build-${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          gh release create "$tag" dist/Sigil.zip \
             --title "Sigil ${GITHUB_SHA::7}" \
             --notes "Built from main (\`${GITHUB_SHA}\`). Unzip and replace /Applications/Sigil.app, or from a clone: \`Scripts/install.sh\`." \
             --latest
+          # Prune the builds this one replaced, the old rolling `latest`
+          # release, and drafts a cancelled run left behind.
+          old_tags="$(gh release list --limit 100 --json tagName --jq '.[].tagName')" \
+            || { echo "::warning::could not list releases to prune"; old_tags=""; }
+          for old in $old_tags; do
+            [[ "$old" =~ ^(latest|build-[0-9]+\.[0-9]+)$ && "$old" != "$tag" ]] || continue
+            # A draft has no tag yet, so the tag cleanup fails after the
+            # release itself is gone. Warn only when the release is left.
+            gh release delete "$old" --yes --cleanup-tag \
+              || ! gh release view "$old" >/dev/null 2>&1 \
+              || echo "::warning::could not delete release $old"
+          done

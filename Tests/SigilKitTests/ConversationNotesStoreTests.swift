@@ -53,6 +53,33 @@ struct ConversationNotesStoreTests {
     }
 
     @Test @MainActor
+    func providerNotesUseSeparateNamespacesAndPreserveTheGrokLayout() throws {
+        let (store, root) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let uuid = "11111111-1111-4111-8111-111111111111"
+        let cwd = "/tmp/one"
+        for id in [uuid, "claudeCode:" + uuid, "codex:" + uuid] {
+            store.setNote("Note for " + id, for: id, cwd: cwd)
+        }
+        store.flushNow()
+        let reread = ConversationNotesStore(root: root)
+        for id in [uuid, "claudeCode:" + uuid, "codex:" + uuid] {
+            #expect(reread.note(for: id, cwd: cwd) == "Note for " + id)
+            #expect(store.isSaved(for: id, cwd: cwd))
+        }
+        #expect(FileManager.default.fileExists(atPath: noteFile(root, uuid, cwd).path))
+        #expect(
+            FileManager.default.fileExists(atPath: noteFile(root.appendingPathComponent("claudeCode"), uuid, cwd).path))
+        #expect(FileManager.default.fileExists(atPath: noteFile(root.appendingPathComponent("codex"), uuid, cwd).path))
+        reread.deleteNote(for: "claudeCode:" + uuid, cwd: cwd)
+        reread.flushNow()
+        let afterDelete = ConversationNotesStore(root: root)
+        #expect(afterDelete.note(for: "claudeCode:" + uuid, cwd: cwd).isEmpty)
+        #expect(afterDelete.note(for: uuid, cwd: cwd) == "Note for " + uuid)
+        #expect(afterDelete.note(for: "codex:" + uuid, cwd: cwd) == "Note for codex:" + uuid)
+    }
+
+    @Test @MainActor
     func writesAreCoalescedAndFlushOnDemand() throws {
         let (store, root) = try makeStore()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -141,12 +168,100 @@ struct ConversationNotesStoreTests {
         let (store, root) = try makeStore()
         defer { try? FileManager.default.removeItem(at: root) }
 
-        for bad in ["../escape", "a/b", "", "a b", "å"] {
+        for bad in [
+            "../escape", "a/b", "", "a b", "å", "codex:../escape", "claudeCode:not-a-uuid",
+            "../codex:11111111-1111-4111-8111-111111111111", "codex:11111111-1111-4111-8111-111111111111:extra",
+        ] {
             store.setNote("nope", for: bad, cwd: "/tmp/one")
             #expect(store.note(for: bad, cwd: "/tmp/one") == "")
         }
         store.flushNow()
         #expect(!FileManager.default.fileExists(atPath: root.path))
+    }
+
+    @Test @MainActor
+    func aFailedWriteIsRetriedByTheNextFlush() throws {
+        let (store, root) = try makeStore()
+        let fm = FileManager.default
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        defer {
+            try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
+            try? fm.removeItem(at: root)
+        }
+        // A read-only notes folder makes the write fail.
+        try fm.setAttributes([.posixPermissions: 0o500], ofItemAtPath: root.path)
+        store.setNote("first", for: "a-1", cwd: "/tmp/one")
+        store.setNote("kept", for: "b-2", cwd: "/tmp/one")
+        store.flushNow()
+        #expect(!fm.fileExists(atPath: noteFile(root, "a-1", "/tmp/one").path))
+
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
+        store.setNote("newer", for: "a-1", cwd: "/tmp/one")
+        store.flushNow()
+        #expect(try String(contentsOf: noteFile(root, "a-1", "/tmp/one"), encoding: .utf8) == "newer")
+        #expect(try String(contentsOf: noteFile(root, "b-2", "/tmp/one"), encoding: .utf8) == "kept")
+    }
+
+    @Test @MainActor
+    func aFailedDebouncedWriteIsRetriedAtQuit() async throws {
+        let (store, root) = try makeStore()
+        let fm = FileManager.default
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        defer {
+            try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
+            try? fm.removeItem(at: root)
+        }
+        try fm.setAttributes([.posixPermissions: 0o500], ofItemAtPath: root.path)
+        store.setNote("typed", for: "a-1", cwd: "/tmp/one")
+        try await Task.sleep(for: ConversationNotesStore.flushDelay * 3)
+
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
+        store.flushNow()
+        #expect(try String(contentsOf: noteFile(root, "a-1", "/tmp/one"), encoding: .utf8) == "typed")
+    }
+
+    @Test @MainActor
+    func aFailedDeleteIsRetriedByTheNextFlush() throws {
+        let (store, root) = try makeStore()
+        let fm = FileManager.default
+        let file = noteFile(root, "a-1", "/tmp/one")
+        let folder = file.deletingLastPathComponent()
+        defer {
+            try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
+            try? fm.removeItem(at: root)
+        }
+        store.setNote("scratch", for: "a-1", cwd: "/tmp/one")
+        store.flushNow()
+        try fm.setAttributes([.posixPermissions: 0o500], ofItemAtPath: folder.path)
+        store.deleteNote(for: "a-1", cwd: "/tmp/one")
+        store.flushNow()
+        #expect(fm.fileExists(atPath: file.path))
+
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
+        store.flushNow()
+        #expect(!fm.fileExists(atPath: file.path))
+    }
+
+    @Test @MainActor
+    func aNoteForALongNonASCIIFolderIsSavedAndReadBack() throws {
+        let (store, root) = try makeStore()
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("notes-cwd-\(UUID().uuidString)")
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: base)
+        }
+        // Percent-encoded, this path is far over the 255-byte file name limit.
+        let cwd = base.appendingPathComponent("太郎/ドキュメント/開発プロジェクト/顧客向け在庫管理システム")
+        try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
+
+        store.setNote("deploy on friday", for: "a-1", cwd: cwd.path)
+        store.flushNow()
+
+        let reread = ConversationNotesStore(root: root)
+        #expect(reread.note(for: "a-1", cwd: cwd.path) == "deploy on friday")
+        let folder = GrokPaths.sessionFolderName(forCanonicalPath: GrokPaths.canonicalPath(cwd.path))
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(folder).path))
     }
 
     @Test @MainActor

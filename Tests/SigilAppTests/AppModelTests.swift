@@ -60,15 +60,17 @@ struct AppModelTests {
         #expect(tab.spec.provider == provider)
         #expect(await waitUntil { tab.controller.bufferText().contains("PROVIDER=\(provider.rawValue)") })
         #expect(tab.controller.bufferText().contains("CWD=\(GrokPaths.canonicalPath(folder.path))"))
-        #expect(tab.controller.bufferText().contains(provider == .grokBuild ? "ARGC=4" : "ARGC=0"))
+        #expect(
+            tab.controller.bufferText().contains(
+                provider == .grokBuild ? "ARGC=4" : provider == .claudeCode ? "ARGC=2" : "ARGC=0"))
         #expect(tab.controller.view.accessibilityLabel() == "\(provider.name) terminal")
         tab.controller.send(text: "provider-input\r")
         #expect(await waitUntil { tab.controller.bufferText().contains("REPLY=provider-input") })
 
         if provider != .grokBuild {
-            #expect(tab.sessionID == nil)
+            #expect((tab.sessionID != nil) == (provider == .claudeCode))
             #expect(tab.spec.sessionDirectory == nil)
-            #expect(fixture.settings.openTabs.tabs.isEmpty)
+            #expect(fixture.settings.openTabs.tabs.count == (provider == .claudeCode ? 1 : 0))
             #expect(!model.canExportSelectedTranscript)
             #expect(!tab.canDeliverBridgePrompt)
             fixture.settings.themeName = TerminalTheme.grokDay.name
@@ -79,9 +81,15 @@ struct AppModelTests {
             model.restartTab(id: tab.id)
             let restarted = try #require(model.selectedTab)
             #expect(restarted.spec.provider == provider)
-            #expect(restarted.id != tab.id)
-            #expect(await waitUntil { restarted.controller.bufferText().contains("PROVIDER=\(provider.rawValue)") })
-            #expect(!tab.controller.isRunning)
+            if provider == .codex {
+                #expect(restarted.id == tab.id)
+                #expect(tab.controller.isRunning)
+            } else {
+                #expect(restarted.id != tab.id)
+                #expect(await waitUntil { restarted.controller.bufferText().contains("PROVIDER=\(provider.rawValue)") })
+                #expect(!tab.controller.isRunning)
+                if provider == .claudeCode { #expect(restarted.spec.mode == .resume(sessionID: tab.nativeSessionID!)) }
+            }
         } else {
             #expect(fixture.settings.openTabs.tabs.count == 1)
         }
@@ -114,6 +122,85 @@ struct AppModelTests {
         model.restoreOpenTabs()
         #expect(model.tabs.count == 2)
         model.closeAllTabsAndWait()
+    }
+
+    @Test @MainActor
+    func aDeferredTabOpenedByHandStaysClosedAfterTheUserClosesIt() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("volume")
+        fixture.settings.openTabs = OpenTabsSnapshot(
+            tabs: [.init(sessionID: "late-id", cwd: cwd.path)],
+            selectedSessionID: "late-id",
+            selectedCWD: cwd.path
+        )
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        model.restoreOpenTabs()
+        #expect(model.tabs.isEmpty)
+
+        try fixture.createSession(id: "late-id", cwd: cwd)
+        model.open(makeSession(id: "late-id", cwd: cwd))
+        let tab = try #require(model.tabs.first)
+        model.closeTab(tab.id)
+
+        #expect(fixture.settings.openTabs.tabs.isEmpty)
+    }
+
+    @Test @MainActor
+    func restoreKeepsEachTabsChosenModelAndEffort() throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
+        defer { fixture.cleanup() }
+        fixture.settings.model = "model-a"
+        fixture.settings.effort = "low"
+        let chosen = try fixture.directory("chosen")
+        let older = try fixture.directory("older")
+        try fixture.createSession(id: "older-id", cwd: older)
+
+        let first = fixture.model()
+        let tab = try #require(first.newTab(in: chosen, model: "model-b", effort: "high"))
+        let sessionID = try #require(tab.sessionID)
+        try fixture.createSession(id: sessionID, cwd: chosen)
+        var snapshot = fixture.settings.openTabs
+        first.closeAllTabsAndWait()
+        // An entry saved before tabs kept their model falls back to Settings.
+        snapshot.tabs.append(.init(sessionID: "older-id", cwd: older.path))
+        fixture.settings.openTabs = snapshot
+
+        let second = fixture.model()
+        defer { second.closeAllTabsAndWait() }
+        second.restoreOpenTabs()
+        let restored = try #require(second.tabs.first { $0.sessionID == sessionID })
+        #expect(restored.spec.model == "model-b")
+        #expect(restored.spec.reasoningEffort == "high")
+        let legacy = try #require(second.tabs.first { $0.sessionID == "older-id" })
+        #expect(legacy.spec.model == "model-a")
+        #expect(legacy.spec.reasoningEffort == "low")
+    }
+
+    @Test @MainActor
+    func restoreKeepsATabsChosenCLIDefault() throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
+        defer { fixture.cleanup() }
+        fixture.settings.model = "model-a"
+        fixture.settings.effort = "low"
+        let chosen = try fixture.directory("chosen")
+
+        let first = fixture.model()
+        // "CLI default" in the new-session sheet overrides the Settings default.
+        let tab = try #require(first.newTab(in: chosen, model: "", effort: ""))
+        let sessionID = try #require(tab.sessionID)
+        try fixture.createSession(id: sessionID, cwd: chosen)
+        let snapshot = fixture.settings.openTabs
+        first.closeAllTabsAndWait()
+        fixture.settings.openTabs = snapshot
+
+        let second = fixture.model()
+        defer { second.closeAllTabsAndWait() }
+        second.restoreOpenTabs()
+        let restored = try #require(second.tabs.first { $0.sessionID == sessionID })
+        #expect(restored.spec.model == nil)
+        #expect(restored.spec.reasoningEffort == nil)
     }
 
     @Test @MainActor
@@ -180,7 +267,7 @@ struct AppModelTests {
     /// The Grok TUI reads GROK_THEME at process start. Recolouring SwiftTerm
     /// leaves the program inside the tab on the old palette.
     @Test @MainActor
-    func changingTheWindowThemeRelaunchesGrokWithTheNewPalette() throws {
+    func changingTheWindowThemeRelaunchesGrokWithTheNewPalette() async throws {
         let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
         defer { fixture.cleanup() }
         let cwd = try fixture.directory("project")
@@ -189,7 +276,9 @@ struct AppModelTests {
 
         let original = try #require(model.newTab(in: cwd))
         let sessionID = try #require(original.sessionID)
-        #expect(original.spec.themeName == TerminalTheme.sigilNeon.grokThemeName)
+        #expect(original.spec.themeName == TerminalTheme.sigilDark.grokThemeName)
+        #expect(original.spec.themeVariables["GROK_THEME_BG"] == "17181A")
+        try await fixture.completeTurn(original)
 
         fixture.settings.themeName = TerminalTheme.twitch.name
         model.applyTheme()
@@ -220,7 +309,87 @@ struct AppModelTests {
 
         let still = try #require(model.tabs.first)
         #expect(still.id == originalID)
-        #expect(still.spec.themeName == TerminalTheme.sigilNeon.grokThemeName)
+        #expect(still.spec.themeVariables == TerminalTheme.sigilDark.grokThemeEnvironment)
+    }
+
+    @Test @MainActor
+    func aTabThatWasWorkingDuringAThemeChangeRelaunchesWhenItsTurnEnds() async throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let original = try #require(model.newTab(in: cwd))
+        let sessionID = try #require(original.sessionID)
+        original.noteTurnStarted()
+        fixture.settings.themeName = TerminalTheme.twitch.name
+        model.applyTheme()
+        #expect(model.tabs.first?.id == original.id)
+
+        try await fixture.completeTurn(original, start: false)
+
+        let relaunched = try #require(model.tabs.first)
+        #expect(relaunched.id != original.id)
+        #expect(relaunched.sessionID == sessionID)
+        #expect(relaunched.spec.themeName == TerminalTheme.twitch.grokThemeName)
+    }
+
+    @Test @MainActor
+    func aConfirmedCloseIsNotLostToAThemeRelaunchWhileTheAlertIsUp() async throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let original = try #require(model.newTab(in: cwd))
+        original.noteTurnStarted()
+        fixture.settings.themeName = TerminalTheme.twitch.name
+        model.applyTheme()
+        // Like the alert's modal loop, this keeps running main-queue work, so
+        // the turn can end, and its theme relaunch come due, while the user decides.
+        model.confirmStopWorking = { _ in
+            RunLoop.main.run(until: Date().addingTimeInterval(1.7))
+            return true
+        }
+
+        // Press Close from a run-loop callout, as a key event does, so the
+        // nested loop can drain the main queue.
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue) {
+                MainActor.assumeIsolated { model.requestCloseTab(original.id) }
+                done.resume()
+            }
+            CFRunLoopWakeUp(CFRunLoopGetMain())
+        }
+
+        #expect(model.tabs.isEmpty)
+    }
+
+    @Test @MainActor
+    func changingThemeKeepsAnIdleTabWithMessagesUntilTheyAreHandled() async throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let original = try #require(model.newTab(in: cwd))
+        try await fixture.completeTurn(original)
+        original.enqueueBridgePrompt("From the other tab")
+        original.enqueueBridgePrompt("Which port?", requestID: "ask-1")
+
+        fixture.settings.themeName = TerminalTheme.twitch.name
+        model.applyTheme()
+
+        #expect(model.tabs.first?.id == original.id)
+        #expect(original.bridgeInbox.count == 2)
+
+        original.dismissNextBridgePrompt()
+        original.removeBridgePrompt(requestID: "ask-1")
+        try await Task.sleep(for: .milliseconds(100))
+
+        let relaunched = try #require(model.tabs.first)
+        #expect(relaunched.id != original.id)
+        #expect(relaunched.spec.themeName == TerminalTheme.twitch.grokThemeName)
     }
 
     @Test @MainActor
@@ -273,7 +442,7 @@ struct AppModelTests {
 
         #expect(model.tabs.count == 1)
         #expect(model.tabs[0].workingDirectory.resolvingSymlinksInPath().path == cwdB.path)
-        #expect(fixture.settings.openTabs.tabs == [.init(sessionID: id, cwd: cwdB.path)])
+        #expect(fixture.settings.openTabs.tabs == [.init(sessionID: id, cwd: cwdB.path, model: "", effort: "")])
         #expect(fixture.settings.openTabs.selectedCWD == cwdB.path)
         model.closeAllTabsAndWait()
     }
@@ -373,6 +542,45 @@ struct AppModelTests {
         model.windowDidBecomeKey()
         await flushMainAsync()
         #expect(model.needsTerminalFocus)
+    }
+
+    @Test @MainActor
+    func optionAsMetaSettingReachesOpenAndNewTabs() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let first = try #require(model.newTab(in: cwd))
+        #expect(!first.controller.optionAsMetaKey)
+
+        model.settings.optionAsMetaKey = true
+        model.applyOptionAsMetaKey()
+        let second = try #require(model.newTab(in: cwd))
+
+        #expect(first.controller.optionAsMetaKey)
+        #expect(second.controller.optionAsMetaKey)
+    }
+
+    @Test @MainActor
+    func findCommandRefocusesAnOpenFindBarInsteadOfClosingIt() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        _ = try #require(model.newTab(in: cwd))
+
+        model.showFindBar()
+        #expect(model.isFindBarVisible)
+        model.findQuery = "error"
+        let token = model.findFocusToken
+
+        model.showFindBar()
+
+        #expect(model.isFindBarVisible)
+        #expect(model.findQuery == "error")
+        #expect(model.findFocusToken == token + 1)
     }
 
     @Test @MainActor
@@ -494,6 +702,44 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func quittingStopsARunningTranscriptExportAndRemovesItsPartialFile() async throws {
+        let fixture = try ModelFixture(
+            script: """
+                #!/bin/sh
+                printf partial > "$3"
+                echo $$ > "$(dirname "$3")/export.pid"
+                exec /bin/sleep 30
+                """
+        )
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let output = cwd.appendingPathComponent("Transcript.md")
+        let pidFile = cwd.appendingPathComponent("export.pid")
+        let model = fixture.model()
+        model.startTranscriptExport(sessionID: "s-1", output: output, workingDirectory: cwd)
+        let started = ContinuousClock.now + .seconds(3)
+        while !FileManager.default.fileExists(atPath: pidFile.path), ContinuousClock.now < started {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        let pid = try #require(
+            pid_t(
+                try String(contentsOf: pidFile, encoding: .utf8)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)))
+        defer { kill(pid, SIGKILL) }
+        #expect(try temporaryExports(nextTo: output).count == 1)
+
+        model.closeAllTabsAndWait()
+
+        #expect(try temporaryExports(nextTo: output).isEmpty)
+        let reaped = ContinuousClock.now + .seconds(2)
+        while kill(pid, 0) == 0, ContinuousClock.now < reaped {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(kill(pid, 0) != 0)
+    }
+
+    @Test @MainActor
     func alreadyInstalledRegistrationStillRunsMcpAddToRepairPath() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
@@ -552,6 +798,85 @@ struct AppModelTests {
         #expect(probe.calls.contains { $0.contains("add") })
         #expect(!probe.calls.contains { $0.contains("remove") })
         #expect(model.tabMessagingError != nil)
+    }
+
+    @Test @MainActor
+    func turningMessagingOffWithoutTheSocketLeavesTheOtherCopysRegistration() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let ownerProbe = RunnerProbe()
+        ownerProbe.setResponse((0, "ok"))
+        let owner = fixture.model(registrationRunner: ownerProbe.run, mcpBinary: fixture.executable)
+        defer { owner.closeAllTabsAndWait() }
+        try await owner.setTabMessaging(enabled: true)
+        #expect(owner.isTabMessagingAvailable)
+        #expect(fixture.settings.isTabMessagingEnabled)
+
+        let secondProbe = RunnerProbe()
+        secondProbe.setResponse((0, "| sigil |"))
+        let second = fixture.model(
+            registrationRunner: secondProbe.run, mcpBinary: fixture.executable)
+        defer { second.closeAllTabsAndWait() }
+
+        await #expect(throws: (any Error).self) {
+            try await second.setTabMessaging(enabled: false)
+        }
+
+        #expect(!secondProbe.calls.contains { $0.contains("remove") })
+        #expect(fixture.settings.isTabMessagingEnabled)
+        #expect(owner.isTabMessagingAvailable)
+        #expect(!second.isTabMessagingAvailable)
+
+        ownerProbe.setResponse((0, "| sigil |"))
+        try await owner.setTabMessaging(enabled: false)
+        #expect(ownerProbe.calls.contains { $0.contains("remove") })
+        #expect(!fixture.settings.isTabMessagingEnabled)
+        #expect(!owner.isTabMessagingAvailable)
+    }
+
+    @Test @MainActor
+    func aLoopingSenderCannotFloodAnotherTabsInbox() throws {
+        _ = NSApplication.shared
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let sender = try #require(model.newTab(in: cwd))
+        let target = try #require(model.newTab(in: cwd))
+        let bridge = TabBridge(model: model, socketURL: fixture.socketURL)
+        let peer = BridgePeer(tabID: sender.id.uuidString)
+
+        let responses = (0..<100).map { index in
+            bridge.bridgeSend(from: peer, to: target.id.uuidString, message: "spam \(index)")
+        }
+
+        #expect(responses.first?.ok == true)
+        #expect(target.bridgeInbox.count < 100)
+        #expect(responses.filter(\.ok).count == target.bridgeInbox.count)
+        #expect(responses.last?.ok == false)
+        #expect(responses.last?.error?.contains("unread") == true)
+
+        target.dismissNextBridgePrompt()
+        #expect(bridge.bridgeSend(from: peer, to: target.id.uuidString, message: "after").ok)
+    }
+
+    @Test @MainActor
+    func registrationCommandsRunOffTheCooperativePool() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let probe = RunnerProbe()
+        probe.setResponse((0, "| sigil |"))
+        let model = fixture.model(registrationRunner: probe.run, mcpBinary: fixture.executable)
+        defer { model.closeAllTabsAndWait() }
+
+        try await model.setTabMessaging(enabled: true)
+        try await model.setTabMessaging(enabled: false)
+
+        #expect(probe.calls.contains { $0.contains("add") })
+        #expect(probe.calls.contains { $0.contains("remove") })
+        #expect(!probe.queueLabels.isEmpty)
+        #expect(probe.queueLabels.allSatisfy { !$0.contains("cooperative") })
     }
 
     @Test @MainActor
@@ -694,6 +1019,41 @@ struct AppModelTests {
         #expect(!model.sidebarSessions.contains { $0.id == "closed-wt" })
     }
 
+    /// A remount of the sidebar (⌘B) must not refocus Search for an old ⌘⇧F.
+    @Test @MainActor
+    func searchFocusRequestIsConsumedOnce() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        #expect(!model.consumeSearchFocusRequest())
+
+        model.focusSidebarSearch()
+
+        #expect(model.consumeSearchFocusRequest())
+        #expect(!model.consumeSearchFocusRequest())
+    }
+
+    /// The Archived row counts only chats the Archived list will show.
+    @Test @MainActor
+    func archivedCountSkipsChatsTheArchivedListHides() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = "/Users/someone/Documents/peptide"
+        try fixture.writeListedSession(id: "kept", cwd: cwd)
+        try fixture.writeListedSession(id: "child", cwd: cwd, sessionKind: "subagent")
+        try fixture.writeListedSession(id: "empty", cwd: cwd, summary: "", messages: 1)
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        for session in fixture.store.sessions { model.archive(session) }
+
+        model.openArchived()
+
+        #expect(model.sidebarSessions.map(\.id) == ["kept"])
+        #expect(model.archivedCount == 1)
+    }
+
     @Test @MainActor
     func sidebarHidesSubagentSessionsUntilEnabled() async throws {
         let fixture = try ModelFixture()
@@ -814,6 +1174,108 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func anAddedFolderIsAProjectUntilItIsRemoved() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(id: "a", cwd: "/Users/someone/Documents/alpha")
+        await fixture.store.reload()
+        let folder = try fixture.directory("added")
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        model.addProject(folder)
+        let added = try #require(model.sidebarProjects.first)
+        #expect(added.name == "added")
+        #expect(added.sessions.isEmpty)
+        #expect(model.sidebarProjects.count == 2)
+
+        model.openProject(added)
+        model.pruneMissingPins()
+        #expect(model.focusedProject?.cwd == folder.path)
+
+        #expect(model.isRemovableOnly(added))
+        model.archiveOrRemove(added)
+        #expect(fixture.settings.addedProjects.isEmpty)
+        #expect(model.sidebarProjects.map(\.name) == ["alpha"])
+    }
+
+    @Test @MainActor
+    func aSigilWorktreeAddsItsProjectNotItself() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let project = try fixture.directory("app")
+        let worktree = SigilWorktree.root
+            .appendingPathComponent(GrokPaths.encode(path: project.path))
+            .appendingPathComponent("ab12cd34")
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        model.addProject(worktree)
+        #expect(fixture.settings.addedProjects.map(\.path) == [project.path])
+        #expect(model.sidebarProjects.map(\.cwd) == [project.path])
+    }
+
+    @Test @MainActor
+    func aStoredWorktreeProjectFoldsIntoItsProject() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let project = try fixture.directory("app")
+        let worktree = SigilWorktree.root
+            .appendingPathComponent(GrokPaths.encode(path: project.path))
+            .appendingPathComponent("ab12cd34")
+        let newer = Date(timeIntervalSince1970: 20)
+        fixture.settings.addedProjects = [
+            AddedProject(path: worktree.path, addedAt: newer),
+            AddedProject(path: project.path, addedAt: Date(timeIntervalSince1970: 10)),
+        ]
+        try fixture.writeListedSession(id: "a", cwd: "/Users/someone/Documents/alpha")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        model.pruneMissingPins()
+        #expect(fixture.settings.addedProjects == [AddedProject(path: project.path, addedAt: newer)])
+        #expect(model.sidebarProjects.map(\.name) == ["alpha", "app"])
+    }
+
+    @Test @MainActor
+    func aPinnedOrOpenWorktreeProjectMovesToItsProject() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let project = try fixture.directory("app")
+        let worktree = SigilWorktree.root
+            .appendingPathComponent(GrokPaths.encode(path: project.path))
+            .appendingPathComponent("ab12cd34")
+        fixture.settings.addedProjects = [AddedProject(path: worktree.path, addedAt: Date())]
+        fixture.settings.pinnedProjects = [worktree.path, project.path]
+        fixture.settings.focusedProjectPath = worktree.path
+        try fixture.writeListedSession(id: "a", cwd: "/Users/someone/Documents/alpha")
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        model.pruneMissingPins()
+        #expect(fixture.settings.pinnedProjects == [project.path])
+        #expect(fixture.settings.focusedProjectPath == project.path)
+        #expect(model.focusedProject?.cwd == project.path)
+    }
+
+    @Test @MainActor
+    func anAddedFolderWithHiddenChatsIsArchivedNotRemoved() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let folder = try fixture.directory("hidden")
+        try fixture.writeListedSession(id: "h", cwd: folder.path)
+        await fixture.store.reload()
+
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        model.addProject(folder)
+        let project = try #require(model.sidebarProjects.first { $0.cwd == folder.path })
+        #expect(!model.isRemovableOnly(project))
+    }
+
+    @Test @MainActor
     func pruneDropsProjectPinsForMissingFolders() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
@@ -829,6 +1291,39 @@ struct AppModelTests {
         await fixture.store.reload()
         model.pruneMissingPins()
         #expect(fixture.settings.pinnedProjects.isEmpty)
+    }
+
+    @Test @MainActor
+    func pinsSurviveWhileTheSessionsFolderIsMissing() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(id: "kept", cwd: "/Users/someone/Documents/project")
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(fixture.store.sessions.first)
+        model.pin(session)
+
+        // A fresh store, as at launch, finds the folder gone: an unmounted
+        // volume or a changed GROK_HOME must not erase the sidebar lists.
+        let root = fixture.grokHome.appendingPathComponent("sessions")
+        try FileManager.default.removeItem(at: root)
+        let relaunched = AppModel(
+            settings: fixture.settings,
+            store: SessionStore(root: root),
+            trashConversation: { _ in },
+            presentError: { _ in },
+            panel: RightPanel(
+                defaults: fixture.defaults,
+                notesStore: ConversationNotesStore(root: fixture.notesRoot)
+            ),
+            pairingStore: InMemoryRemotePairingStore()
+        )
+        defer { relaunched.closeAllTabsAndWait() }
+        await relaunched.store.reload()
+        relaunched.pruneMissingPins()
+
+        #expect(fixture.settings.pinnedConversations.map(\.sessionID) == ["kept"])
     }
 
     @Test @MainActor
@@ -1241,6 +1736,28 @@ struct AppModelTests {
         #expect(fixture.settings.conversationNames.isEmpty)
     }
 
+    /// ⌘⇧R starts from the terminal and must hand focus back there; F2 and the
+    /// row menu start from the list and return to it.
+    @Test @MainActor
+    func renameRemembersWhereItStarted() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeListedSession(id: "s1", cwd: "/Users/someone/Documents/project")
+        try fixture.writeListedSession(id: "s2", cwd: "/Users/someone/Documents/project")
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let one = try #require(model.store.sessions.first { $0.id == "s1" })
+        let two = try #require(model.store.sessions.first { $0.id == "s2" })
+
+        model.beginRename(one, returnFocus: .terminal)
+        #expect(model.renameReturnFocus == .terminal)
+        model.cancelRename()
+
+        model.beginRename(two)
+        #expect(model.renameReturnFocus == .list)
+    }
+
     @Test @MainActor
     func commitRenameAfterCancelStillSavesTheCapturedSession() async throws {
         let fixture = try ModelFixture()
@@ -1645,7 +2162,6 @@ struct AppModelTests {
                     fieldEditorExists: true, fieldEditorIsFirstResponder: true,
                     isEditingRenameField: true),
                 selectAllPending: true))
-        #expect(!AppModel.shouldSuppressBlurCommitDuringRenameSelectAllWait())
         #expect(AppModel.renameSelectAllRetryInterval == .milliseconds(16))
         #expect(AppModel.renameSelectAllRetryTimeout == .milliseconds(400))
         #expect(AppModel.shouldContinueRenameSelectAllRetry(elapsed: .zero))
@@ -2968,6 +3484,7 @@ struct AppModelTests {
         defer { fixture.cleanup() }
         let cwd = try fixture.directory("project")
         let model = fixture.model()
+        model.confirmStopWorking = { _ in true }
         defer { model.closeAllTabsAndWait() }
 
         let tab = try #require(model.newTab(in: cwd))
@@ -2988,6 +3505,7 @@ struct AppModelTests {
         defer { fixture.cleanup() }
         let cwd = try fixture.directory("project")
         let model = fixture.model()
+        model.confirmStopWorking = { _ in true }
         defer { model.closeAllTabsAndWait() }
 
         let first = try #require(model.newTab(in: cwd))
@@ -3013,6 +3531,7 @@ struct AppModelTests {
         await fixture.store.reload()
 
         let model = fixture.model()
+        model.confirmStopWorking = { _ in true }
         defer { model.closeAllTabsAndWait() }
         let project = try #require(model.sidebarProjects.first { $0.name == "acme-api" })
         let keep = try #require(model.newTab(in: otherDir))
@@ -3038,7 +3557,7 @@ struct AppModelTests {
         tab.noteTurnStarted()
         #expect(tab.shouldWarnBeforeStopping)
         let session = makeSession(id: try #require(tab.sessionID), cwd: cwd)
-        model.confirmStopWorking = { false }
+        model.confirmStopWorking = { _ in false }
         model.archive(session)
 
         #expect(model.tabs.map(\.id) == [tab.id])
@@ -3058,12 +3577,158 @@ struct AppModelTests {
         tab.noteTurnStarted()
         #expect(tab.shouldWarnBeforeStopping)
         let session = makeSession(id: try #require(tab.sessionID), cwd: cwd)
-        model.confirmStopWorking = { true }
+        model.confirmStopWorking = { _ in true }
         model.archive(session)
 
         #expect(model.tabs.isEmpty)
         #expect(model.isArchived(session))
         #expect(!model.isOpen(session))
+    }
+
+    @Test @MainActor
+    func newSessionInFolderAsksForTheFolderFirst() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let chosen = try fixture.directory("chosen")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        model.requestNewSessionInFolder { nil }
+        #expect(!model.isShowingNewSessionSheet)
+
+        model.requestNewSessionInFolder { chosen }
+        #expect(model.isShowingNewSessionSheet)
+        #expect(model.pendingSessionDirectory == chosen)
+    }
+
+    @Test @MainActor
+    func fontSizeMenuItemsTurnOffAtTheirLimits() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        model.settings.fontSize = 13
+        #expect(model.canIncreaseFontSize)
+        #expect(model.canDecreaseFontSize)
+        #expect(!model.canResetFontSize)
+
+        model.settings.fontSize = 32
+        #expect(!model.canIncreaseFontSize)
+        #expect(model.canResetFontSize)
+
+        model.settings.fontSize = 8
+        #expect(!model.canDecreaseFontSize)
+        #expect(model.canIncreaseFontSize)
+    }
+
+    @Test @MainActor
+    func archivingAProjectWithTwoWorkingChatsAsksAboutArchivingBoth() throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        for _ in 0..<2 { try #require(model.newTab(in: cwd)).noteTurnStarted() }
+        var prompts: [StopWorkingPrompt] = []
+        model.confirmStopWorking = {
+            prompts.append($0)
+            return false
+        }
+
+        model.archive(
+            SidebarProject(
+                id: cwd.path, name: "project", displayPath: cwd.path,
+                cwd: cwd.path, sessions: [], updatedAt: .now))
+
+        #expect(prompts.count == 1)
+        let prompt = try #require(prompts.first)
+        #expect(prompt.messageText == "2 sessions are still working. Archive anyway?")
+        #expect(prompt.buttonTitle == "Archive")
+        #expect(prompt.informativeText == "The responses in progress will stop.")
+        #expect(model.tabs.count == 2)
+    }
+
+    @Test
+    func quittingNamesRunningSessionsApartFromWorkingOnes() {
+        let working = StopWorkingPrompt(action: .quit, working: 2, running: [])
+        #expect(working.messageText == "2 sessions are still working. Quit anyway?")
+        #expect(working.informativeText == "The responses in progress will stop.")
+
+        let mixed = StopWorkingPrompt(action: .quit, working: 1, running: [.claudeCode, .codex])
+        #expect(mixed.messageText == "3 sessions are still running. Quit anyway?")
+        #expect(mixed.informativeText == "The response in progress will stop.")
+
+        let idle = StopWorkingPrompt(action: .quit, working: 0, running: [.claudeCode, .codex])
+        #expect(idle.messageText == "2 sessions are still running. Quit anyway?")
+        #expect(idle.informativeText == "Their processes will stop.")
+    }
+
+    @Test @MainActor
+    func quittingNamesACommandRunningInThePanelTerminal() {
+        #expect(StopWorkingPrompt(action: .quit, stopping: []) == nil)
+        let panelOnly = StopWorkingPrompt(action: .quit, stopping: [], panelJob: true)
+        #expect(
+            panelOnly?.messageText == "A command is still running in the panel terminal. Quit anyway?")
+        #expect(panelOnly?.informativeText == "The command will stop.")
+
+        let both = StopWorkingPrompt(action: .quit, working: 1, running: [], panelJob: true)
+        #expect(both.messageText == "A session is still working. Quit anyway?")
+        #expect(
+            both.informativeText
+                == "The response in progress will stop. The command in the panel terminal will stop too.")
+    }
+
+    @Test @MainActor
+    func restartingThePanelShellAsksFirstWhileACommandRuns() async throws {
+        // An empty HOME and /bin/sh keep the user's startup files out of the panel shell.
+        let home = try makeTemporaryTestDirectory()
+        let previousHome = ProcessInfo.processInfo.environment["HOME"]
+        let previousShell = ProcessInfo.processInfo.environment["SHELL"]
+        setenv("HOME", home.path, 1)
+        setenv("SHELL", "/bin/sh", 1)
+        defer {
+            if let previousHome { setenv("HOME", previousHome, 1) } else { unsetenv("HOME") }
+            if let previousShell { setenv("SHELL", previousShell, 1) } else { unsetenv("SHELL") }
+            try? FileManager.default.removeItem(at: home)
+        }
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        var prompts: [StopWorkingPrompt] = []
+        var answer = false
+        model.confirmStopWorking = {
+            prompts.append($0)
+            return answer
+        }
+        model.panel.isVisible = false
+        model.showPanel(.shell)
+        await flushMainAsync()
+        let idle = try #require(model.panel.shell)
+
+        model.restartPanelShell()
+        #expect(prompts.isEmpty)
+        let busy = try #require(model.panel.shell)
+        #expect(busy !== idle)
+        busy.send(text: "/bin/sleep 5\r")
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !model.panel.shellHasForegroundJob, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(model.panel.shellHasForegroundJob)
+
+        model.restartPanelShell()
+        #expect(
+            prompts.map(\.messageText) == [
+                "A command is still running in the panel terminal. Restart anyway?"
+            ])
+        #expect(model.panel.shell === busy)
+
+        answer = true
+        model.restartPanelShell()
+        #expect(prompts.count == 2)
+        #expect(model.panel.shell !== busy)
     }
 
     @Test @MainActor
@@ -3083,6 +3748,70 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func archivingASelectionWritesSettingsOnceNotOncePerChat() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        final class Writes: @unchecked Sendable { var count = 0 }
+        func writes(archiving sessions: [GrokSession]) -> Int {
+            let writes = Writes()
+            let token = NotificationCenter.default.addObserver(
+                forName: UserDefaults.didChangeNotification, object: fixture.defaults, queue: nil
+            ) { _ in writes.count += 1 }
+            defer { NotificationCenter.default.removeObserver(token) }
+            model.archive(sessions)
+            return writes.count
+        }
+
+        let one = writes(archiving: [makeSession(id: "s-1", cwd: cwd)])
+        let five = writes(archiving: (2...6).map { makeSession(id: "s-\($0)", cwd: cwd) })
+
+        #expect(one > 0)
+        #expect(five == one)
+    }
+
+    /// A child that ignores SIGTERM costs one full wait. Several of them must
+    /// share that wait, not queue behind each other on the main thread.
+    @Test @MainActor
+    func quittingWithSeveralStuckTabsWaitsAboutOnce() async throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\ntrap '' TERM\nexec /bin/sleep 30\n")
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        let tabs = try (0..<4).map { _ in try #require(model.newTab(in: cwd)) }
+        let pids = tabs.map(\.controller.processID)
+        #expect(pids.allSatisfy { $0 > 0 })
+        try await Task.sleep(for: .milliseconds(400))
+
+        let elapsed = ContinuousClock().measure { model.closeAllTabsAndWait() }
+
+        #expect(elapsed < .milliseconds(2200))
+        #expect(pids.allSatisfy { kill($0, 0) != 0 })
+    }
+
+    @Test @MainActor
+    func archivingSeveralStuckTabsWaitsAboutOnce() async throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\ntrap '' TERM\nexec /bin/sleep 30\n")
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let tabs = try (0..<4).map { _ in try #require(model.newTab(in: cwd)) }
+        let pids = tabs.map(\.controller.processID)
+        let sessions = try tabs.map { makeSession(id: try #require($0.sessionID), cwd: cwd) }
+        model.confirmStopWorking = { _ in true }
+        try await Task.sleep(for: .milliseconds(400))
+
+        let elapsed = ContinuousClock().measure { model.archive(sessions) }
+
+        #expect(model.tabs.isEmpty)
+        #expect(elapsed < .milliseconds(2200))
+        #expect(pids.allSatisfy { kill($0, 0) != 0 })
+    }
+
+    @Test @MainActor
     func archivingASelectionWithAWorkingChatAsksOnce() throws {
         let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
         defer { fixture.cleanup() }
@@ -3096,7 +3825,7 @@ struct AppModelTests {
         let other = makeSession(id: "s-other", cwd: cwd)
 
         var asked = 0
-        model.confirmStopWorking = {
+        model.confirmStopWorking = { _ in
             asked += 1
             return false
         }
@@ -3106,7 +3835,7 @@ struct AppModelTests {
         #expect(!model.isArchived(other))
         #expect(model.isOpen(working))
 
-        model.confirmStopWorking = {
+        model.confirmStopWorking = { _ in
             asked += 1
             return true
         }
@@ -3143,6 +3872,41 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func deletingASelectionRescansTheSessionsOnce() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let scans = ScanCount()
+        let store = SessionStore(
+            root: fixture.grokHome.appendingPathComponent("sessions"),
+            timing: SessionStoreTiming(),
+            scanOperation: { root, cache, ignoringCache in
+                scans.increment()
+                return SessionScanner.scan(root: root, cache: cache, ignoringCache: ignoringCache)
+            }
+        )
+        let model = AppModel(
+            settings: fixture.settings,
+            store: store,
+            trashConversation: { _ in },
+            presentError: { _ in },
+            panel: RightPanel(
+                defaults: fixture.defaults,
+                notesStore: ConversationNotesStore(root: fixture.notesRoot)
+            ),
+            pairingStore: InMemoryRemotePairingStore()
+        )
+        defer { model.closeAllTabsAndWait() }
+
+        let selection = (1...5).map { makeSession(id: "s-\($0)", cwd: cwd) }
+        #expect(model.deleteConversations(selection) == 5)
+        #expect(await waitUntil { scans.value > 0 })
+        try await Task.sleep(for: .milliseconds(200))
+
+        #expect(scans.value == 1)
+    }
+
+    @Test @MainActor
     func legacyFolderNotesMigrateToTheNewestConversationInTheFolder() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
@@ -3152,6 +3916,8 @@ struct AppModelTests {
         try fixture.writeListedSession(
             id: "new", cwd: cwd.path, summary: "New", updatedAt: "2026-08-01T00:00:00Z")
         await fixture.store.reload()
+        // Fixture folders are temporary, which the sidebar treats as worktrees.
+        fixture.settings.showWorktreeSessions = true
         let orphanPath = fixture.root.appendingPathComponent("nowhere").path
         let legacy = [cwd.path: "folder note", orphanPath: "orphan note"]
         fixture.defaults.set(try JSONEncoder().encode(legacy), forKey: "panel.notes")
@@ -3167,12 +3933,251 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func newSessionRecentsSkipFoldersTheSidebarHides() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let project = try fixture.directory("project")
+        let archivedOnly = try fixture.directory("archived-only")
+        let subagentOnly = try fixture.directory("subagent-only")
+        try fixture.writeListedSession(id: "real", cwd: project.path, summary: "Real")
+        try fixture.writeListedSession(id: "old", cwd: archivedOnly.path, summary: "Old")
+        try fixture.writeListedSession(
+            id: "child", cwd: subagentOnly.path, summary: "Child", sessionKind: "subagent")
+        await fixture.store.reload()
+        fixture.settings.archivedConversations = [.init(sessionID: "old", cwd: archivedOnly.path)]
+        // Every test folder is under the temporary folder, which counts as scratch.
+        fixture.settings.showWorktreeSessions = true
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        func recents() -> Set<String> { Set(NewSessionSheet.recentDirectories(in: model).map(\.path)) }
+
+        #expect(recents() == [GrokPaths.canonicalPath(project.path)])
+        fixture.settings.showSubagentSessions = true
+        #expect(recents() == [GrokPaths.canonicalPath(project.path), GrokPaths.canonicalPath(subagentOnly.path)])
+        fixture.settings.showWorktreeSessions = false
+        #expect(recents().isEmpty)
+    }
+
+    @Test @MainActor
+    func newSessionRecentsStopResolvingPathsOnceTheListIsFull() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        for index in 0..<12 {
+            let folder = try fixture.directory("project-\(index)")
+            try fixture.writeListedSession(id: "s-\(index)", cwd: folder.path)
+        }
+        let first = try fixture.directory("project-0")
+        for index in 0..<3 {
+            try fixture.writeListedSession(id: "again-\(index)", cwd: first.path)
+        }
+        await fixture.store.reload()
+        fixture.settings.showWorktreeSessions = true
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        var resolved = 0
+        let recents = NewSessionSheet.recentDirectories(in: model) { path in
+            resolved += 1
+            return GrokPaths.canonicalPath(path)
+        }
+        #expect(recents.count == 8)
+        #expect(resolved == 8)
+    }
+
+    @Test @MainActor
+    func legacyFolderNotesStayWhenTheirFileCannotBeWritten() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let blocked = try fixture.directory("blocked")
+        let open = try fixture.directory("open")
+        try fixture.writeListedSession(id: "b-1", cwd: blocked.path, summary: "Blocked")
+        try fixture.writeListedSession(id: "o-1", cwd: open.path, summary: "Open")
+        await fixture.store.reload()
+        // Fixture folders are temporary, which the sidebar treats as worktrees.
+        fixture.settings.showWorktreeSessions = true
+        let legacy = [blocked.path: "blocked note", open.path: "open note"]
+        fixture.defaults.set(try JSONEncoder().encode(legacy), forKey: "panel.notes")
+        // A read-only notes folder for one project makes its write fail.
+        let blockedFolder = fixture.notesRoot.appendingPathComponent(
+            GrokPaths.encode(path: GrokPaths.canonicalPath(blocked.path)))
+        let fm = FileManager.default
+        try fm.createDirectory(at: blockedFolder, withIntermediateDirectories: true)
+        try fm.setAttributes([.posixPermissions: 0o500], ofItemAtPath: blockedFolder.path)
+        defer { try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: blockedFolder.path) }
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        model.migrateLegacyPanelNotes()
+
+        #expect(model.panel.legacyFolderNotes == [blocked.path: "blocked note"])
+        #expect(
+            fm.fileExists(
+                atPath: fixture.notesRoot.appendingPathComponent(
+                    GrokPaths.encode(path: GrokPaths.canonicalPath(open.path))
+                ).appendingPathComponent("o-1.md").path))
+    }
+
+    @Test @MainActor
+    func sidebarListChangesKeepAnotherRunningCopysEdits() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let elsewhere = try fixture.directory("elsewhere")
+        for id in ["mine", "theirs", "archive-me", "their-archive"] {
+            try fixture.writeListedSession(id: id, cwd: cwd.path, summary: id)
+        }
+        try fixture.writeListedSession(id: "far", cwd: elsewhere.path, summary: "Far")
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        func session(_ id: String) throws -> GrokSession {
+            try #require(fixture.store.sessions.first { $0.id == id })
+        }
+        // A second running copy of the app shares these defaults and changes
+        // every list after this copy loaded them.
+        let otherCopy = AppSettings(defaults: fixture.defaults)
+        otherCopy.pinnedConversations = [.init(sessionID: "theirs", cwd: cwd.path)]
+        otherCopy.pinnedProjects = [elsewhere.path]
+        otherCopy.archivedConversations = [.init(sessionID: "their-archive", cwd: cwd.path)]
+        otherCopy.conversationNames = [.init(sessionID: "theirs", cwd: cwd.path, name: "Theirs")]
+
+        model.pin(try session("mine"))
+        model.pin(
+            SidebarProject(
+                id: cwd.path, name: "project", displayPath: cwd.path, cwd: cwd.path, sessions: [],
+                updatedAt: Date()))
+        model.archive(try session("archive-me"))
+        model.rename(try session("mine"), to: "Mine")
+        model.pruneMissingPins()
+
+        let stored = AppSettings(defaults: fixture.defaults)
+        #expect(Set(stored.pinnedConversations.map(\.sessionID)) == ["mine", "theirs"])
+        #expect(Set(stored.pinnedProjects) == [cwd.path, elsewhere.path])
+        #expect(Set(stored.archivedConversations.map(\.sessionID)) == ["archive-me", "their-archive"])
+        #expect(Set(stored.conversationNames.map(\.name)) == ["Mine", "Theirs"])
+    }
+
+    @Test @MainActor
+    func pruneKeepsAnotherCopysNewEntriesUntilAScanCouldSeeThem() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        try fixture.writeListedSession(id: "known", cwd: cwd.path, summary: "Known")
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        // Another running copy creates a conversation after this copy's last
+        // scan, then pins, archives and names it.
+        let otherCopy = AppSettings(defaults: fixture.defaults)
+        let fresh = OpenTabsSnapshot.Entry(sessionID: "fresh", cwd: cwd.path)
+        let freshFolder = fixture.root.appendingPathComponent("fresh-folder").path
+        otherCopy.pinnedConversations = [fresh]
+        otherCopy.pinnedProjects = [freshFolder]
+        otherCopy.archivedConversations = [fresh]
+        otherCopy.conversationNames = [.init(sessionID: "fresh", cwd: cwd.path, name: "Fresh")]
+
+        model.pruneMissingPins()
+
+        var stored = AppSettings(defaults: fixture.defaults)
+        #expect(stored.pinnedConversations == [fresh])
+        #expect(stored.pinnedProjects == [freshFolder])
+        #expect(stored.archivedConversations == [fresh])
+        #expect(stored.conversationNames.map(\.name) == ["Fresh"])
+
+        // A scan that began after this copy read them still finds nothing,
+        // so they are stale and go.
+        await fixture.store.reload()
+        model.pruneMissingPins()
+
+        stored = AppSettings(defaults: fixture.defaults)
+        #expect(stored.pinnedConversations.isEmpty)
+        #expect(stored.pinnedProjects.isEmpty)
+        #expect(stored.archivedConversations.isEmpty)
+        #expect(stored.conversationNames.isEmpty)
+    }
+
+    @Test @MainActor
+    func legacyFolderNotesSkipConversationsTheSidebarHides() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let hiddenOnly = try fixture.directory("hidden-only")
+        try fixture.writeListedSession(
+            id: "real", cwd: cwd.path, summary: "Real", updatedAt: "2026-07-01T00:00:00Z")
+        try fixture.writeListedSession(
+            id: "archived", cwd: cwd.path, summary: "Archived", updatedAt: "2026-07-15T00:00:00Z")
+        try fixture.writeListedSession(
+            id: "empty", cwd: cwd.path, summary: "", messages: 2, updatedAt: "2026-08-01T00:00:00Z")
+        try fixture.writeListedSession(
+            id: "child", cwd: cwd.path, summary: "Child", sessionKind: "subagent",
+            updatedAt: "2026-08-15T00:00:00Z")
+        try fixture.writeListedSession(
+            id: "only-child", cwd: hiddenOnly.path, summary: "Child", sessionKind: "subagent")
+        let withTab = try fixture.directory("with-tab")
+        try fixture.writeListedSession(
+            id: "open-older", cwd: withTab.path, summary: "Open", updatedAt: "2026-07-01T00:00:00Z")
+        try fixture.writeListedSession(
+            id: "closed-newer", cwd: withTab.path, summary: "Closed", updatedAt: "2026-08-01T00:00:00Z")
+        await fixture.store.reload()
+        // Fixture folders are temporary, which the sidebar treats as worktrees.
+        fixture.settings.showWorktreeSessions = true
+        fixture.settings.archivedConversations = [.init(sessionID: "archived", cwd: cwd.path)]
+        let legacy = [cwd.path: "folder note", hiddenOnly.path: "kept note", withTab.path: "tab note"]
+        fixture.defaults.set(try JSONEncoder().encode(legacy), forKey: "panel.notes")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        model.open(try #require(fixture.store.sessions.first { $0.id == "open-older" }))
+
+        model.migrateLegacyPanelNotes()
+
+        // A conversation open in a tab wins over a newer closed one.
+        #expect(model.panel.notes(forSessionID: "open-older", cwd: withTab.path) == "tab note")
+        #expect(model.panel.notes(forSessionID: "closed-newer", cwd: withTab.path) == "")
+
+        #expect(model.panel.notes(forSessionID: "real", cwd: cwd.path) == "folder note")
+        for hidden in ["archived", "empty", "child"] {
+            #expect(model.panel.notes(forSessionID: hidden, cwd: cwd.path) == "")
+        }
+        // A folder with only hidden conversations keeps its note for later.
+        #expect(model.panel.notes(forSessionID: "only-child", cwd: hiddenOnly.path) == "")
+        #expect(model.panel.legacyFolderNotes == [hiddenOnly.path: "kept note"])
+    }
+
+    @Test @MainActor
+    func legacyFolderNotesFollowTheSidebarFilterSettings() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let children = try fixture.directory("children")
+        try fixture.writeListedSession(
+            id: "child", cwd: children.path, summary: "Child", sessionKind: "subagent")
+        await fixture.store.reload()
+        fixture.settings.showSubagentSessions = true
+        fixture.defaults.set(
+            try JSONEncoder().encode([children.path: "child note"]), forKey: "panel.notes")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+
+        // Fixture folders are temporary, so a hidden worktree cannot take the note.
+        model.migrateLegacyPanelNotes()
+        #expect(model.panel.notes(forSessionID: "child", cwd: children.path) == "")
+        #expect(model.panel.legacyFolderNotes == [children.path: "child note"])
+
+        // Once the sidebar lists it, a subagent conversation takes the note.
+        fixture.settings.showWorktreeSessions = true
+        model.migrateLegacyPanelNotes()
+        #expect(model.panel.notes(forSessionID: "child", cwd: children.path) == "child note")
+        #expect(model.panel.legacyFolderNotes.isEmpty)
+    }
+
+    @Test @MainActor
     func legacyMigrationAppendsWhenTheTargetConversationAlreadyHasANote() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
         let cwd = try fixture.directory("project")
         try fixture.writeListedSession(id: "new", cwd: cwd.path, summary: "New")
         await fixture.store.reload()
+        // Fixture folders are temporary, which the sidebar treats as worktrees.
+        fixture.settings.showWorktreeSessions = true
         let model = fixture.model()
         defer { model.closeAllTabsAndWait() }
         // The user typed a note before the migration ran.
@@ -3195,6 +4200,8 @@ struct AppModelTests {
         let cwd = try fixture.directory("project")
         try fixture.writeListedSession(id: "new", cwd: cwd.path, summary: "New")
         await fixture.store.reload()
+        // Fixture folders are temporary, which the sidebar treats as worktrees.
+        fixture.settings.showWorktreeSessions = true
         let model = fixture.model()
         defer { model.closeAllTabsAndWait() }
         model.panel.setNotes("TODO later", forSessionID: "new", cwd: cwd.path)
@@ -3215,6 +4222,8 @@ struct AppModelTests {
         let cwd = try fixture.directory("project")
         try fixture.writeListedSession(id: "new", cwd: cwd.path, summary: "New")
         await fixture.store.reload()
+        // Fixture folders are temporary, which the sidebar treats as worktrees.
+        fixture.settings.showWorktreeSessions = true
         let model = fixture.model()
         defer { model.closeAllTabsAndWait() }
         model.panel.setNotes("mine\n\n---\n\nfolder note", forSessionID: "new", cwd: cwd.path)
@@ -3276,7 +4285,7 @@ struct AppModelTests {
 
     @Test @MainActor
     func archivingAProjectClosesATabNotYetInTheStore() async throws {
-        let fixture = try ModelFixture()
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /bin/sleep 30\n")
         defer { fixture.cleanup() }
         let projectDir = try fixture.directory("acme-api")
         try fixture.writeListedSession(id: "a", cwd: projectDir.path, summary: "A")
@@ -3289,15 +4298,24 @@ struct AppModelTests {
         let fresh = try #require(model.newTab(in: projectDir))
         #expect(model.store.sessions.map(\.id) == ["a"])
         #expect(model.tabs.map(\.id) == [fresh.id])
+        #expect(fresh.activity == .unknown)
+        #expect(fresh.shouldWarnBeforeStopping)
+        var prompts: [StopWorkingPrompt] = []
+        model.confirmStopWorking = {
+            prompts.append($0)
+            return true
+        }
 
         model.archive(project)
+        #expect(prompts.count == 1)
+        #expect(prompts.first?.action == .archive)
         #expect(model.tabs.isEmpty)
         #expect(model.store.sessions.first { $0.id == "a" }.map(model.isArchived) == true)
     }
 
     @Test @MainActor
     func sidebarDismissClosesAnOpenTabAndDeletesAClosedChat() throws {
-        let fixture = try ModelFixture()
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /bin/sleep 30\n")
         defer { fixture.cleanup() }
         let cwd = try fixture.directory("project")
         let model = fixture.model()
@@ -3306,8 +4324,17 @@ struct AppModelTests {
         let tab = try #require(model.newTab(in: cwd))
         let sessionID = try #require(tab.sessionID)
         let open = makeSession(id: sessionID, cwd: cwd)
+        #expect(tab.activity == .unknown)
+        #expect(tab.shouldWarnBeforeStopping)
+        var prompts: [StopWorkingPrompt] = []
+        model.confirmStopWorking = {
+            prompts.append($0)
+            return true
+        }
         #expect(model.sidebarDismiss(for: open) == .closeTab(tab.id))
         model.performSidebarDismiss(open)
+        #expect(prompts.count == 1)
+        #expect(prompts.first?.action == .closeTab)
         #expect(model.tabs.isEmpty)
 
         let closed = makeSession(id: "closed-id", cwd: cwd)
@@ -3319,7 +4346,13 @@ struct AppModelTests {
         #expect(AppModel.describe(.starting) == "starting")
         #expect(AppModel.describe(.working) == "working")
         #expect(AppModel.describe(.idle) == "idle")
-        #expect(AppModel.describe(.exited(code: 2)) == "exited 2")
+        #expect(AppModel.describe(.waitingForApproval) == "waitingForApproval")
+        #expect(AppModel.describe(.interrupted) == "interrupted")
+        #expect(AppModel.describe(.failed) == "failed")
+        #expect(AppModel.describe(.disconnected) == "disconnected")
+        #expect(AppModel.describe(.unknown) == "unknown")
+        #expect(AppModel.describe(.exited(code: 2)) == "failed 2")
+        #expect(AppModel.describe(.exited(code: 0)) == "exited 0")
         #expect(AppModel.describe(.exited(code: nil)) == "exited")
     }
 
@@ -3387,6 +4420,51 @@ final class ModelFixture {
         notesRoot = root.appendingPathComponent("notes")
     }
 
+    func completeTurn(_ tab: TerminalTab, start: Bool = true) async throws {
+        var didComplete = false
+        let onSettle = tab.onSettle
+        tab.onSettle = {
+            didComplete = true
+            onSettle?()
+        }
+        defer { tab.onSettle = onSettle }
+        let directory = try #require(tab.spec.sessionDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let journal = directory.appendingPathComponent("updates.jsonl")
+        if !FileManager.default.fileExists(atPath: journal.path) { try Data().write(to: journal) }
+        if start { tab.noteTurnStarted() }
+        let timestamp = Int64(Date().addingTimeInterval(0.01).timeIntervalSince1970 * 1000)
+        let turn = UUID().uuidString
+        let sessionID = try #require(tab.nativeSessionID)
+        let events: [[String: Any]] = [
+            [
+                "timestamp": timestamp / 1000,
+                "params": [
+                    "sessionId": sessionID,
+                    "_meta": ["eventId": UUID().uuidString, "promptId": turn, "agentTimestampMs": timestamp],
+                    "update": ["sessionUpdate": "agent_message_chunk"],
+                ],
+            ],
+            [
+                "timestamp": timestamp / 1000,
+                "params": [
+                    "sessionId": sessionID, "_meta": ["eventId": UUID().uuidString, "agentTimestampMs": timestamp],
+                    "update": ["sessionUpdate": "turn_completed", "prompt_id": turn, "stop_reason": "end_turn"],
+                ],
+            ],
+        ]
+        let handle = try FileHandle(forWritingTo: journal)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        for event in events {
+            try handle.write(contentsOf: JSONSerialization.data(withJSONObject: event))
+            try handle.write(contentsOf: Data([0x0A]))
+        }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !didComplete, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(didComplete)
+    }
+
     func directory(_ name: String) throws -> URL {
         let url = root.appendingPathComponent(name).resolvingSymlinksInPath()
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -3445,7 +4523,8 @@ final class ModelFixture {
                     defaults: defaults,
                     notesStore: ConversationNotesStore(root: notesRoot)
                 ),
-                pairingStore: InMemoryRemotePairingStore()
+                pairingStore: InMemoryRemotePairingStore(),
+                providerInstallations: fixtureProviderInstallations(executable)
             )
         }
         if let canonicalPath {
@@ -3459,7 +4538,8 @@ final class ModelFixture {
                     defaults: defaults,
                     notesStore: ConversationNotesStore(root: notesRoot)
                 ),
-                pairingStore: InMemoryRemotePairingStore()
+                pairingStore: InMemoryRemotePairingStore(),
+                providerInstallations: fixtureProviderInstallations(executable)
             )
         }
         return AppModel(
@@ -3471,7 +4551,8 @@ final class ModelFixture {
                 defaults: defaults,
                 notesStore: ConversationNotesStore(root: notesRoot)
             ),
-            pairingStore: InMemoryRemotePairingStore()
+            pairingStore: InMemoryRemotePairingStore(),
+            providerInstallations: fixtureProviderInstallations(executable)
         )
     }
 
@@ -3544,17 +4625,34 @@ private func waitUntil(
     return condition()
 }
 
+private final class ScanCount: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int { lock.withLock { count } }
+    func increment() { lock.withLock { count += 1 } }
+}
+
 private final class RunnerProbe: @unchecked Sendable {
     private let lock = NSLock()
     private var storedCalls: [[String]] = []
     private var storedResponses: [(Int32, String)] = []
     private var storedResponse: (Int32, String) = (0, "")
+    private var storedQueueLabels: [String] = []
     private var gate: CallGate?
 
     var calls: [[String]] {
         lock.lock()
         defer { lock.unlock() }
         return storedCalls
+    }
+
+    /// The dispatch queue each call ran on, to prove none ran on the Swift
+    /// concurrency cooperative pool.
+    var queueLabels: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedQueueLabels
     }
 
     func setResponse(_ value: (Int32, String)) {
@@ -3582,8 +4680,10 @@ private final class RunnerProbe: @unchecked Sendable {
         lock.unlock()
         gate?.waitWhileClosed()
 
+        let queueLabel = String(cString: __dispatch_queue_get_label(nil))
         lock.lock()
         storedCalls.append(arguments)
+        storedQueueLabels.append(queueLabel)
         let result: (Int32, String)
         if storedResponses.isEmpty {
             result = storedResponse

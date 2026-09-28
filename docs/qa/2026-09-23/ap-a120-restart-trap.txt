@@ -1,0 +1,20 @@
+# a120 restart runs the panel shell's TERM trap — branch audit/app-panel @ dde62c7, SigilUX debug build, 2026-09-23 22:04
+# Method (disclosed): no keystrokes are allowed, so the trap was not typed into the shell.
+# A temporary ~/.zshrc in the throwaway harness home (/tmp/sigil-ux/home) set the trap in interactive zsh only:
+#   if [[ -o interactive && -z $ZSH_EXECUTION_STRING ]]; then
+#     print "trap set in zsh pid=$$ ppid=$PPID" >> ap-trap-setup.log
+#     trap 'touch /tmp/sigil-ux/ap-trap-ran; exit' TERM
+#   fi
+# The file was deleted after the check, with the trap file. Restart Shell pressed with AXPress.
+
+panel open (View > Panel > Terminal), panel.mode=shell
+trap set: 22:04:40 zsh pid=35154 ppid=34579 (SigilUX)
+panel shell before restart: 35154 34579 /bin/zsh -il
+/tmp/sigil-ux/ap-trap-ran before restart: No such file or directory
+AXPress "Restart Shell" at 22:04:57
+/tmp/sigil-ux/ap-trap-ran after restart: created Sep 23 22:04:57 2026 (size 0)
+old shell 35154 after restart: gone
+new panel shell: 22:04:57 zsh pid=37096 ppid=34579 (trap set again by the temporary ~/.zshrc)
+cleanup: trap file and temporary ~/.zshrc deleted; panel closed; SigilUX quit at 22:05:08
+
+Result: PASS. Restart Shell sent SIGTERM; the old shell ran its TERM trap and exited, and a new shell started.

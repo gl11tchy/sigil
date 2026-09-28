@@ -4,90 +4,85 @@ import Testing
 
 @Suite("Palette")
 struct PaletteTests {
+    static let sets = [Palette(dark: true), Palette(dark: false)]
 
-    /// Every text colour has to be readable on the panel it actually sits on.
-    /// The metadata line is the one that slips: it is small, grey, and on the
-    /// sidebar rather than the ground.
-    @Test(arguments: TerminalTheme.all)
-    func textClearsWCAGAAOnItsPanel(theme: TerminalTheme) {
-        let palette = Palette(theme: theme)
-
-        #expect(Palette.contrast(palette.textHex, palette.sidebarHex) >= 4.5)
-        #expect(Palette.contrast(palette.textDimHex, palette.sidebarHex) >= 4.5)
-        #expect(Palette.contrast(palette.textFaintHex, palette.sidebarHex) >= 4.5)
-        // The same three sit on the selected row and on the terminal ground.
-        #expect(Palette.contrast(palette.textFaintHex, palette.selectedHex) >= 4.5)
-        #expect(Palette.contrast(palette.textDimHex, palette.groundHex) >= 4.5)
-    }
-
-    /// The accent marks state, so it has to be legible as a mark, not just present.
-    @Test(arguments: TerminalTheme.all)
-    func accentIsVisibleAgainstEveryPanel(theme: TerminalTheme) {
-        let palette = Palette(theme: theme)
-
-        #expect(Palette.contrast(palette.accentHex, palette.sidebarHex) >= 3)
-        #expect(Palette.contrast(palette.accentHex, palette.selectedHex) >= 3)
-    }
-
-    /// Hover, selection, and hairlines have to step off the rail. The terminal
-    /// ground may sit close to the rail on a near-black theme; that is intended.
-    @Test(arguments: TerminalTheme.all)
-    func panelsStepApart(theme: TerminalTheme) {
-        let palette = Palette(theme: theme)
-        let steps = [
-            palette.sidebarHex, palette.raisedHex,
-            palette.selectedHex, palette.hairlineHex,
-        ]
-        let luminances = steps.map(Palette.luminance)
-
-        for (earlier, later) in zip(luminances, luminances.dropFirst()) {
-            #expect(abs(later - earlier) > 0.0008)
+    /// Words use `ink` and `ink2`, and both have to read on every panel,
+    /// the selected `hover2` fill included.
+    @Test(arguments: sets)
+    func wordsClearWCAGAAOnEveryPanel(palette: Palette) {
+        for panel in palette.panelHexes {
+            #expect(Palette.contrast(palette.inkHex, panel) >= 4.5)
+            #expect(Palette.contrast(palette.ink2Hex, panel) >= 4.5)
         }
     }
 
-    @Test(arguments: TerminalTheme.all)
-    func accentAndErrorsAreReadableAsText(theme: TerminalTheme) {
-        let palette = Palette(theme: theme)
-        for background in [palette.groundHex, palette.sidebarHex, palette.raisedHex, palette.selectedHex] {
-            #expect(Palette.contrast(palette.accentHex, background) >= 4.5)
-            #expect(Palette.contrast(palette.errorHex, background) >= 4.5)
+    /// The text-only variants were moved along lightness until they cleared
+    /// AA; this is the floor that move promised.
+    @Test(arguments: sets)
+    func accentAndStatusWordsClearWCAGAA(palette: Palette) {
+        for panel in palette.panelHexes {
+            #expect(Palette.contrast(palette.accentInkHex, panel) >= 4.5)
+            #expect(Palette.contrast(palette.redInkHex, panel) >= 4.5)
+            #expect(Palette.contrast(palette.greenInkHex, panel) >= 4.5)
+            #expect(Palette.contrast(palette.orangeInkHex, panel) >= 4.5)
         }
     }
 
-    /// The rail used to be true black on every dark theme, so Discord, Figma,
-    /// Ember, and Telegram all looked like the same strip. Each theme's ground
-    /// has to show in the chrome.
-    @Test func railsFollowTheThemeGround() {
-        let neon = Palette(theme: .sigilNeon)
-        let discord = Palette(theme: .discord)
-        let figma = Palette(theme: .figma)
-        let ember = Palette(theme: .grokEmber)
-        let telegram = Palette(theme: .telegram)
-        let day = Palette(theme: .grokDay)
-
-        #expect(discord.sidebarHex != 0x000000)
-        #expect(figma.sidebarHex != 0x000000)
-        #expect(ember.sidebarHex != 0x000000)
-        #expect(telegram.sidebarHex != 0x000000)
-        #expect(
-            Set([
-                neon.sidebarHex, discord.sidebarHex, figma.sidebarHex,
-                ember.sidebarHex, telegram.sidebarHex, day.sidebarHex,
-            ]).count == 6
-        )
+    /// Icons at rest — a tab's close glyph, the search magnifier — are `ink3`,
+    /// and a control has to clear the 3:1 of a UI component everywhere it sits.
+    @Test(arguments: sets)
+    func iconsClearTheUIComponentFloor(palette: Palette) {
+        for panel in palette.panelHexes {
+            #expect(Palette.contrast(palette.ink3Hex, panel) >= 3)
+        }
     }
 
-    @Test func emberRailStaysWarm() {
-        let hex = Palette(theme: .grokEmber).sidebarHex
-        let red = (hex >> 16) & 0xFF
-        let blue = hex & 0xFF
-        #expect(red > blue)
+    /// White button text sits on `accentFill`, never on `accent`.
+    @Test(arguments: sets)
+    func primaryButtonTextClearsWCAGAA(palette: Palette) {
+        #expect(Palette.contrast(0xFFFFFF, palette.accentFillHex) >= 4.5)
     }
 
-    @Test func telegramRailStaysCool() {
-        let hex = Palette(theme: .telegram).sidebarHex
-        let red = (hex >> 16) & 0xFF
-        let blue = hex & 0xFF
-        #expect(blue > red)
+    /// The accent is a mark — a working light, a focus ring — so it needs the
+    /// 3:1 of a UI component on the surfaces marks sit on.
+    @Test(arguments: sets)
+    func accentIsVisibleAsAMark(palette: Palette) {
+        for panel in [palette.canvasHex, palette.pageHex, palette.surfaceHex, palette.fieldHex] {
+            #expect(Palette.contrast(palette.accentHex, panel) >= 3)
+        }
+    }
+
+    /// Hover and selection have to step off the surface under them, in the
+    /// order they stack, or a selected row reads as a hovered one.
+    @Test(arguments: sets)
+    func fillsStepApartInOrder(palette: Palette) {
+        let base = palette.isDark ? palette.canvasHex : palette.surfaceHex
+        let steps = [base, palette.hoverHex, palette.hover2Hex].map(Palette.luminance)
+        for (earlier, later) in zip(steps, steps.dropFirst()) {
+            #expect(abs(later - earlier) > 0.003)
+        }
+    }
+
+    /// Beautiful UI's values, kept exactly: the chrome is theirs, not derived.
+    @Test func tokensAreBeautifulUIs() {
+        let dark = Palette(dark: true)
+        #expect(dark.canvasHex == 0x1C1D1F)
+        #expect(dark.pageHex == 0x17181A)
+        #expect(dark.inkHex == 0xF2F3F4)
+        // ink3 is Beautiful UI's hue and chroma, lifted to the 3:1 icon floor.
+        #expect(dark.ink3Hex == 0x787B81)
+        #expect(dark.accentHex == 0x3D9AFF)
+        let light = Palette(dark: false)
+        #expect(light.canvasHex == 0xF1F2F3)
+        #expect(light.pageHex == 0xFAFAFB)
+        #expect(light.surfaceHex == 0xFFFFFF)
+        #expect(light.accentHex == 0x0285FF)
+    }
+
+    /// A theme only picks the set.
+    @Test func themesChooseTheSetByAppearance() {
+        #expect(Palette(theme: .discord) == Palette(dark: true))
+        #expect(Palette(theme: .grokDay) == Palette(dark: false))
+        #expect(Palette(theme: .sigilLight) == Palette(dark: false))
     }
 }

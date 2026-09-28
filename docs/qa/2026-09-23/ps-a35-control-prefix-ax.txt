@@ -1,0 +1,53 @@
+## a35 CONTROL: same steps on the pre-fix build (audit/views-motion, SettingsView path commit identical to origin/main), same missing path
+## Settings opened (18:15:28)
+AXTextField | Value=/Users/Shared/sigil-ux/no-grok/bin/grok | Focused=1 | Enabled=1 | Position=556,376 | Size=274x24
+windows:
+AXWindow | Subrole=AXStandardWindow | Title=General | Focused=0 | Identifier=com_apple_SwiftUI_Settings_window
+AXWindow | Subrole=AXStandardWindow | Title=SigilUX | Focused=0 | Identifier=SwiftUI.ModifiedContent<SwiftUI.M
+sheets/alert text:
+
+## step 1: guarded click into the path field
+clicked 656.0,388.0
+focused: AXTextField | Value=/Users/Shared/sigil-ux/no-grok/bin/grok | Focused=1 | Enabled=1 | Position=556,376 | Size=274x24
+
+## step 3: guarded click on the Appearance toolbar tab
+clicked 699.0,274.0
+windows:
+AXWindow | Subrole=AXStandardWindow | Title=Appearance | Focused=1 | Identifier=com_apple_SwiftUI_Settings_win
+AXWindow | Subrole=AXStandardWindow | Title=SigilUX | Focused=0 | Identifier=SwiftUI.ModifiedContent<SwiftUI.M
+sheets/alert text:
+
+## step 4: guarded click back on General
+clicked 765.0,274.0
+windows:
+AXWindow | Subrole=AXStandardWindow | Title=General | Focused=1 | Identifier=com_apple_SwiftUI_Settings_window
+AXWindow | Subrole=AXStandardWindow | Title=SigilUX | Focused=0 | Identifier=SwiftUI.ModifiedContent<SwiftUI.M
+sheets/alert text:
+
+## step 5: guarded click into the path field, then guarded click on the Settings close button
+clicked 656.0,388.0
+focused: AXTextField | Value=/Users/Shared/sigil-ux/no-grok/bin/grok | Focused=1 | Enabled=1 | Position=556,376 | Size=274x24
+clicked 522.0,230.0
+windows:
+AXWindow | Subrole=AXStandardWindow | Title=SigilUX | Focused=1 | Identifier=SwiftUI.ModifiedContent<SwiftUI.M
+sheets/alert text:
+
+## step 6: reopen Settings (18:16:00)
+windows:
+AXWindow | Subrole=AXStandardWindow | Title=General | Focused=0 | Identifier=com_apple_SwiftUI_Settings_window
+AXWindow | Subrole=AXStandardWindow | Title=SigilUX | Focused=0 | Identifier=SwiftUI.ModifiedContent<SwiftUI.M
+sheets/alert text:
+
+## step 7: guarded click into the path field, then guarded click into the main window's search field
+clicked 656.0,388.0
+focused: AXTextField | Value=/Users/Shared/sigil-ux/no-grok/bin/grok | Focused=1 | Enabled=1 | Position=556,376 | Size=274x24
+clicked 420.0,311.0
+focused: AXSheet | Description=alert | Focused=1 | Identifier=_NS:87 | Position=626,378 | Size=260x122
+windows:
+AXWindow | Subrole=AXStandardWindow | Title=General | Focused=0 | Identifier=com_apple_SwiftUI_Settings_window
+AXWindow | Subrole=AXStandardWindow | Title=SigilUX | Focused=0 | Identifier=SwiftUI.ModifiedContent<SwiftUI.M
+sheets/alert text:
+ AXSheet | Description=alert | Focused=1 | Identifier=_NS:87 | Position=626,378 | Size=260x122
+  AXStaticText | Value=Could not update Settings | Focused=0 | Enabled=1 | Identifier=_NS:74 | Position=647,397 | Size=218x18
+  AXStaticText | Value=Choose an executable file. | Focused=0 | Enabled=1 | Identifier=_NS:58 | Position=647,423 | Size=218x18
+## (control app then quit with pkill while the alert was up)

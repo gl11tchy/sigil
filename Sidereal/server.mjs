@@ -1,10 +1,13 @@
 import http from 'node:http';
-import { readFile } from 'node:fs/promises';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { readFile, stat } from 'node:fs/promises';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
+import { brotliCompress, gzip } from 'node:zlib';
 import { WebSocketServer, WebSocket } from 'ws';
 import { importKey, open } from './public/crypto.mjs';
 import { loadRevision } from './revision.mjs';
+import { createAPNs } from './apns.mjs';
 
 const revision = await loadRevision(undefined, { required: process.env.SIGIL_REQUIRE_REVISION === '1' });
 
@@ -19,9 +22,53 @@ const assets = new Map([
   ['/sw.js', ['sw.js', 'text/javascript']], ['/manifest.webmanifest', ['manifest.webmanifest', 'application/manifest+json']],
   ['/icon.svg', ['icon.svg', 'image/svg+xml']],
   ...[180, 192, 512].map(size => [`/icon-${size}.png`, [`icon-${size}.png`, 'image/png']]),
+  ...['Inter-Regular', 'Inter-Medium', 'Inter-SemiBold', 'JetBrainsMono-Regular', 'JetBrainsMono-Medium']
+    .map(name => [`/fonts/${name}.woff2`, [`fonts/${name}.woff2`, 'font/woff2']]),
 ]);
+const compressors = { br: promisify(brotliCompress), gzip: promisify(gzip) };
+const compressible = type => type.startsWith('text/') || type.endsWith('+xml') || type.endsWith('+json');
+// The first of br and gzip the client accepts; otherwise the file goes out as it is.
+function encoding(header) {
+  const accepted = new Map(String(header || '').split(',').map(part => {
+    const [name, ...params] = part.toLowerCase().split(';').map(value => value.trim());
+    const q = params.find(value => value.startsWith('q='));
+    return [name, q ? Number(q.slice(2)) : 1];
+  }));
+  return ['br', 'gzip'].find(name => accepted.get(name) > 0);
+}
+// If-None-Match uses the weak comparison: W/"x" matches "x".
+const unchanged = (header, etag) => typeof header === 'string' &&
+  header.split(',').some(tag => ['*', etag, `W/${etag}`].includes(tag.trim()));
+// Each file is read, hashed and compressed once per version on disk. A changed size, mtime,
+// ctime or inode reloads it, so a new deployment's code is never answered from an old copy.
+function publicFiles() {
+  const files = new Map();
+  return async (name, wanted) => {
+    const url = new URL(`public/${name}`, import.meta.url);
+    const { size, mtimeMs, ctimeMs, ino } = await stat(url);
+    const version = `${size}:${mtimeMs}:${ctimeMs}:${ino}`;
+    let file = files.get(name);
+    if (file?.version !== version) {
+      const identity = readFile(url).then(body => ({ body, etag: `"${createHash('sha256').update(body).digest('base64url')}"` }));
+      file = { version, identity, encoded: new Map() };
+      files.set(name, file);
+    }
+    try {
+      const plain = await file.identity;
+      if (!wanted) return plain;
+      if (!file.encoded.has(wanted)) {
+        file.encoded.set(wanted, compressors[wanted](plain.body).then(body => body.byteLength < plain.body.byteLength
+          ? { body, etag: `${plain.etag.slice(0, -1)}-${wanted}"`, encoding: wanted } : plain));
+      }
+      return await file.encoded.get(wanted);
+    } catch (error) {
+      if (files.get(name) === file) files.delete(name);
+      throw error;
+    }
+  };
+}
 
-export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {}) {
+export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns = null } = {}) {
   const origin = new URL(publicOrigin);
   if (origin.origin !== publicOrigin || !(origin.protocol === 'https:' ||
       (origin.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(origin.hostname)))) {
@@ -31,6 +78,7 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
   const tickets = new Map();
   let creationWindow = now(), creations = 0;
   const wss = new WebSocketServer({ noServer: true, maxPayload: 110000, perMessageDeflate: false });
+  const files = publicFiles();
   // No request, header, or frame logging. Proxies must log paths only, never queries.
   const server = http.createServer(async (req, res) => {
     req.url = req.url.split('?')[0];
@@ -59,8 +107,17 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
     const asset = req.method === 'GET' && assets.get(req.url);
     if (!asset) { res.writeHead(404).end(); return; }
     try {
-      const data = await readFile(new URL(`public/${asset[0]}`, import.meta.url));
-      res.writeHead(200, { 'Content-Type': `${asset[1]}; charset=utf-8` }).end(data);
+      const compress = compressible(asset[1]);
+      const file = await files(asset[0], compress && encoding(req.headers['accept-encoding']));
+      const font = asset[1].startsWith('font/');
+      // Fonts never change under one name and weigh ~500 KB; let the phone keep them.
+      // Everything else is kept but checked on each use, so a new deployment's code loads at once.
+      res.setHeader('Cache-Control', font ? 'public, max-age=604800, immutable' : 'no-cache');
+      res.setHeader('ETag', file.etag);
+      if (compress) res.setHeader('Vary', 'Accept-Encoding');
+      if (unchanged(req.headers['if-none-match'], file.etag)) { res.writeHead(304).end(); return; }
+      if (file.encoding) res.setHeader('Content-Encoding', file.encoding);
+      res.writeHead(200, { 'Content-Type': font ? asset[1] : `${asset[1]}; charset=utf-8`, 'Content-Length': file.body.byteLength }).end(file.body);
     } catch { res.writeHead(500).end(); }
   });
   server.requestTimeout = 10000;
@@ -71,15 +128,130 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
     if (socket.bufferedAmount > 220000) { socket.terminate(); return; }
     socket.send(JSON.stringify(value));
   };
+  // Alerts for a phone that is away. The host registers the phone's device token
+  // once per connection; the relay keeps it only as long as the room lives and
+  // never logs it. Payload text stays sealed: the phone's extension opens it.
+  const hexToken = value => typeof value === 'string' && value.length >= 64 && value.length <= 200 && /^[a-f0-9]+$/.test(value);
+  const pushEnvironments = new Set(['production', 'development']);
+  const registerPush = (room, value) => {
+    if (value.pushToken === null) { room.push = undefined; return true; }
+    if (!hexToken(value.pushToken) || !pushEnvironments.has(value.pushEnvironment)) return false;
+    room.push = { token: value.pushToken, environment: value.pushEnvironment };
+    return true;
+  };
+  const activityState = state => {
+    if (!state || typeof state !== 'object' || Array.isArray(state)) return null;
+    const out = {};
+    if (typeof state.status === 'string' && state.status.length <= 16) out.status = state.status;
+    if (typeof state.since === 'number' && Number.isFinite(state.since)) out.since = state.since;
+    if (typeof state.asking === 'boolean') out.asking = state.asking;
+    return out.status ? out : null;
+  };
+  // Returns what builds the APNs request for a host's push frame from the phone's
+  // registration when it goes out, or null when the frame is malformed. It keeps only
+  // the checked fields, never the frame.
+  const pushRequest = push => {
+    if (!push || typeof push !== 'object' || Array.isArray(push)) return null;
+    if (typeof push.data === 'string') {
+      if (push.data.length > 3000 || !/^[A-Za-z0-9+/=]+$/.test(push.data)) return null;
+      const thread = typeof push.thread === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(push.thread) ? push.thread : undefined;
+      const data = push.data;
+      return registration => ({
+        environment: registration?.environment, token: registration?.token, pushType: 'alert', collapseId: thread,
+        payload: {
+          aps: {
+            alert: { title: 'Sigil', body: 'A session needs you.' }, sound: 'default', 'mutable-content': 1,
+            category: 'SESSION', ...(thread ? { 'thread-id': thread } : {}),
+          },
+          sigil: { data },
+        },
+      });
+    }
+    if (hexToken(push.activity) && (push.event === 'update' || push.event === 'end')) {
+      const state = activityState(push.state);
+      if (!state) return null;
+      const { activity, event } = push;
+      return registration => {
+        const seconds = Math.floor(now() / 1000);
+        return {
+          environment: registration?.environment, token: activity, pushType: 'liveactivity', priority: 10,
+          payload: {
+            aps: {
+              timestamp: seconds, event, 'content-state': state,
+              ...(event === 'end' ? { 'dismissal-date': seconds + 300 } : {}),
+            },
+          },
+        };
+      };
+    }
+    return null;
+  };
+  // Apple can take ten seconds to answer. Pushes wait in a short queue per room, sent one at a
+  // time in order, so a reply to the phone never waits behind one. A push keeps the token
+  // registered before it; a full queue answers at once instead of holding more.
+  const maxQueuedPushes = 60;
+  const queuePush = (ws, room, push) => {
+    const build = pushRequest(push);
+    if (!build) return false;
+    const queue = room.pushes ??= [];
+    if (queue.length >= maxQueuedPushes) { send(ws, { type: 'push', ok: false, reason: 'busy' }); return true; }
+    queue.push({ ws, build, registration: room.push });
+    if (queue.length === 1) deliverPushes(room).catch(() => {});
+    return true;
+  };
+  // The first push in the queue is the one with Apple; every push gets its answer in turn.
+  const deliverPushes = async room => {
+    const queue = room.pushes;
+    while (queue.length) {
+      const { ws, build, registration } = queue[0];
+      let answer;
+      // A host connection that closed or was replaced sends nothing more, and its pushes do not count.
+      const live = !room.closed && room.host === ws;
+      if (live && now() - (room.pushWindow || 0) >= 60000) { room.pushWindow = now(); room.pushCount = 0; }
+      if (!live) answer = { ok: false, reason: 'closed' };
+      else if (++room.pushCount > 60) answer = { ok: false, reason: 'rate' };
+      else if (!apns || !registration || registration.gone) answer = { ok: false, reason: apns ? 'token' : 'off' };
+      else {
+        const request = build(registration);
+        try {
+          const { status } = await apns.send(request);
+          // Apple's 410 names the token it was sent: an ended activity's, not the phone's.
+          if (status === 410 && request.pushType === 'alert') {
+            registration.gone = true;
+            if (room.push === registration) room.push = undefined;
+          }
+          answer = { ok: status === 200, status };
+        } catch {
+          answer = { ok: false, reason: 'unreachable' };
+        }
+      }
+      queue.shift();
+      send(ws, { type: 'push', ...answer });
+    }
+  };
+  // Two Sigil copies can share one pairing. Hand the ticket to another room whose host is live.
+  const liveRoomFor = (ticket, except) => {
+    for (const [other, candidate] of rooms) {
+      if (other !== except && candidate.ticket === ticket && candidate.host) return other;
+    }
+  };
   const deleteRoom = id => {
     const room = rooms.get(id);
     if (!room) return;
     rooms.delete(id);
     clearTimeout(room.dropPhone);
-    if (room.ticket && tickets.get(room.ticket) === id) tickets.delete(room.ticket);
+    // Queued pushes not yet with Apple are not sent; the host hears so before its socket goes.
+    room.closed = true;
+    for (const { ws } of room.pushes?.splice(1) ?? []) send(ws, { type: 'push', ok: false, reason: 'closed' });
+    if (room.ticket && tickets.get(room.ticket) === id) {
+      const next = liveRoomFor(room.ticket, id);
+      if (next) tickets.set(room.ticket, next); else tickets.delete(room.ticket);
+    }
     room.phone?.terminate(); room.host?.terminate();
   };
   server.on('upgrade', (req, socket, head) => {
+    // Node removes its socket error listener before 'upgrade'; a peer reset would crash the relay.
+    socket.on('error', () => socket.destroy());
     const reject = () => { socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); };
     const rawURL = req.url;
     req.url = rawURL.split('?')[0]; // Downstream diagnostics must not retain queries.
@@ -119,8 +291,10 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
         try { value = JSON.parse(bytes.toString()); } catch { ws.close(1008); return; }
         if (!value || typeof value !== 'object' || Array.isArray(value)) { ws.close(1008); return; }
         incoming = incoming.then(async () => {
-          if (ws.readyState !== WebSocket.OPEN) return;
           if (!routed) {
+            // A frame that arrived with the close frame still goes through;
+            // only a new route needs a live socket.
+            if (ws.readyState !== WebSocket.OPEN) return;
             if (typeof value.route !== 'string' || value.route.length > 2048) { ws.close(1008); return; }
             const route = await open(value.route, await importKey(routingKey), `relay-${role}`);
             if (ws.readyState !== WebSocket.OPEN) return;
@@ -130,9 +304,14 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
               ws.close(1008); return;
             }
             if (role === 'phone') {
-              id = tickets.get(route.ticket) || route.room;
+              const byTicket = tickets.has(route.ticket);
+              id = byTicket ? tickets.get(route.ticket) : route.room;
               room = rooms.get(id);
               if (!room?.host) { ws.close(1008); return; }
+              // Only a paired phone holds the ticket. After one routes by it, the QR room
+              // id no longer lets anyone take the phone slot while the host keeps that ticket.
+              if (byTicket) room.claimedBy = route.ticket;
+              else if (room.claimedBy && room.claimedBy === room.ticket) { ws.close(1008); return; }
             } else {
               id = route.room; room = rooms.get(id);
               if (!room || !equal(req.headers.authorization, `Bearer ${room.hostToken}`)) { ws.close(1008); return; }
@@ -145,13 +324,21 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
               clearTimeout(room.dropPhone);
               room.dropPhone = undefined;
               if (route.ticket) {
-                if (room.ticket && room.ticket !== route.ticket && tickets.get(room.ticket) === id) tickets.delete(room.ticket);
-                tickets.set(route.ticket, id);
+                if (room.ticket && room.ticket !== route.ticket && tickets.get(room.ticket) === id) {
+                  const next = liveRoomFor(room.ticket, id);
+                  if (next) tickets.set(room.ticket, next); else tickets.delete(room.ticket);
+                }
                 room.ticket = route.ticket;
+                // A second copy must not take the phone from a room whose host is live.
+                if (!rooms.get(tickets.get(route.ticket))?.host || tickets.get(route.ticket) === id) tickets.set(route.ticket, id);
               }
               send(ws, { type: 'ready' });
               if (room.phone) send(ws, { type: 'peer', peer: room.peer });
             } else { take('phone'); room.peer = peer; send(room.host, { type: 'peer', peer }); }
+            return;
+          }
+          if (role === 'host' && room.host === ws && ('pushToken' in value || 'push' in value)) {
+            if ('pushToken' in value ? !registerPush(room, value) : !queuePush(ws, room, value.push)) ws.close(1008);
             return;
           }
           const frame = {};
@@ -173,6 +360,8 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
         if (!routed) return;
         if (role === 'host' && room.host === ws) {
           room.host = null; room.disconnectedAt = now();
+          const next = room.ticket && tickets.get(room.ticket) === id && liveRoomFor(room.ticket, id);
+          if (next) tickets.set(room.ticket, next);
           clearTimeout(room.dropPhone);
           const phone = room.phone;
           room.dropPhone = setTimeout(() => {
@@ -200,13 +389,20 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now } = {
   timer.unref();
   return { server, close() {
     clearInterval(timer);
+    apns?.close?.();
     for (const id of rooms.keys()) deleteRoom(id);
     for (const ws of wss.clients) ws.terminate();
     wss.close(); server.close(); server.closeAllConnections();
   } };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const relay = createRelay({ publicOrigin: process.env.PUBLIC_ORIGIN });
+  const relay = createRelay({
+    publicOrigin: process.env.PUBLIC_ORIGIN,
+    apns: createAPNs({
+      key: process.env.APNS_KEY, keyId: process.env.APNS_KEY_ID, teamId: process.env.APNS_TEAM_ID,
+      topic: process.env.APNS_TOPIC,
+    }),
+  });
   relay.server.listen(Number(process.env.PORT || 3000), '0.0.0.0');
   process.on('SIGTERM', () => relay.close());
   process.on('SIGINT', () => relay.close());

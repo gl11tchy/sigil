@@ -1,0 +1,145 @@
+sc3 on sc-merge (branch audit/sidebar-cleanup), built 833b076, 2026-09-23. Folders-as-projects (#99) merged with the sidebar snapshot.
+Real app: isolated SigilUX test build, seeded throwaway home. Read through the macOS accessibility API only; no keystrokes.
+Help strings are shown once; the AX help attribute repeats each one two or three times.
+Seed (removed after the run): an empty folder /tmp/sigil-ux/home/Projects/added-empty (the test home, so it shows as
+~/Projects/added-empty) in the sidebar.addedProjects defaults list, and one archived chat ("Cut the NAT gateway bill in half",
+terraform-infra) in sidebar.archivedConversations, so the Archived count has something to match.
+
+1. PASS. The Projects header reads "Projects, 5" and has the Add Project + button (AXButton "Add Project").
+   The 5 folders are acme-api, added-empty, sigil, acme-web, terraform-infra.
+2. PASS. The added-empty row shows "0 chats" (AXValue "0 chats"; tooltip "~/Projects/added-empty / 0 chats"),
+   between the chat folders acme-api and sigil. The screenshot row shows 0.
+3. PASS. Recents nav row "11 chats"; the Recents list has 11 rows. Archived nav row "1 chat"; the Archived list has 1 row.
+   Home folder counts add up to 11: acme-api 3 + added-empty 0 + sigil 4 + acme-web 3 + terraform-infra 1.
+4. Skipped: a typed search needs keystrokes.
+Screenshot: sc3-home-projects.png (Home, right panel closed).
+
+SigilUX pid 66585 launched 23:54:24
+######## Home (23:54:29)
+== nav rows
+---- element 1
+  AXRole = "AXButton"
+  AXDescription = "Home"
+  AXAttributedDescription = "Home" (attributed)
+  AXTitle = <absent>
+  AXHelp = "Open sessions and projects"
+  AXValue = ""
+  AXIdentifier = <absent>
+  AXPosition = (60, 176)
+  AXSize = 272x32
+  AXEnabled = 1
+---- element 1
+  AXRole = "AXButton"
+  AXDescription = "Recents"
+  AXAttributedDescription = "Recents" (attributed)
+  AXTitle = <absent>
+  AXHelp = "All conversations, newest first"
+  AXValue = "11 chats"
+  AXIdentifier = <absent>
+  AXPosition = (60, 208)
+  AXSize = 272x32
+  AXEnabled = 1
+---- element 1
+  AXRole = "AXButton"
+  AXDescription = "Archived"
+  AXAttributedDescription = "Archived" (attributed)
+  AXTitle = <absent>
+  AXHelp = "Archived conversations"
+  AXValue = "1 chat"
+  AXIdentifier = <absent>
+  AXPosition = (60, 240)
+  AXSize = 272x32
+  AXEnabled = 1
+== section headers (AXHeading)
+---- element 1
+  AXRole = "AXHeading"
+  AXDescription = "Open, 2"
+  AXAttributedDescription = "Open, 2" (attributed)
+  AXTitle = <absent>
+  AXHelp = <absent>
+  AXValue = <absent>
+  AXIdentifier = <absent>
+  AXPosition = (76, 284)
+  AXSize = 32x15
+  AXEnabled = 1
+---- element 2
+  AXRole = "AXHeading"
+  AXDescription = "Projects, 5"
+  AXAttributedDescription = "Projects, 5" (attributed)
+  AXTitle = <absent>
+  AXHelp = <absent>
+  AXValue = <absent>
+  AXIdentifier = <absent>
+  AXPosition = (76, 386)
+  AXSize = 49x15
+  AXEnabled = 1
+== Add Project button
+---- element 1
+  AXRole = "AXButton"
+  AXDescription = "Add Project"
+  AXAttributedDescription = "Add Project" (attributed)
+  AXTitle = <absent>
+  AXHelp = "Add Project"
+  AXValue = <absent>
+  AXIdentifier = "plus"
+  AXPosition = (281, 383)
+  AXSize = 22x22
+  AXEnabled = 1
+== Home list
+row 1: help="Summarise the acme-api service and its layout | /Users/Shared/sigil-ux/projects/acme-api | Working" value="Working"
+row 2: help="Fix the 401 on expired refresh tokens | /Users/Shared/sigil-ux/projects/acme-api | Working" value="Selected, Working"
+row 3: help="/Users/Shared/sigil-ux/projects/acme-api | 3 chats · now" value="3 chats, one open, working"
+row 4: help="~/Projects/added-empty | 0 chats" value="0 chats"
+row 5: help="/Users/Shared/sigil-ux/projects/sigil | 4 chats · 6 hours ago" value="4 chats"
+row 6: help="/Users/Shared/sigil-ux/projects/acme-web | 3 chats · 1 day ago" value="3 chats"
+row 7: help="/Users/Shared/sigil-ux/projects/terraform-infra | 1 chat · 2 weeks ago" value="1 chat"
+  (AXHeading text="<none>")
+  (AXHeading text="<none>")
+row 8: help="Add Project" value="<none>"
+session/project rows (AXButton with help): 8
+== added folder row
+---- element 1
+  AXRole = "AXButton"
+  AXDescription = "added-empty"
+  AXAttributedDescription = "added-empty" (attributed)
+  AXTitle = <absent>
+  AXHelp = "~/Projects/added-empty
+0 chats"
+  AXValue = "0 chats"
+  AXIdentifier = <absent>
+  AXPosition = (60, 438)
+  AXSize = 272x32
+  AXEnabled = 1
+shot sc3-home-projects at 23:54:32 (panel.visible=0)
+######## Recents (23:54:32)
+AXPress on AXButton with help "All conversations, newest first"
+row 1: help="Summarise the acme-api service and its layout | /Users/Shared/sigil-ux/projects/acme-api | 6 messages · now" value="Open in another tab, working"
+row 2: help="Fix the 401 on expired refresh tokens | /Users/Shared/sigil-ux/projects/acme-api | 6 messages · now" value="Selected, working"
+row 3: help="Make the sidebar search rank folders too | /Users/Shared/sigil-ux/projects/sigil | 6 messages · 6 hours ago" value="Closed"
+row 4: help="Explain how tab restore picks the selected tab | /Users/Shared/sigil-ux/projects/sigil | 6 messages · 12 hours ago" value="Closed"
+row 5: help="Rate limit the token endpoint | /Users/Shared/sigil-ux/projects/acme-api | 6 messages · 1 day ago" value="Closed"
+row 6: help="Dark mode for the settings panel | /Users/Shared/sigil-ux/projects/acme-web | 6 messages · 1 day ago" value="Closed"
+row 7: help="Replace the date picker with a native one | /Users/Shared/sigil-ux/projects/acme-web | 6 messages · 1 day ago" value="Closed"
+row 8: help="Why does the checkout page flash on load | /Users/Shared/sigil-ux/projects/acme-web | 6 messages · 2 days ago" value="Closed"
+row 9: help="Add a keyboard shortcut for renaming | /Users/Shared/sigil-ux/projects/sigil | 6 messages · 4 days ago" value="Closed"
+row 10: help="Audit the remote relay for replay protection | /Users/Shared/sigil-ux/projects/sigil | 6 messages · 1 week ago" value="Closed"
+row 11: help="Rotate the staging database credentials | /Users/Shared/sigil-ux/projects/terraform-infra | 6 messages · 2 weeks ago" value="Closed"
+  (AXHeading text="<none>")
+  (AXHeading text="<none>")
+  (AXHeading text="<none>")
+  (AXHeading text="<none>")
+session/project rows (AXButton with help): 11
+######## Archived (23:54:36)
+AXPress on AXButton with help "Archived conversations"
+row 1: help="Cut the NAT gateway bill in half | /Users/Shared/sigil-ux/projects/terraform-infra | 6 messages · 1 month ago" value="Closed"
+  (AXHeading text="<none>")
+session/project rows (AXButton with help): 1
+######## back to Home (23:54:38)
+AXPress on AXButton with help "Open sessions and projects"
+  (AXHeading text="<none>")
+  (AXHeading text="<none>")
+row 8: help="Add Project" value="<none>"
+session/project rows (AXButton with help): 8
+== panel.visible=0
+quit at 23:54:43
+

@@ -1,0 +1,21 @@
+a114: app menu and Help menu of SigilUX (renamed debug build of this branch), read through System Events.
+
+Menu: SigilUX
+  About SigilUX | enabled=true
+  Check for Updates… | enabled=true
+  ---- | enabled=false
+  Settings… | enabled=true | key=,
+  ---- | enabled=false
+  Services | enabled=true
+  ---- | enabled=false
+  Hide SigilUX | enabled=true | key=H
+  Hide Others | enabled=true | key=H
+  Show All | enabled=true
+  ---- | enabled=false
+  Quit SigilUX | enabled=true | key=Q
+  Quit and Keep Windows | enabled=true | key=Q
+
+
+Menu: Help
+  Reveal Crash Logs | enabled=true
+

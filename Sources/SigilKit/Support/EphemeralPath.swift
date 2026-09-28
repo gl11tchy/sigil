@@ -79,24 +79,14 @@ private func hasScratchWorkspaceMarker(_ path: String) -> Bool {
     if parts.contains(where: { scratchComponents.contains($0) }) {
         return true
     }
-    for (root, children) in scratchChildrenByRoot {
-        if let index = parts.firstIndex(of: root) {
-            let next = parts.index(after: index)
-            if next < parts.endIndex, children.contains(parts[next]) {
-                return true
-            }
-        }
+    // Check every occurrence: a worktree can sit under an earlier dot-dir.
+    if zip(parts, parts.dropFirst()).contains(where: { scratchChildrenByRoot[$0]?.contains($1) == true }) {
+        return true
     }
-    if let index = parts.firstIndex(of: ".bb") {
-        let plugins = parts.index(after: index)
-        if plugins < parts.endIndex, parts[plugins] == "plugins" {
-            let plugin = parts.index(after: plugins)
-            if plugin < parts.endIndex, scratchPlugins.contains(parts[plugin]) {
-                return true
-            }
-        }
+    let pluginChains = scratchPlugins.map { [".bb", "plugins", $0] }
+    return parts.indices.contains { index in
+        pluginChains.contains { parts[index...].starts(with: $0) }
     }
-    return false
 }
 
 /// macOS presents the same directory as both `/tmp` and `/private/tmp` (and

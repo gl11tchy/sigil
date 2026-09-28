@@ -1,0 +1,97 @@
+a118: session S = "Rate limit the token endpoint" (158fd7ca-071f-4330-9b6b-adcd1482b2ea, acme-api).
+Saved tabs are read from the SigilUX defaults key session.openTabs. Tab strip and sidebar row states are AX reads.
+
+== 1. S opened by hand (AXPress on its row), then SigilUX quit. Saved tabs:
+saved openTabs entries=16; contains 158fd7ca-071f-4330-9b6b-adcd1482b2ea: True
+
+== 2. S's session folder moved out of the sessions folder, SigilUX relaunched. S cannot open, so it is deferred:
+tab strip:
+  tab 1 | folder=/Users/Shared/sigil-ux/projects/acme-api | state=background, working
+  tab 2 | folder=/Users/Shared/sigil-ux/projects/sigil | state=background, working
+  tab 3 | folder=/Users/Shared/sigil-ux/projects/acme-api | state=selected, working
+  tab count=3
+sidebar list: rows(AXButton)=12, headings=5
+  row: Untitled session in acme-api [Selected, working]
+  row: Make the sidebar search rank folders too [Open in another tab, working]
+  row: Summarise the acme-api service and its layout [Open in another tab, working]
+  row: Explain how tab restore picks the selected tab [Closed]
+  row: Fix the 401 on expired refresh tokens [Closed]
+  row: Dark mode for the settings panel [Closed]
+  row: Replace the date picker with a native one [Closed]
+  row: Why does the checkout page flash on load [Closed]
+  row: Add a keyboard shortcut for renaming [Closed]
+  row: Audit the remote relay for replay protection [Closed]
+  row: Rotate the staging database credentials [Closed]
+  row: Cut the NAT gateway bill in half [Closed]
+
+saved openTabs entries=16; contains 158fd7ca-071f-4330-9b6b-adcd1482b2ea: True
+
+== 3. Folder moved back while SigilUX runs; S appears in the list. S opened by hand (AXPress on its row):
+tab strip:
+  tab 1 | folder=/Users/Shared/sigil-ux/projects/acme-api | state=background, working
+  tab 2 | folder=/Users/Shared/sigil-ux/projects/sigil | state=background, working
+  tab 3 | folder=/Users/Shared/sigil-ux/projects/acme-api | state=background, working
+  tab 4 | folder=/Users/Shared/sigil-ux/projects/acme-api | state=selected, working
+  tab count=4
+sidebar list: rows(AXButton)=13, headings=5
+  row: Rate limit the token endpoint [Selected, working]
+  row: Untitled session in acme-api [Open in another tab, working]
+  row: Make the sidebar search rank folders too [Open in another tab, working]
+  row: Summarise the acme-api service and its layout [Open in another tab, working]
+  row: Explain how tab restore picks the selected tab [Closed]
+  row: Fix the 401 on expired refresh tokens [Closed]
+  row: Dark mode for the settings panel [Closed]
+  row: Replace the date picker with a native one [Closed]
+  row: Why does the checkout page flash on load [Closed]
+  row: Add a keyboard shortcut for renaming [Closed]
+  row: Audit the remote relay for replay protection [Closed]
+  row: Rotate the staging database credentials [Closed]
+  row: Cut the NAT gateway bill in half [Closed]
+
+saved openTabs entries=16; contains 158fd7ca-071f-4330-9b6b-adcd1482b2ea: True
+
+== 4. File > Close Tab (AXPress) on S. The fake CLI keeps every tab working, so the stop alert showed; AXPress on its Close Tab button:
+tab strip:
+  tab 1 | folder=/Users/Shared/sigil-ux/projects/acme-api | state=background, working
+  tab 2 | folder=/Users/Shared/sigil-ux/projects/sigil | state=background, working
+  tab 3 | folder=/Users/Shared/sigil-ux/projects/acme-api | state=selected, working
+  tab count=3
+sidebar list: rows(AXButton)=13, headings=5
+  row: Rate limit the token endpoint [Closed]
+  row: Untitled session in acme-api [Selected, working]
+  row: Make the sidebar search rank folders too [Open in another tab, working]
+  row: Summarise the acme-api service and its layout [Open in another tab, working]
+  row: Explain how tab restore picks the selected tab [Closed]
+  row: Fix the 401 on expired refresh tokens [Closed]
+  row: Dark mode for the settings panel [Closed]
+  row: Replace the date picker with a native one [Closed]
+  row: Why does the checkout page flash on load [Closed]
+  row: Add a keyboard shortcut for renaming [Closed]
+  row: Audit the remote relay for replay protection [Closed]
+  row: Rotate the staging database credentials [Closed]
+  row: Cut the NAT gateway bill in half [Closed]
+
+saved openTabs entries=15; contains 158fd7ca-071f-4330-9b6b-adcd1482b2ea: False
+
+== 5. SigilUX quit and relaunched. S stays closed:
+tab strip:
+  tab 1 | folder=/Users/Shared/sigil-ux/projects/acme-api | state=background, working
+  tab 2 | folder=/Users/Shared/sigil-ux/projects/sigil | state=background, working
+  tab 3 | folder=/Users/Shared/sigil-ux/projects/acme-api | state=selected, working
+  tab count=3
+sidebar list: rows(AXButton)=13, headings=5
+  row: Make the sidebar search rank folders too [Open in another tab, working]
+  row: Summarise the acme-api service and its layout [Open in another tab, working]
+  row: Untitled session in acme-api [Selected, working]
+  row: Rate limit the token endpoint [Closed]
+  row: Explain how tab restore picks the selected tab [Closed]
+  row: Fix the 401 on expired refresh tokens [Closed]
+  row: Dark mode for the settings panel [Closed]
+  row: Replace the date picker with a native one [Closed]
+  row: Why does the checkout page flash on load [Closed]
+  row: Add a keyboard shortcut for renaming [Closed]
+  row: Audit the remote relay for replay protection [Closed]
+  row: Rotate the staging database credentials [Closed]
+  row: Cut the NAT gateway bill in half [Closed]
+
+saved openTabs entries=15; contains 158fd7ca-071f-4330-9b6b-adcd1482b2ea: False

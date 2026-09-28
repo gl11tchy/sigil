@@ -3,7 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#08090b">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#1C1D1F" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#F1F2F3" media="(prefers-color-scheme: light)">
   <meta name="apple-mobile-web-app-title" content="Sidereal">
   <link rel="apple-touch-icon" href="/icon-180.png">
   <link rel="manifest" href="/manifest.webmanifest">
@@ -15,52 +17,75 @@
 <body>
   <header>
     <h1 id="brand"><img src="/icon.svg" width="24" height="24" alt="">Sigil</h1>
-    <button id="sessions-toggle" type="button" aria-label="Browse sessions" aria-haspopup="dialog">Sessions</button>
+    <div id="session-toolbar" class="toolbar" hidden>
+      <img class="mark" src="/icon.svg" width="20" height="20" alt="">
+      <div class="session-picker"><select id="tabs" aria-label="Session"></select><span class="session-chevron chevron" aria-hidden="true"></span></div>
+      <button id="new" type="button" aria-label="New session"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>New</button>
+    </div>
     <details class="connection" id="connection">
-      <summary id="connection-toggle" aria-label="Connection settings"><span id="status" role="status">Not connected</span><span aria-hidden="true">⌄</span></summary>
+      <summary id="connection-toggle" aria-labelledby="status connection-label"><span id="status">Not connected</span><span id="connection-label" hidden>connection settings</span><span class="chevron" aria-hidden="true"></span></summary>
       <div class="connection-panel">
         <p>Keep Sigil running. You should not need to scan again.</p>
         <p id="standalone-panel-hint" class="standalone-hint" hidden>This icon is split from Safari on iPhone. Delete it, then Add to Home Screen from Safari and turn off Open as Web App.</p>
         <button id="copy-output" type="button" hidden>Copy output</button>
         <button id="raw-toggle" type="button" aria-pressed="false" hidden>Show raw terminal</button>
         <button id="reconnect" hidden>Reconnect</button>
-        <button id="forget" hidden>Forget this Mac</button>
+        <button id="forget" class="destructive" hidden>Forget this Mac</button>
       </div>
     </details>
+    <span id="status-live" class="sr-only" role="status"></span>
   </header>
-  <div id="session-toolbar" class="toolbar" hidden>
-    <div class="session-picker"><select id="tabs" aria-label="Session"></select><span class="session-chevron" aria-hidden="true">⌄</span></div>
-    <button id="new" type="button" aria-label="New session">+ New</button>
-  </div>
-  <dialog id="sessions-dialog" aria-labelledby="sessions-heading">
-    <div class="sheet-heading"><h2 id="sessions-heading">Sessions</h2><button id="sessions-close" type="button">Done</button></div>
-    <input id="session-search" type="search" placeholder="Search sessions" aria-label="Search sessions" autocomplete="off">
+  <dialog id="sessions-dialog" class="sheet" aria-labelledby="sessions-heading">
+    <div class="sheet-heading"><h2 id="sessions-heading">Chats</h2><button id="sessions-close" type="button">Done</button></div>
+    <p id="sessions-error" class="sheet-error" role="alert" hidden></p>
+    <div class="search-field">
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+      <input id="session-search" type="search" placeholder="Search open and saved chats" aria-label="Search chats" autocomplete="off">
+    </div>
+    <h3 id="open-heading">Open</h3>
     <div id="session-list"></div>
     <p id="session-no-results" hidden>No matching sessions.</p>
     <h3 id="saved-heading" hidden>Saved chats</h3>
     <div id="saved-list"></div>
     <p id="saved-empty" hidden>No matching chats.</p>
   </dialog>
-  <dialog id="project-dialog" aria-labelledby="project-heading">
+  <dialog id="project-dialog" class="sheet" aria-labelledby="project-heading">
     <div class="sheet-heading"><h2 id="project-heading">Choose a project</h2><button id="project-cancel" type="button">Cancel</button></div>
+    <p id="project-error" class="sheet-error" role="alert" hidden></p>
+    <div id="provider-field" hidden><label for="provider">CLI</label><div class="provider-picker"><select id="provider" aria-describedby="provider-problem"></select><span class="chevron" aria-hidden="true"></span></div></div>
+    <p id="provider-problem" hidden></p>
     <div id="project-list"></div>
     <p id="project-empty" hidden>No projects yet.</p>
   </dialog>
+  <dialog id="replace-dialog" class="confirm" aria-labelledby="replace-heading" aria-describedby="replace-detail">
+    <form method="dialog">
+      <div class="sheet-heading"><h2 id="replace-heading">Replace the paired Mac?</h2></div>
+      <p id="replace-detail">This phone is already paired with a Mac. Replace it only if this link came from Sigil on your own Mac.</p>
+      <div class="dialog-actions"><button id="replace-keep" value="keep">Keep current</button><button id="replace-accept" class="destructive" value="replace">Replace</button></div>
+    </form>
+  </dialog>
+  <dialog id="forget-dialog" class="confirm" aria-labelledby="forget-heading" aria-describedby="forget-detail">
+    <form method="dialog">
+      <div class="sheet-heading"><h2 id="forget-heading">Forget this Mac?</h2></div>
+      <p id="forget-detail">To connect again, scan a new code in Sigil on your Mac. Unsent drafts on this phone are deleted.</p>
+      <div class="dialog-actions"><button id="forget-cancel" value="cancel">Cancel</button><button id="forget-accept" class="destructive" value="forget">Forget</button></div>
+    </form>
+  </dialog>
   <main>
     <section id="welcome">
-      <img src="/icon.svg" width="56" height="56" alt="">
-      <h2>Pick up where<br>you left off.</h2>
+      <img src="/icon.svg" width="48" height="48" alt="">
+      <h2>Pick up where you left off.</h2>
       <p>Your sessions. Your tools. Away from your desk.</p>
-      <ol class="pairing-steps"><li>Open <strong>Settings → Remote</strong> in Sigil on your Mac.</li><li>Choose <strong>Connect Phone</strong>, then scan the code.</li></ol>
+      <ol class="pairing-steps" role="list"><li>Open <strong>Settings → Remote</strong> in Sigil on your Mac.</li><li>Choose <strong>Connect Phone</strong>, then scan the code.</li></ol>
       <p id="standalone-hint" class="standalone-hint" hidden>This icon is split from Safari on iPhone. Delete it, then Add to Home Screen from Safari and turn off Open as Web App.</p>
       <button id="welcome-reconnect" type="button" hidden>Try again</button>
       <div id="welcome-actions">
-        <button id="scan" type="button">Scan code</button>
+        <button id="scan" class="primary" type="button">Scan code</button>
         <button id="paste-link" type="button">Paste link</button>
         <form id="paste-form" hidden>
           <label class="sr-only" for="pairing-link">Pairing link</label>
           <input id="pairing-link" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Pairing link from the QR">
-          <button type="submit">Connect</button>
+          <button class="primary" type="submit">Connect</button>
         </form>
       </div>
     </section>
@@ -69,25 +94,34 @@
       <div class="viewfinder" aria-hidden="true"></div>
       <div class="scanner-bar">
         <p>Point at the code on your Mac</p>
+        <p id="scanner-error" role="alert" hidden></p>
         <button type="button" id="scanner-cancel">Cancel</button>
       </div>
     </section>
     <p id="error" role="alert" hidden></p>
     <section id="controls" hidden aria-label="Sigil remote control">
       <div class="workspace-bar">
-        <span id="session-status" role="status"></span>
-        <div><button id="restart" type="button" hidden>Restart session</button><button id="stop" type="button" hidden>Stop</button><button id="find-toggle" type="button" aria-label="Find in output" aria-expanded="false" aria-controls="find-bar">Find</button></div>
+        <div class="session-state"><span class="pixel-loader" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span id="session-status" role="status"></span></div>
+        <div class="workspace-actions"><button id="restart" type="button" aria-label="Restart session" hidden>Restart</button><button id="stop" type="button" hidden>Stop</button><button id="sessions-toggle" type="button" aria-label="Browse open and saved chats" aria-haspopup="dialog">Chats</button><button id="find-toggle" type="button" aria-label="Find in output" aria-expanded="false" aria-controls="find-bar">Find</button></div>
       </div>
       <form id="find-bar" hidden role="search">
+        <svg class="find-glyph" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
         <input id="find-query" type="search" placeholder="Find in output" aria-label="Find in output" autocomplete="off">
         <span id="find-count" role="status"></span>
-        <button id="find-previous" type="button" aria-label="Previous match">↑</button><button id="find-next" type="button" aria-label="Next match">↓</button><button id="find-close" type="button" aria-label="Close find">×</button>
+        <button id="find-previous" type="button" aria-label="Previous match"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m4 10 4-4 4 4"/></svg></button><button id="find-next" type="button" aria-label="Next match"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m4 6 4 4 4-4"/></svg></button><button id="find-close" type="button" aria-label="Close find"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="m4.5 4.5 7 7m0-7-7 7"/></svg></button>
       </form>
       <div class="output">
-        <div id="empty-output" hidden><h2>Ready when you are.</h2><p>Send a message to this session.</p></div>
+        <div id="empty-output" hidden><span class="pixel-loader" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><h2>Ready when you are.</h2><p>Send a message to this session.</p></div>
         <pre id="terminal" tabindex="0" aria-label="Terminal output"></pre>
         <button id="latest" type="button" hidden>↓ Latest</button>
       </div>
+      <section id="interaction" aria-labelledby="interaction-heading" hidden>
+        <h2 id="interaction-heading">Terminal controls</h2>
+        <p id="interaction-warning">These keys type into the terminal. They do not verify approval.</p>
+        <pre id="interaction-operation"></pre>
+        <p id="interaction-question"></p>
+        <div id="interaction-choices"></div>
+      </section>
       <form id="compose">
         <div id="keys" class="keys" aria-label="Terminal keys" hidden>
           <button type="button" data-key="escape">Esc</button><button type="button" data-key="tab">Tab</button>
@@ -95,20 +129,24 @@
           <button type="button" data-key="left" aria-label="Left arrow">←</button><button type="button" data-key="right" aria-label="Right arrow">→</button>
           <button type="button" data-key="backspace" aria-label="Backspace">⌫</button><button type="button" data-key="enter">Enter</button>
           <button id="paste" type="button">Paste without sending</button>
-          <button id="interrupt" type="button" aria-label="Stop current response">Stop</button>
+          <button id="interrupt" class="destructive" type="button" aria-label="Stop current response">Stop</button>
         </div>
-        <ul id="attachments" class="attachments" hidden></ul>
         <div class="entry">
-          <button id="attach-toggle" type="button" aria-label="Add photo or file">
-            <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.2 10.2 11 20.4a5.2 5.2 0 0 1-7.4-7.4l10.2-10.2a3.5 3.5 0 0 1 4.9 4.9L8.6 18.8a1.7 1.7 0 1 1-2.5-2.5l9.2-9.2"/></svg>
-          </button>
-          <input id="attach" type="file" accept="image/*,application/pdf,text/plain,text/markdown,.md,.txt,.pdf,.png,.jpg,.jpeg,.gif,.webp,.heic,.csv,.json" multiple hidden>
-
+          <ul id="attachments" class="attachments" hidden></ul>
           <label class="sr-only" for="message">Message</label>
           <textarea id="message" rows="1" placeholder="Message…" maxlength="8192" autocapitalize="sentences" enterkeyhint="enter"></textarea>
-          <button id="send" type="submit" aria-label="Send message">↑</button>
+          <div class="entry-controls">
+            <button id="attach-toggle" class="icon-button" type="button" aria-label="Add photo or file">
+              <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.2 10.2 11 20.4a5.2 5.2 0 0 1-7.4-7.4l10.2-10.2a3.5 3.5 0 0 1 4.9 4.9L8.6 18.8a1.7 1.7 0 1 1-2.5-2.5l9.2-9.2"/></svg>
+            </button>
+            <input id="attach" type="file" accept="image/*,application/pdf,text/plain,text/markdown,.md,.txt,.pdf,.png,.jpg,.jpeg,.gif,.webp,.heic,.csv,.json" multiple hidden>
+            <button id="keys-toggle" class="icon-button" type="button" aria-label="Terminal keys" aria-expanded="false" aria-controls="keys">
+              <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6.5 10h.01M10.5 10h.01M14.5 10h.01M18.5 10h.01M6.5 14h.01M9.5 14h5M18.5 14h.01"/></svg>
+            </button>
+            <div class="compose-tools" id="compose-tools" hidden><span id="compose-status" role="status"></span><span class="send-hint">⌘ / Ctrl + Enter to send</span></div>
+            <button id="send" type="submit" aria-label="Send message"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3.5M3.75 7.75 8 3.5l4.25 4.25"/></svg></button>
+          </div>
         </div>
-        <div class="compose-tools"><button id="keys-toggle" type="button" aria-expanded="false" aria-controls="keys">Keys</button><span id="compose-status" role="status"></span><span class="send-hint">⌘ / Ctrl + Enter to send</span></div>
       </form>
     </section>
   </main>

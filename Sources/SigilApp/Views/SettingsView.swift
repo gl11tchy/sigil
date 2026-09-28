@@ -7,6 +7,7 @@ struct SettingsView: View {
     @State private var settingsError: String?
     @State private var pathDraft: ExecutablePathDraft
     @State private var listedModels = GrokModelCatalog.fallback
+    @State private var tabMessagingSwitch = TabMessagingSwitch()
     @FocusState private var isExecutablePathFocused: Bool
 
     init(model: AppModel) {
@@ -14,24 +15,29 @@ struct SettingsView: View {
         _pathDraft = State(initialValue: ExecutablePathDraft(text: model.settings.executablePath))
     }
 
+    private var palette: Palette { Palette(theme: model.settings.theme) }
+
     var body: some View {
         TabView {
             appearance.tabItem { Label("Appearance", systemImage: "paintbrush") }
             general.tabItem { Label("General", systemImage: "gearshape") }
             RemoteControlView(model: model).tabItem { Label("Remote", systemImage: "iphone") }
         }
-        .tint(Palette(theme: model.settings.theme).accent)
-        .environment(\.palette, Palette(theme: model.settings.theme))
-        .frame(width: 460)
-        .scenePadding()
+        .tint(palette.accent)
+        .environment(\.palette, palette)
+        .frame(width: 540)
     }
 
     private var appearance: some View {
-        Form {
-            Section {
+        SettingsPage(minHeight: 620) {
+            SettingsSection(
+                title: "Theme",
+                footer:
+                    "Sigil Dark and Sigil Light match the window. Changing the theme restarts idle Grok tabs so the TUI matches."
+            ) {
                 VStack(spacing: 10) {
                     ForEach(ThemeGrid.rows(TerminalTheme.all)) { row in
-                        HStack(spacing: 8) {
+                        HStack(spacing: 10) {
                             ForEach(row.themes) { theme in
                                 ThemeCard(
                                     theme: theme,
@@ -49,116 +55,164 @@ struct SettingsView: View {
                         }
                     }
                 }
-                .padding(.vertical, 2)
-            } header: {
-                Text("Theme")
+                .padding(12)
             }
 
-            LabeledContent("Font size") {
-                HStack {
-                    Slider(
-                        value: Bindable(model.settings).fontSize,
-                        in: 8...32,
-                        step: 1
-                    )
-                    Text("\(Int(model.settings.fontSize)) pt")
-                        .monospacedDigit()
-                        .frame(width: 46, alignment: .trailing)
+            SettingsSection(title: "Terminal") {
+                SettingsRow(label: "Font size") {
+                    HStack(spacing: 10) {
+                        Slider(
+                            value: Bindable(model.settings).fontSize,
+                            in: 8...32,
+                            step: 1
+                        )
+                        .frame(width: 180)
+                        Text("\(Int(model.settings.fontSize)) pt")
+                            .mono(12)
+                            .foregroundStyle(palette.ink2)
+                            .frame(width: 40, alignment: .trailing)
+                    }
                 }
             }
             .onChange(of: model.settings.fontSize) { _, _ in model.applyAppearance() }
-            Text("Font size updates immediately. Changing the theme restarts the Grok tab so the TUI matches.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
         }
-        .formStyle(.grouped)
     }
 
     private var general: some View {
-        Form {
-            LabeledContent("Grok CLI") {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        TextField("Path", text: $pathDraft.text)
-                            .textFieldStyle(.roundedBorder)
-                            .monospaced()
-                            .focused($isExecutablePathFocused)
-                            // Commit on Return or focus loss only — never on each keystroke.
-                            .onSubmit { applyExecutablePath() }
-                            .onChange(of: isExecutablePathFocused) { _, focused in
-                                if !focused { applyExecutablePath() }
-                            }
-                        Button("Choose…") { pickExecutable() }
+        SettingsPage(minHeight: 620) {
+            SettingsSection(
+                title: "New sessions",
+                footer:
+                    "In a git repository, a new session gets its own worktree and branch. Turn this off to work in the project folder."
+            ) {
+                SettingsRow(label: "Default CLI") {
+                    Picker("Default CLI", selection: Bindable(model.settings).defaultProvider) {
+                        ForEach(CLIProvider.allCases) { provider in
+                            Text(provider.name).tag(provider)
+                        }
                     }
-                    Label(
-                        draftExecutableExists ? "Found" : "Not found",
-                        systemImage: draftExecutableExists
-                            ? "checkmark.circle" : "exclamationmark.triangle"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(draftExecutableExists ? .green : .red)
+                    .labelsHidden()
+                    .fixedSize()
                 }
-            }
-
-            Picker("Default model", selection: modelSelection) {
-                Text("CLI default").tag("")
-                ForEach(
-                    GrokModelCatalog.choices(
-                        listed: listedModels, saved: model.settings.model),
-                    id: \.self
-                ) { name in
-                    Text(name).monospaced().tag(name)
-                }
-            }
-
-            Picker("Default effort", selection: Bindable(model.settings).effort) {
-                ForEach(AppSettings.effortOptions, id: \.self) { option in
-                    Text(AppSettings.effortLabel(option)).tag(option)
-                }
-            }
-
-            Toggle(
-                "Show one-message sessions in the sidebar",
-                isOn: Bindable(model.settings).showEmptySessions
-            )
-
-            Toggle(
-                "Show worktree sessions in the sidebar",
-                isOn: Bindable(model.settings).showWorktreeSessions
-            )
-
-            Toggle(
-                "Show subagent sessions in the sidebar",
-                isOn: Bindable(model.settings).showSubagentSessions
-            )
-
-            Section {
-                Toggle(
-                    "Let tabs message each other",
-                    isOn: tabMessagingIsOn
+                SettingsDivider()
+                SettingsToggle(
+                    "Start in a new worktree",
+                    isOn: Bindable(model.settings).startsInWorktree
                 )
+            }
+
+            SettingsSection(title: "Grok CLI") {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        FieldFrame(isFocused: isExecutablePathFocused, height: 28) {
+                            TextField("", text: $pathDraft.text, prompt: Text("Path").foregroundStyle(palette.ink2))
+                                .textFieldStyle(.plain)
+                                .mono(12)
+                                .foregroundStyle(palette.ink)
+                                .focused($isExecutablePathFocused)
+                                // Commit on Return or focus loss only — never on each keystroke.
+                                .onSubmit { applyExecutablePath() }
+                                .onChange(of: isExecutablePathFocused) { _, focused in
+                                    if !focused { applyExecutablePath() }
+                                }
+                                .accessibilityLabel("Grok CLI path")
+                        }
+                        Button("Choose…") { pickExecutable() }
+                            .buttonStyle(SigilButtonStyle(kind: .secondary, height: 28))
+                    }
+                    HStack(spacing: 6) {
+                        Image(
+                            systemName: draftExecutableExists
+                                ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+                        )
+                        .font(.system(size: 11))
+                        Text(draftExecutableExists ? "Found" : "Not found")
+                            .ui(12, .medium)
+                    }
+                    .foregroundStyle(draftExecutableExists ? palette.greenInk : palette.redInk)
+                }
+                .padding(12)
+                SettingsDivider()
+                SettingsRow(label: "Default model") {
+                    Picker("Default model", selection: modelSelection) {
+                        Text("CLI default").tag("")
+                        ForEach(
+                            GrokModelCatalog.choices(
+                                listed: listedModels, saved: model.settings.model),
+                            id: \.self
+                        ) { name in
+                            Text(name).monospaced().tag(name)
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                SettingsDivider()
+                SettingsRow(label: "Default effort") {
+                    Picker("Default effort", selection: Bindable(model.settings).effort) {
+                        ForEach(AppSettings.effortOptions, id: \.self) { option in
+                            Text(AppSettings.effortLabel(option)).tag(option)
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+            }
+
+            KimiSettingsSection(model: model)
+
+            SettingsSection(title: "Sidebar") {
+                SettingsToggle(
+                    "Show one-message sessions",
+                    isOn: Bindable(model.settings).showEmptySessions
+                )
+                SettingsDivider()
+                SettingsToggle(
+                    "Show worktree sessions",
+                    isOn: Bindable(model.settings).showWorktreeSessions
+                )
+                SettingsDivider()
+                SettingsToggle(
+                    "Show subagent sessions",
+                    isOn: Bindable(model.settings).showSubagentSessions
+                )
+            }
+
+            SettingsSection(title: "Keyboard") {
+                SettingsToggle("Use Option as Meta key", isOn: Bindable(model.settings).optionAsMetaKey)
+                    .onChange(of: model.settings.optionAsMetaKey) { _, _ in model.applyOptionAsMetaKey() }
+            }
+
+            SettingsSection(title: "Tabs", footer: tabMessagingFooter) {
+                SettingsRow(label: "Let tabs message each other") {
+                    HStack(spacing: 8) {
+                        if model.isTabMessagingChangeInProgress {
+                            ProgressView().controlSize(.small)
+                        }
+                        Toggle("Let tabs message each other", isOn: tabMessagingIsOn)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                    }
+                }
                 .disabled(
                     (BridgeRegistration.bundledMCPBinary == nil
                         && !model.settings.isTabMessagingEnabled)
                         || model.isTabMessagingChangeInProgress
                 )
-            } footer: {
-                if let error = model.tabMessagingError {
-                    Text(error)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                } else if BridgeRegistration.bundledMCPBinary != nil {
-                    Text("Applies to tabs opened after this change.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
+            }
+            if let error = model.tabMessagingError {
+                Text(error)
+                    .ui(12)
+                    .foregroundStyle(palette.redInk)
+                    .padding(.horizontal, 4)
             }
         }
-        .formStyle(.grouped)
         .onAppear { normalizeStoredModel() }
         .task(id: model.settings.executablePath) {
-            let found = await GrokModelCatalog.load(executable: model.settings.executableURL)
-            if !found.isEmpty { listedModels = found }
+            if let found = await GrokModelCatalog.menuModels(executable: model.settings.executableURL) {
+                listedModels = found
+            }
         }
         .alert(
             "Could not update Settings",
@@ -173,21 +227,31 @@ struct SettingsView: View {
         }
     }
 
+    private var tabMessagingFooter: String? {
+        guard model.tabMessagingError == nil, BridgeRegistration.bundledMCPBinary != nil else {
+            return nil
+        }
+        return "Applies to tabs opened after this change."
+    }
+
     private var tabMessagingIsOn: Binding<Bool> {
         Binding(
-            get: { model.settings.isTabMessagingEnabled },
+            get: { tabMessagingSwitch.isOn(saved: model.settings.isTabMessagingEnabled) },
             set: { applyTabMessaging(enabled: $0) }
         )
     }
 
     private func applyTabMessaging(enabled: Bool) {
-        guard enabled != model.settings.isTabMessagingEnabled else { return }
+        guard tabMessagingSwitch.request(enabled, saved: model.settings.isTabMessagingEnabled) else {
+            return
+        }
         Task {
             do {
                 try await model.setTabMessaging(enabled: enabled)
             } catch {
                 settingsError = error.localizedDescription
             }
+            tabMessagingSwitch.finish()
         }
     }
 
@@ -209,7 +273,11 @@ struct SettingsView: View {
     }
 
     private func applyExecutablePath() {
-        switch pathDraft.commit(stored: model.settings.executablePath) {
+        apply(pathDraft.commit(stored: model.settings.executablePath))
+    }
+
+    private func apply(_ outcome: ExecutablePathDraft.Outcome) {
+        switch outcome {
         case .rejected:
             settingsError = "Choose an executable file."
         case .unchanged:
@@ -229,8 +297,7 @@ struct SettingsView: View {
             .deletingLastPathComponent()
         panel.prompt = "Choose"
         if panel.runModal() == .OK, let url = panel.url {
-            pathDraft.text = url.path
-            applyExecutablePath()
+            apply(pathDraft.pick(url, stored: model.settings.executablePath))
         }
     }
 }
@@ -251,64 +318,46 @@ enum ThemeGrid {
     }
 }
 
-/// One theme as a selectable swatch: its ground, its accent dot, its name.
-/// Appearance is a visual choice, so the picker shows the thing itself.
+/// One theme as a selectable swatch: a small screen in its own colours with
+/// three lines of text in its ramp, and its name below.
 private struct ThemeCard: View {
     let theme: TerminalTheme
     let isSelected: Bool
     let select: () -> Void
 
     @Environment(\.palette) private var palette
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
-
-    private var colors: Palette { Palette(theme: theme) }
 
     var body: some View {
         Button(action: select) {
-            VStack(spacing: 5) {
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(colors.ground)
-                    .frame(height: 34)
-                    .frame(maxWidth: .infinity)
-                    .overlay(alignment: .bottomLeading) {
-                        Circle()
-                            .fill(colors.accent)
-                            .frame(width: 6, height: 6)
-                            .padding(5)
+            VStack(spacing: 6) {
+                let shape = RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
+                VStack(alignment: .leading, spacing: 3) {
+                    line(theme.accentHex, width: 18)
+                    line(theme.foregroundHex, width: 30)
+                    HStack(spacing: 3) {
+                        line(theme.ansiHex[2], width: 10)
+                        line(theme.ansiHex[4], width: 14)
                     }
-                    .overlay(alignment: .topTrailing) {
-                        // Three text steps, so the ramp reads at a glance.
-                        VStack(alignment: .trailing, spacing: 2) {
-                            RoundedRectangle(cornerRadius: 1)
-                                .fill(colors.text)
-                                .frame(width: 22, height: 3)
-                            RoundedRectangle(cornerRadius: 1)
-                                .fill(colors.textDim)
-                                .frame(width: 14, height: 3)
-                            RoundedRectangle(cornerRadius: 1)
-                                .fill(colors.textFaint)
-                                .frame(width: 18, height: 3)
-                        }
-                        .padding(5)
-                    }
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 5)
-                            .strokeBorder(
-                                isSelected ? palette.text : palette.hairline,
-                                lineWidth: 1
-                            )
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .topLeading)
+                .background(shape.fill(Palette.color(theme.backgroundHex)))
+                .overlay(
+                    shape.strokeBorder(
+                        isSelected ? palette.accent : (isHovering ? palette.lineStrong : palette.ring),
+                        lineWidth: isSelected ? 2 : 1
                     )
-                    .scaleEffect(isHovering && !isSelected && !reduceMotion ? 1.03 : 1)
+                )
                 Text(theme.name)
-                    .font(.system(size: 10))
-                    .foregroundStyle(isSelected ? palette.text : palette.textDim)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
+                    .ui(12, isSelected ? .medium : .regular)
+                    .foregroundStyle(isSelected ? palette.ink : palette.ink2)
+                    .lineLimit(1)
                     .minimumScaleFactor(0.85)
             }
             .frame(maxWidth: .infinity)
-            .animation(.easeOut(duration: 0.12), value: isHovering)
+            .contentShape(Rectangle())
+            .animation(Motion.fade, value: isHovering)
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
@@ -316,9 +365,130 @@ private struct ThemeCard: View {
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         .help("Use the \(theme.name) terminal theme")
     }
+
+    private func line(_ hex: UInt32, width: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: 1.5)
+            .fill(Palette.color(hex))
+            .frame(width: width, height: 3)
+    }
+}
+
+// MARK: - Settings layout
+
+/// A scrolling page of cards, on the window's `canvas`.
+struct SettingsPage<Content: View>: View {
+    /// A scroll view has no height of its own; this is what the pane asks for.
+    var minHeight: CGFloat = 0
+    @ViewBuilder var content: Content
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                content
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(minHeight: minHeight)
+        .background(palette.canvas)
+    }
+}
+
+/// A titled card of rows: the title in 12.5 `ink2`, the rows on `surface`
+/// with the card ring, and an optional note below.
+struct SettingsSection<Content: View>: View {
+    let title: String
+    var footer: String? = nil
+    @ViewBuilder var content: Content
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .ui(12.5, .medium)
+                .foregroundStyle(palette.ink2)
+                .padding(.leading, 4)
+                .accessibilityAddTraits(.isHeader)
+            VStack(alignment: .leading, spacing: 0) {
+                content
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .surface(palette.surface, radius: Radius.card, elevation: .card)
+            if let footer {
+                Text(footer)
+                    .ui(12)
+                    .foregroundStyle(palette.ink2)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
+            }
+        }
+    }
+}
+
+struct SettingsRow<Control: View>: View {
+    let label: String
+    @ViewBuilder var control: Control
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .ui(13)
+                .foregroundStyle(palette.ink)
+            Spacer(minLength: 12)
+            control
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: 40)
+    }
+}
+
+struct SettingsToggle: View {
+    let label: String
+    @Binding var isOn: Bool
+
+    init(_ label: String, isOn: Binding<Bool>) {
+        self.label = label
+        _isOn = isOn
+    }
+
+    var body: some View {
+        SettingsRow(label: label) {
+            Toggle(label, isOn: $isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+        }
+    }
+}
+
+struct SettingsDivider: View {
+    @Environment(\.palette) private var palette
+    var body: some View {
+        Rectangle().fill(palette.lineSoft).frame(height: 1).padding(.leading, 12)
+    }
 }
 
 /// Local Grok CLI path text. Call `commit` from Return or focus loss only.
+/// The tab messaging switch shows what the user asked for while grok applies it,
+/// then the saved value again, which also moves it back after a failure.
+struct TabMessagingSwitch: Equatable {
+    private var requested: Bool?
+
+    func isOn(saved: Bool) -> Bool { requested ?? saved }
+
+    /// False when the request matches the saved value and no change should run.
+    mutating func request(_ enabled: Bool, saved: Bool) -> Bool {
+        guard enabled != saved else { return false }
+        requested = enabled
+        return true
+    }
+
+    mutating func finish() { requested = nil }
+}
+
 struct ExecutablePathDraft: Equatable {
     var text: String
 
@@ -331,10 +501,21 @@ struct ExecutablePathDraft: Equatable {
     @MainActor
     func commit(stored: String) -> Outcome {
         let path = AppSettings.normalizedExecutablePath(text)
+        // An untouched field is no change, even when that path is missing.
+        guard path != AppSettings.normalizedExecutablePath(stored) else { return .unchanged }
         guard AppSettings.isExecutableFile(at: URL(fileURLWithPath: path)) else {
             return .rejected
         }
-        guard path != stored else { return .unchanged }
         return .applied(path)
+    }
+
+    /// A file picked in the open panel is a choice even when it is already the
+    /// stored path, so that path stays after the default changes.
+    @MainActor
+    mutating func pick(_ url: URL, stored: String) -> Outcome {
+        text = url.path
+        let outcome = commit(stored: stored)
+        guard outcome == .unchanged, AppSettings.isExecutableFile(at: url) else { return outcome }
+        return .applied(AppSettings.normalizedExecutablePath(text))
     }
 }

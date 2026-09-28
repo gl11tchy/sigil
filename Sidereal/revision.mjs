@@ -5,7 +5,7 @@ const root = new URL('./', import.meta.url);
 
 // Runtime files and the build recipe copied into the image. Excludes the stamp itself.
 export async function sourceHash(directory = root) {
-  const files = ['Dockerfile', 'package.json', 'package-lock.json', 'server.mjs', 'revision.mjs'];
+  const files = ['Dockerfile', 'package.json', 'package-lock.json', 'server.mjs', 'apns.mjs', 'revision.mjs'];
   async function visit(path) {
     for (const entry of await readdir(new URL(path, directory), { withFileTypes: true })) {
       const name = `${path}${entry.name}`;

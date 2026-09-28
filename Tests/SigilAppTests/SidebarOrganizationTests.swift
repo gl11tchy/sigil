@@ -30,6 +30,56 @@ struct SidebarOrganizationTests {
         #expect(grouped.map(\.name) == ["unique", "/workspace/a/web", "/workspace/b/web"])
     }
 
+    @Test func sigilWorktreeSessionsGroupUnderTheirProject() {
+        let folder = GrokPaths.encode(path: "/workspace/app")
+        let worktree = SigilWorktree.root.appendingPathComponent("\(folder)/ab12cd34").path
+        let inWorktree = session(id: "w", cwd: worktree, updated: 3)
+        let inProject = session(id: "p", cwd: "/workspace/app", updated: 2)
+        let grouped = SidebarOrganization.projects(from: [inWorktree, inProject]) { $0 }
+        #expect(grouped.count == 1)
+        #expect(grouped[0].cwd == "/workspace/app")
+        #expect(grouped[0].name == "app")
+        #expect(grouped[0].sessions.map(\.id) == ["w", "p"])
+    }
+
+    @Test func anOpenFolderListsItsSigilWorktreeSessions() {
+        let folder = GrokPaths.encode(path: "/workspace/app")
+        let worktree = SigilWorktree.root.appendingPathComponent("\(folder)/ab12cd34").path
+        let all = [
+            session(id: "w", cwd: worktree, updated: 3),
+            session(id: "p", cwd: "/workspace/app", updated: 2),
+            session(id: "o", cwd: "/workspace/other", updated: 1),
+        ]
+        let project = SidebarOrganization.projects(from: all) { $0 }.first { $0.cwd == "/workspace/app" }
+        let listed = SidebarOrganization.sessions(all, in: project, samePath: ==)
+        #expect(listed.map(\.id) == ["w", "p"])
+    }
+
+    @Test func sigilWorktreeFoldersShowProjectAndWorktreeName() {
+        let folder = GrokPaths.encode(path: "/workspace/app")
+        let worktree = SigilWorktree.root.appendingPathComponent("\(folder)/ab12cd34")
+        #expect(worktree.sigilWorktreeLabel == "app/ab12cd34")
+        #expect(worktree.breadcrumbPath == "app/ab12cd34")
+        #expect(URL(fileURLWithPath: "/workspace/app").sigilWorktreeLabel == nil)
+    }
+
+    @Test func addedFoldersJoinProjectsByDate() {
+        let web = session(id: "a", cwd: "/workspace/a/web", updated: 20)
+        let api = session(id: "b", cwd: "/workspace/api", updated: 10)
+        let projects = SidebarOrganization.projects(from: [web, api]) { $0 }
+        let merged = SidebarOrganization.merging(
+            added: [
+                AddedProject(path: "/workspace/api", addedAt: Date(timeIntervalSince1970: 30)),
+                AddedProject(path: "/workspace/new", addedAt: Date(timeIntervalSince1970: 15)),
+                AddedProject(path: "/workspace/b/web", addedAt: Date(timeIntervalSince1970: 5)),
+            ],
+            into: projects
+        ) { $0 }
+        #expect(merged.map(\.name) == ["api", "web", "new", "/workspace/b/web"])
+        #expect(merged.first?.sessions.map(\.id) == ["b"])
+        #expect(merged[2].sessions.isEmpty)
+    }
+
     @Test func pinningPrependsAndIsIdempotentOnIdentity() {
         let first = session(id: "a", cwd: "/tmp/one", updated: 2)
         let second = session(id: "b", cwd: "/tmp/two", updated: 1)
@@ -133,7 +183,6 @@ struct SidebarOrganizationTests {
         #expect(project == recents)
         #expect(project == archived)
         #expect(project != .projectChats)
-        #expect(project != .projectSearch)
         #expect(project != .projectList)
         #expect(project != .recents)
         #expect(project != .archived)
@@ -183,7 +232,7 @@ struct SidebarOrganizationTests {
             ])
     }
 
-    @Test func homeListPutsDestinationsAfterProjects() {
+    @Test func homeListPutsDestinationsFirstAsNavItems() {
         #expect(
             SidebarOrganization.homeRowIDs(
                 recentsCount: 2,
@@ -191,12 +240,25 @@ struct SidebarOrganizationTests {
                 pinnedIDs: ["pin"],
                 restIDs: ["rest"]
             ) == [
-                "pin", "rest", SidebarOrganization.recentsID, SidebarOrganization.archivedID,
+                SidebarOrganization.recentsID, SidebarOrganization.archivedID, "pin", "rest",
             ])
         #expect(
             SidebarOrganization.homeRowIDs(
                 recentsCount: 0, archivedCount: 0, pinnedIDs: ["a"], restIDs: []
             ) == ["a"])
+    }
+
+    @Test func homeListPutsOpenTabsBeforeProjects() {
+        let tab = UUID()
+        let rowID = SidebarOrganization.openTabRowID(tab)
+        #expect(
+            SidebarOrganization.homeRowIDs(
+                recentsCount: 1, archivedCount: 0, pinnedIDs: ["pin"], restIDs: ["rest"],
+                openTabIDs: [rowID]
+            ) == [SidebarOrganization.recentsID, rowID, "pin", "rest"])
+        #expect(SidebarOrganization.openTabID(fromRowID: rowID) == tab)
+        #expect(SidebarOrganization.openTabID(fromRowID: "pin") == nil)
+        #expect(SidebarOrganization.openTabID(fromRowID: SidebarOrganization.openTabPrefix + "x") == nil)
     }
 
     @Test func pathHaystacksIncludeEveryMemberSpelling() {
@@ -231,8 +293,62 @@ struct SidebarOrganizationTests {
         let other = session(id: "other", cwd: "/p/b", updated: 1)
         let grouped = SidebarOrganization.projects(from: [pinned, kept, other]) { $0 }
         let project = grouped.first { $0.id == "/p/a" }!
-        let rows = SidebarOrganization.listedRows(in: project, from: [kept, other])
+        let listed = Set([kept, other].map(\.directory))
+        let rows = SidebarOrganization.listedRows(in: project, listed: listed)
         #expect(rows.map(\.id) == ["kept"])
+    }
+
+    /// Leaving a folder puts the keyboard back on that folder's home row, so
+    /// Return reopens it and ↓ moves to the next one.
+    @Test func leavingASurfaceReturnsToItsHomeRow() {
+        #expect(
+            SidebarOrganization.homeRowID(leaving: .project, projectID: "/tmp/acme")
+                == "/tmp/acme")
+        #expect(
+            SidebarOrganization.homeRowID(leaving: .recents, projectID: nil)
+                == SidebarOrganization.recentsID)
+        #expect(
+            SidebarOrganization.homeRowID(leaving: .archived, projectID: nil)
+                == SidebarOrganization.archivedID)
+        #expect(SidebarOrganization.homeRowID(leaving: .folders, projectID: nil) == nil)
+        #expect(SidebarOrganization.homeRowID(leaving: .project, projectID: nil) == nil)
+    }
+
+    /// Set order follows the launch's hash seed; the anchor must follow the list.
+    @Test func droppingTheAnchorReanchorsOnTheFirstVisibleSelectedRow() {
+        let rows = (1...30).map { "row\($0)" }
+        let selection = Set(rows.dropFirst(4))
+
+        #expect(SidebarOrganization.reanchor(selection: selection, in: rows) == "row5")
+        #expect(SidebarOrganization.reanchor(selection: [], in: rows) == nil)
+    }
+
+    /// ⌘⌫ trashes what the user marked: the multi-selection first, else the
+    /// highlighted row, and only rows the list shows.
+    @Test func commandDeleteTargetsTheSelectionElseTheKeyboardRow() {
+        let rows = ["a", "b", "c", "d"]
+        #expect(
+            SidebarOrganization.trashTargets(keyboardRowID: "b", selection: [], in: rows) == ["b"])
+        #expect(
+            SidebarOrganization.trashTargets(keyboardRowID: "a", selection: ["d", "b"], in: rows)
+                == ["b", "d"])
+        #expect(
+            SidebarOrganization.trashTargets(keyboardRowID: "gone", selection: [], in: rows) == [])
+        #expect(SidebarOrganization.trashTargets(keyboardRowID: nil, selection: [], in: rows) == [])
+    }
+
+    /// A focused list always shows where the keys are.
+    @Test func focusedListAlwaysHasAHighlightedRow() {
+        let rows = ["a", "b", "c"]
+        #expect(
+            SidebarOrganization.keyboardRow(onFocus: "c", activeRowID: "b", in: rows) == "c")
+        #expect(
+            SidebarOrganization.keyboardRow(onFocus: nil, activeRowID: "b", in: rows) == "b")
+        #expect(
+            SidebarOrganization.keyboardRow(onFocus: "gone", activeRowID: nil, in: rows) == "a")
+        #expect(
+            SidebarOrganization.keyboardRow(onFocus: nil, activeRowID: "hidden", in: rows) == "a")
+        #expect(SidebarOrganization.keyboardRow(onFocus: nil, activeRowID: nil, in: []) == nil)
     }
 }
 

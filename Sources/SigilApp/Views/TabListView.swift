@@ -1,3 +1,4 @@
+import SigilKit
 import SwiftUI
 
 struct TabListEntry: Equatable, Identifiable {
@@ -19,6 +20,11 @@ enum TabListRows {
     static func workingState(for activity: TerminalTab.Activity) -> String {
         switch activity {
         case .starting: "Starting"
+        case .waitingForApproval: "Needs approval"
+        case .interrupted: "Stopped"
+        case .failed: "Failed"
+        case .disconnected: "Disconnected"
+        case .unknown: "Status unknown"
         case .working: "Working"
         case .idle: "Idle"
         case .exited(let code): "Exited with code \(code.map(String.init) ?? "unknown")"
@@ -61,8 +67,6 @@ struct TabListView: View {
     @Bindable var model: AppModel
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isOpen = false
-    @State private var isHovering = false
     @State private var highlighted: UUID?
     @FocusState private var listFocused: Bool
 
@@ -80,31 +84,20 @@ struct TabListView: View {
     }
 
     var body: some View {
-        Button(action: toggle) {
-            Image(systemName: "list.bullet")
-                .font(.system(size: 11, weight: .medium))
-                .frame(width: 22, height: 22)
-                .background(
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(isHovering ? palette.raised : Color.clear)
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(isHovering ? palette.text : palette.textDim)
-        .onHover { isHovering = $0 }
-        .keyboardShortcut("t", modifiers: [.command, .control])
-        .help("Tabs (⌃⌘T)")
-        .accessibilityLabel("Tabs (⌃⌘T)")
-        .popover(isPresented: $isOpen, arrowEdge: .top) {
+        IconButton(
+            systemImage: "list.bullet", help: "Tabs (⌃⌘T)", label: "Tabs",
+            isOn: model.isShowingTabList, action: toggle
+        )
+        .popover(isPresented: $model.isShowingTabList, arrowEdge: .top) {
             tabList
                 .frame(width: 360)
                 .frame(height: listHeight)
         }
+        .onDisappear { model.isShowingTabList = false }
     }
 
     private var listHeight: CGFloat {
-        min(CGFloat(max(entries.count, 1)) * 44 + 8, 360)
+        min(CGFloat(max(entries.count, 1)) * 40 + 12, 360)
     }
 
     private var tabList: some View {
@@ -121,14 +114,16 @@ struct TabListView: View {
                         .id(entry.id)
                     }
                 }
-                .padding(.vertical, 4)
-                .padding(.horizontal, 6)
+                .padding(6)
             }
-            .background(palette.ground)
+            .background(palette.surface)
             .focusable()
             .focused($listFocused)
             .defaultFocus($listFocused, true)
-            .onAppear { focusList() }
+            .onAppear {
+                focusList()
+                if let highlighted { proxy.scrollTo(highlighted, anchor: .center) }
+            }
             .onKeyPress(.upArrow) {
                 move(-1)
                 return .handled
@@ -161,18 +156,13 @@ struct TabListView: View {
     }
 
     private func toggle() {
-        if isOpen {
-            isOpen = false
-            return
-        }
-        highlighted = TabListRows.highlightedID(
-            current: nil, selected: model.selectedTabID, entries: entries)
-        isOpen = true
+        model.isShowingTabList.toggle()
     }
 
+    /// The list opens on the selected tab, whether the button or the menu opened it.
     private func focusList() {
         highlighted = TabListRows.highlightedID(
-            current: highlighted, selected: model.selectedTabID, entries: entries)
+            current: nil, selected: model.selectedTabID, entries: entries)
         listFocused = true
     }
 
@@ -196,10 +186,12 @@ struct TabListView: View {
     private func choose(_ id: UUID) {
         guard let chosen = TabListRows.selectedID(afterChoosing: id, in: entries) else { return }
         model.select(chosen)
-        isOpen = false
+        model.isShowingTabList = false
     }
 }
 
+/// One open tab in the list, as a Beautiful UI search result: title, then
+/// the folder and state in mono on the trailing side.
 private struct TabListRow: View {
     let entry: TabListEntry
     let isSelected: Bool
@@ -211,24 +203,34 @@ private struct TabListRow: View {
 
     var body: some View {
         Button(action: choose) {
-            VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 10) {
                 Text(entry.title)
-                    .font(.system(size: 12, weight: isSelected ? .medium : .regular))
-                    .foregroundStyle(palette.text)
+                    .ui(13.5, isSelected ? .medium : .regular)
+                    .foregroundStyle(palette.ink)
                     .lineLimit(1)
+                Spacer(minLength: 8)
                 Text("\(entry.folder) · \(entry.workingState)")
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundStyle(palette.textFaint)
+                    .mono(11)
+                    .foregroundStyle(palette.ink2)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .layoutPriority(-1)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .frame(height: 36)
             .background(
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
                     .fill(fill)
+                    .overlay(
+                        // The arrow-key row keeps a ring, so Return's target is
+                        // clear while the pointer rests on another row.
+                        RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
+                            .strokeBorder(
+                                isHighlighted && !isSelected ? palette.lineStrong : Color.clear,
+                                lineWidth: 1)
+                    )
             )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
@@ -237,8 +239,8 @@ private struct TabListRow: View {
     }
 
     private var fill: Color {
-        if isSelected { return palette.selected }
-        if isHovering || isHighlighted { return palette.raised }
+        if isSelected { return palette.hover2 }
+        if isHovering || isHighlighted { return palette.hover }
         return .clear
     }
 }

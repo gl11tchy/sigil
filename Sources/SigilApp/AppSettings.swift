@@ -11,13 +11,14 @@ final class AppSettings {
         static let fontSize = "terminal.fontSize"
         static let themeName = "terminal.theme"
         static let executablePath = "grok.executablePath"
+        static let executablePathChosen = "grok.executablePath.chosen"
         static let showEmptySessions = "sidebar.showEmptySessions"
         static let showWorktreeSessions = "sidebar.showWorktreeSessions"
         static let showSubagentSessions = "sidebar.showSubagentSessions"
-        static let sidebarMode = "sidebar.mode"
         static let focusedProjectPath = "sidebar.focusedProjectPath"
         static let pinnedConversations = "sidebar.pinnedConversations"
         static let pinnedProjects = "sidebar.pinnedProjects"
+        static let addedProjects = "sidebar.addedProjects"
         static let archivedConversations = "sidebar.archivedConversations"
         static let conversationNames = "sidebar.conversationNames"
         static let isTabMessagingEnabled = "bridge.enabled"
@@ -25,6 +26,11 @@ final class AppSettings {
         static let openTabs = "session.openTabs"
         static let model = "session.model"
         static let effort = "session.effort"
+        static let optionAsMeta = "terminal.optionAsMetaKey"
+        static let defaultProvider = "session.defaultProvider"
+        static let startsInWorktree = "session.startsInWorktree"
+        static let kimiSignIn = "kimi.signIn"
+        static let kimiModel = "kimi.apiKeyModel"
     }
 
     private let defaults: UserDefaults
@@ -48,7 +54,10 @@ final class AppSettings {
         didSet { defaults.set(themeName, forKey: Key.themeName) }
     }
     var executablePath: String {
-        didSet { defaults.set(executablePath, forKey: Key.executablePath) }
+        didSet {
+            defaults.set(executablePath, forKey: Key.executablePath)
+            defaults.set(true, forKey: Key.executablePathChosen)
+        }
     }
     /// Sessions the CLI created but never got a real conversation are hidden by default;
     /// hook-triggered one-shot runs otherwise drown the sidebar.
@@ -64,9 +73,6 @@ final class AppSettings {
     /// drown the parent chat in the sidebar. They still run in the background.
     var showSubagentSessions: Bool {
         didSet { defaults.set(showSubagentSessions, forKey: Key.showSubagentSessions) }
-    }
-    var sidebarMode: SidebarMode {
-        didSet { defaults.set(sidebarMode.rawValue, forKey: Key.sidebarMode) }
     }
     /// Empty means the Projects list, not a drilled-in folder.
     var focusedProjectPath: String {
@@ -85,6 +91,14 @@ final class AppSettings {
         didSet {
             if let data = try? JSONEncoder().encode(pinnedProjects) {
                 defaults.set(data, forKey: Key.pinnedProjects)
+            }
+        }
+    }
+    /// Folders shown in Projects before they have a Grok chat, newest first.
+    var addedProjects: [AddedProject] {
+        didSet {
+            if let data = try? JSONEncoder().encode(addedProjects) {
+                defaults.set(data, forKey: Key.addedProjects)
             }
         }
     }
@@ -132,6 +146,27 @@ final class AppSettings {
     var effort: String {
         didSet { defaults.set(effort, forKey: Key.effort) }
     }
+    /// Off by default, as in Terminal.app, so Option types the layout's characters.
+    var optionAsMetaKey: Bool {
+        didSet { defaults.set(optionAsMetaKey, forKey: Key.optionAsMeta) }
+    }
+
+    /// The CLI the New Session sheet selects first.
+    var defaultProvider: CLIProvider {
+        didSet { defaults.set(defaultProvider.rawValue, forKey: Key.defaultProvider) }
+    }
+    /// On by default: a new chat in a git repository gets its own worktree.
+    var startsInWorktree: Bool {
+        didSet { defaults.set(startsInWorktree, forKey: Key.startsInWorktree) }
+    }
+    /// The Kimi account by default; the API key itself lives in the Keychain.
+    var kimiSignIn: KimiSignIn {
+        didSet { defaults.set(kimiSignIn.rawValue, forKey: Key.kimiSignIn) }
+    }
+    /// The model an API-key sign-in runs, since Kimi Code needs one named.
+    var kimiModel: String {
+        didSet { defaults.set(kimiModel, forKey: Key.kimiModel) }
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -139,14 +174,17 @@ final class AppSettings {
             defaults.object(forKey: Key.fontSize) == nil
             ? 13
             : Self.normalizedFontSize(CGFloat(defaults.double(forKey: Key.fontSize)))
-        themeName = defaults.string(forKey: Key.themeName) ?? TerminalTheme.sigilNeon.name
+        themeName = defaults.string(forKey: Key.themeName) ?? TerminalTheme.sigilDark.name
         // A stored path is the user's choice and stays — except when it is the
         // installer's own binary and the themed build is now there. That path
         // was never chosen; it is what the default resolved to before the
         // themed build existed, and keeping it would leave the window themed
-        // and the program inside it not.
+        // and the program inside it not. A path set in Settings always stays.
         let stored = defaults.string(forKey: Key.executablePath)
-        if let stored, stored != GrokPaths.installerExecutable.path {
+        if let stored,
+            stored != GrokPaths.installerExecutable.path
+                || defaults.bool(forKey: Key.executablePathChosen)
+        {
             executablePath = stored
         } else {
             executablePath = GrokPaths.defaultExecutable.path
@@ -154,13 +192,7 @@ final class AppSettings {
         showEmptySessions = defaults.bool(forKey: Key.showEmptySessions)
         showWorktreeSessions = defaults.bool(forKey: Key.showWorktreeSessions)
         showSubagentSessions = defaults.bool(forKey: Key.showSubagentSessions)
-        if let raw = defaults.string(forKey: Key.sidebarMode),
-            let mode = SidebarMode(rawValue: raw)
-        {
-            sidebarMode = mode
-        } else {
-            sidebarMode = .projects
-        }
+        optionAsMetaKey = defaults.bool(forKey: Key.optionAsMeta)
         focusedProjectPath = defaults.string(forKey: Key.focusedProjectPath) ?? ""
         if let data = defaults.data(forKey: Key.pinnedConversations),
             let decoded = try? JSONDecoder().decode([OpenTabsSnapshot.Entry].self, from: data)
@@ -175,6 +207,13 @@ final class AppSettings {
             pinnedProjects = decoded
         } else {
             pinnedProjects = []
+        }
+        if let data = defaults.data(forKey: Key.addedProjects),
+            let decoded = try? JSONDecoder().decode([AddedProject].self, from: data)
+        {
+            addedProjects = decoded
+        } else {
+            addedProjects = []
         }
         if let data = defaults.data(forKey: Key.archivedConversations),
             let decoded = try? JSONDecoder().decode([OpenTabsSnapshot.Entry].self, from: data)
@@ -197,10 +236,42 @@ final class AppSettings {
         model = defaults.string(forKey: Key.model) ?? ""
         let storedEffort = defaults.string(forKey: Key.effort) ?? ""
         effort = Self.effortOptions.contains(storedEffort) ? storedEffort : ""
+        defaultProvider =
+            defaults.string(forKey: Key.defaultProvider).flatMap(CLIProvider.init(rawValue:))
+            ?? .grokBuild
+        startsInWorktree = defaults.object(forKey: Key.startsInWorktree) as? Bool ?? true
+        kimiSignIn =
+            defaults.string(forKey: Key.kimiSignIn).flatMap(KimiSignIn.init(rawValue:)) ?? .kimiAccount
+        kimiModel = defaults.string(forKey: Key.kimiModel) ?? KimiCode.defaultModel
+    }
+
+    /// Re-reads the pin, archive and name lists, which another running copy
+    /// of the app may have changed since launch. Call it before a change, so
+    /// the write keeps that copy's edits instead of replacing them.
+    func reloadSharedLists() {
+        func stored<Value: Decodable>(_ key: String) -> [Value] {
+            defaults.data(forKey: key).flatMap { try? JSONDecoder().decode([Value].self, from: $0) } ?? []
+        }
+        let pins: [OpenTabsSnapshot.Entry] = stored(Key.pinnedConversations)
+        if pins != pinnedConversations { pinnedConversations = pins }
+        let projects: [String] = stored(Key.pinnedProjects)
+        if projects != pinnedProjects { pinnedProjects = projects }
+        let added: [AddedProject] = stored(Key.addedProjects)
+        if added != addedProjects { addedProjects = added }
+        let archives: [OpenTabsSnapshot.Entry] = stored(Key.archivedConversations)
+        if archives != archivedConversations { archivedConversations = archives }
+        let names: [ConversationName] = stored(Key.conversationNames)
+        if names != conversationNames { conversationNames = names }
     }
 
     var theme: TerminalTheme {
-        TerminalTheme.all.first { $0.name == themeName } ?? .sigilNeon
+        TerminalTheme.all.first { $0.name == themeName } ?? .sigilDark
+    }
+
+    /// `theme` as saved, for the window a launch shows before the model exists.
+    static func storedTheme(defaults: UserDefaults = .standard) -> TerminalTheme {
+        let name = defaults.string(forKey: Key.themeName) ?? TerminalTheme.sigilDark.name
+        return TerminalTheme.all.first { $0.name == name } ?? .sigilDark
     }
 
     var executableURL: URL {
@@ -224,10 +295,14 @@ final class AppSettings {
     nonisolated static func effortLabel(_ value: String) -> String {
         switch value {
         case "": "CLI default"
+        case "none": "None"
+        case "minimal": "Minimal"
         case "low": "Low"
         case "medium": "Medium"
         case "high": "High"
-        case "xhigh": "Extra high"
+        case "xhigh", "extra-high": "Extra high"
+        case "max": "Max"
+        case "ultra": "Ultra"
         default: value
         }
     }

@@ -106,7 +106,9 @@ final class BridgeIntegrationTests: XCTestCase {
     func testAskTabTimeoutResponseIsError() async throws {
         let env = try TestEnv(peer: peer)
         defer { env.tearDown() }
-        env.delegate.askResponse = BridgeResponse(ok: true, answer: nil)
+        // What the app sends when the ask times out.
+        env.delegate.askResponse = BridgeResponse(
+            ok: false, error: "the other tab did not answer within 30 seconds")
 
         let outcome = try await callTool(
             env, "ask_tab",

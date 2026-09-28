@@ -5,18 +5,38 @@ import Testing
 
 @MainActor
 struct TabStripTests {
-    @Test func chipsUseTheSpaceTheyHaveInsteadOfAFixedWidth() {
+    @Test func chipsTakeTheirTitleWidthAndNeverStretch() {
         #expect(TabStripSizing.fixedChipWidth == nil)
 
         let wide = TabStripSizing.widths(available: 800, ideals: [150, 150])
-        #expect(wide == [399, 399])
-        #expect(TabStripSizing.contentWidth(available: 800, ideals: [150, 150]) == 800)
+        #expect(wide == [150, 150])
+        #expect(TabStripSizing.contentWidth(available: 800, ideals: [150, 150]) == 304)
+
+        // A long title stops at the ceiling even when the bar has room.
+        let long = TabStripSizing.widths(available: 800, ideals: [600])
+        #expect(long == [TabStripSizing.maximumChipWidth])
 
         let tight = TabStripSizing.widths(available: 100, ideals: [80, 80])
         #expect(tight == [80, 80])
         #expect(TabStripSizing.contentWidth(available: 100, ideals: [80, 80]) > 100)
 
         #expect(TabStripSizing.widths(available: 200, ideals: []) == [])
+    }
+
+    @Test func longTitlesShrinkToFitBeforeTheStripScrolls() {
+        // Two long titles split the strip instead of pushing the first one off screen.
+        #expect(TabStripSizing.widths(available: 300, ideals: [300, 300]) == [148, 148])
+        #expect(TabStripSizing.contentWidth(available: 300, ideals: [300, 300]) == 300)
+
+        // A short title keeps its width; only the long one gives way.
+        let mixed = TabStripSizing.widths(available: 220, ideals: [60, 400])
+        #expect(mixed[0] == 60)
+        #expect(abs(mixed[1] - 156) < 0.01)
+
+        // Below the floor the strip scrolls rather than crushing titles.
+        let crowded = TabStripSizing.widths(available: 200, ideals: [300, 300, 300])
+        #expect(crowded == Array(repeating: TabStripSizing.minimumChipWidth, count: 3))
+        #expect(TabStripSizing.contentWidth(available: 200, ideals: [300, 300, 300]) > 200)
     }
 
     @Test func tabStripShowsTheScrollPosition() {

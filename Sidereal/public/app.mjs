@@ -2,10 +2,12 @@ import { importKey, randomKey, seal, open } from './crypto.mjs';
 import { readableOutput } from './output.mjs';
 import { pairingFromText } from './pairing.mjs';
 const $ = id => document.getElementById(id);
+const STATUS_LABELS = { working: 'Working', starting: 'Starting…', idle: 'Ready', exited: 'Session ended', unknown: 'Status unknown', waitingForApproval: 'Needs approval', interrupted: 'Stopped', failed: 'Failed', disconnected: 'Disconnected' };
 const drafts = new Map();
 const attachmentDrafts = new Map();
 const MAX_REMOTE_BYTES = 4 * 1024 * 1024;
 const CHUNK = 32 * 1024;
+let lastChunkAt = 0;
 function attachmentsFor(id = selected) {
   if (!id) return [];
   if (!attachmentDrafts.has(id)) attachmentDrafts.set(id, []);
@@ -13,25 +15,43 @@ function attachmentsFor(id = selected) {
 }
 function remoteFileName(name) {
   const base = String(name || 'file').split(/[/\\]/).pop();
-  const mapped = [...base].map(ch => /[A-Za-z0-9._-]/.test(ch) ? ch : '-').join('')
-    .replace(/-+/g, '-').replace(/^[.-]+|[.-]+$/g, '') || 'file';
-  const bytes = new TextEncoder();
-  let out = mapped;
-  while (bytes.encode(out).length > 80) out = out.slice(0, -1);
-  return out || 'file';
+  const clean = part => [...part].map(ch => /[\p{L}\p{M}\p{N}._-]/u.test(ch) ? ch : '-').join('')
+    .replace(/-+/g, '-').replace(/^[.-]+|[.-]+$/g, '');
+  const bytes = value => new TextEncoder().encode(value).length;
+  // Keep the extension: the Mac CLI reads the file type from it.
+  const dot = base.lastIndexOf('.');
+  let ext = dot > 0 ? clean(base.slice(dot + 1)) : '';
+  if (bytes(ext) > 16) ext = '';
+  const suffix = ext ? `.${ext}` : '';
+  const stem = [...(clean(ext ? base.slice(0, dot) : base) || 'file')];
+  while (stem.length > 1 && bytes(stem.join('') + suffix) > 80) stem.pop();
+  return (stem.join('').replace(/[.-]+$/, '') || 'file') + suffix;
 }
 let tabsSignature = '';
 let sessionTabs = [], canRestart = false;
+// Set by each Mac handshake; only the first state after one can show a restarted Mac.
+let freshHandshake = false;
 const histories = new Map();
 let pendingEarlier = null, earlierFlight = false, searchToken = 0;
+let providerChoice = '', providerProblems = new Map();
 let findIndex = 0, findMatches = [], displayedOutput = null;
 let rawOutput = '', rawMode = false;
-let credential, bootstrap, newDeviceKey, socket, challenge, sequence = 0, selected;
-let selectedStatus = null, tabCount = 0;
-let connected = false, busy = false, stopped = false, reconnectTimer, pollTimer, connectTimer, generation = 0;
-let commandEpoch = 0, reconnectDelay = 500;
+let credential, bootstrap, newDeviceKey, replacingMemory, socket, challenge, clientNonce, sequence = 0, selected;
+let selectedStatus = null, selectedRunning, selectedCapabilities, currentPrompt = null, promptSignature = null, tabCount = 0;
+let connected = false, busy = false, selectingSession = false, stopped = false, revoked = false, unsaved = false, reconnectTimer, pollTimer, connectTimer, generation = 0;
+let commandEpoch = 0, queuedCommands = 0, reconnectDelay = 500;
 let incoming = Promise.resolve(), outgoing = Promise.resolve(), pending = new Map();
-const showError = text => { $('error').textContent = text; $('error').hidden = !text; };
+// A modal sheet makes the page inert, so its errors show inside the sheet.
+const sheetErrors = { 'sessions-dialog': 'sessions-error', 'project-dialog': 'project-error' };
+const showError = text => {
+  const open = Object.keys(sheetErrors).find(id => $(id).open);
+  for (const id of ['error', ...Object.values(sheetErrors)]) { $(id).textContent = ''; $(id).hidden = true; }
+  const target = $(open ? sheetErrors[open] : 'error');
+  target.textContent = text; target.hidden = !text;
+};
+for (const [dialog, id] of Object.entries(sheetErrors)) {
+  $(dialog).addEventListener('close', () => { if ($(id).textContent) showError($(id).textContent); });
+}
 
 async function storage(mode, value) {
   const db = await new Promise((resolve, reject) => {
@@ -53,42 +73,57 @@ async function storage(mode, value) {
 }
 function updateControls() {
   const disabled = !connected || busy;
-  const ended = selectedStatus === 'exited';
+  const ended = selectedRunning === false || selectedStatus === 'exited';
   document.querySelectorAll('#controls button, #controls textarea, #session-toolbar button, #session-toolbar select').forEach(element => {
     // Never disable a focused editor while a command is pending: it closes the phone keyboard.
-    if (element.id === 'message') { element.disabled = !selected; return; }
+    if (element.id === 'message') { element.disabled = !selected; element.readOnly = Boolean(selectingSession); return; }
     if (['keys-toggle', 'latest', 'find-toggle', 'find-close', 'find-next', 'find-previous', 'sessions-toggle'].includes(element.id)) { element.disabled = false; return; }
     if (element.id === 'restart') { element.disabled = disabled || !ended; return; }
     if (element.id === 'new') { element.disabled = disabled; return; }
     if (element.id === 'tabs') { element.disabled = disabled || tabCount === 0; return; }
     if (element.id === 'stop' || element.id === 'interrupt') {
-      element.disabled = !connected || !selected || ended; return;
+      element.disabled = !connected || !selected || ended || Boolean(selectingSession); return;
     }
+    // Keys queue behind each other, but never land between a send's files and its Enter.
+    if (element.dataset.key) { element.disabled = disabled || !selected || ended; return; }
     element.disabled = disabled || !selected || ended;
   });
   $('send').disabled = disabled || !selected || ended || !($('message').value.trim() || attachmentsFor().length);
-  $('stop').hidden = selectedStatus !== 'working';
-  $('restart').hidden = !ended || !canRestart;
+  $('stop').hidden = !['working', 'unknown', 'waitingForApproval'].includes(selectedStatus) || ended;
+  $('restart').hidden = !ended || !canRestart || selectedCapabilities?.resume === false;
   $('copy-output').hidden = !selected;
   $('sessions-toggle').hidden = !connected;
-  $('session-status').textContent = !connected ? 'Reconnecting · draft kept' : ({ working: 'Working', starting: 'Starting…', idle: 'Ready', exited: 'Session ended' }[selectedStatus] || 'No session');
+  $('session-status').textContent = !connected ? 'Reconnecting…' : (STATUS_LABELS[selectedStatus] || 'No session');
   $('session-status').dataset.state = connected ? selectedStatus || '' : 'offline';
-  $('compose-status').textContent = busy ? 'Sending…' : !connected && selected ? 'Offline · draft kept' : ended ? 'Session ended' : '';
+  if (document.body) document.body.dataset.connected = String(connected && !$('controls').hidden);
+  // An ended session already says so in the bar above, and Send is off.
+  const composeStatus = selectingSession ? 'Switching…' : busy ? 'Sending…' : !connected && selected ? 'Offline · draft kept' : '';
+  $('compose-status').textContent = composeStatus;
+  // The row under the composer only exists when it has something to say: a
+  // status on the phone, or the send shortcut where a hardware keyboard is likely.
+  const tools = $('compose-tools');
+  if (tools) tools.hidden = !composeStatus && !hasFinePointer();
   $('find-next').disabled = $('find-previous').disabled = !findMatches.length;
   $('raw-toggle').hidden = !selected;
   $('forget').hidden = !credential;
   $('reconnect').hidden = !credential || connected;
+  // After the Mac rejects the pairing, scanning again is the way back.
+  const waiting = Boolean(credential) && !revoked;
   const actions = $('welcome-actions');
-  if (actions) actions.hidden = Boolean(credential);
+  if (actions) actions.hidden = waiting;
   $('welcome-reconnect').hidden = !credential;
-  $('welcome').querySelector('h2').textContent = credential ? 'Reconnecting to your Mac' : 'Pick up where you left off.';
-  $('welcome').querySelector('p').textContent = credential ? 'Keep Sigil open and your Mac awake.' : 'Your sessions. Your tools. Away from your desk.';
-  $('welcome').querySelector('.pairing-steps').hidden = Boolean(credential);
+  $('welcome').querySelector('h2').textContent = revoked && credential ? 'Pair again' : credential ? 'Reconnecting to your Mac' : 'Pick up where you left off.';
+  $('welcome').querySelector('p').textContent = waiting ? 'Keep Sigil open and your Mac awake.' : 'Your sessions. Your tools. Away from your desk.';
+  $('welcome').querySelector('.pairing-steps').hidden = waiting;
   const standalone = isStandaloneApp();
   for (const id of ['standalone-hint', 'standalone-panel-hint']) {
     const hint = $(id);
     if (hint) hint.hidden = !standalone;
   }
+}
+function hasFinePointer() {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    && window.matchMedia('(pointer: fine)').matches;
 }
 function isStandaloneApp() {
   if (typeof navigator !== 'undefined' && navigator.standalone) return true;
@@ -98,8 +133,11 @@ function isStandaloneApp() {
   return isiOS && window.matchMedia('(display-mode: standalone)').matches;
 }
 function offline(message = 'Disconnected') {
+  if (selectingSession) $('tabs').value = selected || '';
+  selectingSession = false;
   connected = false;
-  $('status').textContent = message;
+  commandEpoch++;
+  $('status').textContent = $('status-live').textContent = message;
   $('status').dataset.connected = 'false';
   clearTimeout(pollTimer);
   clearTimeout(connectTimer);
@@ -133,6 +171,8 @@ function applyTail(bucket, next) {
   const overlap = overlapSuffixPrefix(loaded, next);
   if (overlap > 0) {
     bucket.history = loaded.slice(0, loaded.length - overlap);
+    // Streamed output takes this path on every poll; keep the newest text under the cap.
+    if (bucket.history.length > 400_000) bucket.history = bucket.history.slice(-400_000);
     bucket.tail = next;
     return;
   }
@@ -142,8 +182,18 @@ function applyTail(bucket, next) {
     bucket.tail = next;
     return;
   }
+  // A sliding window under a fixed footer has no suffix/prefix overlap.
+  // Keep only the old text that scrolled out above the new snapshot's start.
+  // Repeated blocks can match early; take the match that agrees longest, then the latest.
+  const start = next.slice(0, 200);
+  let at = -1, agreed = -1;
+  for (let i = start.trim() ? bucket.tail.indexOf(start) : -1; i >= 0; i = bucket.tail.indexOf(start, i + 1)) {
+    const shared = commonPrefixLength(bucket.tail.slice(i), next);
+    if (shared >= agreed) { agreed = shared; at = i; }
+  }
+  const scrolled = at > 0 ? bucket.tail.slice(0, at) : bucket.tail;
   const room = 400_000 - bucket.history.length;
-  if (room > 0) bucket.history += bucket.tail.slice(0, room);
+  if (room > 0) bucket.history += scrolled.slice(0, room);
   bucket.tail = next;
 }
 function commonPrefixLength(left, right) {
@@ -170,6 +220,14 @@ function prependSlice(bucket, slice) {
 function takeChars(text, count) {
   return [...text].slice(0, count).join('');
 }
+function takeGraphemes(text, count) {
+  const out = [];
+  for (const { segment } of new Intl.Segmenter().segment(text)) {
+    if (out.length === count) break;
+    out.push(segment);
+  }
+  return out.join('');
+}
 function takeEnd(text, count) {
   const chars = [...text];
   return chars.slice(Math.max(0, chars.length - count)).join('');
@@ -183,6 +241,44 @@ function utf8Limited(text, bytes) {
   }
   return out;
 }
+function sameConversation(left, right) {
+  return left?.sessionID && right?.sessionID && left.sessionID === right.sessionID
+    && left.provider === right.provider && typeof left.cwd === 'string' && left.cwd === right.cwd;
+}
+function renderInteraction(prompt) {
+  if (prompt != null && (typeof prompt.id !== 'string' || typeof prompt.question !== 'string'
+    || !['menu', 'yesNo'].includes(prompt.style) || !Array.isArray(prompt.choices)
+    || prompt.choices.length > 9 || JSON.stringify(prompt).length > 16000
+    || prompt.choices.some(c => typeof c.label !== 'string' || typeof c.key !== 'string'
+      || !/^(?:[1-9]|y|n|yes|no)$/.test(c.key)))) throw new Error('Invalid terminal interaction');
+  currentPrompt = prompt ?? null;
+  const signature = JSON.stringify([selected, currentPrompt]);
+  if (signature === promptSignature) return;
+  promptSignature = signature;
+  $('interaction').hidden = !prompt;
+  if (!prompt) { $('interaction-choices').replaceChildren(); return; }
+  const verified = prompt.verified === true && selectedCapabilities?.structuredApproval === true;
+  $('interaction-heading').textContent = verified ? 'Approval' : 'Terminal controls';
+  $('interaction-warning').hidden = verified;
+  $('interaction-operation').textContent = prompt.operation ?? '';
+  $('interaction-operation').hidden = !prompt.operation;
+  $('interaction-question').textContent = prompt.question;
+  const target = selected;
+  $('interaction-choices').replaceChildren(...prompt.choices.map(choice => {
+    const button = document.createElement('button');
+    button.type = 'button'; button.textContent = choice.label;
+    button.onclick = () => void perform(async () => {
+      if (selected !== target || currentPrompt?.id !== prompt.id) throw new Error('The terminal changed. Check it before sending.');
+      const current = generation, epoch = commandEpoch;
+      if (verified) await request('answer', choice.key, target, false, { name: prompt.id });
+      else {
+        await request('key', choice.key, target);
+        if (prompt.style === 'yesNo') { requireConnection(current, epoch); await request('key', 'enter', target); }
+      }
+    });
+    return button;
+  }));
+}
 function render(state) {
   if (!state || !Array.isArray(state.tabs) || state.tabs.length > 100 || typeof state.terminal !== 'string') throw new Error('Invalid Mac response');
   if (state.tabsTruncated !== undefined && typeof state.tabsTruncated !== 'boolean') throw new Error('Invalid Mac response');
@@ -190,7 +286,7 @@ function render(state) {
   const ids = new Set();
   for (const tab of state.tabs) {
     if (!tab || typeof tab.id !== 'string' || !tab.id || typeof tab.title !== 'string'
-      || !['starting', 'working', 'idle', 'exited'].includes(tab.status) || ids.has(tab.id)) {
+      || !['starting', 'working', 'idle', 'exited', 'unknown', 'waitingForApproval', 'interrupted', 'failed', 'disconnected'].includes(tab.status) || ids.has(tab.id)) {
       throw new Error('Invalid Mac response');
     }
     ids.add(tab.id);
@@ -198,27 +294,49 @@ function render(state) {
   if (nextSelected !== null && (typeof nextSelected !== 'string' || !ids.has(nextSelected))) {
     throw new Error('Invalid Mac response');
   }
+  const allTabsNew = freshHandshake && sessionTabs.length > 0 && !sessionTabs.some(tab => ids.has(tab.id));
+  freshHandshake = false;
+  const previousTab = sessionTabs.find(tab => tab.id === selected);
   sessionTabs = state.tabs;
   canRestart = Array.isArray(state.capabilities) && state.capabilities.includes('restart');
   const bucket = nextSelected ? historyFor(nextSelected) : null;
+  let prepended = false;
   if (bucket) {
     applyTail(bucket, state.terminal);
     if (pendingEarlier) {
-      if (pendingEarlier.tabID === nextSelected) prependSlice(bucket, pendingEarlier.slice);
+      if (pendingEarlier.tabID === nextSelected) {
+        const before = bucket.history.length;
+        prependSlice(bucket, pendingEarlier.slice);
+        prepended = bucket.history.length !== before;
+      }
       pendingEarlier = null;
     }
   }
-  const changedSession = selected !== nextSelected;
-  if (changedSession) {
-    if (selected) drafts.set(selected, $('message').value);
-    $('message').value = drafts.get(nextSelected) || '';
-  }
-  selected = nextSelected;
-  selectedStatus = selected ? state.tabs.find(tab => tab.id === selected).status : null;
-  tabCount = state.tabs.length;
   // Absence from a capped snapshot is not evidence that a tab closed.
   // Older Macs omit the flag, so treat a full 100-row response conservatively.
   const completeTabList = state.tabsTruncated === undefined ? state.tabs.length < 100 : !state.tabsTruncated;
+  const changedSession = selected !== nextSelected;
+  if (changedSession) {
+    if (selected) drafts.set(selected, $('message').value);
+    // A Sigil restart gives every tab a new ID. Carry the draft to the tab the Mac selected.
+    if (selected && nextSelected && completeTabList && allTabsNew
+      && sameConversation(previousTab, state.tabs.find(tab => tab.id === nextSelected))
+      && !drafts.get(nextSelected) && !attachmentDrafts.get(nextSelected)?.length) {
+      drafts.set(nextSelected, drafts.get(selected));
+      if (attachmentDrafts.has(selected)) {
+        attachmentDrafts.set(nextSelected, attachmentDrafts.get(selected));
+        attachmentDrafts.delete(selected);
+      }
+    }
+    $('message').value = drafts.get(nextSelected) || '';
+  }
+  selected = nextSelected;
+  const selectedTab = state.tabs.find(tab => tab.id === selected);
+  selectedStatus = selectedTab?.status ?? null;
+  selectedRunning = selectedTab?.processRunning;
+  selectedCapabilities = selectedTab?.capabilities;
+  renderInteraction(state.prompt);
+  tabCount = state.tabs.length;
   if (completeTabList) for (const id of histories.keys()) if (!ids.has(id)) histories.delete(id);
   for (const id of drafts.keys()) { if (completeTabList && !ids.has(id)) drafts.delete(id); }
   for (const id of attachmentDrafts.keys()) {
@@ -241,27 +359,39 @@ function render(state) {
   $('welcome').hidden = true;
   $('controls').hidden = false;
   rawOutput = bucket ? bucket.history + bucket.tail : state.terminal;
+  // Connected, the header is the session: the brand yields to its title.
   $('session-toolbar').hidden = false;
-  $('brand').hidden = false;
+  $('brand').hidden = true;
   if ($('sessions-dialog').open) renderSessionList();
-  renderOutput(changedSession);
+  renderOutput(changedSession, prepended);
   if (changedSession) { resizeMessage(); renderAttachments(); }
   updateControls();
 }
-function renderOutput(changedSession = false) {
+function renderOutput(changedSession = false, prepended = false) {
   const terminal = $('terminal');
   const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
+  const fromEnd = terminal.scrollHeight - terminal.scrollTop;
   const output = rawMode ? rawOutput : readableOutput(rawOutput);
   $('empty-output').hidden = Boolean(output);
-  const ended = Boolean(selected) && selectedStatus === 'exited';
-  $('empty-output').querySelector('h2').textContent = ended ? 'Session ended' : selectedStatus === 'working' ? 'Working…' : selectedStatus === 'starting' ? 'Starting session…' : selected ? 'Ready when you are.' : 'No open sessions.';
-  $('empty-output').querySelector('p').textContent = ended ? (canRestart ? 'Restart to pick up where you left off.' : 'Restart this session in Sigil on your Mac.') : selectedStatus === 'working' || selectedStatus === 'starting' ? 'Output will appear here.' : selected ? 'Send a message to this session.' : 'Choose New to start a session.';
+  const ended = Boolean(selected) && (selectedRunning === false || selectedStatus === 'exited');
+  $('empty-output').querySelector('h2').textContent = ended ? (selectedStatus === 'failed' ? 'Session failed' : 'Session ended') : selectedStatus === 'unknown' ? 'Status unknown' : selectedStatus === 'working' ? 'Working…' : selectedStatus === 'starting' ? 'Starting session…' : selected ? 'Ready when you are.' : 'No open sessions.';
+  $('empty-output').querySelector('p').textContent = ended ? (selectedCapabilities?.resume === false ? (selectedCapabilities.history ? 'Open this conversation from Chats.' : 'Choose New to start another session.') : canRestart ? 'Resume this conversation.' : 'Restart this session in Sigil on your Mac.') : selectedStatus === 'working' || selectedStatus === 'starting' ? 'Output will appear here.' : selected ? 'Send a message to this session.' : 'Choose New to start a session.';
   terminal.dataset.raw = String(rawMode);
   if (displayedOutput !== output || changedSession) {
+    // A repaint replaces the text and drops a selection the reader is making. Append
+    // new text after it, and hold any other repaint until the selection ends.
+    const selection = changedSession || prepended ? null : globalThis.getSelection?.();
+    const selecting = Boolean(selection && !selection.isCollapsed && terminal.contains(selection.anchorNode));
+    const extending = Boolean(displayedOutput) && output.startsWith(displayedOutput)
+      && ($('find-bar').hidden || !$('find-query').value);
+    if (selecting && !extending) { updateLatest(); return; }
+    if (selecting) terminal.append(output.slice(displayedOutput.length));
     displayedOutput = output;
     if (changedSession) findIndex = 0;
-    paintOutput();
+    if (!selecting) paintOutput();
     if (atBottom || changedSession) terminal.scrollTop = terminal.scrollHeight;
+    // Older text went in above the reader. Keep the lines they were reading in place.
+    else if (prepended) terminal.scrollTop = terminal.scrollHeight - fromEnd;
   }
   updateLatest();
 }
@@ -270,6 +400,9 @@ function renderSessionList() {
   const query = $('session-search').value.trim().toLocaleLowerCase();
   const matches = sessionTabs.filter(tab => tab.title.toLocaleLowerCase().includes(query));
   $('session-no-results').hidden = matches.length > 0;
+  $('session-no-results').textContent = sessionTabs.length ? 'No matching sessions.' : 'No open sessions.';
+  const openHeading = $('open-heading');
+  if (openHeading) openHeading.hidden = matches.length === 0;
   // Preserve focus during state polls: only rebuild if the displayed entries change.
   const signature = JSON.stringify([matches, selected]);
   if ($('session-list').dataset.signature === signature) return;
@@ -285,14 +418,13 @@ function renderSessionList() {
     const title = document.createElement('span');
     title.textContent = tab.title;
     const status = document.createElement('small');
-    status.textContent = { idle: 'Ready', working: 'Working', starting: 'Starting…', exited: 'Ended' }[tab.status];
+    status.textContent = STATUS_LABELS[tab.status] ?? 'Status unknown';
     button.append(title, status);
     button.onclick = () => {
       if (!connected || busy) return;
       void perform(async () => {
-        await request('select', undefined, tab.id);
-        $('sessions-dialog').close();
-        $('sessions-toggle').focus();
+        if (!await changeSession('select', undefined, tab.id)) return;
+        if ($('sessions-dialog').open) { $('sessions-dialog').close(); $('sessions-toggle').focus(); }
       });
     };
     return button;
@@ -305,7 +437,8 @@ function searchSaved() {
   const token = ++searchToken;
   if (!query || !$('sessions-dialog').open) { renderSaved([]); return; }
   renderSaved([], { pending: true });
-  request('chats', query).then(reply => {
+  // The Mac reads 200 characters, and text over 8 KB drops the connection.
+  request('chats', utf8Limited(takeGraphemes(query, 200), 8192)).then(reply => {
     if (token !== searchToken || $('session-search').value.trim() !== query) return;
     renderSaved(reply.chats, { truncated: reply.chatsTruncated === true });
   }).catch(error => { if (token === searchToken) showError(error.message); });
@@ -319,7 +452,7 @@ function renderSaved(chats, options = {}) {
       if (!chat || typeof chat.id !== 'string' || typeof chat.title !== 'string' || typeof chat.folder !== 'string') continue;
       if (!chat.id || chat.id.length > 80 || chat.title.length > 300 || chat.folder.length > 4_096) continue;
       if (/[\u0000-\u001F]/.test(chat.id) || /[\u0000-\u001F]/.test(chat.folder)) continue;
-      safe.push({ id: chat.id, title: chat.title, folder: chat.folder });
+      safe.push({ id: chat.id, title: chat.title, folder: chat.folder, provider: chat.provider });
     }
   }
   const heading = $('saved-heading');
@@ -350,7 +483,7 @@ function renderSaved(chats, options = {}) {
       if (!connected || busy) return;
       const id = chat.id, folderPath = chat.folder;
       void perform(async () => {
-        await request('open', folderPath, undefined, false, { name: id });
+        if (!await changeSession('open', folderPath, undefined, { name: id, ...(chat.provider ? { provider: chat.provider } : {}) })) return;
         $('sessions-dialog').close();
       });
     };
@@ -379,10 +512,10 @@ function renderProjects(projects, offset = 0, truncated = false) {
   const list = $('project-list');
   const kept = offset === 0 ? [] : Array.from(list.children || []).filter(button => button.dataset.more !== 'true');
   const buttons = safe.map(project => projectButton(project.name, project.folder, () => {
-    if (!connected || busy) return;
-    const folderPath = project.folder;
+    if (!connected || busy || providerProblem()) return;
+    const folderPath = project.folder, extra = providerField();
     $('project-dialog').close();
-    void perform(() => request('new', folderPath));
+    void perform(() => request('new', folderPath, undefined, false, extra));
   }));
   if (safe.length > 0 && (safe.length === 40 || truncated)) {
     const next = offset + safe.length;
@@ -398,15 +531,53 @@ function renderProjects(projects, offset = 0, truncated = false) {
   }
   if (offset === 0 && safe.length === 0) {
     buttons.push(projectButton('Current folder', 'The folder Sigil uses for a new session', () => {
-      if (!connected || busy) return;
+      if (!connected || busy || providerProblem()) return;
+      const extra = providerField();
       $('project-dialog').close();
-      void perform(() => request('new'));
+      void perform(() => request('new', undefined, undefined, false, extra));
     }));
   }
   list.replaceChildren(...kept, ...buttons);
   const empty = $('project-empty');
   if (empty) empty.hidden = list.children.length > 0;
+  showProviderProblem();
   if (!$('project-dialog').open) $('project-dialog').showModal();
+}
+// The CLIs the Mac offers. A Mac from before the choice sends none, and New starts its default.
+function renderProviders(options) {
+  const providers = [];
+  for (const provider of (Array.isArray(options?.providers) ? options.providers : []).slice(0, 20)) {
+    if (!provider || typeof provider.id !== 'string' || typeof provider.name !== 'string') continue;
+    if (!provider.id || provider.id.length > 32 || !provider.name || provider.name.length > 96) continue;
+    const problem = typeof provider.problem === 'string' ? provider.problem.slice(0, 300) : '';
+    providers.push({ id: provider.id, name: provider.name, problem });
+  }
+  providerProblems = new Map(providers.map(provider => [provider.id, provider.problem]));
+  $('provider').replaceChildren(...providers.map(provider => {
+    const option = document.createElement('option');
+    option.value = provider.id;
+    option.textContent = provider.name;
+    return option;
+  }));
+  // Keep this page's last choice; otherwise the CLI the Mac's New Session sheet opens on.
+  const fallback = typeof options?.provider === 'string' ? options.provider : '';
+  $('provider').value = [providerChoice, fallback].find(id => providerProblems.has(id)) || providers[0]?.id || '';
+  $('provider-field').hidden = providers.length === 0;
+  showProviderProblem();
+}
+function providerField() {
+  return $('provider-field').hidden || !$('provider').value ? {} : { provider: $('provider').value };
+}
+function providerProblem() {
+  return $('provider-field').hidden ? '' : providerProblems.get($('provider').value) || '';
+}
+function showProviderProblem() {
+  const problem = providerProblem();
+  $('provider-problem').textContent = problem;
+  $('provider-problem').hidden = !problem;
+  for (const button of Array.from($('project-list').children || [])) {
+    if (button.dataset.more !== 'true') button.disabled = Boolean(problem);
+  }
 }
 function paintOutput() {
   const output = displayedOutput || '';
@@ -451,7 +622,9 @@ $('sessions-toggle').onclick = () => {
   $('session-search').value = '';
   searchToken++;
   renderSaved([]);
-  renderSessionList(); $('sessions-dialog').showModal(); $('session-search').focus();
+  renderSessionList(); $('sessions-dialog').showModal();
+  // On a touch screen, focus would raise the keyboard over the list.
+  if (hasFinePointer()) $('session-search').focus();
 };
 $('sessions-close').onclick = () => $('sessions-dialog').close();
 $('sessions-dialog').addEventListener('close', () => { if (!$('sessions-toggle').hidden) $('sessions-toggle').focus(); });
@@ -476,6 +649,9 @@ $('copy-output').onclick = async () => {
 $('connection').addEventListener('toggle', () => { if ($('connection').open) $('copy-output').textContent = 'Copy output'; });
 
 async function request(action, text, tabID = selected, pairing = false, extra = {}) {
+  if (!connected && !pairing && action !== 'state') throw new Error('Not connected.');
+  if (queuedCommands >= 32) throw new Error('Too many pending commands. Wait for the Mac.');
+  queuedCommands++;
   const current = generation;
   const epoch = commandEpoch;
   const previous = outgoing;
@@ -487,18 +663,21 @@ async function request(action, text, tabID = selected, pairing = false, extra = 
       throw new Error("Connection changed. Check the terminal before sending again.");
     }
     return await transmit(action, text, tabID, pairing, extra);
-  } finally { release(); }
+  } finally { queuedCommands--; release(); }
 }
 async function transmit(action, text, tabID, pairing, extra = {}) {
   if (!socket || socket.readyState !== WebSocket.OPEN || !challenge || (!connected && !pairing && action !== 'state')) throw new Error('Not connected.');
-  const ws = socket, current = generation, seq = ++sequence;
-  const message = { challenge, sequence: seq, action, ...(tabID ? { tabID } : {}), ...(text !== undefined ? { text } : {}), ...extra };
+  const ws = socket, current = generation, epoch = commandEpoch, seq = ++sequence;
+  const message = { challenge, clientNonce, sequence: seq, action, ...(tabID ? { tabID } : {}), ...(text !== undefined ? { text } : {}), ...extra };
   const data = await seal(message, pairing ? bootstrap : credential.key, 'phone');
-  if (current !== generation || ws.readyState !== WebSocket.OPEN) throw new Error('Connection lost.');
+  if (current !== generation || epoch !== commandEpoch || ws.readyState !== WebSocket.OPEN) throw new Error('Connection lost.');
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
+      if (current !== generation || epoch !== commandEpoch || socket !== ws) return;
       pending.delete(seq);
       reject(new Error('No response. Check the terminal before sending again.'));
+      commandEpoch++;
+      ws.close();
     }, 10000);
     pending.set(seq, { resolve, reject, timer, action, tabID });
     ws.send(JSON.stringify({ data }));
@@ -546,31 +725,63 @@ function connect() {
         ws.send(JSON.stringify({ route }));
       } else if (typeof frame.hello === 'string' && /^[a-f0-9]{64}$/.test(frame.hello)) {
         if (challenge === frame.hello) return;
-        commandEpoch++;
+        offline('Connecting…');
         for (const item of pending.values()) {
           clearTimeout(item.timer);
           item.reject(new Error('Connection changed. Check the terminal before sending again.'));
         }
         pending.clear();
         challenge = frame.hello;
+        clientNonce = randomKey();
         sequence = 0;
+        freshHandshake = true;
+        const authorizationEpoch = commandEpoch;
         const authorization = bootstrap ? request('pair', newDeviceKey, undefined, true) : request('state');
         authorization.then(() => {
-          if (current !== generation) return;
+          if (current !== generation || authorizationEpoch !== commandEpoch) return;
           bootstrap = null; newDeviceKey = null;
+          if (replacingMemory) {
+            for (const list of replacingMemory.attachments.values()) for (const item of list) if (item.preview) URL.revokeObjectURL(item.preview);
+            replacingMemory = null;
+          }
+          if (unsaved) { unsaved = false; storage('put', credential).catch(error => showError(error.message)); }
           reconnectDelay = 500;
           clearTimeout(connectTimer);
           connected = true; busy = false;
-          $('status').textContent = 'Connected'; $('status').dataset.connected = 'true';
+          $('status').textContent = $('status-live').textContent = 'Connected'; $('status').dataset.connected = 'true';
           showError(''); updateControls(); poll();
-        }).catch(error => { showError(error.message); });
+        }).catch(error => {
+          if (current !== generation || authorizationEpoch !== commandEpoch) return;
+          if (replacingMemory) {
+            const saved = replacingMemory; replacingMemory = null;
+            credential = saved.credential; bootstrap = null; newDeviceKey = null; unsaved = false; stopped = false;
+            for (const [key, value] of saved.drafts) drafts.set(key, value);
+            for (const [key, value] of saved.attachments) attachmentDrafts.set(key, value);
+            for (const [key, value] of saved.histories) histories.set(key, value);
+            sessionTabs = saved.tabs; selected = saved.selected; $('message').value = saved.message;
+            connect();
+          }
+          showError(error.message);
+        });
       } else if (frame.error === 'unauthorized') {
         // A dropped pairing acknowledgement can leave the Mac already using the device key.
         if (bootstrap) { bootstrap = null; newDeviceKey = null; ws.close(); }
-        else { stopped = true; showError('Pairing expired or was disconnected. Scan a new code in Sigil.'); ws.close(); }
+        else {
+          stopped = true; revoked = true;
+          $('controls').hidden = true; $('welcome').hidden = false;
+          showError('Pairing expired or was disconnected. Scan a new code in Sigil.'); ws.close();
+        }
       } else if (frame.data) {
         const reply = await open(frame.data, credential.key, 'mac');
         if (current !== generation) return;
+        if (!reply.clientNonce) {
+          const error = new Error('Update Sigil on your Mac to reconnect securely.');
+          stopped = true;
+          for (const item of pending.values()) { clearTimeout(item.timer); item.reject(error); }
+          pending.clear();
+          throw error;
+        }
+        if (reply.clientNonce !== clientNonce) return;
         const item = pending.get(reply.sequence);
         if (!item) return;
         if (reply.challenge !== challenge) return; // A delayed reply from an earlier Mac epoch.
@@ -584,14 +795,19 @@ function connect() {
           credential.ticket = reply.ticket;
           try { await storage('put', credential); } catch { /* keep the in-memory ticket */ }
         }
+        if (current !== generation || reply.clientNonce !== clientNonce || reply.challenge !== challenge
+          || socket !== ws || ws.readyState !== WebSocket.OPEN) return;
         if (item.action === 'earlier') pendingEarlier = {
           tabID: item.tabID, slice: typeof reply.earlier === 'string' ? reply.earlier : '',
         };
         if (reply.state) {
           // Restart replaces the Mac tab ID. Move drafts before pruning closed tabs.
           const next = reply.restartedTabID;
+          const originalTab = sessionTabs.find(tab => tab.id === item.tabID);
+          const restartedTab = reply.state.tabs?.find(tab => tab.id === next) ?? reply.restartedSession;
           const movedRestart = item.action === 'restart' && typeof next === 'string'
-            && next.length > 0 && next.length <= 64 && next !== item.tabID;
+            && next.length > 0 && next.length <= 64 && next !== item.tabID
+            && sameConversation(originalTab, restartedTab);
           if (movedRestart) {
             const draft = item.tabID === selected ? $('message').value : drafts.get(item.tabID);
             if (draft !== undefined) drafts.set(next, draft);
@@ -606,7 +822,7 @@ function connect() {
         pending.delete(reply.sequence); clearTimeout(item.timer);
         item.resolve(reply);
       } else throw new Error('Invalid response');
-    }).catch(() => { if (current === generation) { showError('Could not verify the connection.'); ws.close(); } });
+    }).catch(error => { if (current === generation) { showError(error.message?.startsWith('Update Sigil') ? error.message : 'Could not verify the connection.'); ws.close(); } });
   };
   ws.onclose = () => {
     if (current !== generation) return;
@@ -620,13 +836,33 @@ function connect() {
   };
   ws.onerror = () => { if (current === generation) showError('Cannot reach Sigil. Keep the Mac awake and connected.'); };
 }
+// The displayed picker can change before the Mac confirms its selection. Keep
+// the old draft readable and focused, but do not accept edits for an uncertain target.
+async function changeSession(action, text, tabID, extra = {}) {
+  const current = generation, epoch = commandEpoch;
+  const selection = selectingSession = { current, epoch };
+  updateControls();
+  try {
+    await request(action, text, tabID, false, extra);
+    return current === generation && epoch === commandEpoch;
+  } catch (error) {
+    if (current === generation && epoch === commandEpoch) throw error;
+    return false;
+  } finally {
+    // A timed-out socket may still be closing. Release only this selection's
+    // editor guard; never unlock a newer connection's pending selection.
+    if (selectingSession === selection) {
+      selectingSession = false; $('tabs').value = selected || ''; updateControls();
+    }
+  }
+}
 async function perform(work) {
   if (!connected || busy) return;
-  const current = generation;
+  const current = generation, epoch = commandEpoch;
   busy = true; updateControls(); showError('');
   try { await work(); }
   catch (error) { showError(error.message); $('tabs').value = selected || ''; }
-  finally { if (generation === current) { busy = false; updateControls(); } }
+  finally { if (generation === current && commandEpoch === epoch) { busy = false; updateControls(); } }
 }
 function isImageFile(file) {
   return (file.type || '').startsWith('image/') || /\.(png|jpe?g|gif|webp|heic|heif|bmp|tiff?)$/i.test(file.name || '');
@@ -661,12 +897,21 @@ async function prepareFile(file) {
   if (file.size > MAX_REMOTE_BYTES) throw new Error('Keep files under 4 MB.');
   return { name: remoteFileName(file.name), bytes: new Uint8Array(await file.arrayBuffer()) };
 }
-async function uploadFile(file, tabID) {
-  const payload = await prepareFile(file);
+function requireConnection(current, epoch) {
+  if (current !== generation || epoch !== commandEpoch || !connected) {
+    throw new Error('Connection changed. Check the terminal before sending again.');
+  }
+}
+async function uploadFile(payload, tabID, current = generation, epoch = commandEpoch) {
   const transfer = randomKey().slice(0, 32);
   const count = Math.max(1, Math.ceil(payload.bytes.length / CHUNK));
   for (let index = 0; index < count; index++) {
     const piece = payload.bytes.subarray(index * CHUNK, index * CHUNK + CHUNK);
+    // The relay closes a socket over 30 frames/s, and the Mac replies once per chunk.
+    const wait = lastChunkAt + 50 - Date.now();
+    if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+    requireConnection(current, epoch);
+    lastChunkAt = Date.now();
     await request('file', bytesToBase64(piece), tabID, false, { name: payload.name, index, count, transfer });
   }
 }
@@ -713,17 +958,34 @@ async function sendText(submit) {
   const text = $('message').value;
   const files = attachmentsFor().slice();
   if (!text.trim() && !files.length) return;
-  if (new TextEncoder().encode(text).length > 8192) { showError('Keep the message under 8 KB.'); return; }
-  const target = selected, current = generation;
-  for (const item of files) await uploadFile(item.file, target);
-  if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
-  if (text.trim()) await request('input', files.length ? ` ${text}` : text, target);
-  if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
+  // Check the text as sent: after attachments it gains a leading space.
+  const payload = files.length ? ` ${text}` : text;
+  if (new TextEncoder().encode(payload).length > 8192) { showError('Keep the message under 8 KB.'); return; }
+  const target = selected, current = generation, epoch = commandEpoch;
+  // Size-check every file before the Mac pastes any of them into the prompt.
+  const payloads = [];
+  for (const item of files) {
+    payloads.push(await prepareFile(item.file));
+    requireConnection(current, epoch);
+  }
+  for (const [index, item] of files.entries()) {
+    await uploadFile(payloads[index], target, current, epoch);
+    requireConnection(current, epoch);
+    // The Mac has pasted this file, so a retry must not send it again.
+    const list = attachmentDrafts.get(target);
+    const at = list ? list.indexOf(item) : -1;
+    if (at >= 0) { list.splice(at, 1); if (item.preview) URL.revokeObjectURL(item.preview); }
+    if (selected === target) renderAttachments();
+  }
+  requireConnection(current, epoch);
+  if (text.trim()) await request('input', payload, target);
+  requireConnection(current, epoch);
   if (submit) {
     await new Promise(resolve => setTimeout(resolve, 100));
-    if (current !== generation) throw new Error('Connection changed. Check the terminal before sending again.');
+    requireConnection(current, epoch);
     await request('key', 'enter', target);
   }
+  requireConnection(current, epoch);
   if (selected === target) {
     if ($('message').value === text) { $('message').value = ''; resizeMessage(); }
     if (files.length) clearAttachments();
@@ -735,13 +997,14 @@ function updateLatest() {
   const terminal = $('terminal');
   $('latest').hidden = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
 }
-function resizeMessage() {
+function resizeMessage(atBottom) {
   const terminal = $('terminal');
-  const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
+  const scrollTop = terminal.scrollTop;
+  atBottom ??= terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
   const message = $('message');
   message.style.height = 'auto';
   message.style.height = `${message.scrollHeight + 2}px`;
-  if (atBottom) terminal.scrollTop = terminal.scrollHeight;
+  terminal.scrollTop = atBottom ? terminal.scrollHeight : scrollTop;
   updateLatest();
 }
 function updateViewport() {
@@ -753,8 +1016,7 @@ function updateViewport() {
   document.body.dataset.compact = String(viewport.height < 600);
   document.documentElement.style.setProperty('--viewport-height', `${viewport.height}px`);
   document.documentElement.style.setProperty('--viewport-top', `${viewport.offsetTop}px`);
-  if (atBottom) terminal.scrollTop = terminal.scrollHeight;
-  updateLatest();
+  resizeMessage(atBottom);
 }
 window.visualViewport?.addEventListener('resize', updateViewport);
 window.visualViewport?.addEventListener('scroll', updateViewport);
@@ -794,15 +1056,27 @@ $('keys-toggle').onclick = () => {
 };
 $('compose').onsubmit = event => { event.preventDefault(); void perform(() => sendText(true)); };
 $('paste').onclick = () => void perform(() => sendText(false));
-$('tabs').onchange = () => void perform(() => request('select', undefined, $('tabs').value));
+$('tabs').onchange = () => void perform(() => changeSession('select', undefined, $('tabs').value));
 $('new').onclick = () => void perform(async () => {
-  const reply = await request('projects');
+  let reply;
+  try { reply = await request('projects'); } catch (error) {
+    // A Mac without the project list starts New in its current folder.
+    if (error.message !== 'Unknown action.') throw error;
+    await request('new');
+    return;
+  }
+  let options;
+  try { options = (await request('options')).options; } catch (error) {
+    if (error.message !== 'Unknown action.') throw error;
+  }
+  renderProviders(options);
   renderProjects(reply.projects, 0, reply.projectsTruncated === true);
 });
+$('provider').onchange = () => { providerChoice = $('provider').value; showProviderProblem(); };
 $('project-cancel').onclick = () => $('project-dialog').close();
 $('project-dialog').addEventListener('close', () => { if (!$('new').disabled) $('new').focus(); });
 async function interrupt() {
-  if (!connected || !selected) return;
+  if (!connected || !selected || selectingSession) return;
   try { await request('key', 'interrupt'); }
   catch (error) { showError(error.message); }
 }
@@ -812,13 +1086,18 @@ $('restart').onclick = () => void perform(() => request('restart'));
 $('attach-toggle').onclick = () => $('attach').click();
 $('attach').onchange = () => {
   const list = attachmentsFor();
-  const room = 16 - list.length;
-  for (const file of [...$('attach').files].slice(0, Math.max(0, room))) {
+  let tooBig = false, overLimit = false;
+  for (const file of $('attach').files) {
+    // Photos are compressed before upload; other files must already fit.
+    if (!isImageFile(file) && file.size > MAX_REMOTE_BYTES) { tooBig = true; continue; }
+    if (list.length >= 16) { overLimit = true; continue; }
     list.push({
       file, name: file.name || 'file',
       preview: isImageFile(file) ? URL.createObjectURL(file) : '',
     });
   }
+  const problems = [tooBig && 'Keep files under 4 MB.', overLimit && 'Up to 16 files per message. The rest were not added.'];
+  if (tooBig || overLimit) showError(problems.filter(Boolean).join(' '));
   $('attach').value = '';
   renderAttachments();
 };
@@ -828,11 +1107,19 @@ $('message').addEventListener('keydown', event => {
   event.preventDefault();
   void perform(() => sendText(true));
 });
-document.querySelectorAll('[data-key]').forEach(button => { button.onclick = () => void perform(() => request('key', button.dataset.key)); });
-$('reconnect').onclick = $('welcome-reconnect').onclick = () => { stopped = false; reconnectDelay = 500; connect(); };
-$('forget').onclick = async () => {
+// request() already sends in order, so a quick tap is queued instead of dropped.
+document.querySelectorAll('[data-key]').forEach(button => { button.onclick = () => request('key', button.dataset.key).catch(error => showError(error.message)); });
+$('reconnect').onclick = $('welcome-reconnect').onclick = () => { stopped = false; revoked = false; reconnectDelay = 500; connect(); };
+// Forgetting cannot be undone from the phone, so it asks first.
+$('forget').onclick = () => {
+  $('connection').open = false;
+  $('forget-dialog').returnValue = '';
+  $('forget-dialog').showModal();
+};
+$('forget-dialog').addEventListener('close', () => { if ($('forget-dialog').returnValue === 'forget') void forget(); });
+async function forget() {
   stopped = true; ++generation; clearTimeout(reconnectTimer); socket?.close(); offline();
-  credential = null; bootstrap = null; newDeviceKey = null; selected = null; drafts.clear(); tabsSignature = '';
+  credential = null; revoked = false; unsaved = false; bootstrap = null; newDeviceKey = null; selected = null; drafts.clear(); tabsSignature = '';
   selectedStatus = null; tabCount = 0;
   $('keys').hidden = true; $('keys-toggle').setAttribute('aria-expanded', 'false');
   clearAttachments();
@@ -844,7 +1131,7 @@ $('forget').onclick = async () => {
   $('terminal').textContent = ''; $('message').value = ''; $('controls').hidden = true; $('welcome').hidden = false;
   try { await storage('delete'); showError(''); } catch { showError('Could not clear pairing. Clear this site’s data in browser settings.'); }
   updateControls();
-};
+}
 let scanRun = 0;
 function loadJsQR() {
   if (typeof globalThis.jsQR === 'function') return Promise.resolve(globalThis.jsQR);
@@ -870,11 +1157,24 @@ function stopScan() {
   if (scanner) scanner.hidden = true;
 }
 async function beginPair(pairing) {
+  // Pairing credentials are not replaced on disk until this Mac authenticates.
+  // Contents from the previous Mac must not share an ID namespace with this one.
+  if (credential && !replacingMemory) replacingMemory = {
+    credential, drafts: new Map(drafts), attachments: new Map(attachmentDrafts), histories: new Map(histories),
+    tabs: sessionTabs, selected, message: $('message').value,
+  };
+  drafts.clear(); attachmentDrafts.clear(); histories.clear(); sessionTabs = [];
+  selected = null; selectedStatus = null; selectedRunning = undefined; selectedCapabilities = undefined;
+  currentPrompt = null; promptSignature = null; tabsSignature = ''; rawOutput = ''; displayedOutput = null;
+  pendingEarlier = null; earlierFlight = false; searchToken++;
+  $('message').value = ''; $('terminal').textContent = ''; $('interaction').hidden = true;
+  renderAttachments();
   bootstrap = await importKey(pairing.key);
   newDeviceKey = randomKey();
   credential = { room: pairing.room, key: await importKey(newDeviceKey) };
-  await storage('put', credential);
-  stopped = false;
+  // Keep the stored pairing until the Mac accepts this one.
+  unsaved = true;
+  stopped = false; revoked = false;
   reconnectDelay = 500;
   updateControls();
   connect();
@@ -887,6 +1187,8 @@ async function startScan() {
     return;
   }
   showError('');
+  $('scanner-error').hidden = true;
+  $('scanner-error').textContent = '';
   const run = ++scanRun;
   let stream;
   try {
@@ -937,7 +1239,11 @@ async function startScan() {
           beginPair(result).catch(error => showError(error.message));
           return;
         }
-        if (result?.error) showError(result.error);
+        if (result?.error) {
+          // #error sits under the full-screen scanner. Show the reason on the scanner only.
+          if ($('scanner-error').textContent !== result.error) $('scanner-error').textContent = result.error;
+          $('scanner-error').hidden = false;
+        }
       }
     }
     requestAnimationFrame(tick);
@@ -951,7 +1257,7 @@ if ($('paste-link')) $('paste-link').onclick = async () => {
   $('pairing-link').focus();
   try {
     const text = await navigator.clipboard.readText();
-    if (credential) return;
+    if (credential && !revoked) return;
     const result = pairingFromText(text, location.origin);
     if (result?.room) { showError(''); await beginPair(result); return; }
     if (result?.error) showError(result.error);
@@ -988,13 +1294,23 @@ document.addEventListener('visibilitychange', () => {
   else if (connected) poll();
   else if (!stopped) connect();
 });
+function confirmReplace() {
+  const dialog = $('replace-dialog');
+  dialog.returnValue = '';
+  dialog.showModal();
+  return new Promise(resolve => dialog.addEventListener('close', () => resolve(dialog.returnValue === 'replace'), { once: true }));
+}
 async function start() {
   const fragment = new URLSearchParams(location.hash.slice(1));
   const pairing = pairingFromText(location.hash, location.origin);
   history.replaceState(null, '', location.pathname);
   if (!crypto.subtle) throw new Error('Open Sidereal using HTTPS.');
-  if (pairing?.room) await beginPair(pairing);
-  else if (pairing?.error || fragment.has('room') || fragment.has('key')) {
+  if (pairing?.room) {
+    // A link must not silently replace a working pairing.
+    const saved = await storage('get');
+    if (!saved || await confirmReplace()) await beginPair(pairing);
+    else { credential = saved; updateControls(); connect(); }
+  } else if (pairing?.error || fragment.has('room') || fragment.has('key')) {
     throw new Error(pairing?.error || 'Invalid code. Scan a new code in Sigil.');
   } else {
     credential = await storage('get');

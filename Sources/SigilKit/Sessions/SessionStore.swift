@@ -27,11 +27,15 @@ public final class SessionStore {
     /// Set when the sessions directory or one or more session summaries could not be read.
     public private(set) var loadError: String?
 
-    private let root: URL
+    public let root: URL
     @ObservationIgnored private var cache: [String: SessionCacheEntry] = [:]
+    /// Folded search fields, one per entry of `sessions`, in the same order.
+    @ObservationIgnored private var searchKeys: [SessionScanner.SearchKey] = []
     @ObservationIgnored private var isStarted = false
-    @ObservationIgnored private var scanSequence = 0
-    @ObservationIgnored private var appliedScanSequence = 0
+    /// How many scans have started, and which of them produced `sessions`.
+    /// A scan numbered above a moment's `scanSequence` began after it.
+    @ObservationIgnored public private(set) var scanSequence = 0
+    @ObservationIgnored public private(set) var appliedScanSequence = 0
     @ObservationIgnored private var forceEpoch = 0
     @ObservationIgnored private var forcedScansInFlight = 0
     @ObservationIgnored private var cachedScanPending = false
@@ -39,40 +43,51 @@ public final class SessionStore {
     @ObservationIgnored private var debounceTask: Task<Void, Never>?
     @ObservationIgnored private var firstPendingEvent: ContinuousClock.Instant?
     @ObservationIgnored private let watcher = SessionDirectoryWatcher()
+    @ObservationIgnored private var nativeWatchers: [String: SessionDirectoryWatcher] = [:]
     @ObservationIgnored private var watchedPath: String?
     @ObservationIgnored private var watcherRetryTask: Task<Void, Never>?
     @ObservationIgnored private let eventContinuation: AsyncStream<Bool>.Continuation
     @ObservationIgnored private var eventPump: Task<Void, Never>?
     @ObservationIgnored private let timing: SessionStoreTiming
     @ObservationIgnored private let scanOperation: ScanOperation
+    @ObservationIgnored private let nativeRoots: [(CLIProvider, URL)]
 
-    public convenience init(root: URL = GrokPaths.sessionsRoot) {
-        self.init(
-            root: root,
-            timing: SessionStoreTiming(),
-            scanOperation: { root, cache, ignoringCache in
-                await Task.detached(priority: .userInitiated) {
-                    SessionScanner.scan(
-                        root: root,
-                        cache: cache,
-                        ignoringCache: ignoringCache
-                    )
-                }.value
-            }
-        )
+    public convenience init() {
+        self.init(root: GrokPaths.sessionsRoot, includesNativeHistory: true)
     }
 
-    convenience init(root: URL, timing: SessionStoreTiming) {
+    public convenience init(root: URL, includesNativeHistory: Bool = false) {
+        self.init(
+            root: root, timing: SessionStoreTiming(),
+            nativeRoots: includesNativeHistory ? NativeSessionScanner.roots : [])
+    }
+
+    /// Capture the same roots for the watcher and detached scans. Explicit roots
+    /// also keep filesystem tests isolated from the user's provider history.
+    convenience init(root: URL, timing: SessionStoreTiming, nativeRoots: [(CLIProvider, URL)] = []) {
+        let nativeRoots = nativeRoots.map { ($0.0, SessionDirectoryWatcher.canonicalURL($0.1)) }
         self.init(
             root: root,
             timing: timing,
+            nativeRoots: nativeRoots,
             scanOperation: { root, cache, ignoringCache in
                 await Task.detached(priority: .userInitiated) {
-                    SessionScanner.scan(
+                    var result = SessionScanner.scan(
                         root: root,
-                        cache: cache,
+                        cache: cache.filter { $0.value.session.provider == .grokBuild },
                         ignoringCache: ignoringCache
                     )
+                    for (provider, nativeRoot) in nativeRoots {
+                        let native = NativeSessionScanner.scan(
+                            provider: provider, root: nativeRoot, cache: cache, ignoringCache: ignoringCache)
+                        result.sessions += native.sessions
+                        result.cache.merge(native.cache) { _, new in new }
+                        result.loadError =
+                            [result.loadError, native.loadError].compactMap { $0 }.joined(separator: "\n")
+                            .nilIfBlank
+                    }
+                    if !nativeRoots.isEmpty { result.sessions.sort(by: SessionScanner.isNewer) }
+                    return result
                 }.value
             }
         )
@@ -81,11 +96,13 @@ public final class SessionStore {
     init(
         root: URL,
         timing: SessionStoreTiming,
+        nativeRoots: [(CLIProvider, URL)] = [],
         scanOperation: @escaping ScanOperation
     ) {
         self.root = root
         self.timing = timing
         self.scanOperation = scanOperation
+        self.nativeRoots = nativeRoots
         let stream: AsyncStream<Bool>
         let continuation: AsyncStream<Bool>.Continuation
         (stream, continuation) = AsyncStream<Bool>.makeStream(
@@ -95,7 +112,11 @@ public final class SessionStore {
         self.eventPump = Task { [weak self] in
             for await requiresRestart in stream {
                 guard let self, self.isStarted else { continue }
-                if requiresRestart { self.watchedPath = nil }
+                if requiresRestart {
+                    self.watchedPath = nil
+                    for watcher in self.nativeWatchers.values { watcher.stop() }
+                    self.nativeWatchers.removeAll()
+                }
                 self.refreshWatcher()
                 self.scheduleDebouncedScan()
             }
@@ -108,6 +129,7 @@ public final class SessionStore {
         watcherRetryTask?.cancel()
         debounceTask?.cancel()
         watcher.stop()
+        for watcher in nativeWatchers.values { watcher.stop() }
     }
 
     /// Begins watching the sessions directory and performs the first scan.
@@ -121,6 +143,8 @@ public final class SessionStore {
 
     /// Stops watching. Safe to call when not started.
     public func stop() {
+        for watcher in nativeWatchers.values { watcher.stop() }
+        nativeWatchers.removeAll()
         watcher.stop()
         watchedPath = nil
         watcherRetryTask?.cancel()
@@ -152,13 +176,11 @@ public final class SessionStore {
         _ query: String,
         displayedTitle: ((GrokSession) -> String)? = nil
     ) -> [GrokSession] {
-        if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return sessions
-        }
-        return sessions.compactMap { session -> (GrokSession, SessionScanner.SearchRank)? in
+        guard let query = SessionScanner.SearchQuery(query) else { return sessions }
+        return zip(sessions, searchKeys).compactMap { session, key -> (GrokSession, SessionScanner.SearchRank)? in
             guard
                 let rank = SessionScanner.searchRank(
-                    session,
+                    key,
                     query: query,
                     displayedTitle: displayedTitle?(session)
                 )
@@ -170,13 +192,6 @@ public final class SessionStore {
             return SessionScanner.isNewer(lhs.0, rhs.0)
         }
         .map(\.0)
-    }
-
-    /// Groups `search` results by working directory, in that same order.
-    public func groupedByProject(matching query: String = "") -> [(
-        cwd: String, sessions: [GrokSession]
-    )] {
-        SessionScanner.grouped(search(query))
     }
 
     /// Walks `root` off the main actor. Cache hits skip JSON decoding.
@@ -221,6 +236,7 @@ public final class SessionStore {
         cache = result.cache
         if sessions != result.sessions {
             sessions = result.sessions
+            searchKeys = sessions.map(SessionScanner.SearchKey.init)
         }
         if loadError != result.loadError {
             loadError = result.loadError
@@ -270,13 +286,40 @@ public final class SessionStore {
         }
     }
 
+    /// Watches the root only. While it is missing, nothing is watched: its
+    /// nearest existing ancestor can be the home folder, whose churn would
+    /// rescan constantly. The retry loop starts the watcher once it appears.
     private func refreshWatcher() {
         guard isStarted else { return }
-        guard let desiredPath = nearestExistingDirectory(to: root) else {
-            if watchedPath != nil {
-                watcher.stop()
-                watchedPath = nil
+        if !nativeRoots.isEmpty {
+            for (provider, nativeRoot) in nativeRoots {
+                let path = nativeRoot.path
+                // Codex names live next to sessions, so watch their common parent
+                // with a scoped filter rather than accepting all Codex home churn.
+                let titleIndex =
+                    provider == .codex
+                    ? nativeRoot.deletingLastPathComponent().appendingPathComponent("session_index.jsonl") : nil
+                let watchRoot = titleIndex == nil ? nativeRoot : nativeRoot.deletingLastPathComponent()
+                guard nativeWatchers[path] == nil, FileManager.default.fileExists(atPath: watchRoot.path) else {
+                    continue
+                }
+                let watcher = SessionDirectoryWatcher()
+                let continuation = eventContinuation
+                if watcher.start(
+                    path: watchRoot.path, latency: timing.watcherLatency,
+                    contents: .nativeHistory(root: nativeRoot, titleIndex: titleIndex),
+                    handler: { requiresRestart in continuation.yield(requiresRestart) })
+                {
+                    nativeWatchers[path] = watcher
+                    continuation.yield(false)
+                }
             }
+        }
+        guard let desiredPath = existingRootPath() else {
+            // Also ends a stream whose root was just deleted (a restart
+            // event clears `watchedPath` before this runs).
+            watcher.stop()
+            watchedPath = nil
             return
         }
         guard desiredPath != watchedPath else { return }
@@ -297,19 +340,12 @@ public final class SessionStore {
         }
     }
 
-    private func nearestExistingDirectory(to requestedRoot: URL) -> String? {
-        let fm = FileManager.default
-        var candidate = requestedRoot.standardizedFileURL
-        while true {
-            var isDirectory: ObjCBool = false
-            if fm.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
-                isDirectory.boolValue
-            {
-                return candidate.path
-            }
-            let parent = candidate.deletingLastPathComponent()
-            if parent.path == candidate.path { return nil }
-            candidate = parent
-        }
+    private func existingRootPath() -> String? {
+        let path = root.standardizedFileURL.path
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+            isDirectory.boolValue
+        else { return nil }
+        return path
     }
 }

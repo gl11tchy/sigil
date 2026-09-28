@@ -6,29 +6,51 @@ import SwiftUI
 @main
 struct SigilApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @State private var model = AppModel()
+    @State private var launch: AppLaunch
+
+    init() {
+        // Inter and JetBrains Mono, before the first view or terminal asks for them.
+        Typeface.registerBundledFonts()
+        // A launch without GROK_HOME reads it from the login shell while the
+        // window shows. The model is built once it is adopted.
+        _launch = State(initialValue: AppLaunch())
+    }
 
     var body: some Scene {
         WindowGroup {
-            RootView(model: model)
-                .frame(
-                    minWidth: WindowColumns.minimumWidth(
-                        sidebarVisible: model.isSidebarVisible,
-                        panelVisible: model.panel.isVisible
-                    ),
-                    minHeight: 460
-                )
-                .onAppear {
+            Self.mainWindow(launch: launch) {
+                launch.whenReady { model in
                     delegate.model = model
                     delegate.startRemoteIdleSleep(model)
                 }
+            }
         }
         .windowStyle(.hiddenTitleBar)
-        .commands { GrokCommands(model: model) }
+        .commands { GrokCommands(launch: launch) }
 
         Settings {
-            SettingsView(model: model)
+            if let model = launch.model {
+                SettingsView(model: model)
+            }
         }
+    }
+
+    /// The window's content. SwiftUI names the window it saves and restores
+    /// after this type, so a new modifier here strands the window an earlier
+    /// build saved, and the app launches with none. Add modifiers in
+    /// `RootView` instead.
+    @MainActor static func mainWindow(
+        launch: AppLaunch, onAppear: @escaping () -> Void
+    ) -> some View {
+        RootView(launch: launch)
+            .frame(
+                minWidth: WindowColumns.minimumWidth(
+                    sidebarVisible: launch.model?.isSidebarVisible ?? true,
+                    panelVisible: launch.model?.panel.isVisible ?? false
+                ),
+                minHeight: 460
+            )
+            .onAppear(perform: onAppear)
     }
 }
 
@@ -46,6 +68,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CrashReporter.install()
     }
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        Self.turnOffWindowTabbing()
+    }
+
+    /// Every window would share one model, and a terminal view lives in only
+    /// one window. A native window tab would take the terminals from the first.
+    @MainActor static func turnOffWindowTabbing() {
+        NSWindow.allowsAutomaticWindowTabbing = false
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -54,17 +86,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         MainActor.assumeIsolated {
-            guard let model else { return .terminateNow }
-            let working = model.tabs.filter(\.shouldWarnBeforeStopping).count
-            guard working > 0 else { return .terminateNow }
-            let alert = NSAlert()
-            alert.messageText =
-                working == 1
-                ? "A session is still working. Quit anyway?"
-                : "\(working) sessions are still working. Quit anyway?"
-            alert.addButton(withTitle: "Quit")
-            alert.addButton(withTitle: "Cancel")
-            return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+            guard let model,
+                let prompt = StopWorkingPrompt(
+                    action: .quit, stopping: model.tabs,
+                    panelJob: model.panel.shellHasForegroundJob)
+            else { return .terminateNow }
+            return prompt.runModal() ? .terminateNow : .terminateCancel
         }
     }
 
@@ -106,33 +133,50 @@ private final class RemoteIdleSleepWatch {
 }
 
 /// Menu bar commands. Everything here is also reachable from the UI.
+/// Before the model exists, an action waits for it, and an item that needs
+/// a tab or a match stays disabled.
 struct GrokCommands: Commands {
-    @Bindable var model: AppModel
+    @Bindable var launch: AppLaunch
+    private var model: AppModel? { launch.model }
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("New Session") { model.requestNewSession() }
+            Button("New Session…") { launch.whenReady { $0.requestNewSession() } }
                 .keyboardShortcut("t", modifiers: .command)
-            Button("New Session in Folder…") { model.requestNewSession() }
-                .keyboardShortcut("n", modifiers: [.command, .shift])
+            Button("New Session in Folder…") {
+                launch.whenReady { model in
+                    model.requestNewSessionInFolder { model.pickDirectory() }
+                }
+            }
+            .keyboardShortcut("n", modifiers: [.command, .shift])
         }
 
         CommandGroup(after: .newItem) {
-            Button("Close Tab") { model.closeSelectedTab() }
+            Button("Close Tab") { launch.whenReady(Self.closeTabOrKeyWindow) }
                 .keyboardShortcut("w", modifiers: .command)
-                .disabled(model.tabs.isEmpty)
+                .disabled(model?.tabs.isEmpty ?? true)
             Divider()
             Button("Export Transcript…") {
-                model.exportSelectedTranscript()
+                launch.whenReady { $0.exportSelectedTranscript() }
             }
-            .disabled(!model.canExportSelectedTranscript)
+            .disabled(!(model?.canExportSelectedTranscript ?? false))
             Button("Rename Conversation") {
-                if let session = model.sessionForSelectedTab() {
-                    model.beginRename(session)
+                launch.whenReady { model in
+                    if let session = model.sessionForSelectedTab() {
+                        model.beginRename(session, returnFocus: .terminal)
+                    }
                 }
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])
-            .disabled(model.sessionForSelectedTab() == nil)
+            .disabled(model?.sessionForSelectedTab() == nil)
+            Divider()
+            Button("Deliver Tab Message") { launch.whenReady { $0.deliverSelectedTabMessage() } }
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(!(model?.canDeliverSelectedTabMessage ?? false))
+            Button("Dismiss Tab Message") { launch.whenReady { $0.dismissSelectedTabMessage() } }
+                .disabled(!(model?.canDismissSelectedTabMessage ?? false))
+            Button("Restart Session") { launch.whenReady { $0.restartSelectedTab() } }
+                .disabled(!(model?.canRestartSelectedTab ?? false))
         }
 
         CommandGroup(replacing: .pasteboard) {
@@ -147,61 +191,102 @@ struct GrokCommands: Commands {
         }
 
         CommandGroup(after: .pasteboard) {
-            Button("Find") { model.toggleFindBar() }
+            Button("Find") { launch.whenReady { $0.showFindBar() } }
                 .keyboardShortcut("f", modifiers: .command)
-                .disabled(model.selectedTab == nil)
-            Button("Find Conversations") { model.focusSidebarSearch() }
+                .disabled(model?.selectedTab == nil)
+            Button("Find Next") { launch.whenReady { $0.findNextInTerminal() } }
+                .keyboardShortcut("g", modifiers: .command)
+                .disabled((model?.findMatchCount ?? 0) == 0)
+            Button("Find Previous") { launch.whenReady { $0.findPreviousInTerminal() } }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+                .disabled((model?.findMatchCount ?? 0) == 0)
+            Button("Find Conversations") { launch.whenReady { $0.focusSidebarSearch() } }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
         }
 
         CommandGroup(after: .toolbar) {
-            Button(model.isSidebarVisible ? "Hide Sidebar" : "Show Sidebar") {
-                model.isSidebarVisible.toggle()
+            Button(model?.isSidebarVisible ?? true ? "Hide Sidebar" : "Show Sidebar") {
+                launch.whenReady { model in
+                    Self.animateColumn { model.isSidebarVisible.toggle() }
+                }
             }
             .keyboardShortcut("b", modifiers: .command)
-            Button(model.panel.isVisible ? "Hide Panel" : "Show Panel") {
-                model.togglePanel()
+            Button(model?.panel.isVisible ?? false ? "Hide Panel" : "Show Panel") {
+                launch.whenReady { model in
+                    Self.animateColumn { model.togglePanel() }
+                }
             }
             .keyboardShortcut("b", modifiers: [.command, .option])
             Menu("Panel") {
-                Button("Terminal") { model.showPanel(.shell) }
+                Button("Terminal") { launch.whenReady { $0.showPanel(.shell) } }
                     .keyboardShortcut("1", modifiers: [.command, .option])
-                Button("Notes") { model.showPanel(.notes) }
+                Button("Notes") { launch.whenReady { $0.showPanel(.notes) } }
                     .keyboardShortcut("2", modifiers: [.command, .option])
             }
             Divider()
-            Button("Increase Font Size") { model.adjustFontSize(by: 1) }
+            Button("Increase Font Size") { launch.whenReady { $0.adjustFontSize(by: 1) } }
                 .keyboardShortcut("+", modifiers: .command)
-            Button("Decrease Font Size") { model.adjustFontSize(by: -1) }
+                .disabled(!(model?.canIncreaseFontSize ?? false))
+            Button("Decrease Font Size") { launch.whenReady { $0.adjustFontSize(by: -1) } }
                 .keyboardShortcut("-", modifiers: .command)
-            Button("Actual Size") { model.resetFontSize() }
+                .disabled(!(model?.canDecreaseFontSize ?? false))
+            Button("Actual Size") { launch.whenReady { $0.resetFontSize() } }
                 .keyboardShortcut("0", modifiers: .command)
+                .disabled(!(model?.canResetFontSize ?? false))
             Divider()
-            Button("Reload Conversations") { Task { await model.store.reload() } }
-                .keyboardShortcut("r", modifiers: .command)
+            Button("Reload Conversations") {
+                launch.whenReady { model in Task { await model.store.reload() } }
+            }
+            .keyboardShortcut("r", modifiers: .command)
         }
 
         CommandGroup(after: .windowList) {
-            Button("Next Tab") { model.cycleTab(by: 1) }
+            Button("Next Tab") { launch.whenReady { $0.cycleTab(by: 1) } }
                 .keyboardShortcut("]", modifiers: [.command, .shift])
-                .disabled(model.tabs.count < 2)
-            Button("Previous Tab") { model.cycleTab(by: -1) }
+                .disabled((model?.tabs.count ?? 0) < 2)
+            Button("Previous Tab") { launch.whenReady { $0.cycleTab(by: -1) } }
                 .keyboardShortcut("[", modifiers: [.command, .shift])
-                .disabled(model.tabs.count < 2)
+                .disabled((model?.tabs.count ?? 0) < 2)
+            Button("Show Tab List…") { launch.whenReady { $0.isShowingTabList.toggle() } }
+                .keyboardShortcut("t", modifiers: [.command, .control])
+                .disabled(!TabListRows.isShown(tabCount: model?.tabs.count ?? 0))
             Divider()
             ForEach(1...9, id: \.self) { index in
-                Button("Tab \(index)") { model.select(index: index - 1) }
+                Button("Tab \(index)") { launch.whenReady { $0.select(index: index - 1) } }
                     .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: .command)
-                    .disabled(model.tabs.count < index)
+                    .disabled((model?.tabs.count ?? 0) < index)
             }
         }
 
-        CommandGroup(after: .help) {
+        CommandGroup(after: .appInfo) {
             Button("Check for Updates…") {
                 NSWorkspace.shared.open(
                     URL(string: "https://github.com/gl11tchy/sigil/releases/latest")!)
             }
-            Button("Reveal Crash Logs") { model.revealCrashLogs() }
+        }
+
+        // Sigil has no help book, so the default Help item would only say so.
+        CommandGroup(replacing: .help) {
+            Button("Reveal Crash Logs") { launch.whenReady { $0.revealCrashLogs() } }
+        }
+    }
+
+    /// The same motion as the toolbar buttons, so ⌘B does not snap.
+    private static func animateColumn(_ change: () -> Void) {
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16), change)
+    }
+
+    /// ⌘W belongs to the window in front. Settings and About get the system
+    /// Close action, a sheet blocks it, and only the tab window closes a tab.
+    private static func closeTabOrKeyWindow(_ model: AppModel) {
+        guard let key = NSApp.keyWindow else { return }
+        if model.tabs.contains(where: { $0.controller.view.window === key }) {
+            model.closeSelectedTab()
+        } else if key.sheetParent == nil {
+            key.performClose(nil)
+        } else {
+            NSSound.beep()
         }
     }
 

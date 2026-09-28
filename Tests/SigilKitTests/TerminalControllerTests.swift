@@ -173,6 +173,43 @@ struct TerminalControllerTests {
         #expect(await TerminalTestSupport.waitUntil { !controller.isRunning })
     }
 
+    @Test func optionTypesTheLayoutCharacterByDefault() async throws {
+        let controller = TerminalController()
+        let capture = try await TerminalTestSupport.startInputCapture(in: controller, bracketedPaste: false)
+        defer { controller.terminateAndWait() }
+        let view = try #require(controller.view as? GrokProcessTerminalView)
+        // Option-L on a German layout types "@".
+        let event = try #require(
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: .option, timestamp: 0,
+                windowNumber: 0, context: nil, characters: "@", charactersIgnoringModifiers: "l",
+                isARepeat: false, keyCode: 37))
+
+        view.keyDown(with: event)
+
+        let input = await TerminalTestSupport.capturedInput(capture, from: controller)
+        #expect(input == Array("@".utf8))
+        #expect(!controller.optionAsMetaKey)
+    }
+
+    @Test func optionAsMetaKeyStillSendsEscapePrefixedKeys() async throws {
+        let controller = TerminalController()
+        let capture = try await TerminalTestSupport.startInputCapture(in: controller, bracketedPaste: false)
+        defer { controller.terminateAndWait() }
+        let view = try #require(controller.view as? GrokProcessTerminalView)
+        controller.optionAsMetaKey = true
+        let event = try #require(
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: .option, timestamp: 0,
+                windowNumber: 0, context: nil, characters: "@", charactersIgnoringModifiers: "l",
+                isARepeat: false, keyCode: 37))
+
+        view.keyDown(with: event)
+
+        let input = await TerminalTestSupport.capturedInput(capture, from: controller)
+        #expect(input == Array("\u{1b}l".utf8))
+    }
+
     @Test func inputSubmissionIgnoresBracketedPasteNewlines() {
         let view = GrokProcessTerminalView(
             frame: NSRect(x: 0, y: 0, width: 200, height: 100),
@@ -257,6 +294,40 @@ struct TerminalControllerTests {
             })
     }
 
+    /// Quitting several tabs gives the later ones only a short share of the wait.
+    /// The child must still be gone, not left behind as an unreaped zombie.
+    @Test func aShortSynchronousStopStillReapsAChildThatIgnoresSIGTERM() async throws {
+        let helper = try TerminalTestSupport.makeFlagStrippingHelper()
+        let controller = TerminalController()
+
+        controller.start(
+            TerminalTestSupport.launchSpec(
+                executable: helper,
+                extraArguments: [
+                    "/bin/sh", "-c",
+                    "trap '' TERM; printf RESIST_READY; while :; do /bin/sleep 1; done",
+                ]
+            )
+        )
+        #expect(
+            await TerminalTestSupport.waitUntil {
+                controller.bufferText().contains("RESIST_READY")
+            })
+        let pid = controller.processID
+        #expect(pid > 0)
+        defer {
+            if TerminalTestSupport.processIsAlive(pid) {
+                kill(-pid, SIGKILL)
+                kill(pid, SIGKILL)
+                _ = TerminalController.reap(pid)
+            }
+        }
+
+        controller.terminateAndWait(timeout: .milliseconds(1))
+
+        #expect(kill(pid, 0) != 0)
+    }
+
     @Test func accessibilityExposesBoundedUnicodeTerminalText() async throws {
         let helper = try TerminalTestSupport.makeFlagStrippingHelper()
         let controller = TerminalController()
@@ -287,6 +358,51 @@ struct TerminalControllerTests {
                 $0 == "\n" || $0 == "\t" || $0.properties.generalCategory != .control
             } == true
         )
+    }
+
+    @Test func accessibilityValueIsBuiltWhenAskedNotOnEveryOutputTick() throws {
+        let controller = TerminalController()
+        let view = try #require(controller.view as? TerminalView)
+
+        view.feed(text: "AX_ON_DEMAND")
+
+        let value = controller.view.accessibilityValue() as? String
+        #expect(value?.contains("AX_ON_DEMAND") == true)
+    }
+
+    @Test func scratchShellIsNotAnnouncedAsGrok() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let oldHome = ProcessInfo.processInfo.environment["HOME"]
+        let oldShell = ProcessInfo.processInfo.environment["SHELL"]
+        setenv("HOME", root.path, 1)
+        setenv("SHELL", "/bin/sh", 1)
+        defer {
+            if let oldHome { setenv("HOME", oldHome, 1) } else { unsetenv("HOME") }
+            if let oldShell { setenv("SHELL", oldShell, 1) } else { unsetenv("SHELL") }
+            try? FileManager.default.removeItem(at: root)
+        }
+        let controller = TerminalController()
+        #expect(controller.view.accessibilityLabel() == "Terminal")
+
+        controller.startShell(ShellLaunchSpec(workingDirectory: root))
+        defer { controller.terminateAndWait() }
+
+        #expect(controller.view.accessibilityLabel() == "Shell terminal")
+    }
+
+    @Test func findStartsAtTheNewestHitOnScreenNotTheOldestInScrollback() throws {
+        let controller = TerminalController()
+        let view = try #require(controller.view as? TerminalView)
+        let filler = (0..<300).map { "filler \($0)" }.joined(separator: "\r\n")
+        view.feed(text: "needle old\r\n" + filler + "\r\nneedle new\r\n")
+        let top = view.getTerminal().buffer.yDisp
+
+        controller.setFindQuery("needle")
+
+        #expect(controller.findMatchCount == 2)
+        #expect(controller.findMatchIndex == 2)
+        #expect(view.getTerminal().buffer.yDisp == top)
     }
 
     @Test func anAlreadyReapedChildIsGoneEvenIfItsPIDCouldBeReused() throws {

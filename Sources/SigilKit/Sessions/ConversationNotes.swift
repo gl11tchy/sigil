@@ -18,6 +18,8 @@ public final class ConversationNotesStore {
     /// Pending persistence per file: a text to write, or nil to delete.
     private var dirty: [String: String?] = [:]
     private var flushTask: Task<Void, Never>?
+    /// Paths a debounced write could not save, waiting to go back in `dirty`.
+    private nonisolated let failedWrites = OSAllocatedUnfairLock(initialState: [URL]())
 
     private nonisolated static let log = Logger(subsystem: "com.gl11tchy.sigil", category: "notes")
     /// Keystrokes coalesce into one write per quiet window of this length.
@@ -37,7 +39,11 @@ public final class ConversationNotesStore {
     public func note(for sessionID: String, cwd: String) -> String {
         guard let url = fileURL(for: sessionID, cwd: cwd) else { return "" }
         if let cached = cache[url.path] { return cached }
-        adoptFlatLayoutFile(named: sessionID + ".md", destination: url)
+        // Only Grok had the legacy flat layout. A native provider must never
+        // adopt another provider's old note, even when the UUID matches.
+        if Self.isValidSessionID(sessionID) {
+            adoptFlatLayoutFile(named: sessionID + ".md", destination: url)
+        }
         guard let data = try? Data(contentsOf: url),
             let text = String(data: data, encoding: .utf8)
         else { return "" }
@@ -67,6 +73,13 @@ public final class ConversationNotesStore {
         scheduleFlush()
     }
 
+    /// True when nothing for this note waits to be written. After `flushNow()`
+    /// a false means its write failed and is queued for a retry.
+    public func isSaved(for sessionID: String, cwd: String) -> Bool {
+        guard let url = fileURL(for: sessionID, cwd: cwd) else { return false }
+        return dirty[url.path] == nil
+    }
+
     /// Removes the flat-layout file the first notes build wrote. Only the
     /// caller can know no other folder still has a conversation with this
     /// session ID waiting to adopt it, so this stays a separate decision.
@@ -83,8 +96,30 @@ public final class ConversationNotesStore {
     public func flushNow() {
         flushTask?.cancel()
         flushTask = nil
+        // Let earlier debounced writes finish, so their failures are retried here.
+        writeQueue.sync {}
+        requeueFailedWrites()
         let pending = takePending()
-        writeQueue.sync { Self.write(pending) }
+        requeue(writeQueue.sync { Self.write(pending) })
+    }
+
+    private func requeueFailedWrites() {
+        requeue(
+            failedWrites.withLock { failed in
+                defer { failed.removeAll() }
+                return failed
+            })
+    }
+
+    /// Puts paths whose write or delete failed back in the queue, so the next
+    /// flush tries again. The cache holds the newest text, so a later edit wins
+    /// over the failed one; an empty text is a delete.
+    private func requeue(_ failed: [URL]) {
+        for url in failed where dirty[url.path] == nil {
+            // Only the flat-layout delete has no cached text.
+            let text = cache[url.path] ?? ""
+            dirty[url.path] = text.isEmpty ? .some(nil) : text
+        }
     }
 
     private func scheduleFlush() {
@@ -119,12 +154,19 @@ public final class ConversationNotesStore {
         label: "com.gl11tchy.sigil.notes", qos: .utility)
 
     private func persist(_ pending: (writes: [(url: URL, data: Data)], deletes: [URL])) {
-        writeQueue.async { Self.write(pending) }
+        writeQueue.async { [failedWrites] in
+            let failed = Self.write(pending)
+            guard !failed.isEmpty else { return }
+            failedWrites.withLock { $0 += failed }
+            Task { @MainActor [weak self] in self?.requeueFailedWrites() }
+        }
     }
 
+    /// Returns the files it could not write or delete.
     private nonisolated static func write(
         _ pending: (writes: [(url: URL, data: Data)], deletes: [URL])
-    ) {
+    ) -> [URL] {
+        var failed: [URL] = []
         let fm = FileManager.default
         for (url, data) in pending.writes {
             do {
@@ -135,6 +177,7 @@ public final class ConversationNotesStore {
                 log.error(
                     "note write failed for \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)"
                 )
+                failed.append(url)
             }
         }
         for url in pending.deletes {
@@ -142,8 +185,10 @@ public final class ConversationNotesStore {
                 log.error(
                     "note delete failed for \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)"
                 )
+                failed.append(url)
             }
         }
+        return failed
     }
 
     /// The first notes build wrote `notes/<id>.md` with no folder; adopt that
@@ -165,15 +210,20 @@ public final class ConversationNotesStore {
         }
     }
 
-    /// `notes/<encoded-cwd>/<session-id>.md`, mirroring the CLI's own layout.
-    /// Session IDs are UUIDs; refuse anything that could escape the folder or
-    /// trip Unicode filename normalization.
+    /// Preserve every existing Grok path. New native providers get their own
+    /// directory namespace and only a validated UUID becomes a file name.
     private func fileURL(for sessionID: String, cwd: String) -> URL? {
-        guard Self.isValidSessionID(sessionID), !cwd.isEmpty else { return nil }
-        return
-            root
-            .appendingPathComponent(GrokPaths.encode(path: GrokPaths.canonicalPath(cwd)))
-            .appendingPathComponent(sessionID + ".md")
+        guard !cwd.isEmpty else { return nil }
+        let directory = GrokPaths.sessionFolderName(forCanonicalPath: GrokPaths.canonicalPath(cwd))
+        if Self.isValidSessionID(sessionID) {
+            return root.appendingPathComponent(directory).appendingPathComponent(sessionID + ".md")
+        }
+        let parts = sessionID.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2, ["claudeCode", "codex"].contains(String(parts[0])),
+            let uuid = UUID(uuidString: String(parts[1]))
+        else { return nil }
+        return root.appendingPathComponent(String(parts[0])).appendingPathComponent(directory)
+            .appendingPathComponent(uuid.uuidString.lowercased() + ".md")
     }
 
     private static func isValidSessionID(_ sessionID: String) -> Bool {
