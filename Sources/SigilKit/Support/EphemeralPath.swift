@@ -64,8 +64,13 @@ private let scratchComponents: Set<String> = [
 /// Direct children of a dot-dir that hold implementer worktrees, not real projects.
 private let scratchChildrenByRoot: [String: Set<String>] = [
     ".claude": ["worktrees", "projects", "scratch", "scratchpads", "tmp"],
-    ".bb": ["worktrees"],
+    ".bb": ["worktrees", "thread-storage", "personal-workspaces"],
     ".cache": ["quick-grok"],
+]
+
+/// bb environment plugins whose host data holds per-thread checkouts.
+private let scratchPlugins: Set<String> = [
+    "environment-git-worktree", "environment-personal-workspace",
 ]
 
 private func hasScratchWorkspaceMarker(_ path: String) -> Bool {
@@ -77,8 +82,10 @@ private func hasScratchWorkspaceMarker(_ path: String) -> Bool {
     if zip(parts, parts.dropFirst()).contains(where: { scratchChildrenByRoot[$0]?.contains($1) == true }) {
         return true
     }
-    let pluginChain = [".bb", "plugins", "environment-git-worktree"]
-    return parts.indices.contains { parts[$0...].starts(with: pluginChain) }
+    let pluginChains = scratchPlugins.map { [".bb", "plugins", $0] }
+    return parts.indices.contains { index in
+        pluginChains.contains { parts[index...].starts(with: $0) }
+    }
 }
 
 /// macOS presents the same directory as both `/tmp` and `/private/tmp` (and
