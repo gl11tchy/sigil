@@ -19,7 +19,7 @@ async function browser() {
   const stored = { room: 'a'.repeat(32), key: { device: true } };
   const element = id => {
     if (!elements.has(id)) elements.set(id, {
-      id, value: '', textContent: '', hidden: false, disabled: false, dataset: {}, style: {},
+      id, value: '', textContent: '', hidden: false, disabled: false, readOnly: false, dataset: {}, style: {},
       open: false, focus() {}, contains() { return false; },
       getAttribute(name) { return this[name]; }, setAttribute(name, value) { this[name] = value; },
       listeners: {}, addEventListener(type, listener) { (this.listeners[type] ??= []).push(listener); },
@@ -48,7 +48,7 @@ async function browser() {
       };
     },
     querySelectorAll: selector => selector === '[data-key]' ? [] :
-      ['new', 'tabs', 'message', 'send', 'paste', 'interrupt'].map(element),
+      ['new', 'tabs', 'message', 'send', 'paste', 'interrupt', 'stop'].map(element),
     addEventListener() {},
   };
   class FakeSocket {
@@ -63,7 +63,7 @@ async function browser() {
     receive(frame) { this.onmessage({ data: JSON.stringify(frame) }); }
     answer(request, fields = {}, state = { tabs: [tab('tab-1')], selectedTabID: 'tab-1', terminal: 'READY' }) {
       this.receive({ data: JSON.stringify({
-        challenge: request.challenge, sequence: request.sequence, ok: true, ...fields, ...(state ? { state } : {}),
+        challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: true, ...fields, ...(state ? { state } : {}),
       }) });
     }
     close() { this.readyState = 3; this.onclose?.(); }
@@ -181,20 +181,22 @@ test('keys typed before the first reply leave one search waiting, sent with the 
   assert.deepEqual(page.element('saved-list').children.map(row => row.children[0].textContent), ['alphaworkflow result']);
 });
 
-test('a select and a key issued after typing wait only for the search out and the newest one', async () => {
+test('a select issued after typing waits only for the search out and the newest one', async () => {
   const page = await browser();
   const socket = await page.authorize({ tabs: [tab('tab-1'), tab('tab-2', 'Other')], selectedTabID: 'tab-1', terminal: 'READY' });
   page.element('sessions-toggle').onclick();
   await page.type('alphaworkflow');
   page.element('tabs').value = 'tab-2';
   page.element('tabs').onchange();
-  page.element('interrupt').onclick();
   await settle();
   for (let reply = 0; reply < 3; reply++) {
     socket.answer(socket.sent.at(-1), socket.sent.at(-1).action === 'chats' ? chats(socket.sent.at(-1).text) : {},
       { tabs: [tab('tab-1'), tab('tab-2', 'Other')], selectedTabID: socket.sent.at(-1).action === 'select' ? 'tab-2' : 'tab-1', terminal: 'READY' });
     await settle();
   }
+  // Keys wait for the switch to end; then one goes out at once.
+  page.element('interrupt').onclick();
+  await settle();
   assert.deepEqual(socket.sent.map(request => [request.action, request.text ?? request.tabID]),
     [['state', undefined], ['chats', 'a'], ['chats', 'alphaworkflow'], ['select', 'tab-2'], ['key', 'interrupt']]);
 });
