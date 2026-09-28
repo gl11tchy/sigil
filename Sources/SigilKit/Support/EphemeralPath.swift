@@ -64,8 +64,14 @@ private let scratchComponents: Set<String> = [
 /// Direct children of a dot-dir that hold implementer worktrees, not real projects.
 private let scratchChildrenByRoot: [String: Set<String>] = [
     ".claude": ["worktrees", "projects", "scratch", "scratchpads", "tmp"],
-    ".bb": ["worktrees"],
+    ".bb": ["worktrees", "thread-storage", "personal-workspaces"],
+    ".sigil": ["worktrees"],
     ".cache": ["quick-grok"],
+]
+
+/// bb environment plugins whose host data holds per-thread checkouts.
+private let scratchPlugins: Set<String> = [
+    "environment-git-worktree", "environment-personal-workspace",
 ]
 
 private func hasScratchWorkspaceMarker(_ path: String) -> Bool {
@@ -85,7 +91,7 @@ private func hasScratchWorkspaceMarker(_ path: String) -> Bool {
         let plugins = parts.index(after: index)
         if plugins < parts.endIndex, parts[plugins] == "plugins" {
             let plugin = parts.index(after: plugins)
-            if plugin < parts.endIndex, parts[plugin] == "environment-git-worktree" {
+            if plugin < parts.endIndex, scratchPlugins.contains(parts[plugin]) {
                 return true
             }
         }

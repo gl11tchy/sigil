@@ -28,6 +28,10 @@ struct EphemeralPathTests {
         "/Users/someone/.bb/worktrees/env_abc",
         "/Users/someone/.bb/worktrees",
         "/Users/someone/.bb/plugins/environment-git-worktree/sigil",
+        "/Users/someone/.bb/thread-storage/thr_iimp24a4nc",
+        "/Users/someone/.bb/personal-workspaces/thr_abc",
+        "/Users/someone/.bb/plugins/environment-personal-workspace/host-data/workspaces/thr_abc",
+        "/Users/someone/.sigil/worktrees/%2FUsers%2Fsomeone%2Fsigil/017231be",
     ])
     func treatsScratchLocationsAsEphemeral(path: String) {
         #expect(isEphemeral(path: path))
@@ -50,6 +54,8 @@ struct EphemeralPathTests {
         "/Users/someone/.bb/plugins",
         "/Users/someone/.bb/plugins/other-plugin",
         "/Users/someone/src/environment-git-worktree",
+        "/Users/someone/.sigil",
+        "/Users/someone/src/thread-storage",
     ])
     func treatsRealLocationsAsPersistent(path: String) {
         #expect(!isEphemeral(path: path))
