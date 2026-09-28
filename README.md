@@ -24,7 +24,9 @@ By gl11tchy.
   in from Settings › General: with a Kimi account (`kimi login` in the browser) or
   with a Kimi Platform API key, which stays in the Keychain. Sigil uses your login shell's PATH
   and the standard installation folders. Grok keeps its configured Settings path.
-  Grok, Claude Code and Codex history appears in the sidebar. Known native
+  The sidebar lists only chats started in Sigil; chats that the terminal or other
+  apps wrote to the same Grok, Claude Code and Codex history stay hidden unless
+  Settings › Show chats from other apps is on. Known native
   conversations can resume and restore without creating replacements. A new Codex
   tab has no verified native ID until opened from history; Sigil does not guess it.
   Export and tab messaging remain Grok-only. Other unsupported controls stay hidden.

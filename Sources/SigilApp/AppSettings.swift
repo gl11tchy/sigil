@@ -15,6 +15,9 @@ final class AppSettings {
         static let showEmptySessions = "sidebar.showEmptySessions"
         static let showWorktreeSessions = "sidebar.showWorktreeSessions"
         static let showSubagentSessions = "sidebar.showSubagentSessions"
+        static let showOtherAppSessions = "sidebar.showOtherAppSessions"
+        static let sigilConversations = "session.sigilConversations"
+        static let sigilConversationsSeeded = "session.sigilConversationsSeeded"
         static let focusedProjectPath = "sidebar.focusedProjectPath"
         static let pinnedConversations = "sidebar.pinnedConversations"
         static let pinnedProjects = "sidebar.pinnedProjects"
@@ -73,6 +76,27 @@ final class AppSettings {
     /// drown the parent chat in the sidebar. They still run in the background.
     var showSubagentSessions: Bool {
         didSet { defaults.set(showSubagentSessions, forKey: Key.showSubagentSessions) }
+    }
+    /// The sidebar lists only chats started in Sigil. Claude Code, Codex and
+    /// Grok keep one shared history, so chats from the terminal and other apps
+    /// are there too; they stay hidden unless the user turns them on.
+    var showOtherAppSessions: Bool {
+        didSet { defaults.set(showOtherAppSessions, forKey: Key.showOtherAppSessions) }
+    }
+    /// Sidebar ids of the chats Sigil started, oldest first.
+    private(set) var sigilConversations: [String] {
+        didSet {
+            sigilConversationIDs = Set(sigilConversations)
+            if let data = try? JSONEncoder().encode(sigilConversations) {
+                defaults.set(data, forKey: Key.sigilConversations)
+            }
+        }
+    }
+    /// `sigilConversations` as a set, so a sidebar pass is one lookup per chat.
+    @ObservationIgnored private(set) var sigilConversationIDs: Set<String> = []
+    /// True once chats started before `sigilConversations` existed were added.
+    var sigilConversationsSeeded: Bool {
+        didSet { defaults.set(sigilConversationsSeeded, forKey: Key.sigilConversationsSeeded) }
     }
     /// Empty means the Projects list, not a drilled-in folder.
     var focusedProjectPath: String {
@@ -192,6 +216,13 @@ final class AppSettings {
         showEmptySessions = defaults.bool(forKey: Key.showEmptySessions)
         showWorktreeSessions = defaults.bool(forKey: Key.showWorktreeSessions)
         showSubagentSessions = defaults.bool(forKey: Key.showSubagentSessions)
+        showOtherAppSessions = defaults.bool(forKey: Key.showOtherAppSessions)
+        let started =
+            defaults.data(forKey: Key.sigilConversations)
+            .flatMap { try? JSONDecoder().decode([String].self, from: $0) } ?? []
+        sigilConversations = started
+        sigilConversationIDs = Set(started)
+        sigilConversationsSeeded = defaults.bool(forKey: Key.sigilConversationsSeeded)
         optionAsMetaKey = defaults.bool(forKey: Key.optionAsMeta)
         focusedProjectPath = defaults.string(forKey: Key.focusedProjectPath) ?? ""
         if let data = defaults.data(forKey: Key.pinnedConversations),
@@ -262,6 +293,25 @@ final class AppSettings {
         if archives != archivedConversations { archivedConversations = archives }
         let names: [ConversationName] = stored(Key.conversationNames)
         if names != conversationNames { conversationNames = names }
+        let started: [String] = stored(Key.sigilConversations)
+        if started != sigilConversations { sigilConversations = started }
+    }
+
+    func isSigilConversation(_ sidebarID: String) -> Bool {
+        sigilConversationIDs.contains(sidebarID)
+    }
+
+    /// Adds chats to the list of those Sigil started. Known ids are skipped.
+    /// Another running copy may have added some since this one last read the
+    /// list, so the saved list is merged in first and nothing is dropped.
+    func recordSigilConversations(_ sidebarIDs: [String]) {
+        let saved =
+            defaults.data(forKey: Key.sigilConversations)
+            .flatMap { try? JSONDecoder().decode([String].self, from: $0) } ?? []
+        var merged = sigilConversations
+        var seen = sigilConversationIDs
+        for id in saved + sidebarIDs where seen.insert(id).inserted { merged.append(id) }
+        if merged != sigilConversations { sigilConversations = merged }
     }
 
     var theme: TerminalTheme {

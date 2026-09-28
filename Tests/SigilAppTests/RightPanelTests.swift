@@ -146,6 +146,8 @@ struct RightPanelTests {
 
         let defaults = UserDefaults(suiteName: "RightPanelTests-\(UUID().uuidString)")!
         let settings = AppSettings(defaults: defaults)
+        // These tests list chats from the history files directly.
+        settings.showOtherAppSessions = true
         settings.executablePath = "/bin/sh"
         settings.defaultDirectory = root.path
         settings.themeName = TerminalTheme.grokDay.name
@@ -304,6 +306,8 @@ struct RightPanelTests {
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = AppSettings(defaults: defaults)
+        // These tests list chats from the history files directly.
+        settings.showOtherAppSessions = true
         func tab(_ provider: CLIProvider) -> TerminalTab {
             TerminalTab(
                 spec: GrokLaunchSpec(

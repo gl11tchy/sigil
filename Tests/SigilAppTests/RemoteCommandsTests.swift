@@ -29,6 +29,8 @@ struct RemoteCommandsTests {
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = AppSettings(defaults: defaults)
+        // These tests list chats from the history files directly.
+        settings.showOtherAppSessions = true
         settings.executablePath = executable.path
         settings.defaultDirectory = root.path
         let model = AppModel(
@@ -106,6 +108,8 @@ struct RemoteCommandsTests {
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = AppSettings(defaults: defaults)
+        // These tests list chats from the history files directly.
+        settings.showOtherAppSessions = true
         settings.executablePath = executable.path
         settings.defaultDirectory = root.path
         let model = AppModel(
@@ -140,6 +144,8 @@ struct RemoteCommandsTests {
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = AppSettings(defaults: defaults)
+        // These tests list chats from the history files directly.
+        settings.showOtherAppSessions = true
         settings.executablePath = executable.path
         settings.defaultDirectory = root.path
         let model = AppModel(
@@ -688,6 +694,8 @@ final class PhoneCommandFixture {
         defaultsName = "sigil-phone-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: defaultsName))
         settings = AppSettings(defaults: defaults)
+        // These tests list chats from the history files directly.
+        settings.showOtherAppSessions = true
         settings.executablePath = executable.path
         settings.defaultDirectory = root.path
         store = SessionStore(root: root.appendingPathComponent("sessions"))

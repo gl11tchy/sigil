@@ -76,6 +76,7 @@ struct NewSessionSheet: View {
         for session in model.store.sessions {
             if !settings.showWorktreeSessions, isEphemeral(path: session.cwd) { continue }
             if !settings.showSubagentSessions, session.isSubagent { continue }
+            if !settings.showOtherAppSessions, !settings.isSigilConversation(session.id) { continue }
             if model.isArchived(session) { continue }
             // Resolve each stored folder once, and stop when the list is full.
             guard seenCwds.insert(session.projectPath).inserted else { continue }

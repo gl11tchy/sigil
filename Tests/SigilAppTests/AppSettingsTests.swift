@@ -33,6 +33,10 @@ struct AppSettingsTests {
         defer { defaults.reset() }
 
         let settings = AppSettings(defaults: defaults.value)
+
+        // These tests list chats from the history files directly.
+
+        settings.showOtherAppSessions = true
         settings.executablePath = root.path
         #expect(!settings.executableExists)
         settings.executablePath = "/bin/echo"
@@ -112,6 +116,8 @@ struct AppSettingsTests {
         let defaults = isolatedDefaults()
         defer { defaults.reset() }
         let settings = AppSettings(defaults: defaults.value)
+        // These tests list chats from the history files directly.
+        settings.showOtherAppSessions = true
         #expect(!settings.showWorktreeSessions)
         #expect(!settings.showSubagentSessions)
     }
@@ -147,6 +153,8 @@ struct AppSettingsTests {
         let defaults = isolatedDefaults()
         defer { defaults.reset() }
         let settings = AppSettings(defaults: defaults.value)
+        // These tests list chats from the history files directly.
+        settings.showOtherAppSessions = true
         settings.fontSize = -20
         #expect(settings.fontSize == 8)
         settings.fontSize = 1000

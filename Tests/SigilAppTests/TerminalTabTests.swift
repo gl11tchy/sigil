@@ -231,6 +231,8 @@ struct TerminalTabTests {
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
         let settings = AppSettings(defaults: defaults)
+        // These tests list chats from the history files directly.
+        settings.showOtherAppSessions = true
         func claudeTab(in folder: String) -> TerminalTab {
             TerminalTab(
                 spec: GrokLaunchSpec(

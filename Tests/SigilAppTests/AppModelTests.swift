@@ -4415,6 +4415,8 @@ final class ModelFixture {
         defaultsName = "SigilAppTests.\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: defaultsName)!
         settings = AppSettings(defaults: defaults)
+        // These tests list chats from the history files directly.
+        settings.showOtherAppSessions = true
         settings.executablePath = executable.path
         store = SessionStore(root: grokHome.appendingPathComponent("sessions"))
         notesRoot = root.appendingPathComponent("notes")
