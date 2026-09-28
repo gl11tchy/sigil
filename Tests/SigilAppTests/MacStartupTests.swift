@@ -307,6 +307,46 @@ struct MacStartupTests {
         case shown, appHidden, minimized, orderedOut
     }
 
+    @Test func pendingStartupFocusRetriesWhenTheTerminalJoinsAnAlreadyKeyWindow() async throws {
+        let fixture = try ModelFixture(script: "#!/bin/sh\nread line\n")
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        try fixture.createSession(id: "restored", cwd: cwd)
+        fixture.settings.openTabs = .init(
+            tabs: [.init(sessionID: "restored", cwd: cwd.path)], selectedSessionID: "restored", selectedCWD: cwd.path)
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let window = StandInKeyWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 640),
+            styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let host = NSHostingView(rootView: WindowContent(model: model))
+        window.contentView = host
+        window.reportsKey = true
+        window.orderFront(nil)
+        #expect(await waitUntil { model.selectedTab?.controller.view.window === window })
+        let terminal = try #require(model.selectedTab?.controller.view)
+        let pane = try #require(terminal.superview as? TerminalPane.ContainerView)
+        let parent = try #require(pane.superview)
+
+        // Hold the real pane outside the window while selection and the key
+        // notification run. SwiftUI's selected-tab task does not run again
+        // merely because this AppKit view joins the hierarchy afterward.
+        pane.removeFromSuperview()
+        window.makeFirstResponder(window)
+        model.focusSelectedTerminal()
+        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
+        await flushMainAsync()
+        #expect(terminal.window == nil)
+        #expect(model.needsTerminalFocus)
+        parent.addSubview(pane)
+        #expect(terminal.window === window)
+
+        #expect(await waitUntil { window.firstResponder === terminal })
+        #expect(!model.needsTerminalFocus)
+    }
+
     /// Shows the real window with the window's key state, sends it away,
     /// lets the launch finish, brings it back, and reads where focus lands;
     /// for a window that was not key, again once it becomes key.

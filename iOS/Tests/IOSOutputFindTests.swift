@@ -1,3 +1,6 @@
+#if canImport(Sigil)
+@testable import Sigil
+#endif
 import Foundation
 
 /// IOS-2: find marks its matches over the output, off the main thread, and

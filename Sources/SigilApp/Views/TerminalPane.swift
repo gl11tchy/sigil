@@ -16,24 +16,26 @@ struct TerminalPane: NSViewRepresentable {
     var cornerRadius: CGFloat = 0
     /// False rounds only the bottom corners, for a pane under a tab bar.
     var roundsTopCorners = true
+    var onWindowAttachment: (() -> Void)?
 
     init(
         tab: TerminalTab, background: NSColor, cornerRadius: CGFloat = 0,
-        roundsTopCorners: Bool = true
+        roundsTopCorners: Bool = true, onWindowAttachment: (() -> Void)? = nil
     ) {
         self.init(
             controller: tab.controller, background: background, cornerRadius: cornerRadius,
-            roundsTopCorners: roundsTopCorners)
+            roundsTopCorners: roundsTopCorners, onWindowAttachment: onWindowAttachment)
     }
 
     init(
         controller: TerminalController, background: NSColor, cornerRadius: CGFloat = 0,
-        roundsTopCorners: Bool = true
+        roundsTopCorners: Bool = true, onWindowAttachment: (() -> Void)? = nil
     ) {
         self.controller = controller
         self.background = background
         self.cornerRadius = cornerRadius
         self.roundsTopCorners = roundsTopCorners
+        self.onWindowAttachment = onWindowAttachment
     }
 
     /// Layer corners are in unflipped coordinates: `MinY` is the bottom edge.
@@ -53,6 +55,7 @@ struct TerminalPane: NSViewRepresentable {
         container.pasteDroppedContent = { [weak controller] pasteboard in
             controller?.pasteDroppedContent(from: pasteboard) ?? false
         }
+        container.onWindowAttachment = onWindowAttachment
         container.install(controller.view)
         return container
     }
@@ -65,6 +68,7 @@ struct TerminalPane: NSViewRepresentable {
         nsView.pasteDroppedContent = { [weak controller] pasteboard in
             controller?.pasteDroppedContent(from: pasteboard) ?? false
         }
+        nsView.onWindowAttachment = onWindowAttachment
         nsView.install(controller.view)
     }
 
@@ -72,6 +76,7 @@ struct TerminalPane: NSViewRepresentable {
     final class ContainerView: NSView {
         override var acceptsFirstResponder: Bool { false }
         var pasteDroppedContent: ((NSPasteboard) -> Bool)?
+        var onWindowAttachment: (() -> Void)?
 
         private(set) var hostedTerminal: NSView?
         private var terminalConstraints: [NSLayoutConstraint] = []
@@ -84,6 +89,11 @@ struct TerminalPane: NSViewRepresentable {
         required init?(coder: NSCoder) {
             super.init(coder: coder)
             registerForDraggedTypes(TerminalDrop.pasteboardTypes)
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window != nil { onWindowAttachment?() }
         }
 
         override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
@@ -123,6 +133,7 @@ struct TerminalPane: NSViewRepresentable {
             for scroller in terminal.subviews.compactMap({ $0 as? NSScroller }) {
                 scroller.isHidden = true
             }
+            if window != nil { onWindowAttachment?() }
         }
     }
 }

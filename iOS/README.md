@@ -1,61 +1,107 @@
 # Sigil for iPhone
 
-The native phone companion for Sigil. It does what the Sidereal web page does,
-as an app: pair with the Mac by QR code, see open sessions, read their output
-in the terminal's colours, reply, press terminal keys, stop a turn, start a
-session in a project or a fresh worktree, close, rename and archive sessions,
-reopen a saved chat, and send photos and files.
+The native phone companion for Sigil. Pair with a Mac by QR code, read open
+terminal sessions, send text and files, use terminal keys, and reopen supported
+saved conversations. The Mac supplies each provider's capabilities. Unsupported
+rename, archive, and resume controls stay disabled or hidden.
 
-After the handshake the app asks the Mac to `watch`: the Mac then sends every
-change as it happens, as the rows that changed with their styles, and the app
-sends no periodic request. A Mac that predates `watch` is polled once a second
-as before. The last screen seen from the Mac is kept on disk, so the app shows
-it the moment it opens, before the socket comes up.
+SwiftUI, iOS 26, no third-party dependencies. The chrome follows the Mac terminal's
+light or dark theme.
 
-It speaks the same sealed protocol as `Sidereal/public/app.mjs` through the
-same relay (`https://remote.sigilapp.dev` unless the code names another). The
-device key and ticket live in the Keychain, this device only. The readable
-output view runs `Sidereal/public/output.mjs` itself, bundled as
-`Sigil/Resources/readable-output.js`; `scripts/test.sh` fails if the copies differ.
-
-SwiftUI, iOS 26, no third-party dependencies. Dark only, like the Mac app.
-
-More than one Mac: Pair another Mac (in the Sessions sheet or the menu) adds a
-pairing; the Sessions sheet lists the Macs and swaps the whole screen to the one
-chosen. Each pairing keeps its own cached screen. A notification or the Lock
-Screen card names its Mac and opens it. Forget drops only the Mac on screen.
-
-Alerts: once connected the app asks for notification permission and hands its
-APNs token to the Mac. With the app closed, a turn that finishes, a question
-that appears, or a session that ends arrives as a notification; the Mac seals
-the words with the pairing key, so the relay and Apple carry ciphertext, and
-`SigilNotifications` (a notification service extension) opens them. The session
-on screen runs a Live Activity while it works or asks (`SigilWidgets`): the
-Dynamic Island and a Lock Screen card, updated by the Mac's pushes when the app
-is away. Both extensions compile `Shared/`, which the app and the test binary
-compile too. Tapping a notification or the card opens that session and nothing
-else.
-
-## Pair
+## Pair and reconnect
 
 1. On the Mac, open Sigil → Settings → Remote and select Connect Phone.
-2. In the app, tap Scan code and point the camera at the code, or tap Paste link.
+2. In the app, tap Scan code, or tap Paste link.
 
-## Working on it
+The app uses the same sealed relay protocol as the Sidereal web companion.
+The relay cannot read terminal content or commands. Each connection uses a fresh
+phone nonce authenticated by the Mac. Both companions must support this protocol;
+older versions receive an upgrade error rather than weaker authorization.
+
+The Mac streams changed rows only when it supplies monotonic event counters.
+Otherwise the app polls authenticated state replies. Offline commands are not
+queued. Reconnect does not retry commands. A lost acknowledgement means the user
+must inspect the terminal before sending again. A successful reply confirms
+input dispatch, not provider acceptance or completion.
+
+More than one Mac can be paired. Pairings, cached screens, drafts, and attachments
+stay separate. A notification names its Mac; a forgotten Mac cannot redirect a
+notification into the current Mac's session. Restored drafts move to a new tab only
+when provider, native conversation ID, and canonical project all match.
+
+## Terminal controls and alerts
+
+Sigil has no verified approval response broker connected to the owned terminal session.
+Parsed menus appear as **Terminal controls**, with the available operation and
+exact choice labels. They send ordinary terminal keys, not verified approvals.
+Generic selection menus do not gain invented Yes/No shortcuts.
+
+The app asks for notification permission after connecting. The Mac seals alert
+content with the device key. `SigilNotifications` opens only alerts with a valid
+UUID and timestamp: at most five minutes old, with 30 seconds of future clock skew.
+A file-locked, bounded receipt ledger rejects duplicate IDs for the same Mac.
+It stores only IDs and times in the extension's private container.
+
+An invalid or duplicate APNs notification can still produce a passive generic
+banner. The extension cannot cancel an already delivered APNs notification. Its
+fallback contains no stale alert text, completion claim, or session action.
+
+`SigilWidgets` shows a Live Activity for working sessions or verified approval
+state. Parsed terminal hints alone do not claim an authoritative approval.
+Physical-device push delivery and background Live Activity updates need separate
+signed-device testing.
+
+## Local data
+
+Pairing keys and tickets use the device-only Keychain, shared with the notification
+extension. A failed update does not delete an existing Keychain item. If a pairing
+cannot be saved, the app says it will end when the app closes and retains existing
+in-memory pairings. Unsent drafts and attachments are not saved to disk.
+
+The latest selected screen and tab list are cached per Mac as JSON under
+Application Support. On iOS, the files use complete file protection until first
+unlock. They are **not encrypted separately by Sigil** and have no automatic expiry.
+A newer snapshot replaces them; Forget deletes that Mac's cache. Treat application
+data and local crash reports as private because they may contain terminal content.
+
+The readable-output formatter is `Sidereal/public/output.mjs`, copied into
+`Sigil/Resources/readable-output.js`. The tests fail if those copies differ.
+
+## Development and verification
+
+Run these from the `iOS` directory:
 
 ```bash
-scripts/typecheck.sh    # every source against the iOS simulator SDK
-scripts/test.sh         # protocol, history and formatter tests, as a macOS binary
-scripts/relay-e2e.sh    # the same tests plus pairing through a real local relay
-scripts/build.sh        # full simulator build
-scripts/ci.sh           # all of the above
-scripts/ship.sh         # archive and upload to App Store Connect for TestFlight
-swift scripts/make-icon.swift Sigil/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+scripts/typecheck.sh     # app/shared sources against the simulator SDK
+scripts/test.sh          # shared logic, compiled as a macOS executable
+scripts/relay-e2e.sh     # shared logic and a real local relay
+scripts/native-test.sh   # actual app, both extensions, app-hosted simulator tests
+scripts/native-output-test.sh # UIKit/TextKit output, Find, and cover tests
+scripts/build.sh         # standalone unsigned simulator build
+scripts/ci.sh            # required native verification gate
+scripts/ship.sh          # signed archive and App Store Connect upload
 ```
 
-Xcode 26 with the iOS 26 platform is required.
+Xcode 26+ and an installed iOS 26+ simulator runtime are required. Native tests
+create and remove their own simulator. They never use a personal pairing or paid
+provider session. The native gate verifies `Sigil.app`, `SigilNotifications.appex`,
+and `SigilWidgets.appex`, then runs the real app's networking and store against a
+real relay with a deterministic Mac fixture. The separate TextKit harness preserves native output, Find, scrolling, and cover tests.
+Result bundles contain test evidence
+and a synthetic accessibility-size composer screenshot.
 
-Launch with `-demo` (debug builds only) for offline sample sessions:
+The `sigil-vm` runner uses a digest-pinned Tahoe/Xcode 26.5 image with iOS 26.5.
+Provisioning checks Xcode, simulator availability, Metal and first-launch readiness
+before publishing its base. The previous Xcode 16.4 base remains available for
+rollback. No GitHub-hosted capacity is used. Native checks still fail rather than
+skipping the application build.
+
+Simulator builds do not prove distribution signing, physical-device Keychain
+entitlements, APNs delivery, notification service activation, or Live Activity
+pushes. `ship.sh` is separate and requires the owner's configured signing account.
+See [native verification evidence](../docs/qa/product-hardening/ios-verification.md).
+
+Launch with `-demo` (debug builds only) for synthetic offline sessions:
 
 ```bash
 xcrun simctl launch booted com.gl11tchy.sigilremote -demo

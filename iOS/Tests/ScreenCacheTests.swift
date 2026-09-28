@@ -1,3 +1,6 @@
+#if canImport(Sigil)
+@testable import Sigil
+#endif
 import Foundation
 
 /// The screen cache writer: work off the caller, in order, one write per burst,

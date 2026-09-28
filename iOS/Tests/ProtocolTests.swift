@@ -1,3 +1,6 @@
+#if canImport(Sigil)
+@testable import Sigil
+#endif
 import Foundation
 
 enum ProtocolTests {
@@ -7,6 +10,56 @@ enum ProtocolTests {
     struct Sample: Codable, Equatable {
         let action: String
         let sequence: Int
+    }
+
+    static func alertReceiptsRejectDuplicatesAndStayBounded() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let first = AlertReceiptStore(directory: folder)
+        let second = AlertReceiptStore(directory: folder)
+        let now = Int(Date().timeIntervalSince1970)
+        let alert = RemoteAlert(kind: .finished, tabID: "T1", title: "Synthetic", body: "", issuedAt: now)
+        try Expect.true(first.consume(alert, pairingID: "mac-a", now: now), "first alert delivered")
+        try Expect.true(!second.consume(alert, pairingID: "mac-a", now: now), "another extension instance rejects replay")
+        try Expect.true(second.consume(alert, pairingID: "mac-b", now: now), "Mac receipts are isolated")
+        for _ in 2..<AlertReceiptStore.capacity {
+            let next = RemoteAlert(kind: .finished, tabID: "T", title: "Synthetic", body: "", issuedAt: now)
+            try Expect.true(first.consume(next, pairingID: "mac-a", now: now), "receipt fits bounded ledger")
+        }
+        let later = RemoteAlert(kind: .finished, tabID: "T", title: "Synthetic", body: "", issuedAt: now)
+        try Expect.true(!first.consume(later, pairingID: "mac-a", now: now), "full ledger fails closed")
+        let fresh = RemoteAlert(kind: .finished, tabID: "T", title: "Synthetic", body: "", issuedAt: now + 331)
+        try Expect.true(second.consume(fresh, pairingID: "mac-a", now: now + 331), "expired receipts reclaimed")
+    }
+
+    static func alertsRejectExpiredAndLegacyPayloads() throws {
+        struct Payload: Encodable {
+            let id: String?
+            let issuedAt: Int?
+            let kind = "finished"
+            let tabID = "T1"
+            let title = "Synthetic test"
+            let body = "Finished"
+        }
+        let key = RemoteCrypto.randomKey()
+        let now = Int(Date().timeIntervalSince1970)
+        for payload in [
+            Payload(id: UUID().uuidString, issuedAt: now - 301),
+            Payload(id: UUID().uuidString, issuedAt: now + 31),
+            Payload(id: "invalid", issuedAt: now),
+            Payload(id: nil, issuedAt: nil),
+        ] {
+            let sealed = try RemoteCrypto.seal(payload, key: key, direction: RemoteAlert.direction)
+            try Expect.equal(RemoteAlert.open(sealed, keys: [key]), nil, "stale or unverifiable alert rejected")
+        }
+    }
+
+    static func selectionMenuHasNoInventedApproval() throws {
+        let payload = #"{"tabs":[{"id":"T1","title":"Test","status":"unknown"}],"selectedTabID":"T1","terminal":"","prompt":{"id":"hint","question":"Choose a folder","operation":"/project/source","style":"menu","choices":[{"label":"Open folder","key":"1"}],"verified":false}}"#
+        let state = try JSONDecoder().decode(RemoteState.self, from: Data(payload.utf8))
+        try state.validate()
+        try Expect.equal(state.prompt?.yes, nil, "a selection is not an approval")
+        try Expect.equal(state.prompt?.no, nil, "no manufactured negative choice")
     }
 
     static func cryptoRoundTrip() throws {
@@ -177,6 +230,9 @@ enum ProtocolTests {
     }
 }
 
+#if !os(iOS)
 extension PairingLink.Failure: CustomStringConvertible {
     public var description: String { self == .insecure ? "insecure" : "notALink" }
 }
+
+#endif

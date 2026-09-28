@@ -10,13 +10,15 @@ import SwiftUI
 struct TerminalScreen: View {
     let tab: TerminalTab
     let theme: TerminalTheme
+    var onWindowAttachment: (() -> Void)?
 
     var body: some View {
         TerminalPane(
             tab: tab,
             background: Palette.nsColor(theme.backgroundHex),
             cornerRadius: Radius.window - 1,
-            roundsTopCorners: false
+            roundsTopCorners: false,
+            onWindowAttachment: onWindowAttachment
         )
         // Clear of the screen's 1pt border on the three sides it touches.
         .padding([.leading, .trailing, .bottom], 1)

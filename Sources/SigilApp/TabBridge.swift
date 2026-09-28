@@ -215,11 +215,7 @@ final class TabBridge: BridgeServerDelegate {
     }
 
     private func status(of tab: TerminalTab) -> String {
-        switch tab.activity {
-        case .working: return "working"
-        case .exited: return "exited"
-        case .idle, .starting: return "idle"
-        }
+        tab.activity.statusName
     }
 
     private func formatSeconds(_ timeout: Double) -> String {

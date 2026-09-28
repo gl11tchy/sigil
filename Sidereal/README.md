@@ -73,12 +73,12 @@ The session title at the top switches between open sessions. Chats opens a
 searchable list of open and saved chats; a saved chat opens on the Mac. Scroll to the
 top of the output to load earlier output. Find searches the recent output with previous/next
 matches. Connection settings also lets you copy the displayed output.
-Ended sessions offer Restart when the connected Mac supports it; drafts move to the
-restarted session. Older Macs still ask you to restart on the desktop.
+Ended sessions offer Restart only when the native conversation can resume. Drafts
+move only after matching provider, native session ID and project path. Unknown
+identities never inherit another conversation's draft.
 
-New asks which project to use, then starts a session there. The project list,
-saved chats, and earlier output need Sigil from #54 or later. On an older Mac, New
-starts in Sigil's current folder and the other two show "Unknown action."
+New asks which project to use, then starts a session there. Both the Mac and phone
+companion need the current secure protocol; older endpoints show an upgrade error.
 
 Paste fills the prompt without
 submitting it. Send pastes, then presses Enter. Return in the phone message box
@@ -113,9 +113,8 @@ The QR carries a one-use bootstrap secret in its fragment. The phone replaces it
 with a different key during pairing. The relay sees room identifiers, timing and
 ciphertext sizes and routing tickets, but not session contents or device keys. AES-256-GCM binds
 message direction; Mac-generated connection challenges and sequences stop the Mac from
-accepting replayed phone requests. The Mac's challenge reaches the phone unsealed, so a
-relay that replays an earlier challenge can also replay the Mac's earlier replies to the
-phone. The web host, on the same origin as the relay, remains trusted to deliver the
+accepting replayed phone requests. The phone contributes a fresh client nonce and requires its encrypted echo,
+so an old Mac challenge plus a recorded reply cannot authenticate a new connection. The web host, on the same origin as the relay, remains trusted to deliver the
 correct client JavaScript.
 
 Neither tickets nor room IDs enter WebSocket URLs. The relay sends a fresh per-connection routing
@@ -162,3 +161,16 @@ then runs native tests including real URLSession → relay → phone protocol te
 Browser tests use synthetic Mac sessions through the real encrypted relay. They
 cover narrow phones, tablets, desktop, drafting, scrolling, and a simulated visual
 viewport resize. Real iOS keyboard behavior still requires a physical device check.
+
+
+## Protocol upgrade and approval limits
+
+Update the Mac and phone companion together. Each request now carries a fresh
+phone nonce, echoed in sealed replies. Missing support produces an upgrade error.
+Native event streams also require rising event counters; this PWA uses correlated
+request/reply polling. It keeps no offline command queue and does not blindly retry.
+
+A detected menu shows its available operation context and literal choices under
+**Terminal controls**. These buttons type into the terminal; they are not verified
+provider approvals. Oversized/ambiguous menus fall back to the ordinary terminal.
+Successful dispatch does not prove the provider accepted or completed an action.

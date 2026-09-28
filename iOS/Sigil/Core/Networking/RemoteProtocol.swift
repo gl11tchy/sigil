@@ -18,6 +18,7 @@ struct RemoteRequest: Encodable, Equatable {
     var effort: String?
     /// New sessions: start in a fresh worktree of the project.
     var worktree: Bool?
+    var clientNonce: String?
 
     static let textLimit = 8_192
     static let fileTextLimit = 48_000
@@ -31,7 +32,7 @@ enum RemoteKey: String, CaseIterable, Identifiable {
 }
 
 enum TabStatus: Equatable {
-    case starting, working, idle, exited
+    case starting, working, waitingForApproval, idle, interrupted, exited, failed, disconnected
     /// A status this build does not know. Shown as-is, never guessed.
     case unknown(String)
 
@@ -39,6 +40,10 @@ enum TabStatus: Equatable {
         switch raw {
         case "starting": self = .starting
         case "working": self = .working
+        case "waitingForApproval": self = .waitingForApproval
+        case "interrupted": self = .interrupted
+        case "failed": self = .failed
+        case "disconnected": self = .disconnected
         case "idle": self = .idle
         case "exited": self = .exited
         default: self = .unknown(raw)
@@ -49,6 +54,10 @@ enum TabStatus: Equatable {
         switch self {
         case .starting: return "Starting…"
         case .working: return "Working"
+        case .waitingForApproval: return "Needs approval"
+        case .interrupted: return "Stopped"
+        case .failed: return "Failed"
+        case .disconnected: return "Disconnected"
         case .idle: return "Ready"
         case .exited: return "Ended"
         case .unknown(let raw): return raw.capitalized
@@ -60,11 +69,35 @@ enum TabStatus: Equatable {
         switch self {
         case .starting: return "starting"
         case .working: return "working"
+        case .waitingForApproval: return "waitingForApproval"
+        case .interrupted: return "interrupted"
+        case .failed: return "failed"
+        case .disconnected: return "disconnected"
         case .idle: return "idle"
         case .exited: return "exited"
         case .unknown(let raw): return raw
         }
     }
+}
+
+/// Capabilities are supplied by the Mac's provider adapter, never inferred from a name.
+struct ProviderCapabilities: Codable, Equatable {
+    let history: Bool
+    let resume: Bool
+    let notes: Bool
+    let rename: Bool
+    let archive: Bool
+    let export: Bool
+    let delete: Bool
+    let bridge: Bool
+    let lifecycle: Bool
+    let structuredApproval: Bool
+}
+
+struct ProviderSessionReference: Codable, Equatable {
+    let provider: String
+    let sessionID: String
+    let cwd: String
 }
 
 struct RemoteTab: Codable, Equatable, Identifiable {
@@ -77,12 +110,39 @@ struct RemoteTab: Codable, Equatable, Identifiable {
     let providerName: String?
     let folder: String?
     let canArchive: Bool?
+    let sessionID: String?
+    let cwd: String?
+    let capabilities: ProviderCapabilities?
+    let processRunning: Bool?
 
-    private enum CodingKeys: String, CodingKey { case id, title, status, provider, providerName, folder, canArchive }
+    var acceptsInput: Bool { processRunning ?? (status != .exited) }
+    var canInterrupt: Bool {
+        guard acceptsInput else { return false }
+        switch status {
+        case .working, .waitingForApproval, .unknown: return true
+        default: return false
+        }
+    }
+    var canRename: Bool { capabilities?.rename ?? true }
+    var canResume: Bool { capabilities?.resume == true && !(sessionID ?? "").isEmpty }
+    var supportsArchive: Bool { (capabilities?.archive ?? true) && canArchive == true }
+
+    var sessionReference: ProviderSessionReference? {
+        guard let provider, let sessionID, !sessionID.isEmpty, let cwd, !cwd.isEmpty else { return nil }
+        return ProviderSessionReference(provider: provider, sessionID: sessionID, cwd: cwd)
+    }
+
+    func hasSameConversation(as other: RemoteTab) -> Bool {
+        guard let sessionReference else { return false }
+        return sessionReference == other.sessionReference
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, title, status, provider, providerName, folder, canArchive, sessionID, cwd, capabilities, processRunning }
 
     init(
         id: String, title: String, status: TabStatus, provider: String? = nil, providerName: String? = nil,
-        folder: String? = nil, canArchive: Bool? = nil
+        folder: String? = nil, canArchive: Bool? = nil, sessionID: String? = nil, cwd: String? = nil,
+        capabilities: ProviderCapabilities? = nil, processRunning: Bool? = nil
     ) {
         self.id = id
         self.title = title
@@ -91,6 +151,10 @@ struct RemoteTab: Codable, Equatable, Identifiable {
         self.providerName = providerName
         self.folder = folder
         self.canArchive = canArchive
+        self.sessionID = sessionID
+        self.cwd = cwd
+        self.capabilities = capabilities
+        self.processRunning = processRunning
     }
 
     init(from decoder: Decoder) throws {
@@ -102,6 +166,10 @@ struct RemoteTab: Codable, Equatable, Identifiable {
         providerName = try c.decodeIfPresent(String.self, forKey: .providerName)
         folder = try c.decodeIfPresent(String.self, forKey: .folder)
         canArchive = try c.decodeIfPresent(Bool.self, forKey: .canArchive)
+        sessionID = try c.decodeIfPresent(String.self, forKey: .sessionID)
+        cwd = try c.decodeIfPresent(String.self, forKey: .cwd)
+        capabilities = try c.decodeIfPresent(ProviderCapabilities.self, forKey: .capabilities)
+        processRunning = try c.decodeIfPresent(Bool.self, forKey: .processRunning)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -113,6 +181,10 @@ struct RemoteTab: Codable, Equatable, Identifiable {
         try c.encodeIfPresent(providerName, forKey: .providerName)
         try c.encodeIfPresent(folder, forKey: .folder)
         try c.encodeIfPresent(canArchive, forKey: .canArchive)
+        try c.encodeIfPresent(sessionID, forKey: .sessionID)
+        try c.encodeIfPresent(cwd, forKey: .cwd)
+        try c.encodeIfPresent(capabilities, forKey: .capabilities)
+        try c.encodeIfPresent(processRunning, forKey: .processRunning)
     }
 }
 
@@ -143,9 +215,9 @@ struct RemoteScreen: Decodable, Equatable {
     static let trueColorBase = 1 << 24
 }
 
-/// An approval question the selected session is showing. The Mac reads the
-/// screen again when a button is tapped, so a stale prompt cannot type.
+/// A host-owned interaction, or explicitly unverified terminal controls.
 struct RemotePrompt: Decodable, Equatable {
+    static let allowedKeys: Set<String> = Set((1...9).map(String.init) + ["y", "n", "yes", "no"])
     struct Choice: Decodable, Equatable, Identifiable {
         let label: String
         /// What `answer` sends: a digit for a menu row, a letter for a yes/no question.
@@ -167,23 +239,30 @@ struct RemotePrompt: Decodable, Equatable {
         }
     }
 
-    /// The Mac's digest of the words on screen; an answer names it.
+    /// The host interaction instance, not a content hash.
     let id: String?
     let question: String
     let style: Style
     let choices: [Choice]
-    let yes: String
-    let no: String
+    let yes: String?
+    let no: String?
+    let operation: String?
+    let verified: Bool
+    let sessionID: String?
 
-    private enum CodingKeys: String, CodingKey { case id, question, style, choices, yes, no }
+    private enum CodingKeys: String, CodingKey { case id, question, style, choices, yes, no, operation, verified, sessionID }
 
-    init(id: String? = nil, question: String, style: Style, choices: [Choice], yes: String, no: String) {
+    init(id: String? = nil, question: String, style: Style, choices: [Choice], yes: String? = nil, no: String? = nil,
+         operation: String? = nil, verified: Bool = false, sessionID: String? = nil) {
         self.id = id
         self.question = question
         self.style = style
         self.choices = choices
         self.yes = yes
         self.no = no
+        self.operation = operation
+        self.verified = verified
+        self.sessionID = sessionID
     }
 
     init(from decoder: Decoder) throws {
@@ -192,8 +271,11 @@ struct RemotePrompt: Decodable, Equatable {
         question = try c.decode(String.self, forKey: .question)
         style = Style(raw: try c.decode(String.self, forKey: .style))
         choices = try c.decode([Choice].self, forKey: .choices)
-        yes = try c.decode(String.self, forKey: .yes)
-        no = try c.decode(String.self, forKey: .no)
+        yes = try c.decodeIfPresent(String.self, forKey: .yes)
+        no = try c.decodeIfPresent(String.self, forKey: .no)
+        operation = try c.decodeIfPresent(String.self, forKey: .operation)
+        verified = try c.decodeIfPresent(Bool.self, forKey: .verified) ?? false
+        sessionID = try c.decodeIfPresent(String.self, forKey: .sessionID)
     }
 }
 
@@ -237,8 +319,12 @@ struct RemoteState: Decodable, Equatable {
             else { throw RemoteCryptoError.invalidMessage }
         }
         if let prompt {
-            guard prompt.choices.count <= 9, prompt.question.count <= 300, (prompt.id ?? "").utf8.count <= 64,
-                prompt.choices.allSatisfy({ $0.label.count <= 300 && $0.key.count <= 8 })
+            guard prompt.choices.count <= 9, prompt.question.utf8.count <= 12_000,
+                (prompt.operation ?? "").utf8.count <= 12_000, (prompt.id ?? "").utf8.count <= 64,
+                (prompt.sessionID ?? "").utf8.count <= 1_024,
+                prompt.choices.allSatisfy({ $0.label.utf8.count <= 12_000 && RemotePrompt.allowedKeys.contains($0.key) }),
+                prompt.yes.map(RemotePrompt.allowedKeys.contains) ?? true,
+                prompt.no.map(RemotePrompt.allowedKeys.contains) ?? true
             else { throw RemoteCryptoError.invalidMessage }
         }
     }
@@ -248,6 +334,7 @@ struct RemoteChat: Decodable, Equatable, Identifiable {
     let id: String
     let title: String
     let folder: String
+    var provider: String? = nil
 }
 
 struct RemoteProject: Decodable, Equatable, Identifiable {
@@ -328,6 +415,7 @@ struct RemoteReply: Decodable {
     let state: RemoteState?
     let ticket: String?
     let restartedTabID: String?
+    let restartedSession: ProviderSessionReference?
     let chats: [RemoteChat]?
     let projects: [RemoteProject]?
     let earlier: String?
@@ -337,6 +425,8 @@ struct RemoteReply: Decodable {
     let project: RemoteProject?
     /// True on a frame the Mac sent unasked; its sequence is 0.
     let event: Bool?
+    let eventSequence: Int?
+    let clientNonce: String?
 }
 
 /// The outer, unencrypted envelope the relay forwards.

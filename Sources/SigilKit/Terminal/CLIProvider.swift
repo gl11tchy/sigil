@@ -1,6 +1,6 @@
 import Foundation
 
-public enum CLIProvider: String, CaseIterable, Identifiable, Sendable {
+public enum CLIProvider: String, CaseIterable, Identifiable, Codable, Sendable {
     case claudeCode
     case codex
     case devin

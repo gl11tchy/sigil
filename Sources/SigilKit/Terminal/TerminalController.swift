@@ -24,6 +24,9 @@ public final class TerminalController {
     public var onTitleChange: ((String) -> Void)?
     /// Called on every child write, uncoalesced, so a remote stream can send the change at once.
     public var onRemoteOutput: (() -> Void)?
+    /// Advances before observers see each child write or any terminal input.
+    public private(set) var remoteInteractionRevision: UInt64 = 0
+    public private(set) var remoteInteractionAfterInput = false
     /// The theme in force, sent to the phone with a full screen window.
     public private(set) var theme: TerminalTheme
     private var screenGeneration = 0
@@ -59,8 +62,14 @@ public final class TerminalController {
         terminal.optionAsMetaKey = false
         terminal.processDelegate = self
         terminal.onChildOutput = { [weak self] in
+            self?.remoteInteractionRevision &+= 1
+            self?.remoteInteractionAfterInput = false
             self?.noteActivity()
             self?.onRemoteOutput?()
+        }
+        terminal.onInput = { [weak self] in
+            self?.remoteInteractionRevision &+= 1
+            self?.remoteInteractionAfterInput = true
         }
         terminal.onUserSubmit = { [weak self] in
             self?.onUserSubmit?()
@@ -366,6 +375,11 @@ public final class TerminalController {
         case "right": selector = #selector(NSTextView.moveRight(_:))
         case "tab": selector = #selector(NSTextView.insertTab(_:))
         case "backspace": selector = #selector(NSTextView.deleteBackward(_:))
+        case "1", "2", "3", "4", "5", "6", "7", "8", "9", "y", "n", "yes", "no":
+            // Explicitly ordinary terminal controls, not verified approvals.
+            // Menu keystrokes must not acquire bracketed-paste escape wrappers.
+            terminalView.send(txt: key)
+            return true
         case "interrupt":
             terminalView.send(txt: "\u{3}")
             return true

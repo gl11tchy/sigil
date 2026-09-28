@@ -26,6 +26,9 @@ enum TestMain {
         run("appearance follows the terminal ground") { try ThemeTests.appearanceFollowsTheGround() }
         run("emphasis steps up for bold text") { try ThemeTests.emphasisStepsUp() }
 
+        run("alert receipts reject duplicates and stay bounded") { try ProtocolTests.alertReceiptsRejectDuplicatesAndStayBounded() }
+        run("alerts reject expired and legacy payloads") { try ProtocolTests.alertsRejectExpiredAndLegacyPayloads() }
+        run("selection menu has no invented approval") { try ProtocolTests.selectionMenuHasNoInventedApproval() }
         run("crypto round trip") { try ProtocolTests.cryptoRoundTrip() }
         run("crypto rejects wrong direction, key and tampering") { try ProtocolTests.cryptoRejectsWrongDirectionKeyAndTampering() }
         run("crypto rejects bad keys") { try ProtocolTests.cryptoRejectsBadKeys() }
@@ -106,6 +109,22 @@ enum TestMain {
             } catch {
                 failed += 1
                 print("FAIL relay lost reply: \(error)")
+            }
+        }
+
+        if let port = ProcessInfo.processInfo.environment["SIGIL_RELAY_PORT"] {
+            for (name, test) in [
+                ("old hello and state cannot authorize reconnect", RelayTests.oldHelloAndOldStateCannotAuthorizeReconnect),
+                ("old authorization cannot connect new epoch", RelayTests.oldAuthorizationCannotConnectNewEpoch),
+                ("old send failure cannot consume fresh handshake", RelayTests.oldSendFailureCannotConsumeNewHandshake),
+                ("pending input queue is bounded", RelayTests.pendingInputQueueIsBounded),
+                ("rejects replayed events", RelayTests.rejectsReplayedEvents),
+                ("legacy events cannot replace output", RelayTests.legacyEventsCannotReplaceOutput),
+                ("missing event counter fails closed", RelayTests.missingEventCounterFailsClosed),
+                ("malformed reply releases pending request", RelayTests.malformedReplyFailsThePendingRequest),
+            ] {
+                do { try await test(port); passed += 1; print("PASS relay: \(name)") }
+                catch { failed += 1; print("FAIL relay: \(name): \(error)") }
             }
         }
 

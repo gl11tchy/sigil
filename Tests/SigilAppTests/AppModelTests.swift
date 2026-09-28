@@ -60,15 +60,17 @@ struct AppModelTests {
         #expect(tab.spec.provider == provider)
         #expect(await waitUntil { tab.controller.bufferText().contains("PROVIDER=\(provider.rawValue)") })
         #expect(tab.controller.bufferText().contains("CWD=\(GrokPaths.canonicalPath(folder.path))"))
-        #expect(tab.controller.bufferText().contains(provider == .grokBuild ? "ARGC=4" : "ARGC=0"))
+        #expect(
+            tab.controller.bufferText().contains(
+                provider == .grokBuild ? "ARGC=4" : provider == .claudeCode ? "ARGC=2" : "ARGC=0"))
         #expect(tab.controller.view.accessibilityLabel() == "\(provider.name) terminal")
         tab.controller.send(text: "provider-input\r")
         #expect(await waitUntil { tab.controller.bufferText().contains("REPLY=provider-input") })
 
         if provider != .grokBuild {
-            #expect(tab.sessionID == nil)
+            #expect((tab.sessionID != nil) == (provider == .claudeCode))
             #expect(tab.spec.sessionDirectory == nil)
-            #expect(fixture.settings.openTabs.tabs.isEmpty)
+            #expect(fixture.settings.openTabs.tabs.count == (provider == .claudeCode ? 1 : 0))
             #expect(!model.canExportSelectedTranscript)
             #expect(!tab.canDeliverBridgePrompt)
             fixture.settings.themeName = TerminalTheme.grokDay.name
@@ -79,9 +81,15 @@ struct AppModelTests {
             model.restartTab(id: tab.id)
             let restarted = try #require(model.selectedTab)
             #expect(restarted.spec.provider == provider)
-            #expect(restarted.id != tab.id)
-            #expect(await waitUntil { restarted.controller.bufferText().contains("PROVIDER=\(provider.rawValue)") })
-            #expect(!tab.controller.isRunning)
+            if provider == .codex {
+                #expect(restarted.id == tab.id)
+                #expect(tab.controller.isRunning)
+            } else {
+                #expect(restarted.id != tab.id)
+                #expect(await waitUntil { restarted.controller.bufferText().contains("PROVIDER=\(provider.rawValue)") })
+                #expect(!tab.controller.isRunning)
+                if provider == .claudeCode { #expect(restarted.spec.mode == .resume(sessionID: tab.nativeSessionID!)) }
+            }
         } else {
             #expect(fixture.settings.openTabs.tabs.count == 1)
         }
@@ -259,7 +267,7 @@ struct AppModelTests {
     /// The Grok TUI reads GROK_THEME at process start. Recolouring SwiftTerm
     /// leaves the program inside the tab on the old palette.
     @Test @MainActor
-    func changingTheWindowThemeRelaunchesGrokWithTheNewPalette() throws {
+    func changingTheWindowThemeRelaunchesGrokWithTheNewPalette() async throws {
         let fixture = try ModelFixture(script: "#!/bin/sh\nexec /usr/bin/yes >/dev/null\n")
         defer { fixture.cleanup() }
         let cwd = try fixture.directory("project")
@@ -270,6 +278,7 @@ struct AppModelTests {
         let sessionID = try #require(original.sessionID)
         #expect(original.spec.themeName == TerminalTheme.sigilDark.grokThemeName)
         #expect(original.spec.themeVariables["GROK_THEME_BG"] == "17181A")
+        try await fixture.completeTurn(original)
 
         fixture.settings.themeName = TerminalTheme.twitch.name
         model.applyTheme()
@@ -317,7 +326,7 @@ struct AppModelTests {
         model.applyTheme()
         #expect(model.tabs.first?.id == original.id)
 
-        try await Task.sleep(for: TerminalTab.idleFallbackSilence + .milliseconds(500))
+        try await fixture.completeTurn(original, start: false)
 
         let relaunched = try #require(model.tabs.first)
         #expect(relaunched.id != original.id)
@@ -364,6 +373,7 @@ struct AppModelTests {
         let model = fixture.model()
         defer { model.closeAllTabsAndWait() }
         let original = try #require(model.newTab(in: cwd))
+        try await fixture.completeTurn(original)
         original.enqueueBridgePrompt("From the other tab")
         original.enqueueBridgePrompt("Which port?", requestID: "ask-1")
 
@@ -3474,6 +3484,7 @@ struct AppModelTests {
         defer { fixture.cleanup() }
         let cwd = try fixture.directory("project")
         let model = fixture.model()
+        model.confirmStopWorking = { _ in true }
         defer { model.closeAllTabsAndWait() }
 
         let tab = try #require(model.newTab(in: cwd))
@@ -3494,6 +3505,7 @@ struct AppModelTests {
         defer { fixture.cleanup() }
         let cwd = try fixture.directory("project")
         let model = fixture.model()
+        model.confirmStopWorking = { _ in true }
         defer { model.closeAllTabsAndWait() }
 
         let first = try #require(model.newTab(in: cwd))
@@ -3519,6 +3531,7 @@ struct AppModelTests {
         await fixture.store.reload()
 
         let model = fixture.model()
+        model.confirmStopWorking = { _ in true }
         defer { model.closeAllTabsAndWait() }
         let project = try #require(model.sidebarProjects.first { $0.name == "acme-api" })
         let keep = try #require(model.newTab(in: otherDir))
@@ -4272,7 +4285,7 @@ struct AppModelTests {
 
     @Test @MainActor
     func archivingAProjectClosesATabNotYetInTheStore() async throws {
-        let fixture = try ModelFixture()
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /bin/sleep 30\n")
         defer { fixture.cleanup() }
         let projectDir = try fixture.directory("acme-api")
         try fixture.writeListedSession(id: "a", cwd: projectDir.path, summary: "A")
@@ -4285,15 +4298,24 @@ struct AppModelTests {
         let fresh = try #require(model.newTab(in: projectDir))
         #expect(model.store.sessions.map(\.id) == ["a"])
         #expect(model.tabs.map(\.id) == [fresh.id])
+        #expect(fresh.activity == .unknown)
+        #expect(fresh.shouldWarnBeforeStopping)
+        var prompts: [StopWorkingPrompt] = []
+        model.confirmStopWorking = {
+            prompts.append($0)
+            return true
+        }
 
         model.archive(project)
+        #expect(prompts.count == 1)
+        #expect(prompts.first?.action == .archive)
         #expect(model.tabs.isEmpty)
         #expect(model.store.sessions.first { $0.id == "a" }.map(model.isArchived) == true)
     }
 
     @Test @MainActor
     func sidebarDismissClosesAnOpenTabAndDeletesAClosedChat() throws {
-        let fixture = try ModelFixture()
+        let fixture = try ModelFixture(script: "#!/bin/sh\nexec /bin/sleep 30\n")
         defer { fixture.cleanup() }
         let cwd = try fixture.directory("project")
         let model = fixture.model()
@@ -4302,8 +4324,17 @@ struct AppModelTests {
         let tab = try #require(model.newTab(in: cwd))
         let sessionID = try #require(tab.sessionID)
         let open = makeSession(id: sessionID, cwd: cwd)
+        #expect(tab.activity == .unknown)
+        #expect(tab.shouldWarnBeforeStopping)
+        var prompts: [StopWorkingPrompt] = []
+        model.confirmStopWorking = {
+            prompts.append($0)
+            return true
+        }
         #expect(model.sidebarDismiss(for: open) == .closeTab(tab.id))
         model.performSidebarDismiss(open)
+        #expect(prompts.count == 1)
+        #expect(prompts.first?.action == .closeTab)
         #expect(model.tabs.isEmpty)
 
         let closed = makeSession(id: "closed-id", cwd: cwd)
@@ -4315,7 +4346,13 @@ struct AppModelTests {
         #expect(AppModel.describe(.starting) == "starting")
         #expect(AppModel.describe(.working) == "working")
         #expect(AppModel.describe(.idle) == "idle")
-        #expect(AppModel.describe(.exited(code: 2)) == "exited 2")
+        #expect(AppModel.describe(.waitingForApproval) == "waitingForApproval")
+        #expect(AppModel.describe(.interrupted) == "interrupted")
+        #expect(AppModel.describe(.failed) == "failed")
+        #expect(AppModel.describe(.disconnected) == "disconnected")
+        #expect(AppModel.describe(.unknown) == "unknown")
+        #expect(AppModel.describe(.exited(code: 2)) == "failed 2")
+        #expect(AppModel.describe(.exited(code: 0)) == "exited 0")
         #expect(AppModel.describe(.exited(code: nil)) == "exited")
     }
 
@@ -4383,6 +4420,51 @@ final class ModelFixture {
         notesRoot = root.appendingPathComponent("notes")
     }
 
+    func completeTurn(_ tab: TerminalTab, start: Bool = true) async throws {
+        var didComplete = false
+        let onSettle = tab.onSettle
+        tab.onSettle = {
+            didComplete = true
+            onSettle?()
+        }
+        defer { tab.onSettle = onSettle }
+        let directory = try #require(tab.spec.sessionDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let journal = directory.appendingPathComponent("updates.jsonl")
+        if !FileManager.default.fileExists(atPath: journal.path) { try Data().write(to: journal) }
+        if start { tab.noteTurnStarted() }
+        let timestamp = Int64(Date().addingTimeInterval(0.01).timeIntervalSince1970 * 1000)
+        let turn = UUID().uuidString
+        let sessionID = try #require(tab.nativeSessionID)
+        let events: [[String: Any]] = [
+            [
+                "timestamp": timestamp / 1000,
+                "params": [
+                    "sessionId": sessionID,
+                    "_meta": ["eventId": UUID().uuidString, "promptId": turn, "agentTimestampMs": timestamp],
+                    "update": ["sessionUpdate": "agent_message_chunk"],
+                ],
+            ],
+            [
+                "timestamp": timestamp / 1000,
+                "params": [
+                    "sessionId": sessionID, "_meta": ["eventId": UUID().uuidString, "agentTimestampMs": timestamp],
+                    "update": ["sessionUpdate": "turn_completed", "prompt_id": turn, "stop_reason": "end_turn"],
+                ],
+            ],
+        ]
+        let handle = try FileHandle(forWritingTo: journal)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        for event in events {
+            try handle.write(contentsOf: JSONSerialization.data(withJSONObject: event))
+            try handle.write(contentsOf: Data([0x0A]))
+        }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !didComplete, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(didComplete)
+    }
+
     func directory(_ name: String) throws -> URL {
         let url = root.appendingPathComponent(name).resolvingSymlinksInPath()
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -4441,7 +4523,8 @@ final class ModelFixture {
                     defaults: defaults,
                     notesStore: ConversationNotesStore(root: notesRoot)
                 ),
-                pairingStore: InMemoryRemotePairingStore()
+                pairingStore: InMemoryRemotePairingStore(),
+                providerInstallations: fixtureProviderInstallations(executable)
             )
         }
         if let canonicalPath {
@@ -4455,7 +4538,8 @@ final class ModelFixture {
                     defaults: defaults,
                     notesStore: ConversationNotesStore(root: notesRoot)
                 ),
-                pairingStore: InMemoryRemotePairingStore()
+                pairingStore: InMemoryRemotePairingStore(),
+                providerInstallations: fixtureProviderInstallations(executable)
             )
         }
         return AppModel(
@@ -4467,7 +4551,8 @@ final class ModelFixture {
                 defaults: defaults,
                 notesStore: ConversationNotesStore(root: notesRoot)
             ),
-            pairingStore: InMemoryRemotePairingStore()
+            pairingStore: InMemoryRemotePairingStore(),
+            providerInstallations: fixtureProviderInstallations(executable)
         )
     }
 

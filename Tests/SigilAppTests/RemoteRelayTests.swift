@@ -347,12 +347,14 @@ struct RemoteEventStreamTests {
         let watched = try await paired.phone.request(
             RemoteRequest(challenge: paired.challenge, sequence: 2, action: "watch"), key: paired.device)
         #expect(watched.ok)
+        #expect(watched.state?.capabilities.contains("eventSequence") == true)
         #expect(watched.state?.screen?.rows.contains { $0.t == "READY" } == true)
 
         try Data("\u{1b}[31mFROM_MAC\u{1b}[0m\n".utf8).write(to: feed)
         let event: RemoteReply = try await paired.phone.receiveReply(key: paired.device)
         #expect(event.event == true)
         #expect(event.sequence == 0)
+        #expect(event.eventSequence == 1)
         #expect(event.challenge == paired.challenge)
         let rows = try #require(event.state?.screen?.rows)
         let row = try #require(rows.first { $0.t == "FROM_MAC" })
@@ -368,6 +370,7 @@ struct RemoteEventStreamTests {
             selectionEvent = try await paired.phone.receiveReply(key: paired.device)
         } while selectionEvent.state?.selectedTabID != second.id.uuidString
         #expect(selectionEvent.state?.tabs.count == 2)
+        #expect((selectionEvent.eventSequence ?? 0) > (event.eventSequence ?? 0))
         #expect(selectionEvent.state?.screen?.palette != nil)
 
         // Leaving stops the stream: nothing arrives for the next change.
@@ -468,13 +471,13 @@ struct RemoteAlertDeliveryTests {
                 try RemoteCrypto.open(
                     try #require(entry.payload.sigil?.data), key: paired.device, direction: RemoteAlert.direction))
         }
-        #expect(alerts.map(\.kind) == [.asking, .ended])
-        #expect(alerts.first?.body == "Do you want to proceed?")
+        #expect(alerts.map(\.kind) == [.attention, .ended])
+        #expect(alerts.first?.body == "Check the terminal: Do you want to proceed?")
         #expect(alerts.first?.tabID == id)
         #expect(alerts.first?.title == "alert-folder")
         let updates = captured.filter { $0.pushType == "liveactivity" }
         #expect(updates.allSatisfy { $0.token == activityToken })
-        #expect(updates.first?.payload.aps.contentState?.asking == true)
+        #expect(updates.first?.payload.aps.contentState?.asking == false)
         #expect(updates.last?.payload.aps.event == "end")
         #expect(updates.last?.payload.aps.contentState?.status == "exited")
         // The relay never sees a title or a question in the clear.

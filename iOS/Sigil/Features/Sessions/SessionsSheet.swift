@@ -48,7 +48,7 @@ struct SessionsSheet: View {
                                 } label: {
                                     Label("Close", systemImage: "xmark")
                                 }
-                                if tab.canArchive == true {
+                                if tab.supportsArchive {
                                     Button {
                                         store.archive(tab)
                                     } label: {
@@ -63,6 +63,7 @@ struct SessionsSheet: View {
                                     Label("Rename", systemImage: "pencil")
                                 }
                                 .tint(Theme.accentFill)
+                                .disabled(!tab.canRename)
                             }
                         }
                         .contextMenu {
@@ -73,7 +74,8 @@ struct SessionsSheet: View {
                                 } label: {
                                     Label("Rename", systemImage: "pencil")
                                 }
-                                if tab.canArchive == true {
+                                .disabled(!tab.canRename)
+                                if tab.supportsArchive {
                                     Button {
                                         store.archive(tab)
                                     } label: {
@@ -277,7 +279,7 @@ struct SessionsSheet: View {
         let word: String? =
             switch tab.status {
             case .working, .idle: nil
-            case .starting, .exited, .unknown: tab.status.label
+            case .starting, .waitingForApproval, .interrupted, .failed, .disconnected, .exited, .unknown: tab.status.label
             }
         return HStack(spacing: Theme.Space.small) {
             ActivityMark(status: tab.status)

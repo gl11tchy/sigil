@@ -53,6 +53,33 @@ struct ConversationNotesStoreTests {
     }
 
     @Test @MainActor
+    func providerNotesUseSeparateNamespacesAndPreserveTheGrokLayout() throws {
+        let (store, root) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let uuid = "11111111-1111-4111-8111-111111111111"
+        let cwd = "/tmp/one"
+        for id in [uuid, "claudeCode:" + uuid, "codex:" + uuid] {
+            store.setNote("Note for " + id, for: id, cwd: cwd)
+        }
+        store.flushNow()
+        let reread = ConversationNotesStore(root: root)
+        for id in [uuid, "claudeCode:" + uuid, "codex:" + uuid] {
+            #expect(reread.note(for: id, cwd: cwd) == "Note for " + id)
+            #expect(store.isSaved(for: id, cwd: cwd))
+        }
+        #expect(FileManager.default.fileExists(atPath: noteFile(root, uuid, cwd).path))
+        #expect(
+            FileManager.default.fileExists(atPath: noteFile(root.appendingPathComponent("claudeCode"), uuid, cwd).path))
+        #expect(FileManager.default.fileExists(atPath: noteFile(root.appendingPathComponent("codex"), uuid, cwd).path))
+        reread.deleteNote(for: "claudeCode:" + uuid, cwd: cwd)
+        reread.flushNow()
+        let afterDelete = ConversationNotesStore(root: root)
+        #expect(afterDelete.note(for: "claudeCode:" + uuid, cwd: cwd).isEmpty)
+        #expect(afterDelete.note(for: uuid, cwd: cwd) == "Note for " + uuid)
+        #expect(afterDelete.note(for: "codex:" + uuid, cwd: cwd) == "Note for codex:" + uuid)
+    }
+
+    @Test @MainActor
     func writesAreCoalescedAndFlushOnDemand() throws {
         let (store, root) = try makeStore()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -141,7 +168,10 @@ struct ConversationNotesStoreTests {
         let (store, root) = try makeStore()
         defer { try? FileManager.default.removeItem(at: root) }
 
-        for bad in ["../escape", "a/b", "", "a b", "å"] {
+        for bad in [
+            "../escape", "a/b", "", "a b", "å", "codex:../escape", "claudeCode:not-a-uuid",
+            "../codex:11111111-1111-4111-8111-111111111111", "codex:11111111-1111-4111-8111-111111111111:extra",
+        ] {
             store.setNote("nope", for: bad, cwd: "/tmp/one")
             #expect(store.note(for: bad, cwd: "/tmp/one") == "")
         }

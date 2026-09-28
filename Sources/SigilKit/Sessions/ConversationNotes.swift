@@ -39,7 +39,11 @@ public final class ConversationNotesStore {
     public func note(for sessionID: String, cwd: String) -> String {
         guard let url = fileURL(for: sessionID, cwd: cwd) else { return "" }
         if let cached = cache[url.path] { return cached }
-        adoptFlatLayoutFile(named: sessionID + ".md", destination: url)
+        // Only Grok had the legacy flat layout. A native provider must never
+        // adopt another provider's old note, even when the UUID matches.
+        if Self.isValidSessionID(sessionID) {
+            adoptFlatLayoutFile(named: sessionID + ".md", destination: url)
+        }
         guard let data = try? Data(contentsOf: url),
             let text = String(data: data, encoding: .utf8)
         else { return "" }
@@ -206,15 +210,20 @@ public final class ConversationNotesStore {
         }
     }
 
-    /// `notes/<encoded-cwd>/<session-id>.md`, mirroring the CLI's own layout.
-    /// Session IDs are UUIDs; refuse anything that could escape the folder or
-    /// trip Unicode filename normalization.
+    /// Preserve every existing Grok path. New native providers get their own
+    /// directory namespace and only a validated UUID becomes a file name.
     private func fileURL(for sessionID: String, cwd: String) -> URL? {
-        guard Self.isValidSessionID(sessionID), !cwd.isEmpty else { return nil }
-        return
-            root
-            .appendingPathComponent(GrokPaths.sessionFolderName(forCanonicalPath: GrokPaths.canonicalPath(cwd)))
-            .appendingPathComponent(sessionID + ".md")
+        guard !cwd.isEmpty else { return nil }
+        let directory = GrokPaths.sessionFolderName(forCanonicalPath: GrokPaths.canonicalPath(cwd))
+        if Self.isValidSessionID(sessionID) {
+            return root.appendingPathComponent(directory).appendingPathComponent(sessionID + ".md")
+        }
+        let parts = sessionID.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2, ["claudeCode", "codex"].contains(String(parts[0])),
+            let uuid = UUID(uuidString: String(parts[1]))
+        else { return nil }
+        return root.appendingPathComponent(String(parts[0])).appendingPathComponent(directory)
+            .appendingPathComponent(uuid.uuidString.lowercased() + ".md")
     }
 
     private static func isValidSessionID(_ sessionID: String) -> Bool {

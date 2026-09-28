@@ -29,6 +29,8 @@ public struct GrokLaunchSpec: Sendable, Hashable {
     private let searchesPATH: Bool
     public var workingDirectory: URL
     public var mode: Mode
+    /// Exact provider-owned transcript selected by the validated history adapter.
+    public var sessionFile: URL?
     public var model: String?
     public var reasoningEffort: String?
     /// Asks a CLI that has a fast mode to use it. Off leaves the CLI's own setting.
@@ -65,7 +67,8 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         bridgeTabID: String? = nil,
         bridgeSocketPath: String? = nil,
         providerEnvironment: [String: String] = [:],
-        provider: CLIProvider = .grokBuild
+        provider: CLIProvider = .grokBuild,
+        sessionFile: URL? = nil
     ) {
         self.provider = provider
         self.searchesPATH = executable == nil && provider != .grokBuild
@@ -77,6 +80,7 @@ public struct GrokLaunchSpec: Sendable, Hashable {
                     .appendingPathComponent(".local/bin/\(provider.command)"))
         self.workingDirectory = workingDirectory
         self.mode = mode
+        self.sessionFile = sessionFile
         self.model = model
         self.reasoningEffort = reasoningEffort
         self.fastMode = fastMode
@@ -105,7 +109,9 @@ public struct GrokLaunchSpec: Sendable, Hashable {
 
     /// Command-line arguments for the CLI, in the order `grok` documents them.
     public func arguments() -> [String] {
-        guard provider == .grokBuild else { return optionArguments() + extraArguments }
+        guard provider == .grokBuild else {
+            return provider.sessionArguments(for: mode) + optionArguments() + extraArguments
+        }
         var args = ["--cwd", workingDirectory.path]
         switch mode {
         case .new(let sessionID):

@@ -81,10 +81,15 @@ enum CredentialStore {
     }
 
     private static func write(_ data: Data, account: String) -> Bool {
-        SecItemDelete(base(account) as CFDictionary)
+        let values: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+        let result = SecItemUpdate(base(account) as CFDictionary, values as CFDictionary)
+        if result == errSecSuccess { return true }
+        guard result == errSecItemNotFound else { return false }
         var item = base(account)
-        item[kSecValueData as String] = data
-        item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        values.forEach { item[$0.key] = $0.value }
         return SecItemAdd(item as CFDictionary, nil) == errSecSuccess
     }
 

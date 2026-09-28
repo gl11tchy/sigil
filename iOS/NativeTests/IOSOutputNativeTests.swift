@@ -3,7 +3,7 @@ import UIKit
 
 /// IOS-1 and IOS-2 on UIKit and TextKit 2 themselves: streamed rows go through
 /// the real `OutputView` in a window, and what its text view holds is checked
-/// against a text view given all of the output at once. `scripts/native-test.sh`
+/// against a text view given all of the output at once. `scripts/native-output-test.sh`
 /// builds this and runs it on a simulator made for the run.
 @main
 struct IOSOutputNativeTestApp: App {

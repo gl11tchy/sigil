@@ -7,17 +7,32 @@ import Foundation
 public struct OpenTabsSnapshot: Codable, Equatable, Sendable {
     public struct Entry: Codable, Equatable, Sendable {
         public var sessionID: String
+        public var provider: CLIProvider
         public var cwd: String
         /// The tab's model and reasoning effort. Empty means the CLI default.
         /// Nil only in older snapshots; restore then uses Settings.
         public var model: String?
         public var effort: String?
 
-        public init(sessionID: String, cwd: String, model: String? = nil, effort: String? = nil) {
+        public init(
+            sessionID: String, cwd: String, model: String? = nil, effort: String? = nil,
+            provider: CLIProvider = .grokBuild
+        ) {
             self.sessionID = sessionID
+            self.provider = provider
             self.cwd = cwd
             self.model = model
             self.effort = effort
+        }
+
+        private enum CodingKeys: String, CodingKey { case sessionID, cwd, model, effort, provider }
+        public init(from decoder: any Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            sessionID = try values.decode(String.self, forKey: .sessionID)
+            cwd = try values.decode(String.self, forKey: .cwd)
+            model = try values.decodeIfPresent(String.self, forKey: .model)
+            effort = try values.decodeIfPresent(String.self, forKey: .effort)
+            provider = try values.decodeIfPresent(CLIProvider.self, forKey: .provider) ?? .grokBuild
         }
     }
 
@@ -26,11 +41,15 @@ public struct OpenTabsSnapshot: Codable, Equatable, Sendable {
     /// The selected tab's working directory. Older snapshots do not contain
     /// this field and continue to fall back to ID-only selection.
     public var selectedCWD: String?
+    public var selectedProvider: CLIProvider?
 
-    public init(tabs: [Entry], selectedSessionID: String?, selectedCWD: String? = nil) {
+    public init(
+        tabs: [Entry], selectedSessionID: String?, selectedCWD: String? = nil, selectedProvider: CLIProvider? = nil
+    ) {
         self.tabs = tabs
         self.selectedSessionID = selectedSessionID
         self.selectedCWD = selectedCWD
+        self.selectedProvider = selectedProvider
     }
 
     public func encode() -> Data? {

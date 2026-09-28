@@ -18,7 +18,7 @@ async function pair(page, origin, initialOutput, options = {}) {
   }
   const bootstrap = randomKey();
   const ticket = randomKey();
-  let key = await importKey(bootstrap), selected = 'one', peer, challenge, serial = Promise.resolve();
+  let key = await importKey(bootstrap), selected = 'one', peer, challenge, replayData, serial = Promise.resolve();
   const actions = [], errors = [];
   const terminal = title => `${title}\n\n${Array.from({ length: 35 }, (_, i) => `Line ${i + 1}: Verified the mobile layout and terminal output.`).join('\n')}\n\nReady for your next message.`;
   const outputs = { one: initialOutput ?? terminal('Mobile layout review'), two: terminal('Release checks') };
@@ -33,15 +33,18 @@ async function pair(page, origin, initialOutput, options = {}) {
       } else if (frame.type === 'ready') {
         ready();
       } else if (frame.type === 'peer') {
-        peer = frame.peer; challenge = randomKey();
+        peer = frame.peer; challenge = options.reuseChallenge && challenge ? challenge : randomKey();
         ws.send(JSON.stringify({ peer, hello: challenge }));
       } else if (frame.data) {
         const request = await open(frame.data, key, 'phone');
         expect(request.challenge).toBe(challenge);
+        if (options.replayReplies && replayData) {
+          ws.send(JSON.stringify({ peer, data: replayData })); return;
+        }
         actions.push(request);
-        options.onRequest?.(request);
+        await options.onRequest?.(request);
         if (request.action === 'pair') key = await importKey(request.text);
-        if (request.action === 'select') selected = request.tabID;
+        if (request.action === 'select' && options.rejectAction !== 'select') selected = request.tabID;
         if (request.action === 'new') selected = 'two';
         const projects = request.action === 'projects'
           ? (options.projects ?? [{ name: 'Release checks', folder: '/tmp/release' }]) : undefined;
@@ -52,7 +55,7 @@ async function pair(page, origin, initialOutput, options = {}) {
           ? (typeof options.earlier === 'function' ? options.earlier(request)
             : typeof options.earlier === 'string' ? options.earlier : '') : undefined;
         if (options.rejectAction === request.action) {
-          ws.send(JSON.stringify({ peer, data: await seal({ challenge, sequence: request.sequence, ok: false, error: 'Test action refused.' }, key, 'mac') }));
+          ws.send(JSON.stringify({ peer, data: await seal({ challenge, sequence: request.sequence, clientNonce: request.clientNonce, ok: false, error: 'Test action refused.' }, key, 'mac') }));
           return;
         }
         if (request.action === 'restart' && options.restart) {
@@ -61,17 +64,19 @@ async function pair(page, origin, initialOutput, options = {}) {
         if (request.action === 'input') outputs[selected] += `\n\nYou: ${request.text}`;
         if (request.action === 'file') outputs[selected] += `\n\nAttached ${request.name || 'file'}`;
         const state = options.state ?? { tabs: [
-          { id: outputs.restarted ? 'restarted' : 'one', title: 'Mobile layout review', status: outputs.restarted ? 'idle' : options.statuses?.one ?? 'working' },
-          { id: 'two', title: 'Release checks', status: options.statuses?.two ?? 'idle' }],
+          { provider: 'grokBuild', sessionID: 'native-one', cwd: '/tmp/one', capabilities: { resume: true }, id: outputs.restarted ? 'restarted' : 'one', title: 'Mobile layout review', status: outputs.restarted ? 'idle' : options.statuses?.one ?? 'working' },
+          { provider: 'grokBuild', sessionID: 'native-two', cwd: '/tmp/two', capabilities: { resume: true }, id: 'two', title: 'Release checks', status: options.statuses?.two ?? 'idle' }],
           selectedTabID: selected, terminal: outputs[selected], capabilities: options.restart ? ['restart'] : [] };
-        const payload = { challenge, sequence: request.sequence, ok: true, ticket, state, restartedTabID: request.action === 'restart' && options.restart ? 'restarted' : undefined };
+        const payload = { challenge, sequence: request.sequence, clientNonce: options.omitNonce ? undefined : request.clientNonce, ok: true, ticket, state, restartedTabID: request.action === 'restart' && options.restart ? 'restarted' : undefined, restartedSession: request.action === 'restart' && options.restart ? { provider: 'grokBuild', sessionID: 'native-one', cwd: '/tmp/one' } : undefined };
         if (projects) payload.projects = projects;
         if (request.action === 'options' && options.providers) {
           payload.options = { providers: options.providers, provider: options.providers[0].id, models: [], model: '', efforts: [], effort: '', locations: [] };
         }
         if (chats) payload.chats = chats;
         if (earlier !== undefined) payload.earlier = earlier;
-        ws.send(JSON.stringify({ peer, data: await seal(payload, key, 'mac') }));
+        const sealedReply = await seal(payload, key, 'mac');
+        replayData ??= sealedReply;
+        ws.send(JSON.stringify({ peer, data: sealedReply }));
       }
     }).catch(error => errors.push(error));
   };
@@ -297,6 +302,68 @@ test('loading earlier output keeps the text the reader was on in place', async (
     await expect(page.locator('#terminal')).toContainText(`Batch ${loads + 1} line 1:`);
     const after = await measure(before.text, false);
     expect(Math.abs(after.offset - before.offset)).toBeLessThan(40);
+  } finally { mac.close(); }
+});
+
+for (const position of ['history', 'latest']) {
+  test(`resizing a draft from desktop to phone and back preserves ${position} position`, async ({ page, baseURL }, testInfo) => {
+    await page.setViewportSize({ width: 1512, height: 844 });
+    // Short terminal lines do not rewrap, so this isolates composer reflow from text wrapping.
+    const output = Array.from({ length: 100 }, (_, index) => `Output line ${index + 1}`).join('\n');
+    const mac = await pair(page, baseURL, output);
+    try {
+      await page.evaluate(() => document.fonts.ready);
+      const draft = 'Keep this unsent draft fully visible when the desktop window changes to a narrow phone screen.';
+      const message = page.locator('#message');
+      await message.fill(draft);
+      await message.focus();
+      await message.evaluate(el => el.setSelectionRange(5, 12));
+      const terminal = page.locator('#terminal');
+      await terminal.evaluate((el, position) => {
+        el.scrollTop = position === 'history' ? 220 : el.scrollHeight;
+        el.dispatchEvent(new Event('scroll'));
+      }, position);
+      const initialTop = await terminal.evaluate(el => el.scrollTop);
+      const height = () => message.evaluate(el => ({ client: el.clientHeight, scroll: el.scrollHeight }));
+      const desktop = await height();
+      expect(desktop.scroll).toBeLessThanOrEqual(desktop.client);
+      for (const width of [390, 1512]) {
+        await page.setViewportSize({ width, height: 844 });
+        await expect.poll(async () => { const size = await height(); return size.scroll - size.client; }).toBeLessThanOrEqual(1);
+        if (width === 390) await expect.poll(async () => (await height()).client).toBeGreaterThan(desktop.client);
+        else await expect.poll(async () => Math.abs((await height()).client - desktop.client)).toBeLessThanOrEqual(1);
+        await expect(message).toHaveValue(draft);
+        await expect(message).toBeFocused();
+        expect(await message.evaluate(el => [el.selectionStart, el.selectionEnd])).toEqual([5, 12]);
+        const scroll = await terminal.evaluate(el => ({ top: el.scrollTop, fromBottom: el.scrollHeight - el.scrollTop - el.clientHeight }));
+        if (position === 'history') expect(Math.abs(scroll.top - initialTop)).toBeLessThanOrEqual(1);
+        else expect(scroll.fromBottom).toBeLessThanOrEqual(1);
+        await page.screenshot({ path: testInfo.outputPath(`draft-${width}.png`) });
+      }
+      expect(mac.actions.filter(action => ['input', 'key'].includes(action.action))).toEqual([]);
+      expect(mac.errors).toEqual([]);
+    } finally { mac.close(); }
+  });
+}
+
+test('reflowing a tall draft preserves manual reading just above the follow threshold', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const output = Array.from({ length: 100 }, (_, index) => `Output line ${index + 1}`).join('\n');
+  const mac = await pair(page, baseURL, output);
+  try {
+    await page.evaluate(() => document.fonts.ready);
+    const draft = 'A tall unsent draft\n'.repeat(6);
+    await page.locator('#message').fill(draft);
+    const before = await page.locator('#terminal').evaluate(el => {
+      el.scrollTop = el.scrollHeight - el.clientHeight - 70;
+      return el.scrollTop;
+    });
+    // A keyboard/browser viewport event also remeasures an already tall editor.
+    await page.evaluate(() => visualViewport.dispatchEvent(new Event('resize')));
+    expect(await page.locator('#terminal').evaluate(el => el.scrollTop)).toBe(before);
+    await expect(page.locator('#message')).toHaveValue(draft);
+    await expect(page.locator('#message')).toBeFocused();
+    expect(mac.actions.filter(action => ['input', 'key'].includes(action.action))).toEqual([]);
   } finally { mac.close(); }
 });
 
@@ -870,6 +937,64 @@ test('folder paths in the project and chats sheets use the mono face', async ({ 
   } finally { mac.close(); }
 });
 
+for (const entry of ['picker', 'browse']) {
+  for (const outcome of ['success', 'failure']) {
+    test(`pending ${entry} session selection preserves readonly drafts through ${outcome}`, async ({ page, baseURL }, testInfo) => {
+      let hold = false, release;
+      const gate = new Promise(resolve => { release = resolve; });
+      const options = { onRequest: async request => { if (hold && request.action === 'select') await gate; } };
+      const mac = await pair(page, baseURL, undefined, options);
+      try {
+        const message = page.locator('#message');
+        await message.fill('First draft');
+        await page.locator('#tabs').selectOption('two');
+        await expect(page.locator('#terminal')).toContainText('Release checks');
+        await message.fill('Second draft');
+        await page.locator('#tabs').selectOption('one');
+        await expect(message).toHaveValue('First draft');
+        hold = true;
+        if (outcome === 'failure') options.rejectAction = 'select';
+        const count = mac.actions.filter(action => action.action === 'select').length;
+        if (entry === 'picker') await page.locator('#tabs').selectOption('two');
+        else {
+          await page.getByRole('button', { name: 'Browse open and saved chats' }).click();
+          await page.locator('#session-list button').filter({ hasText: 'Release checks' }).click();
+          // A person can dismiss Chats while the Mac's selection reply is pending.
+          await page.locator('#sessions-dialog').evaluate(el => {
+            el.dataset.testClosed = 'false';
+            el.addEventListener('close', () => { el.dataset.testClosed = 'true'; }, { once: true });
+          });
+          await page.keyboard.press('Escape');
+          await expect(page.locator('#sessions-dialog')).toHaveAttribute('data-test-closed', 'true');
+        }
+        await expect.poll(() => mac.actions.filter(action => action.action === 'select').length).toBe(count + 1);
+        await expect(message).not.toBeEditable();
+        await expect(message).toBeEnabled();
+        await message.focus();
+        await page.keyboard.type('Typing before the Mac replies');
+        await expect(message).toBeFocused();
+        await expect(message).toHaveValue('First draft');
+        await expect(page.locator('#send')).toBeDisabled();
+        await expect(page.locator('#stop')).toBeDisabled();
+        await expect(page.locator('#interrupt')).toBeDisabled();
+        await expect(page.locator('#compose-status')).toHaveText('Switching…');
+        await page.screenshot({ path: testInfo.outputPath('selection-pending.png') });
+        release();
+        await expect(message).toBeEditable();
+        await expect(message).toBeFocused();
+        await expect(message).toHaveValue(outcome === 'success' ? 'Second draft' : 'First draft');
+        await expect(page.locator('#tabs')).toHaveValue(outcome === 'success' ? 'two' : 'one');
+        if (outcome === 'failure') await expect(page.locator('#error')).toHaveText('Test action refused.');
+        options.rejectAction = null; hold = false;
+        await page.locator('#tabs').selectOption(outcome === 'success' ? 'one' : 'two');
+        await expect(message).toHaveValue(outcome === 'success' ? 'First draft' : 'Second draft');
+        expect(mac.actions.filter(action => ['input', 'key'].includes(action.action))).toEqual([]);
+        expect(mac.errors).toEqual([]);
+      } finally { release(); mac.close(); }
+    });
+  }
+}
+
 test('session search switches conversations and keeps each draft', async ({ page, baseURL }) => {
   const mac = await pair(page, baseURL);
   try {
@@ -1028,7 +1153,7 @@ test('restart keeps drafts with their own sessions when the Mac changes selectio
 
 test('restart retains draft and attachments while its tab is outside the capped list', async ({ page, baseURL }) => {
   const tabs = Array.from({ length: 99 }, (_, i) => ({ id: `tab-${i}`, title: `Session ${i}`, status: 'idle' }));
-  const original = { id: 'one', title: 'Hidden restart', status: 'idle' };
+  const original = { id: 'one', title: 'Hidden restart', status: 'idle', provider: 'grokBuild', sessionID: 'native-one', cwd: '/tmp/one' };
   const state = { tabs: [...tabs, original], selectedTabID: 'one', terminal: '', capabilities: ['restart'], tabsTruncated: true };
   const options = { state, restart: true, onRequest(request) {
     if (request.action === 'restart') {
@@ -1046,7 +1171,7 @@ test('restart retains draft and attachments while its tab is outside the capped 
     await expect(page.locator('#tabs')).toHaveValue('tab-0');
     const polls = mac.actions.filter(a => a.action === 'state').length;
     await expect.poll(() => mac.actions.filter(a => a.action === 'state').length).toBeGreaterThan(polls);
-    state.tabs = [...tabs, { id: 'restarted', title: 'Hidden restart', status: 'idle' }];
+    state.tabs = [...tabs, { id: 'restarted', title: 'Hidden restart', status: 'idle', provider: 'grokBuild', sessionID: 'native-one', cwd: '/tmp/one' }];
     state.selectedTabID = 'restarted';
     await expect(page.locator('#tabs')).toHaveValue('restarted');
     await expect(page.locator('#message')).toHaveValue('Keep my hidden-session draft');
@@ -1055,10 +1180,72 @@ test('restart retains draft and attachments while its tab is outside the capped 
     state.selectedTabID = 'tab-0';
     state.tabsTruncated = false;
     await expect(page.locator('#tabs')).toHaveValue('tab-0');
-    state.tabs = [tabs[0], { id: 'restarted', title: 'Hidden restart', status: 'idle' }];
+    state.tabs = [tabs[0], { id: 'restarted', title: 'Hidden restart', status: 'idle', provider: 'grokBuild', sessionID: 'native-one', cwd: '/tmp/one' }];
     state.selectedTabID = 'restarted';
     await expect(page.locator('#tabs')).toHaveValue('restarted');
     await expect(page.locator('#message')).toHaveValue('');
     await expect(page.locator('#attachments')).toBeHidden();
+  } finally { mac.close(); }
+});
+
+test('unverified menu shows the full operation and only literal terminal choices', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const operation = `Inspect ${'long-path/'.repeat(36)}critical-end.txt`;
+  const mac = await pair(page, baseURL, '', { state: {
+    tabs: [{ id: 'one', title: 'Review', status: 'working', provider: 'codex', processRunning: true,
+      capabilities: { structuredApproval: false, resume: true } }],
+    selectedTabID: 'one', terminal: 'Which file?\n1. README.md\n2. CHANGELOG.md',
+    prompt: { id: 'instance-one', question: 'Which file?', operation, verified: false,
+      style: 'menu', choices: [{ label: 'README.md', key: '1' }, { label: 'CHANGELOG.md', key: '2' }] },
+  } });
+  try {
+    await expect(page.locator('#interaction')).toBeVisible();
+    await expect(page.locator('#interaction-heading')).toHaveText('Terminal controls');
+    await expect(page.locator('#interaction-operation')).toHaveText(operation);
+    await expect(page.locator('#interaction').getByRole('button', { name: 'Yes', exact: true })).toHaveCount(0);
+    await page.locator('#interaction').getByRole('button', { name: 'README.md', exact: true }).click();
+    await expect.poll(() => mac.actions.filter(a => a.action === 'key' && a.text === '1').length).toBe(1);
+    expect(mac.actions.some(a => a.action === 'answer')).toBe(false);
+    expect(mac.actions.find(a => a.action === 'key' && a.text === '1').text).toBe('1');
+    await page.screenshot({ path: testInfo.outputPath('unverified-operation.png') });
+  } finally { mac.close(); }
+});
+
+test('unknown lifecycle stays explicit and unsupported restart stays hidden', async ({ page, baseURL }) => {
+  const state = { tabs: [{ id: 'one', title: 'Codex', status: 'unknown', provider: 'codex',
+    processRunning: true, capabilities: { resume: false, history: true } }], selectedTabID: 'one', terminal: 'Provider output',
+    capabilities: ['restart'] };
+  const mac = await pair(page, baseURL, '', { state });
+  try {
+    await expect(page.locator('#session-status')).toHaveText('Status unknown');
+    state.tabs[0].status = 'exited'; state.tabs[0].processRunning = false;
+    await expect(page.locator('#session-status')).toHaveText('Session ended');
+    await expect(page.locator('#restart')).toBeHidden();
+    state.terminal = '';
+    await expect(page.locator('#empty-output')).toContainText('Open this conversation from Chats.');
+  } finally { mac.close(); }
+});
+
+
+test('a replayed old hello and sealed reply cannot authenticate a fresh browser connection', async ({ page, baseURL }) => {
+  const options = { reuseChallenge: true };
+  const mac = await pair(page, baseURL, 'AUTHENTICATED_OUTPUT', options);
+  try {
+    await expect(page.locator('#terminal')).toContainText('AUTHENTICATED_OUTPUT');
+    options.replayReplies = true;
+    await page.reload();
+    await page.waitForTimeout(1200);
+    await expect(page.locator('#status')).not.toHaveText('Connected');
+    await expect(page.locator('#terminal')).not.toContainText('AUTHENTICATED_OUTPUT');
+    expect(mac.actions.some(a => ['input', 'answer', 'key'].includes(a.action))).toBe(false);
+  } finally { mac.close(); }
+});
+
+test('an old Mac without the authenticated client nonce gets a clear upgrade error', async ({ page, baseURL }) => {
+  const mac = await pair(page, baseURL, '', { omitNonce: true, skipNavigate: true });
+  try {
+    await page.goto(`${baseURL}/#room=${mac.room}&key=${mac.bootstrap}`);
+    await expect(page.locator('#error')).toContainText('Update Sigil on your Mac');
+    await expect(page.locator('#controls')).toBeHidden();
   } finally { mac.close(); }
 });

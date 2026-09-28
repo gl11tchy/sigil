@@ -25,8 +25,12 @@ final class RemoteControl {
     @ObservationIgnored private let notifications: NotificationCenter
     /// The phone asked to watch: changes go out as events until it leaves.
     @ObservationIgnored private var watcher: Watcher?
+    @ObservationIgnored private var eventSequence = 0
     @ObservationIgnored private var stream = RemoteScreenStream()
     @ObservationIgnored private var changeTask: Task<Void, Never>?
+    @ObservationIgnored private var changePending = false
+    /// A deterministic socket-write pause for revocation race tests.
+    @ObservationIgnored var afterPushRegistrationSend: (@MainActor () async -> Void)?
     @ObservationIgnored private var lastSentTabs: [RemoteState.Tab]?
     @ObservationIgnored private var lastSentSelection: String?
     @ObservationIgnored private var lastSentPrompt: RemotePrompt?
@@ -216,6 +220,8 @@ final class RemoteControl {
                             self.peer = id
                             self.stopWatching()
                             session.resetConnection()
+                            self.eventSequence = 0
+                            RemoteCommands.uploads = RemoteUpload.Inbox()
                             // A new peer is not the phone until it authenticates.
                             self.status = session.isPaired ? "Phone disconnected" : "Scan to connect"
                             try await self.send(Frame(peer: id, hello: session.challenge), socket: socket)
@@ -225,12 +231,33 @@ final class RemoteControl {
                         } else if frame.type == "left", frame.peer == self.peer {
                             self.peer = nil
                             self.stopWatching()
+                            RemoteCommands.uploads = RemoteUpload.Inbox()
                             self.status = session.isPaired ? "Phone disconnected" : "Scan to connect"
                             if retireRoom { break }
                         } else if let id = frame.peer, id == self.peer, let ciphertext = frame.data {
                             do {
                                 let firstPair = !session.isPaired
-                                let command = try session.accept(ciphertext)
+                                var accepted = session
+                                let command: RemoteRequest
+                                do {
+                                    command = try accepted.accept(ciphertext)
+                                } catch {
+                                    // Authenticated bounds errors consume their sequence
+                                    // and retain the nonce used by the error receipt.
+                                    session = accepted
+                                    throw error
+                                }
+                                guard let clientNonce = command.clientNonce else {
+                                    let upgrade = RemoteReply(
+                                        challenge: command.challenge, sequence: command.sequence,
+                                        ok: false, error: "Update Sigil and the phone companion to reconnect securely.")
+                                    let sealed = try RemoteCrypto.seal(
+                                        upgrade,
+                                        key: accepted.deviceKey ?? accepted.pairingKey, direction: "mac")
+                                    try await self.send(Frame(peer: id, data: sealed), socket: socket)
+                                    continue
+                                }
+                                session = accepted
                                 guard let model else {
                                     self.stop()
                                     return
@@ -269,9 +296,16 @@ final class RemoteControl {
                                     if command.action == "options" {
                                         await RemoteCommands.refreshModels(model: model)
                                     }
+                                    guard self.generation == current, !Task.isCancelled,
+                                        self.peer == id, self.socket === socket
+                                    else { return }
                                     reply = await RemoteCommands.execute(command, model: model)
                                 }
+                                guard self.generation == current, !Task.isCancelled,
+                                    self.peer == id, self.socket === socket
+                                else { return }
                                 reply.ticket = session.ticket
+                                reply.clientNonce = clientNonce
                                 let encrypted = try RemoteCrypto.seal(
                                     reply, key: session.deviceKey!, direction: "mac")
                                 try await self.send(Frame(peer: id, data: encrypted), socket: socket)
@@ -279,7 +313,8 @@ final class RemoteControl {
                                 // The pairing is fine; only this request was too large.
                                 let reply = RemoteReply(
                                     challenge: session.challenge, sequence: sequence, ok: false,
-                                    error: "Too long to send. Shorten it and try again.")
+                                    error: "Too long to send. Shorten it and try again.",
+                                    clientNonce: session.acceptedClientNonce)
                                 let encrypted = try RemoteCrypto.seal(
                                     reply, key: session.deviceKey!, direction: "mac")
                                 try await self.send(Frame(peer: id, data: encrypted), socket: socket)
@@ -361,9 +396,10 @@ final class RemoteControl {
     ) async throws -> RemoteReply {
         let token = (command.text ?? "").lowercased()
         let environment = command.name ?? "production"
+        let registration: Frame
         if token.isEmpty {
             push = nil
-            try await send(Frame(pushTokenCleared: true), socket: socket)
+            registration = Frame(pushTokenCleared: true)
         } else {
             guard token.utf8.count >= 64, token.utf8.count <= 200, RemoteCrypto.isLowerHex(token),
                 ["production", "development"].contains(environment)
@@ -373,7 +409,7 @@ final class RemoteControl {
                     error: "That alert token is not usable.")
             }
             push = (token, environment)
-            try await send(Frame(pushToken: token, pushEnvironment: environment), socket: socket)
+            registration = Frame(pushToken: token, pushEnvironment: environment)
         }
         if let key = session.deviceKey {
             _ = store.save(
@@ -381,6 +417,10 @@ final class RemoteControl {
                     origin: origin.absoluteString, deviceKey: key, ticket: session.ticket, pushToken: push?.token,
                     pushEnvironment: push?.environment))
         }
+        // Persist before suspension. Revocation during the socket write must
+        // never be undone by saving an old key when that write returns.
+        try await send(registration, socket: socket)
+        await afterPushRegistrationSend?()
         var reply = RemoteReply(challenge: command.challenge, sequence: command.sequence)
         reply.state = RemoteCommands.snapshot(model)
         return RemoteCommands.fitting(reply)
@@ -429,7 +469,8 @@ final class RemoteControl {
         let prompt = RemoteCommands.prompt(for: tab)
         let snapshot = RemoteAlertPlanner.Snapshot(
             status: tab.activity.statusName, since: Int((tab.workingSince ?? Date()).timeIntervalSince1970),
-            question: prompt?.question, title: RemoteCommands.bounded(model.title(for: tab), bytes: 96))
+            question: prompt?.question, title: RemoteCommands.bounded(model.title(for: tab), bytes: 96),
+            interactionID: prompt?.id, verified: prompt?.verified == true)
         let plan = planner.plan(tabID: id, snapshot)
         // A phone on the socket sees the change itself; alerts are for a phone that is away.
         guard peer == nil, let socket else { return }
@@ -465,20 +506,29 @@ final class RemoteControl {
     // MARK: Events
 
     private struct Watcher {
+        let id = UUID()
         let socket: URLSessionWebSocketTask
         let peer: String
         let challenge: String
         let deviceKey: String
+        let clientNonce: String
     }
 
     /// Any change the phone should see: output, status, tabs, selection, titles.
     func noteChange() {
-        guard watcher != nil, changeTask == nil else { return }
+        guard let watcher else { return }
+        changePending = true
+        guard changeTask == nil else { return }
         changeTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: Self.changeDelay)
-            guard let self, !Task.isCancelled else { return }
+            guard let self else { return }
+            while self.changePending {
+                try? await Task.sleep(for: Self.changeDelay)
+                guard !Task.isCancelled, self.watcher?.id == watcher.id else { return }
+                self.changePending = false
+                await self.flushChanges()
+                guard !Task.isCancelled, self.watcher?.id == watcher.id else { return }
+            }
             self.changeTask = nil
-            await self.flushChanges()
         }
     }
 
@@ -486,11 +536,13 @@ final class RemoteControl {
         _ command: RemoteRequest, model: AppModel, socket: URLSessionWebSocketTask, peer: String,
         session: RemoteSession
     ) -> RemoteReply {
-        guard let deviceKey = session.deviceKey else {
+        guard let deviceKey = session.deviceKey, let clientNonce = command.clientNonce else {
             return RemoteReply(
                 challenge: command.challenge, sequence: command.sequence, ok: false, error: "Not paired.")
         }
-        watcher = Watcher(socket: socket, peer: peer, challenge: session.challenge, deviceKey: deviceKey)
+        stopWatching()
+        watcher = Watcher(
+            socket: socket, peer: peer, challenge: session.challenge, deviceKey: deviceKey, clientNonce: clientNonce)
         watchedModel = model
         stream.reset()
         let window = model.selectedTab?.controller.remoteScreenWindow()
@@ -512,6 +564,7 @@ final class RemoteControl {
         watchedModel = nil
         changeTask?.cancel()
         changeTask = nil
+        changePending = false
         stream.reset()
         lastSentTabs = nil
         lastSentSelection = nil
@@ -547,13 +600,23 @@ final class RemoteControl {
         lastSentPrompt = prompt
         let frames: [RemoteReply]
         var base = RemoteReply(challenge: watcher.challenge, sequence: 0, event: true)
+        base.clientNonce = watcher.clientNonce
         base.state = RemoteState(
             tabs: tabs, selectedTabID: selected, terminal: "", tabsTruncated: model.tabs.count > 100,
             screen: nil, mac: RemoteCommands.macName, prompt: prompt)
         frames = Self.frames(base: base, screen: screen)
-        for (index, frame) in frames.enumerated() {
+        for (index, value) in frames.enumerated() {
             if index > 0 { try? await Task.sleep(for: Self.frameSpacing) }
-            guard self.watcher?.peer == watcher.peer else { return }
+            guard self.watcher?.id == watcher.id, self.watcher?.challenge == watcher.challenge,
+                self.watcher?.socket === watcher.socket, !Task.isCancelled
+            else { return }
+            guard eventSequence < 9_007_199_254_740_991 else {
+                watcher.socket.cancel(with: .goingAway, reason: nil)
+                return
+            }
+            eventSequence += 1
+            var frame = value
+            frame.eventSequence = eventSequence
             do {
                 let encrypted = try RemoteCrypto.seal(frame, key: watcher.deviceKey, direction: "mac")
                 try await send(Frame(peer: watcher.peer, data: encrypted), socket: watcher.socket)

@@ -15,6 +15,8 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
     var onChildOutput: (() -> Void)?
     /// Invoked when the user submits the current prompt with Return.
     var onUserSubmit: (() -> Void)?
+    /// Every byte sent, including menu digits, paste, and non-Return keys.
+    var onInput: (() -> Void)?
     /// Builds the VoiceOver value when an assistive client asks, not on every output tick.
     var accessibilityText: (() -> String)?
     /// Moves on every child write and every resize, the only ways Sigil changes
@@ -144,6 +146,7 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
     }
 
     override func send(source: TerminalView, data: ArraySlice<UInt8>) {
+        if !data.isEmpty { onInput?() }
         if data.elementsEqual(Self.bracketedPasteStart) {
             isForwardingBracketedPaste = true
         } else if data.elementsEqual(Self.bracketedPasteEnd) {

@@ -9,6 +9,7 @@ public enum RemoteUpload: Sendable {
 
     public struct Inbox: Sendable {
         private struct Transfer: Sendable {
+            var scope: String
             var name: String
             var count: Int
             var chunks: [Int: Data]
@@ -16,12 +17,13 @@ public enum RemoteUpload: Sendable {
         }
 
         private var pending: [String: Transfer] = [:]
+        private var completed: [String: Date] = [:]
 
         public init() {}
 
         public mutating func receive(
             transfer: String, name: String, index: Int, count: Int, base64: String, directory: URL,
-            now: Date = Date()
+            now: Date = Date(), scope: String = ""
         ) throws -> URL? {
             prune(now: now)
             guard isTransferID(transfer), count >= 1, count <= RemoteUpload.maxChunks, index >= 0,
@@ -29,11 +31,16 @@ public enum RemoteUpload: Sendable {
             else { throw RemoteError.invalidMessage }
             let data = base64.isEmpty ? Data() : Data(base64Encoded: base64)
             guard let data, data.count <= RemoteUpload.maxChunkBytes else { throw RemoteError.invalidMessage }
+            // A transfer belongs to one authenticated connection and one tab.
+            // A late tail must not begin a new upload after reconnect or expiry.
+            guard completed[transfer] == nil,
+                pending[transfer] != nil || (index == 0 && completed.count < 256)
+            else { throw RemoteError.invalidMessage }
             if pending[transfer] == nil, pending.count >= RemoteUpload.maxPending {
                 throw RemoteError.invalidMessage
             }
-            var item = pending[transfer] ?? Transfer(name: name, count: count, chunks: [:], updated: now)
-            guard item.count == count, item.name == name else { throw RemoteError.invalidMessage }
+            var item = pending[transfer] ?? Transfer(scope: scope, name: name, count: count, chunks: [:], updated: now)
+            guard item.scope == scope, item.count == count, item.name == name else { throw RemoteError.invalidMessage }
             if let existing = item.chunks[index], existing != data { throw RemoteError.invalidMessage }
             item.chunks[index] = data
             item.updated = now
@@ -44,6 +51,8 @@ public enum RemoteUpload: Sendable {
                 return nil
             }
             pending[transfer] = nil
+            // Consume before writing/pasting. A lost reply never repeats the write.
+            completed[transfer] = now
             var assembled = Data(capacity: total)
             for chunkIndex in 0..<count {
                 guard let chunk = item.chunks[chunkIndex] else { throw RemoteError.invalidMessage }
@@ -54,6 +63,7 @@ public enum RemoteUpload: Sendable {
 
         public mutating func prune(now: Date = Date()) {
             pending = pending.filter { now.timeIntervalSince($0.value.updated) < RemoteUpload.timeout }
+            completed = completed.filter { now.timeIntervalSince($0.value) < RemoteUpload.timeout }
         }
 
         private func isTransferID(_ value: String) -> Bool {
