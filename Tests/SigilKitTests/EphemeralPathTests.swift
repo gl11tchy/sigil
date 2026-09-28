@@ -104,4 +104,51 @@ struct EphemeralPathTests {
         try fm.createSymbolicLink(at: alias, withDestinationURL: persistent)
         #expect(!isEphemeral(path: alias.path))
     }
+
+    @Test func treatsAnyToolsGitWorktreeAsEphemeral() throws {
+        let fm = FileManager.default
+        let base = fm.homeDirectoryForCurrentUser.appendingPathComponent(
+            "sigil-ephemeral-git-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: base) }
+        let worktree = base.appendingPathComponent("repos/app/feature")
+        let submodule = base.appendingPathComponent("app/vendor/lib")
+        let repo = base.appendingPathComponent("app")
+        try fm.createDirectory(at: worktree.appendingPathComponent("web"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: submodule, withIntermediateDirectories: true)
+        try fm.createDirectory(at: repo.appendingPathComponent(".git"), withIntermediateDirectories: true)
+        try "gitdir: /Users/someone/app/.git/worktrees/feature\n".write(
+            to: worktree.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
+        try "gitdir: ../../.git/modules/lib\n".write(
+            to: submodule.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
+
+        #expect(isEphemeral(path: worktree.path))
+        #expect(isEphemeral(path: worktree.appendingPathComponent("web").path))
+        #expect(!isEphemeral(path: repo.path))
+        #expect(!isEphemeral(path: submodule.path))
+    }
+
+    @Test func keepsSigilWorktreesWithTheirProject() throws {
+        let fm = FileManager.default
+        let project = SigilWorktree.root.appendingPathComponent(
+            "%2FUsers%2Fsomeone%2Fsigil-ephemeral-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: project) }
+        let worktree = project.appendingPathComponent("abcd1234")
+        try fm.createDirectory(at: worktree, withIntermediateDirectories: true)
+        try "gitdir: /Users/someone/sigil/.git/worktrees/abcd1234\n".write(
+            to: worktree.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
+
+        #expect(!isEphemeral(path: worktree.path))
+    }
+
+    @Test func treatsDeletedHomeFolderAsEphemeral() throws {
+        let fm = FileManager.default
+        let folder = fm.homeDirectoryForCurrentUser.appendingPathComponent(
+            "sigil-ephemeral-gone-\(UUID().uuidString)")
+        #expect(isEphemeral(path: folder.path))
+        #expect(!isEphemeral(path: "/Volumes/sigil-unmounted-\(UUID().uuidString)/project"))
+
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: folder) }
+        #expect(!isEphemeral(path: folder.path))
+    }
 }

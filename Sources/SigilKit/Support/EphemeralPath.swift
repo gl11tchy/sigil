@@ -41,7 +41,39 @@ private func filesystemIdentity(_ path: String) -> (device: UInt64?, inode: UInt
 private func computeIsEphemeral(path: String) -> Bool {
     let variants = pathVariants(path)
     if variants.contains(where: isTemporaryVariant) { return true }
-    return variants.contains(where: hasScratchWorkspaceMarker)
+    if variants.contains(where: hasScratchWorkspaceMarker) { return true }
+    return isDeletedHomeFolder(path) || isLinkedGitWorktree(path)
+}
+
+/// A folder in the home folder that no longer exists, such as a removed
+/// worktree. Folders elsewhere may sit on a volume that is only unmounted.
+private func isDeletedHomeFolder(_ path: String) -> Bool {
+    let home = GrokPaths.canonicalPath(FileManager.default.homeDirectoryForCurrentUser.path)
+    let folder = GrokPaths.canonicalPath(path)
+    guard folder.hasPrefix(home + "/") else { return false }
+    return !FileManager.default.fileExists(atPath: folder)
+}
+
+/// A checkout made by `git worktree add`, whatever tool made it: its `.git`
+/// is a file that points into another repository's `worktrees` folder.
+/// Sigil's own worktrees are left alone; they group under their project.
+private func isLinkedGitWorktree(_ path: String) -> Bool {
+    if SigilWorktree.projectPath(of: path) != nil { return false }
+    var folder = URL(fileURLWithPath: GrokPaths.canonicalPath(path))
+    while folder.path != "/" {
+        let git = folder.appendingPathComponent(".git")
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: git.path, isDirectory: &isDirectory) {
+            guard !isDirectory.boolValue,
+                let text = try? String(contentsOf: git, encoding: .utf8),
+                text.hasPrefix("gitdir:")
+            else { return false }
+            let target = text.dropFirst("gitdir:".count).trimmingCharacters(in: .whitespacesAndNewlines)
+            return URL(fileURLWithPath: target).deletingLastPathComponent().lastPathComponent == "worktrees"
+        }
+        folder.deleteLastPathComponent()
+    }
+    return false
 }
 
 private func isTemporaryVariant(_ path: String) -> Bool {
