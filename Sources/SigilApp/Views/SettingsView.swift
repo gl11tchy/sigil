@@ -176,6 +176,11 @@ struct SettingsView: View {
                     "Show subagent sessions",
                     isOn: Bindable(model.settings).showSubagentSessions
                 )
+                SettingsDivider()
+                SettingsToggle(
+                    "Show chats from other apps",
+                    isOn: Bindable(model.settings).showOtherAppSessions
+                )
             }
 
             SettingsSection(title: "Keyboard") {

@@ -41,6 +41,8 @@ struct NativeStartupRestorationTests {
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = AppSettings(defaults: defaults)
+        // These tests list chats from the history files directly.
+        settings.showOtherAppSessions = true
         settings.executablePath = "/missing/grok"
         settings.isTabMessagingEnabled = false
         let entry = OpenTabsSnapshot.Entry(sessionID: session.nativeSessionID, cwd: root.path, provider: provider)

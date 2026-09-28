@@ -19,6 +19,8 @@ final class TerminalTab: Identifiable {
 
     let id: UUID
     let spec: GrokLaunchSpec
+    /// When the tab was made. A new Codex chat is matched to its history by it.
+    let launchedAt = Date()
     let controller: TerminalController
     let remoteInteraction = RemoteInteraction()
 

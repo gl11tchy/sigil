@@ -114,6 +114,8 @@ private final class ContinuityFixture {
         suite = "ProviderContinuityIntegrationTests.\(UUID().uuidString)"
         defaults = try #require(UserDefaults(suiteName: suite))
         settings = AppSettings(defaults: defaults)
+        // These tests list chats from the history files directly.
+        settings.showOtherAppSessions = true
         settings.executablePath = "/missing/grok"
         settings.showEmptySessions = true
     }

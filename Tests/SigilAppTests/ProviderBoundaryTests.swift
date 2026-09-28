@@ -306,6 +306,8 @@ private struct ProviderFixture {
         suite = "ProviderBoundaryTests.\(UUID().uuidString)"
         defaults = try #require(UserDefaults(suiteName: suite))
         settings = AppSettings(defaults: defaults)
+        // These tests list chats from the history files directly.
+        settings.showOtherAppSessions = true
         settings.executablePath = shell.path
         let errors = errors
         model = AppModel(

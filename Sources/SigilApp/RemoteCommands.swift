@@ -365,6 +365,11 @@ enum RemoteCommands {
         if !model.settings.showSubagentSessions, session.isSubagent, !model.isOpen(session) {
             return false
         }
+        if !model.settings.showOtherAppSessions, !model.settings.isSigilConversation(session.id),
+            !model.isOpen(session)
+        {
+            return false
+        }
         return true
     }
 

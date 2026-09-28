@@ -332,6 +332,8 @@ private final class LaunchAvailabilityFixture {
         suite = "ProviderLaunchAvailabilityTests.\(UUID().uuidString)"
         defaults = try #require(UserDefaults(suiteName: suite))
         settings = AppSettings(defaults: defaults)
+        // These tests list chats from the history files directly.
+        settings.showOtherAppSessions = true
         settings.executablePath = shell.path
         settings.defaultDirectory = root.path
         settings.isTabMessagingEnabled = false

@@ -324,6 +324,8 @@ struct NewSessionSheetTests {
         let defaults = try #require(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let settings = AppSettings(defaults: defaults)
+        // These tests list chats from the history files directly.
+        settings.showOtherAppSessions = true
         settings.model = "grok-4.7"
         settings.effort = "xhigh"
         let root = FileManager.default.temporaryDirectory

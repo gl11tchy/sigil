@@ -39,6 +39,8 @@ struct NativeHistoryVisibilityTests {
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = AppSettings(defaults: defaults)
+        // These tests list chats from the history files directly.
+        settings.showOtherAppSessions = true
         settings.showEmptySessions = false
         settings.showWorktreeSessions = true
         let model = AppModel(
