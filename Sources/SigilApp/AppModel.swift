@@ -964,7 +964,8 @@ final class AppModel {
     /// the first Codex chat that appears in its folder after it launched. The
     /// tab then knows its chat, so the row shows as open and it can restore.
     private func recordStartedCodexSessions() {
-        let waiting = tabs
+        let waiting =
+            tabs
             .filter { $0.spec.provider == .codex && $0.sessionReference == nil }
             .sorted { $0.launchedAt < $1.launchedAt }
         guard !waiting.isEmpty else { return }
