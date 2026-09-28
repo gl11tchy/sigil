@@ -70,4 +70,37 @@ struct SigilOnlyHistoryTests {
         #expect(settings.isSigilConversation(worktree.id))
         #expect(!settings.isSigilConversation(other.id))
     }
+
+    @Test func twoCopiesRecordingChatsKeepBoth() throws {
+        let suite = "SigilOnlyHistoryTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let first = AppSettings(defaults: defaults)
+        let second = AppSettings(defaults: defaults)
+
+        first.recordSigilConversations(["a"])
+        second.recordSigilConversations(["b"])
+
+        #expect(AppSettings(defaults: defaults).isSigilConversation("a"))
+        #expect(AppSettings(defaults: defaults).isSigilConversation("b"))
+    }
+
+    @Test func seedingWaitsForAScanWithoutErrors() async throws {
+        let suite = "SigilOnlyHistoryTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        _ = NSApplication.shared
+        let store = SessionStore(
+            root: FileManager.default.temporaryDirectory, timing: SessionStoreTiming(),
+            scanOperation: { _, _, _ in .init(sessions: [], cache: [:], loadError: "History is unavailable.") })
+        await store.reload()
+        let settings = AppSettings(defaults: defaults)
+        let model = AppModel(
+            settings: settings, store: store, presentError: { _ in }, panel: RightPanel(defaults: defaults),
+            pairingStore: InMemoryRemotePairingStore())
+
+        model.seedSigilConversations()
+
+        #expect(!settings.sigilConversationsSeeded)
+    }
 }

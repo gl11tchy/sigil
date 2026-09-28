@@ -81,8 +81,6 @@ final class AppModel {
     private var isRestoringTabs = false
     /// Saved entries that are temporarily unavailable stay here instead of being erased.
     private var deferredOpenTabs: [OpenTabsSnapshot.Entry] = []
-    /// The Codex chat each new Codex tab was matched to.
-    private var codexSessionIDs: [TerminalTab.ID: String] = [:]
     private var deferredSelectedEntry: OpenTabsSnapshot.Entry?
     /// Older snapshots saved only an ID. Keep it until the first matching tab
     /// can be restored or the user makes a new selection.
@@ -949,7 +947,9 @@ final class AppModel {
     /// Chats Sigil started before it kept a list: saved open tabs and chats
     /// in Sigil's own worktrees. Runs once, after the first scan.
     func seedSigilConversations() {
-        guard !settings.sigilConversationsSeeded, store.appliedScanSequence > 0 else { return }
+        // A scan with a read error may have missed chats; wait for a clean one.
+        guard !settings.sigilConversationsSeeded, store.appliedScanSequence > 0, store.loadError == nil
+        else { return }
         let saved = settings.openTabs.tabs.map {
             ProviderSessionReference(provider: $0.provider, sessionID: $0.sessionID, cwd: $0.cwd).sidebarID
         }
@@ -961,13 +961,14 @@ final class AppModel {
     }
 
     /// Codex picks its own id for a new chat, so a new Codex tab is matched to
-    /// the first Codex chat that appears in its folder after it launched.
+    /// the first Codex chat that appears in its folder after it launched. The
+    /// tab then knows its chat, so the row shows as open and it can restore.
     private func recordStartedCodexSessions() {
         let waiting = tabs
-            .filter { $0.spec.provider == .codex && $0.sessionReference == nil && codexSessionIDs[$0.id] == nil }
+            .filter { $0.spec.provider == .codex && $0.sessionReference == nil }
             .sorted { $0.launchedAt < $1.launchedAt }
         guard !waiting.isEmpty else { return }
-        var claimed = Set(codexSessionIDs.values)
+        var claimed = Set(tabs.compactMap(\.sessionID))
         for tab in waiting {
             let folder = GrokPaths.canonicalPath(tab.workingDirectory.path)
             let match = store.sessions
@@ -979,9 +980,11 @@ final class AppModel {
                 }
                 .min { $0.createdAt < $1.createdAt }
             guard let match else { continue }
-            codexSessionIDs[tab.id] = match.id
+            tab.learnedSessionReference = ProviderSessionReference(
+                provider: .codex, sessionID: match.nativeSessionID, cwd: tab.workingDirectory.path)
             claimed.insert(match.id)
             settings.recordSigilConversations([match.id])
+            persistOpenTabs()
         }
     }
 
@@ -1878,7 +1881,8 @@ final class AppModel {
             if let self, let tab { self.restartForThemeWhenSettled(tab) }
         }
         wireRemoteStream(tab)
-        if let sessionID = tab.sessionID { settings.recordSigilConversations([sessionID]) }
+        // Only a chat this tab creates; opening an existing chat does not make it Sigil's.
+        if case .new = spec.mode, let sessionID = tab.sessionID { settings.recordSigilConversations([sessionID]) }
         tabs.append(tab)
         selectedTabID = tab.id
         if !isRestoringTabs { clearDeferredSelection() }

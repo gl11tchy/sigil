@@ -68,8 +68,13 @@ final class TerminalTab: Identifiable {
                 ? spec.sessionDirectory?.appendingPathComponent("updates.jsonl") : spec.sessionFile)
     }
 
+    /// A new Codex chat's id, once its history file is found. Codex picks the
+    /// id itself, so it is not known at launch.
+    var learnedSessionReference: ProviderSessionReference?
+
     /// No native ID is fabricated for providers that allocate one internally.
     var sessionReference: ProviderSessionReference? {
+        if let learnedSessionReference { return learnedSessionReference }
         switch spec.mode {
         case .new(let uuid) where spec.provider == .grokBuild || spec.provider == .claudeCode:
             return ProviderSessionReference(

@@ -302,11 +302,16 @@ final class AppSettings {
     }
 
     /// Adds chats to the list of those Sigil started. Known ids are skipped.
+    /// Another running copy may have added some since this one last read the
+    /// list, so the saved list is merged in first and nothing is dropped.
     func recordSigilConversations(_ sidebarIDs: [String]) {
-        let new = sidebarIDs.filter { !sigilConversationIDs.contains($0) }
-        guard !new.isEmpty else { return }
-        var seen = Set<String>()
-        sigilConversations += new.filter { seen.insert($0).inserted }
+        let saved =
+            defaults.data(forKey: Key.sigilConversations)
+            .flatMap { try? JSONDecoder().decode([String].self, from: $0) } ?? []
+        var merged = sigilConversations
+        var seen = sigilConversationIDs
+        for id in saved + sidebarIDs where seen.insert(id).inserted { merged.append(id) }
+        if merged != sigilConversations { sigilConversations = merged }
     }
 
     var theme: TerminalTheme {
