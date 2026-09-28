@@ -541,10 +541,14 @@ function showProviderProblem() {
 // match made each keystroke rebuild and lay out the whole history.
 const findHighlight = globalThis.CSS?.highlights && typeof Highlight === 'function'
   ? { match: new Highlight(), current: new Highlight() } : null;
-if (findHighlight) {
-  findHighlight.current.priority = 1;
-  CSS.highlights.set('find-match', findHighlight.match);
-  CSS.highlights.set('find-current', findHighlight.current);
+if (findHighlight) findHighlight.current.priority = 1;
+// WebKit paints all text slower while any highlight is registered, even an empty one: marking every
+// match on 14 long lines of Japanese took 89 ms against 70. So only a highlight with ranges is.
+function registerHighlights() {
+  for (const [name, highlight] of [['find-match', findHighlight.match], ['find-current', findHighlight.current]]) {
+    if (!highlight.size) CSS.highlights.delete(name);
+    else if (!CSS.highlights.has(name)) CSS.highlights.set(name, highlight);
+  }
 }
 // The output is painted as text nodes of at most findChunk characters: in WebKit, a range's box
 // costs about a microsecond per character of non-ASCII text its node has on that line, and a node
@@ -595,10 +599,11 @@ function paintOutput() {
 }
 function updateFind(scroll = true) {
   const current = findMatches.length ? findIndex : -1;
-  // Only the old and the new current match change.
+  // Only the old and the new current match change. A marked current match is filled by its marks.
   if (findHighlight) {
     findHighlight.current.clear();
-    if (current >= 0) findHighlight.current.add(findStatic(current));
+    if (current >= 0 && !findMarks.has(current)) findHighlight.current.add(findStatic(current));
+    registerHighlights();
   }
   for (const mark of findMarks.get(findMarked) ?? []) mark.dataset.current = 'false';
   for (const mark of findMarks.get(current) ?? []) mark.dataset.current = 'true';
@@ -653,14 +658,30 @@ function paintText(output) {
   });
   $('terminal').replaceChildren(...findBlockNodes, ...findNodes.slice(findBlocks.at(-1) ?? 0));
 }
-// Whether the matches on a block are marked in WebKit: it has complex text, and is at most twice
-// findBlock long. A longer block is one long line, laid out again for each mark.
+// Whether the matches on a block are marked in WebKit: it has complex text.
 function findMarkable(block) {
   if (!findComplexBlocks.has(block)) {
     const from = findStarts[findBlocks[block]], to = findStarts[findBlocks[block + 1]] ?? findText.length;
-    findComplexBlocks.set(block, to - from <= 2 * findBlock && findComplex.test(findText.slice(from, to)));
+    findComplexBlocks.set(block, findComplex.test(findText.slice(from, to)));
   }
   return findComplexBlocks.get(block);
+}
+// The matches on the block of match `index`, as [first, end, block], when WebKit marks them all at
+// once: the block has complex text and is over twice findBlock long, so one line, laid out again
+// whenever its marks change. So a scroll or Next along the line changes no marks. Otherwise null.
+function findWhole(index) {
+  if (!findHighlight || !findComplex) return null;
+  const chunk = findChunkAt(findMatches[index].start);
+  let block = 0, high = findBlocks.length - 1;
+  while (block < high) { const middle = (block + high + 1) >> 1; if (findBlocks[middle] <= chunk) block = middle; else high = middle - 1; }
+  const from = findStarts[findBlocks[block]], to = findStarts[findBlocks[block + 1]] ?? findText.length;
+  if (to - from <= 2 * findBlock || !findMarkable(block)) return null;
+  const first = offset => {
+    let low = 0, high = findMatches.length;
+    while (low < high) { const middle = (low + high) >> 1; if (findMatches[middle].start < offset) low = middle + 1; else high = middle; }
+    return low;
+  };
+  return [first(from), first(to), block];
 }
 // The spans to mark in a chunk for its matches in `indices`, as [start, end, indices] in findText. In
 // WebKit a span takes in the whole grapheme clusters at its ends, and spans that then overlap are one.
@@ -811,11 +832,19 @@ function showVisibleMatches() {
   const frame = terminal.getBoundingClientRect();
   const top = frame.top + terminal.clientTop, bottom = top + height;
   const left = frame.left + terminal.clientLeft, right = left + width;
-  // Matches are in document order, so their boxes run top to bottom.
+  // Matches are in document order, so their boxes run top to bottom. A match on a line marked whole
+  // is measured by its line: a range over complex text that no mark splits costs up to a millisecond.
+  // The last block is in the terminal itself, so it runs from the one before to the end.
+  const box = index => {
+    const block = findWhole(index)?.[2];
+    if (block === undefined) return findBox(index);
+    if (block < findBlockNodes.length) return findBlockNodes[block].getBoundingClientRect();
+    return { top: findBlockNodes.at(-1)?.getBoundingClientRect().bottom ?? -Infinity, bottom: Infinity };
+  };
   const first = (low, high, test) => {
     while (low < high) {
       const middle = (low + high) >> 1;
-      if (test(findBox(middle))) high = middle; else low = middle + 1;
+      if (test(box(middle))) high = middle; else low = middle + 1;
     }
     return low;
   };
@@ -844,7 +873,8 @@ function showVisibleMatches() {
             columns(low, middle); columns(middle, high);
           } else for (let at = low; at < high; at++) shown.push(at);
         };
-        columns(index, next);
+        // Measuring columns on a long line of complex text costs more than marking all of it.
+        if (findWhole(index)) for (let at = index; at < next; at++) shown.push(at); else columns(index, next);
       } else for (let at = index; at < next; at++) shown.push(at);
       index = next;
     }
@@ -852,27 +882,34 @@ function showVisibleMatches() {
   };
   const view = near(0);
   let shown = near(1 / 4), margin = 1 / 4;
-  if (shown.length - view.length > findCap) {
-    // Keep the findCap matches out of view nearest to it, in screens on either axis. A scroll
-    // shorter than the nearest one left out still has every match in view highlighted.
-    const inView = new Set(view), distance = index => {
+  const kept = new Set(view.concat(shown.filter(index => findWhole(index))));
+  if (shown.length - kept.size > findCap) {
+    // Keep the findCap matches out of view nearest to it, in screens on either axis, and those on a line
+    // marked whole. A scroll shorter than the nearest one left out still has every match in view highlighted.
+    const distance = index => {
       const box = findBox(index);
       return Math.max((top - box.bottom) / height, (box.top - bottom) / height, (left - box.right) / width, (box.left - right) / width);
     };
-    const out = shown.filter(index => !inView.has(index)).map(index => [distance(index), index]).sort((a, b) => a[0] - b[0]);
+    const out = shown.filter(index => !kept.has(index)).map(index => [distance(index), index]).sort((a, b) => a[0] - b[0]);
     margin = out[findCap][0];
-    shown = view.concat(out.slice(0, findCap).map(([, index]) => index)).sort((a, b) => a - b);
+    shown = [...kept].concat(out.slice(0, findCap).map(([, index]) => index)).sort((a, b) => a - b);
   }
-  // Without highlights every match is marked, and in WebKit each on a short block of complex text.
+  // Without highlights every match is marked, and in WebKit each on a block of complex text.
   const marked = [], lit = [];
   for (let at = 0, block = 0; at < shown.length; at++) {
     const chunk = findChunkAt(findMatches[shown[at]].start);
     while (findBlocks[block + 1] <= chunk) block++;
-    (!findHighlight || (findComplex && findMarkable(block)) ? marked : lit).push(shown[at]);
+    const whole = findWhole(shown[at]);
+    if (!whole) (!findHighlight || (findComplex && findMarkable(block)) ? marked : lit).push(shown[at]);
+    else {
+      for (let index = whole[0]; index < whole[1]; index++) marked.push(index);
+      while (shown[at + 1] < whole[1]) at++;
+    }
   }
   findHighlight?.match.clear();
   const changed = markMatches(marked);
   for (const index of lit) findHighlight.match.add(findStatic(index));
+  if (findHighlight) registerHighlights();
   // The current match is on new nodes.
   if (changed && findHighlight) updateFind(false);
   findShown = shown; findBand = [...scroll, margin];

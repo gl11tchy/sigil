@@ -81,13 +81,14 @@ function findState(page) {
       const rect = live(range).getBoundingClientRect();
       return rect.bottom > box.top && rect.top < box.bottom && rect.right > box.left && rect.left < box.right;
     };
-    const api = typeof Highlight === 'function' && CSS.highlights?.has('find-match');
+    // Find registers a highlight only while it has ranges.
+    const api = typeof Highlight === 'function' && Boolean(CSS.highlights);
     const marks = [...terminal.querySelectorAll('mark')];
     const over = (first, last) => ({ startContainer: first.firstChild, startOffset: 0, endContainer: last.firstChild, endOffset: last.firstChild.length });
-    const matches = [...(api ? CSS.highlights.get('find-match') : []), ...marks.map(mark => over(mark, mark))];
-    // A match across two chunks has a mark in each.
+    const matches = [...(CSS.highlights?.get('find-match') ?? []), ...marks.map(mark => over(mark, mark))];
+    // A match across two chunks has a mark in each. A marked current match has no highlight.
     const currentMarks = marks.filter(mark => mark.dataset.current === 'true');
-    const current = api ? [...CSS.highlights.get('find-current')][0] : currentMarks.length ? over(currentMarks[0], currentMarks[currentMarks.length - 1]) : undefined;
+    const current = [...(CSS.highlights?.get('find-current') ?? [])][0] ?? (currentMarks.length ? over(currentMarks[0], currentMarks[currentMarks.length - 1]) : undefined);
     const texts = [];
     for (const walker = document.createTreeWalker(terminal, NodeFilter.SHOW_TEXT); walker.nextNode();) texts.push(walker.currentNode.length);
     return {
@@ -119,8 +120,7 @@ function coverage(page, matches) {
       }
       return [nodes[low], offset - starts[low]];
     };
-    const api = typeof Highlight === 'function' && CSS.highlights?.has('find-match');
-    const ranges = [...(api ? CSS.highlights.get('find-match') : []), ...[...terminal.querySelectorAll('mark')].map(mark => (
+    const ranges = [...(CSS.highlights?.get('find-match') ?? []), ...[...terminal.querySelectorAll('mark')].map(mark => (
       { startContainer: mark.firstChild, startOffset: 0, endContainer: mark.firstChild, endOffset: mark.firstChild.length }))];
     const index = new Map(nodes.map((node, at) => [node, at]));
     const shown = new Set(ranges.map(range => starts[index.get(range.startContainer)] + range.startOffset));
@@ -543,9 +543,11 @@ for (const api of [true, false]) {
       } finally { mac.close(); }
     });
 
-    test('Find highlights only the columns in view on a long right-to-left raw line', async ({ page, baseURL }) => {
+    test('Find highlights only the columns in view on a long right-to-left raw line', async ({ page, baseURL, browserName }) => {
       // Hebrew runs right to left, so the first match is at the right end of the line. Columns found
       // as if boxes ran left to right highlighted none in view at either end and every one mid-line.
+      // WebKit marks every match on a line this long of complex text at once.
+      const whole = api && browserName === 'webkit';
       const line = 'שלום עולם '.repeat(400);
       const matches = count(line, 'שלום').map(match => [match.index, match.index + 4]);
       const mac = await pair(page, baseURL, { terminal: () => line });
@@ -563,8 +565,8 @@ for (const api of [true, false]) {
           await page.locator('#terminal').evaluate((el, at) => { el.scrollLeft = at * (el.scrollWidth - el.clientWidth); }, at);
           await expect.poll(async () => {
             const state = await coverage(page, matches);
-            return [state.visible > 0, state.missing, state.far, state.shown < 200];
-          }).toEqual([true, 0, 0, true]);
+            return [state.visible > 0, state.missing, whole ? state.shown === matches.length : state.far === 0 && state.shown < 200];
+          }).toEqual([true, 0, true]);
         }
         // Previous wraps to the last match, at the left end of the line, and brings it into view.
         const wrapTime = await timed(page, 'find-previous');
@@ -573,7 +575,7 @@ for (const api of [true, false]) {
         await frames(page);
         const [start, end] = matches.at(-1);
         expect((await findState(page)).current).toEqual({ start, end, text: 'שלום', visible: true });
-        expect(await coverage(page, matches)).toMatchObject({ missing: 0, far: 0 });
+        expect(await coverage(page, matches)).toMatchObject({ missing: 0, ...(!whole && { far: 0 }) });
       } finally { mac.close(); }
     });
 
@@ -716,12 +718,15 @@ for (const api of [true, false]) {
 
     // Without highlights every match in view is marked, as the scroll test below times.
     if (api) for (const [script, unit, query, repeat] of [['Arabic', 'السلام عليكم ورحمة الله وبركاته ', 'ال', 3], ['Hebrew', 'שלום עולם את הדבר הזה ', 'ה', 4],
-      ['Hindi', 'यह एक परीक्षण है और यह सही है ', 'है', 3], ['Japanese', 'これは私の友達の家の猫の名前です', 'の', 5]]) {
-      test(`Find stays under 100 ms a frame over ${script}, readable and raw`, async ({ page, baseURL }) => {
+      ['Hindi', 'यह एक परीक्षण है और यह सही है ', 'है', 3], ['Japanese', 'これは私の友達の家の猫の名前です', 'の', 5]]) for (const long of [false, true]) {
+      // WebKit marks every match on a line of over 2,048 characters of these scripts at once. Before
+      // highlights, a frame there took up to 153 ms, on raw Arabic.
+      const most = long ? 160 : 100;
+      test(`Find stays under ${most} ms a frame over ${script}${long ? ' on long lines' : ''}, readable and raw`, async ({ page, baseURL }) => {
         // A change to a highlight paints every highlighted range in view again: in WebKit a tenth to
         // half a millisecond a range over these scripts, and two to three times that with a text color.
-        // Lines of about 90 characters, under one sealed message's 64 KB.
-        const line = unit.repeat(repeat), lines = Math.floor(58_000 / (new TextEncoder().encode(line).length + 1));
+        // Lines of about 90 or 2,200 characters, under one sealed message's 64 KB.
+        const line = unit.repeat(long ? Math.ceil(2200 / unit.length) : repeat), lines = Math.floor(58_000 / (new TextEncoder().encode(line).length + 1));
         const text = Array.from({ length: lines }, () => line).join('\n');
         const mac = await pair(page, baseURL, { terminal: () => text });
         try {
@@ -736,7 +741,7 @@ for (const api of [true, false]) {
             await frames(page);
             times.push({ raw, next: Math.round(await longestFrame(page, 3, 0)), scrolled: Math.round(await longestFrame(page, 12, 1 / 4)) });
           }
-          expect(times.filter(time => time.next >= 100 || time.scrolled >= 100)).toEqual([]);
+          expect(times.filter(time => time.next >= most || time.scrolled >= most)).toEqual([]);
         } finally { mac.close(); }
       });
     }

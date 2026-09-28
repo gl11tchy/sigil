@@ -280,8 +280,8 @@ main {
 #find-count { color: var(--ink2); font: 11.5px/16px var(--mono); letter-spacing: 0; white-space: nowrap; padding-right: 4px; }
 mark { background: var(--accent-tint); color: var(--accent-ink); border-radius: 2px; }
 /* Find highlights text ranges where the browser can. A highlight has no ring, so the current match is filled,
-   marked or not. The text color costs nothing measurable on Latin text; in WebKit it paints complex text
-   highlighted on lines over 2,048 characters two to three times slower. */
+   marked or not. In WebKit a highlight that sets the text color paints complex text two to three times
+   slower, so WebKit marks the matches there instead. Elsewhere the color costs nothing measurable. */
 mark[data-current="true"] { background: var(--accent-fill); color: var(--on-accent); }
 ::highlight(find-match) { background-color: var(--accent-tint); color: var(--accent-ink); }
 ::highlight(find-current) { background-color: var(--accent-fill); color: var(--on-accent); }
