@@ -345,16 +345,18 @@ function render(state) {
       attachmentDrafts.delete(id);
     }
   }
-  const tabs = state.tabs.map(tab => {
-    const option = document.createElement('option');
-    option.value = tab.id;
-    const suffix = tab.status === 'exited' ? ' · Ended' : '';
-    option.textContent = tab.title + suffix;
-    return option;
-  });
-  if (!tabs.length) { const empty = document.createElement('option'); empty.value = ''; empty.textContent = 'No open sessions'; tabs.push(empty); }
   const signature = JSON.stringify(state.tabs);
-  if (signature !== tabsSignature) { $('tabs').replaceChildren(...tabs); tabsSignature = signature; }
+  if (signature !== tabsSignature) {
+    const tabs = state.tabs.map(tab => {
+      const option = document.createElement('option');
+      option.value = tab.id;
+      const suffix = tab.status === 'exited' ? ' · Ended' : '';
+      option.textContent = tab.title + suffix;
+      return option;
+    });
+    if (!tabs.length) { const empty = document.createElement('option'); empty.value = ''; empty.textContent = 'No open sessions'; tabs.push(empty); }
+    $('tabs').replaceChildren(...tabs); tabsSignature = signature;
+  }
   $('tabs').value = selected || '';
   $('welcome').hidden = true;
   $('controls').hidden = false;
@@ -367,11 +369,14 @@ function render(state) {
   if (changedSession) { resizeMessage(); renderAttachments(); }
   updateControls();
 }
+// Polls usually return the same text; format it again only when it changes.
+let readableFrom = null, readableText = '';
 function renderOutput(changedSession = false, prepended = false) {
   const terminal = $('terminal');
   const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
   const fromEnd = terminal.scrollHeight - terminal.scrollTop;
-  const output = rawMode ? rawOutput : readableOutput(rawOutput);
+  if (!rawMode && readableFrom !== rawOutput) { readableText = readableOutput(rawOutput); readableFrom = rawOutput; }
+  const output = rawMode ? rawOutput : readableText;
   $('empty-output').hidden = Boolean(output);
   const ended = Boolean(selected) && (selectedRunning === false || selectedStatus === 'exited');
   $('empty-output').querySelector('h2').textContent = ended ? (selectedStatus === 'failed' ? 'Session failed' : 'Session ended') : selectedStatus === 'unknown' ? 'Status unknown' : selectedStatus === 'working' ? 'Working…' : selectedStatus === 'starting' ? 'Starting session…' : selected ? 'Ready when you are.' : 'No open sessions.';
@@ -435,11 +440,11 @@ function searchSaved() {
   renderSessionList();
   const query = $('session-search').value.trim();
   const token = ++searchToken;
-  if (!query || !$('sessions-dialog').open) { renderSaved([]); return; }
+  if (!query || !$('sessions-dialog').open) { dropWaitingSearch(); renderSaved([]); return; }
   renderSaved([], { pending: true });
   // The Mac reads 200 characters, and text over 8 KB drops the connection.
   request('chats', utf8Limited(takeGraphemes(query, 200), 8192)).then(reply => {
-    if (token !== searchToken || $('session-search').value.trim() !== query) return;
+    if (reply.stale || token !== searchToken || $('session-search').value.trim() !== query) return;
     renderSaved(reply.chats, { truncated: reply.chatsTruncated === true });
   }).catch(error => { if (token === searchToken) showError(error.message); });
 }
@@ -579,34 +584,387 @@ function showProviderProblem() {
     if (button.dataset.more !== 'true') button.disabled = Boolean(problem);
   }
 }
+// Find keeps every match as text offsets and highlights only the matches in view. A mark per
+// match made each keystroke rebuild and lay out the whole history.
+const findHighlight = globalThis.CSS?.highlights && typeof Highlight === 'function'
+  ? { match: new Highlight(), current: new Highlight() } : null;
+if (findHighlight) findHighlight.current.priority = 1;
+// WebKit paints all text slower while any highlight is registered, even an empty one: marking every
+// match on 14 long lines of Japanese took 89 ms against 70. So only a highlight with ranges is.
+function registerHighlights() {
+  for (const [name, highlight] of [['find-match', findHighlight.match], ['find-current', findHighlight.current]]) {
+    if (!highlight.size) CSS.highlights.delete(name);
+    else if (!CSS.highlights.has(name)) CSS.highlights.set(name, highlight);
+  }
+}
+// The output is painted as text nodes of at most findChunk characters: in WebKit, a range's box
+// costs about a microsecond per character of non-ASCII text its node has on that line, and a node
+// wider than about 66,000 px on one line gives empty boxes, so Find neither scrolls nor stops at
+// findCap. The paint cost of a range grows with its offset inside its node. WebKit also repaints every
+// highlighted range for each line it paints, so at most findCap matches out of view are highlighted.
+// The nodes go in blocks of about findBlock characters of whole lines: WebKit lays out all the text
+// of a block again for each mark it gains or loses, 33 ms for 300,000 characters in one.
+const findChunk = 256, findCap = 500, findBlock = 1024;
+// A change to any highlight paints every highlighted range in view again. In WebKit that costs a
+// tenth to half a millisecond a range over right-to-left or complex scripts, CJK or emoji, against a
+// twentieth over Latin, Greek or Cyrillic, so there matches on blocks with such text are marked instead.
+// WebKit breaks the glyph of a grapheme cluster that a mark splits, so a mark takes in whole clusters.
+// Chromium paints highlights over every script as fast, and paints the marks of dense CJK in view slower.
+const findComplex = globalThis.navigator?.vendor === 'Apple Computer, Inc.' ? /[\u0300-\u036f\u0590-\u1fff\u2e80-\uffff]/ : null;
+const findClusters = globalThis.Intl?.Segmenter ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
+// One range measures every box, and highlights hold static ranges: WebKit updates each live range
+// on every change to the text until it is collected.
+const findScratch = document.createRange?.() ?? null;
+// findNodes: findText painted as one text node per chunk, from each of findStarts. findBlocks: the first
+// chunk of each block, and findBlockNodes the elements of all blocks but the last. findSplits maps a
+// chunk with marks to the nodes in its place, their text as pieces ({ node, start } in findText), its
+// marks and the match indices each shows, and a key of the marked offsets. findShown: the shown match
+// indices, chosen at the scroll offsets findBand[0] and findBand[1]; they hold every match in view
+// until a scroll of over findBand[2] screens. findMarks maps each marked index to its marks.
+let findText = null, findStarts = [], findNodes = [], findBlocks = [], findBlockNodes = [], findSplits = new Map();
+let findShown = null, findBand = null, findMarks = new Map(), findMarked = -1, findFrame = 0, findComplexBlocks = new Map();
 function paintOutput() {
   const output = displayedOutput || '';
   const query = $('find-bar').hidden ? '' : $('find-query').value;
+  const terminal = $('terminal'), last = findNodes.length - 1;
   findMatches = [];
-  if (!query) { $('terminal').textContent = output; updateFind(false); return; }
-  const fragment = document.createDocumentFragment();
-  let cursor = 0;
   if (query) {
     // Escaped literal search preserves source offsets even for Unicode case folding.
     const pattern = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu');
-    for (const match of output.matchAll(pattern)) {
-      fragment.append(document.createTextNode(output.slice(cursor, match.index)));
-      const mark = document.createElement('mark');
-      mark.textContent = match[0];
-      fragment.append(mark); findMatches.push(mark);
-      cursor = match.index + match[0].length;
-    }
+    for (const match of output.matchAll(pattern)) findMatches.push({ start: match.index, end: match.index + match[0].length });
+    findIndex = Math.min(findIndex, Math.max(0, findMatches.length - 1));
   }
-  fragment.append(document.createTextNode(output.slice(cursor)));
-  $('terminal').replaceChildren(fragment);
-  findIndex = Math.min(findIndex, Math.max(0, findMatches.length - 1));
+  // A new query alone keeps the laid-out text, and its marks until the frame that shows the new
+  // matches: only the chunks whose marks change are painted again.
+  if (findText !== output || terminal.firstChild !== (findBlockNodes[0] ?? findSplits.get(0)?.nodes[0] ?? findNodes[0] ?? null)
+    || terminal.lastChild !== (findSplits.get(last)?.nodes.slice(-1)[0] ?? findNodes[last] ?? null)) paintText(output);
+  else if (!findMatches.length) markMatches([]);
+  findShown = null; findMarks = new Map(); findMarked = -1;
+  findHighlight?.match.clear();
   updateFind(false);
+  if (findMatches.length) showMatchesSoon();
 }
 function updateFind(scroll = true) {
-  findMatches.forEach((mark, index) => { mark.dataset.current = String(index === findIndex); });
+  const current = findMatches.length ? findIndex : -1;
+  // Only the old and the new current match change. A marked current match is filled by its marks.
+  if (findHighlight) {
+    findHighlight.current.clear();
+    if (current >= 0 && !findMarks.has(current)) findHighlight.current.add(findStatic(current));
+    registerHighlights();
+  }
+  for (const mark of findMarks.get(findMarked) ?? []) mark.dataset.current = 'false';
+  for (const mark of findMarks.get(current) ?? []) mark.dataset.current = 'true';
+  findMarked = current;
   $('find-count').textContent = !$('find-query').value ? '' : findMatches.length ? `${findIndex + 1} of ${findMatches.length}` : 'No matches';
   $('find-next').disabled = $('find-previous').disabled = !findMatches.length;
-  if (scroll) findMatches[findIndex]?.scrollIntoView({ block: 'center' });
+  if (scroll && current >= 0) scrollToMatch(current);
+}
+// Chunks end after a newline where one is near, and a chunk inside a longer line ends with that line,
+// so the line can be a block of its own. A longer line is split after a space that no mark
+// or joiner follows, or between two ASCII characters, which never join into one glyph. Text with
+// neither, as in CJK, is split where a grapheme cluster starts. So the text lays out as one node would.
+const findJoins = /[\p{M}\p{Grapheme_Extend}\p{Emoji_Modifier}\u200d\u0e33\u0eb3]/uy;
+function chunkStarts(output) {
+  const starts = [0], ascii = at => output.charCodeAt(at) >= 32 && output.charCodeAt(at) < 127;
+  const spaced = at => { findJoins.lastIndex = at; return output[at - 1] === ' ' && !findJoins.test(output); };
+  let start = 0, line = output.indexOf('\n');
+  while (output.length - start > findChunk || (start && output[start - 1] !== '\n' && line >= 0)) {
+    let end = start;
+    while (line >= 0 && line < start + findChunk && (end === start || !start || output[start - 1] === '\n')) { end = line + 1; line = output.indexOf('\n', end); }
+    for (let at = start + findChunk; end === start && at > start; at--) if (spaced(at)) end = at;
+    for (let at = start + findChunk; end === start && at > start; at--) if (ascii(at - 1) && ascii(at)) end = at;
+    // Every chunk starts a cluster, so the clusters from `start` are those of the whole text.
+    if (end === start && globalThis.Intl?.Segmenter) {
+      end = start + new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+        .segment(output.slice(start, start + findChunk + 2)).containing(findChunk).index;
+    }
+    for (let at = start + findChunk + 1; end === start && at < output.length; at++) if (output[at - 1] === '\n' || (ascii(at - 1) && ascii(at))) end = at;
+    if (end === start || end >= output.length) break;
+    starts.push(end); start = end;
+  }
+  return starts;
+}
+// Paint the output as one text node per chunk, with no marks, in blocks of whole lines. A block ends
+// where a line starts findBlock characters or more into it, and before a line over findBlock long.
+function paintText(output) {
+  if (findText !== output) { findText = output; findStarts = chunkStarts(output); }
+  findNodes = output ? findStarts.map((start, index) => document.createTextNode(output.slice(start, findStarts[index + 1] ?? output.length))) : [];
+  findSplits = new Map(); findBlocks = findNodes.length ? [0] : []; findComplexBlocks = new Map();
+  for (let chunk = 1; chunk < findStarts.length; chunk++) {
+    const start = findStarts[chunk];
+    if (output[start - 1] !== '\n') continue;
+    const end = output.indexOf('\n', start);
+    if (start - findStarts[findBlocks.at(-1)] >= findBlock || (end < 0 ? output.length : end) - start > findBlock) findBlocks.push(chunk);
+  }
+  // The last block is painted in the terminal itself, after the others: WebKit copies a selection
+  // that ends after a block element with one more line.
+  findBlockNodes = findBlocks.slice(0, -1).map((chunk, index) => {
+    const block = document.createElement('span');
+    block.append(...findNodes.slice(chunk, findBlocks[index + 1]));
+    return block;
+  });
+  $('terminal').replaceChildren(...findBlockNodes, ...findNodes.slice(findBlocks.at(-1) ?? 0));
+}
+// Whether the matches on a block are marked in WebKit: it has complex text.
+function findMarkable(block) {
+  if (!findComplexBlocks.has(block)) {
+    const from = findStarts[findBlocks[block]], to = findStarts[findBlocks[block + 1]] ?? findText.length;
+    findComplexBlocks.set(block, findComplex.test(findText.slice(from, to)));
+  }
+  return findComplexBlocks.get(block);
+}
+// The matches on the block of match `index`, as [first, end, block], when WebKit marks them all at
+// once: the block has complex text and is over twice findBlock long, so one line, laid out again
+// whenever its marks change. So a scroll or Next along the line changes no marks. Otherwise null.
+function findWhole(index) {
+  if (!findHighlight || !findComplex) return null;
+  const chunk = findChunkAt(findMatches[index].start);
+  let block = 0, high = findBlocks.length - 1;
+  while (block < high) { const middle = (block + high + 1) >> 1; if (findBlocks[middle] <= chunk) block = middle; else high = middle - 1; }
+  const from = findStarts[findBlocks[block]], to = findStarts[findBlocks[block + 1]] ?? findText.length;
+  if (to - from <= 2 * findBlock || !findMarkable(block)) return null;
+  const first = offset => {
+    let low = 0, high = findMatches.length;
+    while (low < high) { const middle = (low + high) >> 1; if (findMatches[middle].start < offset) low = middle + 1; else high = middle; }
+    return low;
+  };
+  return [first(from), first(to), block];
+}
+// The spans to mark in a chunk for its matches in `indices`, as [start, end, indices] in findText. In
+// WebKit a span takes in the whole grapheme clusters at its ends, and spans that then overlap are one.
+function markSpans(chunk, indices) {
+  const from = findStarts[chunk], to = findStarts[chunk + 1] ?? findText.length, spans = [];
+  let clusters = null;
+  // Two characters under U+0300 are never one cluster, but for a carriage return and line feed.
+  const whole = (at, end) => {
+    if (!findComplex || !findClusters || at <= from || at >= to || Math.max(findText.charCodeAt(at - 1), findText.charCodeAt(at)) < 0x300) return at;
+    clusters ??= findClusters.segment(findText.slice(from, to));
+    const { index, segment } = clusters.containing(at - from);
+    return from + (end && from + index < at ? index + segment.length : index);
+  };
+  for (const index of indices) {
+    const start = whole(Math.max(findMatches[index].start, from), false), end = whole(Math.min(findMatches[index].end, to), true);
+    const last = spans.at(-1);
+    if (last && start < last[1]) { last[1] = Math.max(last[1], end); last[2].push(index); }
+    else spans.push([start, end, [index]]);
+  }
+  return spans;
+}
+// Mark the matches in `shown`, an ascending index list, and no others. Only the chunks whose marked
+// offsets change are painted again, and a selection in them is put back on the same text.
+function markMatches(shown) {
+  const wanted = new Map();
+  for (const index of shown) {
+    const { start, end } = findMatches[index];
+    for (let chunk = findChunkAt(start); findStarts[chunk] < end; chunk++) {
+      if (!wanted.has(chunk)) wanted.set(chunk, []);
+      wanted.get(chunk).push(index);
+    }
+  }
+  const changes = [];
+  for (const chunk of findSplits.keys()) if (!wanted.has(chunk)) changes.push([chunk]);
+  for (const [chunk, indices] of wanted) {
+    const split = findSplits.get(chunk), spans = markSpans(chunk, indices), key = spans.map(([start, end]) => `${start},${end}`).join(' ');
+    if (split?.key === key) split.owners = spans.map(span => span[2]); else changes.push([chunk, spans, key]);
+  }
+  const putBack = changes.length ? keepSelection() : null;
+  for (const [chunk, spans, key] of changes) {
+    const old = findSplits.get(chunk)?.nodes ?? [findNodes[chunk]], fragment = document.createDocumentFragment();
+    findSplits.delete(chunk);
+    if (!spans) fragment.append(findNodes[chunk]);
+    else {
+      const split = { key, owners: spans.map(span => span[2]), nodes: [], pieces: [], marks: [] };
+      let cursor = findStarts[chunk];
+      const text = stop => {
+        if (stop <= cursor) return;
+        const node = document.createTextNode(findText.slice(cursor, stop));
+        split.nodes.push(node); split.pieces.push({ node, start: cursor }); cursor = stop;
+      };
+      for (const [start, end] of spans) {
+        const mark = document.createElement('mark');
+        text(start);
+        mark.textContent = findText.slice(start, end);
+        split.nodes.push(mark); split.pieces.push({ node: mark.firstChild, start }); split.marks.push(mark);
+        cursor = end;
+      }
+      text(findStarts[chunk + 1] ?? findText.length);
+      for (const node of split.nodes) fragment.append(node);
+      findSplits.set(chunk, split);
+    }
+    old[0].replaceWith(fragment);
+    for (const node of old.slice(1)) node.remove();
+  }
+  putBack?.();
+  findMarks = new Map();
+  for (const { owners, marks } of findSplits.values()) {
+    marks.forEach((mark, at) => {
+      const current = String(owners[at].includes(findIndex));
+      if (mark.dataset.current !== current) mark.dataset.current = current;
+      for (const index of owners[at]) {
+        if (!findMarks.has(index)) findMarks.set(index, []);
+        findMarks.get(index).push(mark);
+      }
+    });
+  }
+  findMarked = findMatches.length ? findIndex : -1;
+  return changes.length > 0;
+}
+// The selection's ends in the terminal as offsets in findText, and a function that puts them back
+// on the text nodes painted since.
+function keepSelection() {
+  const selection = globalThis.getSelection?.(), terminal = $('terminal');
+  if (!selection || selection.isCollapsed || !findScratch) return null;
+  const { anchorNode, anchorOffset, focusNode, focusOffset } = selection;
+  const offset = (node, at) => {
+    if (!terminal.contains(node)) return null;
+    findScratch.setStart(terminal, 0); findScratch.setEnd(node, at);
+    return findScratch.toString().length;
+  };
+  const anchor = offset(anchorNode, anchorOffset), focus = offset(focusNode, focusOffset);
+  if (anchor === null && focus === null) return null;
+  return () => selection.setBaseAndExtent(...(anchor === null ? [anchorNode, anchorOffset] : findPoint(anchor, false)),
+    ...(focus === null ? [focusNode, focusOffset] : findPoint(focus, false)));
+}
+// The chunk with a place in findText: the last that starts at or before it, or before it for the
+// end of a range.
+function findChunkAt(offset, end = false) {
+  let low = 0, high = findStarts.length - 1;
+  while (low < high) {
+    const middle = (low + high + 1) >> 1, start = findStarts[middle];
+    if (end ? start < offset : start <= offset) low = middle; else high = middle - 1;
+  }
+  return low;
+}
+// The painted text node and offset at a place in findText, found in the same way.
+function findPoint(offset, end) {
+  const chunk = findChunkAt(offset, end);
+  const pieces = findSplits.get(chunk)?.pieces ?? [{ node: findNodes[chunk], start: findStarts[chunk] }];
+  let piece = pieces[0];
+  for (const next of pieces) if (end ? next.start < offset : next.start <= offset) piece = next;
+  return [piece.node, offset - piece.start];
+}
+// The box of one match, or from its start to the end of match `last`.
+function findBox(index, last = index) {
+  if (!findScratch || !findNodes.length) return null;
+  findScratch.setStart(...findPoint(findMatches[index].start, false));
+  findScratch.setEnd(...findPoint(findMatches[last].end, true));
+  return findScratch.getBoundingClientRect();
+}
+function findStatic(index) {
+  const [startContainer, startOffset] = findPoint(findMatches[index].start, false);
+  const [endContainer, endOffset] = findPoint(findMatches[index].end, true);
+  return new StaticRange({ startContainer, startOffset, endContainer, endOffset });
+}
+// Like scrollIntoView({ block: 'center' }) on the match, inside the terminal only.
+function scrollToMatch(index) {
+  const box = findBox(index);
+  if (!box) return;
+  const terminal = $('terminal'), frame = terminal.getBoundingClientRect();
+  const top = frame.top + terminal.clientTop, left = frame.left + terminal.clientLeft;
+  terminal.scrollTop += box.top + box.height / 2 - (top + terminal.clientHeight / 2);
+  if (box.left < left) terminal.scrollLeft -= left - box.left;
+  else if (box.right > left + terminal.clientWidth) terminal.scrollLeft += Math.min(box.left - left, box.right - left - terminal.clientWidth);
+}
+function showMatchesSoon() {
+  if (!findFrame) findFrame = globalThis.requestAnimationFrame?.(showVisibleMatches) ?? 0;
+}
+// Highlight every match in view and those up to a quarter screen around it, so a smaller scroll
+// keeps them. Past findCap matches out of view, only the nearest are kept, for a shorter scroll.
+function showVisibleMatches() {
+  findFrame = 0;
+  const terminal = $('terminal'), height = terminal.clientHeight, width = terminal.clientWidth;
+  if (!findMatches.length || !height) return;
+  const scroll = [terminal.scrollTop, terminal.scrollLeft];
+  if (findShown && Math.abs(scroll[0] - findBand[0]) <= findBand[2] * height && Math.abs(scroll[1] - findBand[1]) <= findBand[2] * width) return;
+  const frame = terminal.getBoundingClientRect();
+  const top = frame.top + terminal.clientTop, bottom = top + height;
+  const left = frame.left + terminal.clientLeft, right = left + width;
+  // Matches are in document order, so their boxes run top to bottom. A match on a line marked whole
+  // is measured by its line: a range over complex text that no mark splits costs up to a millisecond.
+  // The last block is in the terminal itself, so it runs from the one before to the end.
+  const box = index => {
+    const block = findWhole(index)?.[2];
+    if (block === undefined) return findBox(index);
+    if (block < findBlockNodes.length) return findBlockNodes[block].getBoundingClientRect();
+    return { top: findBlockNodes.at(-1)?.getBoundingClientRect().bottom ?? -Infinity, bottom: Infinity };
+  };
+  const first = (low, high, test) => {
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (test(box(middle))) high = middle; else low = middle + 1;
+    }
+    return low;
+  };
+  // Raw output does not wrap, so a line wider than the view also needs the columns in view.
+  const wide = terminal.scrollWidth > width;
+  // The matches that meet the view grown by `margin` screens on each side.
+  const near = margin => {
+    const shown = [], y = margin * height, x = margin * width;
+    const from = first(0, findMatches.length, box => box.bottom > top - y);
+    const to = first(from, findMatches.length, box => box.top >= bottom + y);
+    for (let index = from; index < to;) {
+      let next = to;
+      if (wide) {
+        const end = findText.indexOf('\n', findMatches[index].start);
+        for (let low = index + 1; end >= 0 && low < next;) {
+          const middle = (low + next) >> 1;
+          if (findMatches[middle].start > end) next = middle; else low = middle + 1;
+        }
+        // Right-to-left text runs backwards on a line, so a span of its matches is left out only
+        // when the box around all of it is out of the columns, and shown whole when inside them.
+        const columns = (low, high) => {
+          const box = findBox(low, high - 1);
+          if (box.right <= left - x || box.left >= right + x) return;
+          if (high - low > 1 && (box.left < left - x || box.right > right + x)) {
+            const middle = (low + high) >> 1;
+            columns(low, middle); columns(middle, high);
+          } else for (let at = low; at < high; at++) shown.push(at);
+        };
+        // Measuring columns on a long line of complex text costs more than marking all of it.
+        if (findWhole(index)) for (let at = index; at < next; at++) shown.push(at); else columns(index, next);
+      } else for (let at = index; at < next; at++) shown.push(at);
+      index = next;
+    }
+    return shown;
+  };
+  const view = near(0);
+  let shown = near(1 / 4), margin = 1 / 4;
+  const kept = new Set(view.concat(shown.filter(index => findWhole(index))));
+  if (shown.length - kept.size > findCap) {
+    // Keep the findCap matches out of view nearest to it, in screens on either axis, and those on a line
+    // marked whole. A scroll shorter than the nearest one left out still has every match in view highlighted.
+    const distance = index => {
+      const box = findBox(index);
+      return Math.max((top - box.bottom) / height, (box.top - bottom) / height, (left - box.right) / width, (box.left - right) / width);
+    };
+    const out = shown.filter(index => !kept.has(index)).map(index => [distance(index), index]).sort((a, b) => a[0] - b[0]);
+    margin = out[findCap][0];
+    shown = [...kept].concat(out.slice(0, findCap).map(([, index]) => index)).sort((a, b) => a - b);
+  }
+  // Without highlights every match is marked, and in WebKit each on a block of complex text.
+  const marked = [], lit = [];
+  for (let at = 0, block = 0; at < shown.length; at++) {
+    const chunk = findChunkAt(findMatches[shown[at]].start);
+    while (findBlocks[block + 1] <= chunk) block++;
+    const whole = findWhole(shown[at]);
+    if (!whole) (!findHighlight || (findComplex && findMarkable(block)) ? marked : lit).push(shown[at]);
+    else {
+      for (let index = whole[0]; index < whole[1]; index++) marked.push(index);
+      while (shown[at + 1] < whole[1]) at++;
+    }
+  }
+  findHighlight?.match.clear();
+  const changed = markMatches(marked);
+  for (const index of lit) findHighlight.match.add(findStatic(index));
+  if (findHighlight) registerHighlights();
+  // The current match is on new nodes.
+  if (changed && findHighlight) updateFind(false);
+  findShown = shown; findBand = [...scroll, margin];
+}
+// A new width or font wraps the text again under the same scroll offset.
+function refindVisible() {
+  findShown = null;
+  if (findMatches.length) showMatchesSoon();
 }
 function moveFind(delta) {
   if (!findMatches.length) return;
@@ -627,13 +985,18 @@ $('sessions-toggle').onclick = () => {
   if (hasFinePointer()) $('session-search').focus();
 };
 $('sessions-close').onclick = () => $('sessions-dialog').close();
-$('sessions-dialog').addEventListener('close', () => { if (!$('sessions-toggle').hidden) $('sessions-toggle').focus(); });
+$('sessions-dialog').addEventListener('close', () => { dropWaitingSearch(); if (!$('sessions-toggle').hidden) $('sessions-toggle').focus(); });
 $('session-search').oninput = searchSaved;
 $('find-toggle').onclick = () => {
   $('find-bar').hidden = false; $('find-toggle').setAttribute('aria-expanded', 'true');
   $('find-query').focus(); paintOutput();
 };
 $('find-query').oninput = () => { findIndex = 0; paintOutput(); updateFind(); };
+$('terminal').addEventListener('scroll', () => { if (findMatches.length) showMatchesSoon(); });
+// The observer also keeps refindVisible alive: WebKit drops a listener on document.fonts once
+// nothing else holds its function.
+if (globalThis.ResizeObserver) new ResizeObserver(refindVisible).observe($('terminal'));
+document.fonts?.addEventListener?.('loadingdone', refindVisible);
 $('find-bar').onsubmit = event => { event.preventDefault(); moveFind(1); };
 $('find-next').onclick = () => moveFind(1);
 $('find-previous').onclick = () => moveFind(-1);
@@ -648,8 +1011,30 @@ $('copy-output').onclick = async () => {
 };
 $('connection').addEventListener('toggle', () => { if ($('connection').open) $('copy-output').textContent = 'Copy output'; });
 
-async function request(action, text, tabID = selected, pairing = false, extra = {}) {
-  if (!connected && !pairing && action !== 'state') throw new Error('Not connected.');
+// The saved search that has not been sent yet.
+let waitingSearch = null;
+// A cleared box or a closed sheet ends the query; skip it at its turn.
+function dropWaitingSearch() { if (waitingSearch) waitingSearch.stale = true; waitingSearch = null; }
+function request(action, text, tabID = selected, pairing = false, extra = {}) {
+  if (!connected && !pairing && action !== 'state') return Promise.reject(new Error('Not connected.'));
+  if (action !== 'chats') return enqueue(() => transmit(action, text, tabID, pairing, extra));
+  // Typing can outrun the Mac. Last in line, the waiting search takes the newest query;
+  // behind a later command it is skipped at its turn. Its callers see a stale token.
+  const waiting = waitingSearch;
+  if (waiting?.tail === outgoing && waiting.generation === generation && waiting.epoch === commandEpoch) {
+    Object.assign(waiting, { text, tabID });
+    return waiting.reply;
+  }
+  if (waiting) waiting.stale = true;
+  const search = waitingSearch = { text, tabID, generation, epoch: commandEpoch };
+  search.reply = enqueue(async () => {
+    if (waitingSearch === search) waitingSearch = null;
+    return search.stale ? { stale: true } : transmit(action, search.text, search.tabID, pairing, extra);
+  });
+  search.tail = outgoing;
+  return search.reply;
+}
+async function enqueue(send) {
   if (queuedCommands >= 32) throw new Error('Too many pending commands. Wait for the Mac.');
   queuedCommands++;
   const current = generation;
@@ -662,7 +1047,7 @@ async function request(action, text, tabID = selected, pairing = false, extra = 
     if (current !== generation || epoch !== commandEpoch) {
       throw new Error("Connection changed. Check the terminal before sending again.");
     }
-    return await transmit(action, text, tabID, pairing, extra);
+    return await send();
   } finally { queuedCommands--; release(); }
 }
 async function transmit(action, text, tabID, pairing, extra = {}) {
@@ -1123,7 +1508,7 @@ async function forget() {
   selectedStatus = null; tabCount = 0;
   $('keys').hidden = true; $('keys-toggle').setAttribute('aria-expanded', 'false');
   clearAttachments();
-  rawOutput = ''; rawMode = false; displayedOutput = null;
+  rawOutput = ''; rawMode = false; displayedOutput = null; readableFrom = null; readableText = '';
   histories.clear(); pendingEarlier = null; earlierFlight = false; searchToken++;
   sessionTabs = []; $('sessions-dialog').close(); $('project-dialog').close(); closeFind();
   $('raw-toggle').setAttribute('aria-pressed', 'false'); $('raw-toggle').textContent = 'Show raw terminal';
