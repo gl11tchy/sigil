@@ -65,7 +65,6 @@ private let scratchComponents: Set<String> = [
 private let scratchChildrenByRoot: [String: Set<String>] = [
     ".claude": ["worktrees", "projects", "scratch", "scratchpads", "tmp"],
     ".bb": ["worktrees", "thread-storage", "personal-workspaces"],
-    ".sigil": ["worktrees"],
     ".cache": ["quick-grok"],
 ]
 

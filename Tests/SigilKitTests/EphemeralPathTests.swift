@@ -31,7 +31,6 @@ struct EphemeralPathTests {
         "/Users/someone/.bb/thread-storage/thr_iimp24a4nc",
         "/Users/someone/.bb/personal-workspaces/thr_abc",
         "/Users/someone/.bb/plugins/environment-personal-workspace/host-data/workspaces/thr_abc",
-        "/Users/someone/.sigil/worktrees/%2FUsers%2Fsomeone%2Fsigil/017231be",
         "/Users/someone/.claude/skills/write-swift/.claude/worktrees/agent-1",
         "/Users/someone/.bb/repos/app/.bb/plugins/environment-git-worktree/app",
     ])
@@ -57,6 +56,7 @@ struct EphemeralPathTests {
         "/Users/someone/.bb/plugins/other-plugin",
         "/Users/someone/src/environment-git-worktree",
         "/Users/someone/.sigil",
+        "/Users/someone/.sigil/worktrees/%2FUsers%2Fsomeone%2Fsigil/017231be",
         "/Users/someone/src/thread-storage",
     ])
     func treatsRealLocationsAsPersistent(path: String) {
