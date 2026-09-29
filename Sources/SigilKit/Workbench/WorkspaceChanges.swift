@@ -123,15 +123,36 @@ public enum WorkspaceChangesReader {
             head = "detached at \(short)"
         }
 
-        let counts = parseNumstat(numstat.data)
         let entries = parseStatus(status.data)
-        let files = entries.prefix(fileLimit).map { entry in
-            let count = counts[entry.path]
+        let files = join(entries, parseNumstat(numstat.data)).prefix(fileLimit)
+        return .changes(WorkspaceChanges(head: head, files: Array(files), isTruncated: entries.count > fileLimit))
+    }
+
+    /// Gives each numstat count to exactly one status entry. A tracked entry
+    /// takes its own path's count. A rename or copy also takes its old
+    /// path's count when no tracked entry owns that path: status pairs a
+    /// staged rename against the index, but numstat compares HEAD with the
+    /// working tree and reports a deletion and an addition once the file no
+    /// longer resembles its original. Untracked entries take nothing, as Git
+    /// counts nothing for them, even when a deleted path is back on disk.
+    static func join(
+        _ entries: [StatusEntry], _ counts: [String: (added: Int?, removed: Int?)]
+    ) -> [WorkspaceChanges.File] {
+        var owned = Set(entries.filter { $0.status != .untracked }.map(\.path))
+        return entries.map { entry in
+            var count = entry.status == .untracked ? nil : counts[entry.path]
+            if let oldPath = entry.oldPath, owned.insert(oldPath).inserted, let old = counts[oldPath] {
+                count = count.map { (sum($0.added, old.added), sum($0.removed, old.removed)) } ?? old
+            }
             return WorkspaceChanges.File(
                 path: entry.path, oldPath: entry.oldPath, status: entry.status,
                 added: count?.added, removed: count?.removed)
         }
-        return .changes(WorkspaceChanges(head: head, files: files, isTruncated: entries.count > fileLimit))
+    }
+
+    /// Nil only when neither side has a count, as for a binary file.
+    private static func sum(_ a: Int?, _ b: Int?) -> Int? {
+        a == nil && b == nil ? nil : (a ?? 0) + (b ?? 0)
     }
 
     struct StatusEntry: Equatable {

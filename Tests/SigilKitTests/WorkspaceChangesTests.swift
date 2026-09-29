@@ -78,6 +78,69 @@ struct WorkspaceChangesTests {
         #expect(!FileManager.default.fileExists(atPath: repo.appendingPathComponent(".git/index.lock").path))
     }
 
+    @Test func aStagedRenameThatNoLongerResemblesItsOriginalKeepsItsDeletedLines() async throws {
+        let repo = try scratch()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try "one\ntwo\nthree\n".write(to: repo.appendingPathComponent("old.txt"), atomically: true, encoding: .utf8)
+        try git(["init", "-q", "-b", "main"], in: repo)
+        try git(["add", "."], in: repo)
+        try git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"], in: repo)
+        try git(["mv", "old.txt", "new.txt"], in: repo)
+        try "w\nx\ny\nz\n".write(to: repo.appendingPathComponent("new.txt"), atomically: true, encoding: .utf8)
+        // Git no longer pairs the two against HEAD: old.txt −3, new.txt +4.
+        #expect(try gitTotals(in: repo) == (added: 4, removed: 3))
+
+        guard case .changes(let changes) = await WorkspaceChangesReader.read(repo) else {
+            Issue.record("expected changes")
+            return
+        }
+        #expect(
+            changes.files == [.init(path: "new.txt", oldPath: "old.txt", status: .renamed, added: 4, removed: 3)])
+        #expect(changes.added == 4)
+        #expect(changes.removed == 3)
+    }
+
+    @Test func countsMatchGitAndNoPathIsCountedTwice() async throws {
+        let repo = try scratch()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try "a\nb\nc\nd\ne\n".write(to: repo.appendingPathComponent("similar.txt"), atomically: true, encoding: .utf8)
+        try "1\n2\n3\n4\n5\n".write(to: repo.appendingPathComponent("moved.txt"), atomically: true, encoding: .utf8)
+        try "k\n".write(to: repo.appendingPathComponent("unstaged.txt"), atomically: true, encoding: .utf8)
+        try Data([0, 1, 2, 3]).write(to: repo.appendingPathComponent("image.bin"))
+        try git(["init", "-q", "-b", "main"], in: repo)
+        try git(["add", "."], in: repo)
+        try git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"], in: repo)
+
+        // A rename Git still pairs, with one line changed.
+        try git(["mv", "similar.txt", "renamed.txt"], in: repo)
+        try "a\nb\nC\nd\ne\n".write(to: repo.appendingPathComponent("renamed.txt"), atomically: true, encoding: .utf8)
+        // A rename whose old path holds a new, untracked file.
+        try git(["mv", "moved.txt", "there.txt"], in: repo)
+        try "fresh\n".write(to: repo.appendingPathComponent("moved.txt"), atomically: true, encoding: .utf8)
+        // Removed from the index but kept on disk: a deletion and an untracked file at one path.
+        try git(["rm", "-q", "--cached", "unstaged.txt"], in: repo)
+        try Data([9, 0, 9]).write(to: repo.appendingPathComponent("image.bin"))
+
+        guard case .changes(let changes) = await WorkspaceChangesReader.read(repo) else {
+            Issue.record("expected changes")
+            return
+        }
+        let git = try gitTotals(in: repo)
+        #expect(changes.added == git.added)
+        #expect(changes.removed == git.removed)
+        let renamed = changes.files.first { $0.path == "renamed.txt" }
+        #expect(renamed == .init(path: "renamed.txt", oldPath: "similar.txt", status: .renamed, added: 1, removed: 1))
+        #expect(changes.files.first { $0.path == "there.txt" }?.oldPath == "moved.txt")
+        #expect(changes.files.first { $0.path == "unstaged.txt" && $0.status == .deleted }?.removed == 1)
+        // Git does not count untracked files, so the reader does not either.
+        for file in changes.files where file.status == .untracked {
+            #expect(file.added == nil && file.removed == nil, "\(file.path)")
+        }
+        let binary = changes.files.first { $0.path == "image.bin" }
+        #expect(binary?.status == .modified)
+        #expect(binary?.added == nil)
+    }
+
     @Test func readsARepositoryWithNoCommitYet() async throws {
         let repo = try scratch()
         defer { try? FileManager.default.removeItem(at: repo) }
@@ -211,6 +274,17 @@ private func scratch() throws -> URL {
         .appendingPathComponent("sigil-changes-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return URL(fileURLWithPath: GrokPaths.canonicalPath(url.path))
+}
+
+/// What Git itself counts against HEAD, binary files left out.
+private func gitTotals(in repo: URL) throws -> (added: Int, removed: Int) {
+    try git(["diff", "HEAD", "--numstat", "-M"], in: repo)
+        .split(whereSeparator: \.isNewline)
+        .reduce(into: (added: 0, removed: 0)) { totals, line in
+            let parts = line.split(separator: "\t")
+            totals.added += Int(parts[0]) ?? 0
+            totals.removed += Int(parts[1]) ?? 0
+        }
 }
 
 private func fakeGit(in directory: URL, _ body: String) throws -> URL {
