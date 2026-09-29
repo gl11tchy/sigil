@@ -42,7 +42,7 @@ public final class SessionStore {
     @ObservationIgnored private var inflight = 0
     @ObservationIgnored private var debounceTask: Task<Void, Never>?
     @ObservationIgnored private var firstPendingEvent: ContinuousClock.Instant?
-    @ObservationIgnored private let watcher = SessionDirectoryWatcher()
+    @ObservationIgnored let watcher = SessionDirectoryWatcher()
     @ObservationIgnored private var nativeWatchers: [String: SessionDirectoryWatcher] = [:]
     @ObservationIgnored private var watchedPath: String?
     @ObservationIgnored private var watcherRetryTask: Task<Void, Never>?
@@ -319,7 +319,13 @@ public final class SessionStore {
             // Also ends a stream whose root was just deleted (a restart
             // event clears `watchedPath` before this runs).
             watcher.stop()
-            watchedPath = nil
+            if watchedPath != nil {
+                // FSEvents has not reported the deletion yet (its restart event
+                // clears `watchedPath`), and stopping the stream drops that report.
+                // Treat the loss as an event of its own.
+                watchedPath = nil
+                eventContinuation.yield(false)
+            }
             return
         }
         guard desiredPath != watchedPath else { return }
