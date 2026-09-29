@@ -54,6 +54,9 @@ final class TerminalTab: Identifiable {
 
     /// Preferred label. The session summary wins once the sidebar knows one.
     var sessionTitle: String?
+    /// Color for a tab that is not a saved Grok conversation. Saved
+    /// conversations keep their color in settings, keyed by session id.
+    var markColor: TabColor?
 
     private var isSelected: () -> Bool = { false }
     private let completionEventsURL: URL?

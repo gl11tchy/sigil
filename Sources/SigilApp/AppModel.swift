@@ -551,6 +551,10 @@ final class AppModel {
         if remainingNames != settings.conversationNames {
             settings.conversationNames = remainingNames
         }
+        let remainingColors = pruningMissingColors(settings.tabColors)
+        if remainingColors != settings.tabColors {
+            settings.tabColors = remainingColors
+        }
         let focused = settings.focusedProjectPath
         if !focused.isEmpty,
             !SidebarOrganization.isSentinel(focused),
@@ -628,6 +632,13 @@ final class AppModel {
 
     private func pruningMissingNames(_ names: [ConversationName]) -> [ConversationName] {
         names.filter { record in
+            store.sessions.contains { $0.id == record.sessionID && samePath($0.cwd, record.cwd) }
+                || tabs.contains { tabMatches($0, sessionID: record.sessionID, cwd: record.cwd) }
+        }
+    }
+
+    private func pruningMissingColors(_ records: [TabColorRecord]) -> [TabColorRecord] {
+        records.filter { record in
             store.sessions.contains { $0.id == record.sessionID && samePath($0.cwd, record.cwd) }
                 || tabs.contains { tabMatches($0, sessionID: record.sessionID, cwd: record.cwd) }
         }
@@ -1238,19 +1249,128 @@ final class AppModel {
 
     /// A tab's label. New sessions start out named after their folder; once the CLI
     /// writes a summary for them, the store supplies the conversation name. A
-    /// user-chosen name wins even when the CLI has not written a summary yet.
+    /// user-chosen name wins even when the CLI has not written a summary yet,
+    /// and even when the store has not listed the session yet.
     func title(for tab: TerminalTab) -> String {
         if let id = tab.sessionID,
-            let session = store.sessions.first(where: {
-                $0.id == id && samePath($0.cwd, tab.workingDirectory.path)
-            })
+            let custom = ConversationNaming.name(
+                sessionID: id,
+                cwd: tab.workingDirectory.path,
+                in: settings.conversationNames,
+                samePath: samePath)
         {
-            if hasCustomName(session) { return title(for: session) }
-            if !session.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return session.title
-            }
+            return custom
+        }
+        if let session = session(for: tab),
+            !session.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            return session.title
         }
         return tab.title
+    }
+
+    func tabColor(for tab: TerminalTab) -> TabColor? {
+        if let id = tab.sessionID {
+            return TabColors.color(
+                sessionID: id,
+                cwd: tab.workingDirectory.path,
+                in: settings.tabColors,
+                samePath: samePath)
+        }
+        return tab.markColor
+    }
+
+    func setTabColor(_ tab: TerminalTab, to color: TabColor?) {
+        guard let id = tab.sessionID else {
+            tab.markColor = color
+            return
+        }
+        let next = TabColors.setting(
+            color,
+            sessionID: id,
+            cwd: tab.workingDirectory.path,
+            onto: settings.tabColors,
+            samePath: samePath)
+        guard next != settings.tabColors else { return }
+        settings.tabColors = next
+    }
+
+    func hasCustomTabName(_ tab: TerminalTab) -> Bool {
+        if let id = tab.sessionID {
+            return ConversationNaming.name(
+                sessionID: id,
+                cwd: tab.workingDirectory.path,
+                in: settings.conversationNames,
+                samePath: samePath) != nil
+        }
+        guard let local = tab.sessionTitle, !local.isEmpty else { return false }
+        return local != automaticTitle(for: tab)
+    }
+
+    /// Empty, whitespace, or the automatic title clears a user name.
+    /// A Grok conversation keeps the name the sidebar uses.
+    func renameTab(_ tab: TerminalTab, to raw: String) {
+        if let session = session(for: tab) {
+            rename(session, to: raw)
+            return
+        }
+        if let id = tab.sessionID {
+            let next = ConversationNaming.setting(
+                raw,
+                sessionID: id,
+                cwd: tab.workingDirectory.path,
+                cliTitle: automaticTitle(for: tab),
+                onto: settings.conversationNames,
+                samePath: samePath)
+            guard next != settings.conversationNames else { return }
+            settings.conversationNames = next
+            return
+        }
+        let trimmed = ConversationNaming.normalized(raw)
+        tab.sessionTitle = (trimmed == nil || trimmed == automaticTitle(for: tab)) ? nil : trimmed
+    }
+
+    func resetTabName(_ tab: TerminalTab) {
+        if let session = session(for: tab) {
+            resetName(session)
+            return
+        }
+        if let id = tab.sessionID {
+            let next = ConversationNaming.removing(
+                sessionID: id,
+                cwd: tab.workingDirectory.path,
+                from: settings.conversationNames,
+                samePath: samePath)
+            if next != settings.conversationNames {
+                settings.conversationNames = next
+            }
+            return
+        }
+        tab.sessionTitle = nil
+    }
+
+    private func session(for tab: TerminalTab) -> GrokSession? {
+        guard let id = tab.sessionID else { return nil }
+        return store.sessions.first {
+            $0.id == id && samePath($0.cwd, tab.workingDirectory.path)
+        }
+    }
+
+    /// Folder name, or the provider name. Not a user name and not a CLI summary.
+    private func automaticTitle(for tab: TerminalTab) -> String {
+        if tab.spec.provider != .grokBuild { return tab.spec.provider.name }
+        let name = tab.workingDirectory.lastPathComponent
+        return name.isEmpty ? tab.workingDirectory.path : name
+    }
+
+    private func clearTabColor(_ session: GrokSession) {
+        let next = TabColors.removing(
+            sessionID: session.id,
+            cwd: session.cwd,
+            from: settings.tabColors,
+            samePath: samePath)
+        guard next != settings.tabColors else { return }
+        settings.tabColors = next
     }
 
     /// Same label `open` writes: the sidebar name, including the empty-summary
@@ -1395,6 +1515,7 @@ final class AppModel {
         let tab = TerminalTab(id: tabID, spec: tagged(spec, tabID: tabID), settings: settings)
         tab.onUnseenActivityChange = { [weak self] in self?.refreshDockIndicator() }
         tab.sessionTitle = old.sessionTitle
+        tab.markColor = old.markColor
         tab.restoreUnseenActivity(from: old)
         let newID = tab.id
         tab.start(isSelected: { [weak self] in
@@ -1936,6 +2057,7 @@ final class AppModel {
             unpin(session)
             unarchive(session)
             resetName(session)
+            clearTabColor(session)
             panel.deleteNotes(forSessionID: session.id, cwd: session.cwd)
             // A same-ID conversation in another folder may still be waiting to
             // adopt the flat-layout note; when in doubt, keep the file.

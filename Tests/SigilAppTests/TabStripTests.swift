@@ -2,6 +2,7 @@ import Foundation
 import Testing
 
 @testable import SigilApp
+@testable import SigilKit
 
 @MainActor
 struct TabStripTests {
@@ -104,6 +105,21 @@ struct TabStripTests {
         let directory = home.appendingPathComponent("projects/sigil")
         #expect(TabListRows.folder(of: directory) == "~/projects/sigil")
         #expect(TabListRows.folder(of: home) == "~")
+    }
+
+    @Test @MainActor func tabChipSaysTheColorAlongWithTheWorkingState() {
+        #expect(
+            TabChipAccess.value(
+                isSelected: true, hasUnseenActivity: false, activity: .idle, color: nil)
+                == "selected, idle")
+        #expect(
+            TabChipAccess.value(
+                isSelected: false, hasUnseenActivity: true, activity: .working, color: .mint)
+                == "background, unread, working, mint")
+        #expect(
+            TabChipAccess.value(
+                isSelected: false, hasUnseenActivity: false, activity: .exited(code: 2), color: nil)
+                == "background, exited")
     }
 
     @Test func tabListIsShownWhenMoreThanOneSessionIsOpen() {

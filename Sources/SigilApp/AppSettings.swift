@@ -20,6 +20,7 @@ final class AppSettings {
         static let pinnedProjects = "sidebar.pinnedProjects"
         static let archivedConversations = "sidebar.archivedConversations"
         static let conversationNames = "sidebar.conversationNames"
+        static let tabColors = "tabs.colors"
         static let isTabMessagingEnabled = "bridge.enabled"
         static let defaultDirectory = "session.defaultDirectory"
         static let openTabs = "session.openTabs"
@@ -101,6 +102,14 @@ final class AppSettings {
         didSet {
             if let data = try? JSONEncoder().encode(conversationNames) {
                 defaults.set(data, forKey: Key.conversationNames)
+            }
+        }
+    }
+    /// User-chosen tab colors. Identity is session id + working directory.
+    var tabColors: [TabColorRecord] {
+        didSet {
+            if let data = try? JSONEncoder().encode(tabColors) {
+                defaults.set(data, forKey: Key.tabColors)
             }
         }
     }
@@ -189,6 +198,13 @@ final class AppSettings {
             conversationNames = decoded
         } else {
             conversationNames = []
+        }
+        if let data = defaults.data(forKey: Key.tabColors),
+            let decoded = TabColors.decode(data)
+        {
+            tabColors = decoded
+        } else {
+            tabColors = []
         }
         isTabMessagingEnabled = defaults.bool(forKey: Key.isTabMessagingEnabled)
         defaultDirectory =

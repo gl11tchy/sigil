@@ -1,3 +1,4 @@
+import SigilKit
 import SwiftUI
 
 /// Chips share leftover width. Content wider than the strip scrolls.
@@ -41,9 +42,16 @@ struct TabStripView: View {
                         TabChip(
                             tab: tab,
                             label: model.title(for: tab),
+                            color: model.tabColor(for: tab),
+                            hasCustomName: model.hasCustomTabName(tab),
                             isSelected: tab.id == model.selectedTab?.id,
                             select: { model.select(tab.id) },
-                            close: { model.requestCloseTab(tab.id) }
+                            close: { model.requestCloseTab(tab.id) },
+                            rename: { model.renameTab(tab, to: $0) },
+                            resetName: { model.resetTabName(tab) },
+                            setColor: { model.setTabColor(tab, to: $0) },
+                            liveColor: { model.tabColor(for: tab) },
+                            focusTerminal: { model.focusSelectedTerminal() }
                         )
                         .id(tab.id)
                     }
@@ -112,34 +120,84 @@ private struct TabChipRow: Layout {
     }
 }
 
+enum TabChipAccess {
+    static func value(
+        isSelected: Bool,
+        hasUnseenActivity: Bool,
+        activity: TerminalTab.Activity,
+        color: TabColor?
+    ) -> String {
+        var parts = [isSelected ? "selected" : "background"]
+        if hasUnseenActivity { parts.append("unread") }
+        switch activity {
+        case .starting: parts.append("starting")
+        case .working: parts.append("working")
+        case .idle: parts.append("idle")
+        case .exited: parts.append("exited")
+        }
+        if let color { parts.append(color.label.lowercased()) }
+        return parts.joined(separator: ", ")
+    }
+}
+
 private struct TabChip: View {
     let tab: TerminalTab
     let label: String
+    let color: TabColor?
+    let hasCustomName: Bool
     let isSelected: Bool
     let select: () -> Void
     let close: () -> Void
+    let rename: (String) -> Void
+    let resetName: () -> Void
+    let setColor: (TabColor?) -> Void
+    /// The color stored now. The menu must not trust the color it was built with.
+    let liveColor: () -> TabColor?
+    let focusTerminal: () -> Void
 
     @Environment(\.palette) private var palette
     @State private var isHovering = false
     @State private var isCloseHovering = false
+    @State private var isRenaming = false
+    @State private var draft = ""
+    @State private var discardRename = false
+    @FocusState private var renameFocused: Bool
 
     var body: some View {
         HStack(spacing: 2) {
-            Button(action: select) {
-                HStack(spacing: 6) {
-                    StatusDot(activity: tab.activity)
-                    Text(label)
-                        .font(.system(size: 11.5))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                        .foregroundStyle(isSelected ? palette.text : palette.textDim)
+            if isRenaming {
+                TextField("Name", text: $draft)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(palette.text)
+                    .focused($renameFocused)
+                    .onSubmit { commitRename() }
+                    .onExitCommand(perform: cancelRename)
+                    .onKeyPress(.escape) {
+                        cancelRename()
+                        return .handled
+                    }
+                    .onChange(of: renameFocused) { wasFocused, focused in
+                        if wasFocused && !focused { commitRename() }
+                    }
+                    .accessibilityLabel("Tab name")
+            } else {
+                Button(action: select) {
+                    HStack(spacing: 6) {
+                        StatusDot(activity: tab.activity)
+                        Text(label)
+                            .font(.system(size: 11.5))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                            .foregroundStyle(isSelected ? palette.text : palette.textDim)
+                    }
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(label)
+                .accessibilityValue(accessibilityState)
+                .accessibilityAddTraits(isSelected ? [.isSelected] : [])
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(label)
-            .accessibilityValue(accessibilityState)
-            .accessibilityAddTraits(isSelected ? [.isSelected] : [])
 
             Button(action: close) {
                 Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
@@ -165,6 +223,13 @@ private struct TabChip: View {
                         : (isHovering ? palette.raised.opacity(0.5) : Color.clear)
                 )
         )
+        .overlay(alignment: .leading) {
+            if let color {
+                TabColorMark(color: color)
+                    .padding(.leading, 3)
+                    .padding(.vertical, 5)
+            }
+        }
         .overlay(alignment: .topTrailing) {
             if tab.hasUnseenActivity && !isSelected {
                 Circle().fill(palette.accent).frame(width: 4, height: 4).offset(x: -3, y: 3)
@@ -172,17 +237,98 @@ private struct TabChip: View {
         }
         .onHover { isHovering = $0 }
         .help(tab.workingDirectory.path)
+        .contextMenu { tabMenu }
+        .task(id: isRenaming) { await focusRenameField() }
+    }
+
+    @ViewBuilder
+    private var tabMenu: some View {
+        Button("Rename") { beginRename() }
+        if hasCustomName {
+            Button("Reset Name") { resetName() }
+        }
+        Menu("Color") {
+            Toggle(
+                "None",
+                isOn: Binding(
+                    get: { color == nil },
+                    set: { isOn in if isOn { setColor(nil) } }
+                )
+            )
+            ForEach(TabColor.allCases) { mark in
+                Toggle(
+                    isOn: Binding(
+                        get: { liveColor() == mark },
+                        set: { isOn in
+                            let next = TabColors.choosing(
+                                mark, isOn: isOn, current: liveColor())
+                            if next != liveColor() { setColor(next) }
+                        }
+                    )
+                ) {
+                    Label {
+                        Text(mark.label)
+                    } icon: {
+                        Image(nsImage: TabColorSwatch.image(for: mark))
+                    }
+                }
+            }
+        }
+        Divider()
+        Button("Close Tab") { close() }
     }
 
     private var accessibilityState: String {
-        var parts = [isSelected ? "selected" : "background"]
-        if tab.hasUnseenActivity { parts.append("unread") }
-        switch tab.activity {
-        case .starting: parts.append("starting")
-        case .working: parts.append("working")
-        case .idle: parts.append("idle")
-        case .exited: parts.append("exited")
+        TabChipAccess.value(
+            isSelected: isSelected,
+            hasUnseenActivity: tab.hasUnseenActivity,
+            activity: tab.activity,
+            color: color
+        )
+    }
+
+    private func beginRename() {
+        draft = label
+        discardRename = false
+        isRenaming = true
+    }
+
+    private func commitRename() {
+        guard isRenaming, !discardRename else { return }
+        let submitted = draft
+        isRenaming = false
+        rename(submitted)
+        focusTerminal()
+    }
+
+    private func cancelRename() {
+        discardRename = true
+        isRenaming = false
+        focusTerminal()
+    }
+
+    private func focusRenameField() async {
+        guard isRenaming else { return }
+        renameFocused = true
+        let baseline = draft
+        let started = ContinuousClock.now
+        while !Task.isCancelled && isRenaming {
+            let editor = NSApp.keyWindow?.fieldEditor(false, for: nil)
+            let isFirstResponder = editor.map { $0.window?.firstResponder === $0 } ?? false
+            let ready = AppModel.isRenameFieldEditorReady(
+                fieldEditorExists: editor != nil,
+                fieldEditorIsFirstResponder: isFirstResponder,
+                isEditingRenameField: renameFocused && editor?.string == draft
+            )
+            if ready {
+                if draft == baseline { editor?.selectAll(nil) }
+                return
+            }
+            guard
+                AppModel.shouldContinueRenameSelectAllRetry(
+                    elapsed: ContinuousClock.now - started)
+            else { return }
+            try? await Task.sleep(for: AppModel.renameSelectAllRetryInterval)
         }
-        return parts.joined(separator: ", ")
     }
 }
