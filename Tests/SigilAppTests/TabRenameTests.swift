@@ -193,6 +193,95 @@ struct TabRenameTests {
         #expect(fixture.settings.tabColors.isEmpty)
     }
 
+    @Test func aCodexTabKeepsTheNameAndColorItHadBeforeItsChatId() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let folder = try fixture.directory("project")
+        let native = UUID().uuidString.lowercased()
+        let script = ScriptedSessions()
+        script.sessions = [
+            GrokSession(
+                id: native, cwd: folder.path, summary: "CLI summary",
+                createdAt: .now, updatedAt: .now, messageCount: 1,
+                modelID: nil, agentName: nil, reasoningEffort: nil,
+                directory: folder, provider: .codex)
+        ]
+        let store = SessionStore(
+            root: fixture.store.root, timing: SessionStoreTiming(),
+            scanOperation: { _, _, _ in
+                SessionScanner.Result(sessions: script.sessions, cache: [:], loadError: nil)
+            })
+        try FileManager.default.createDirectory(at: fixture.store.root, withIntermediateDirectories: true)
+        await store.reload()
+
+        let model = fixture.model(store: store)
+        defer { model.closeAllTabsAndWait() }
+        let tab = TerminalTab(
+            spec: GrokLaunchSpec(
+                workingDirectory: folder, mode: .new(sessionID: UUID()), provider: .codex),
+            settings: fixture.settings)
+        model.renameTab(tab, to: "Auth")
+        model.setTabColor(tab, to: .amber)
+        model.adoptLearnedCodexSession(tab, session: script.sessions[0])
+
+        #expect(model.title(for: tab) == "Auth")
+        #expect(model.tabColor(for: tab) == .amber)
+        #expect(model.hasCustomTabName(tab))
+        #expect(
+            fixture.settings.conversationNames
+                == [ConversationName(sessionID: "codex:\(native)", cwd: folder.path, name: "Auth")])
+        #expect(
+            fixture.settings.tabColors
+                == [TabColorRecord(sessionID: "codex:\(native)", cwd: folder.path, color: .amber)])
+    }
+
+    @Test func aSecondCopyKeepsAColorItDidNotSet() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let folder = try fixture.directory("project")
+        let first = fixture.model()
+        let secondSettings = AppSettings(defaults: fixture.defaults)
+        let second = fixture.model(settings: secondSettings)
+        defer {
+            first.closeAllTabsAndWait()
+            second.closeAllTabsAndWait()
+        }
+        let kept = TerminalTab(spec: spec(folder: folder, sessionID: "kept"), settings: fixture.settings)
+        let added = TerminalTab(spec: spec(folder: folder, sessionID: "added"), settings: secondSettings)
+
+        first.setTabColor(kept, to: .mint)
+        let data = try #require(fixture.defaults.data(forKey: "tabs.colors"))
+        var rows = try #require(JSONSerialization.jsonObject(with: data) as? [[String: String]])
+        rows.append(["sessionID": "bad", "cwd": folder.path, "color": "nope"])
+        fixture.defaults.set(try JSONSerialization.data(withJSONObject: rows), forKey: "tabs.colors")
+        second.setTabColor(added, to: .amber)
+
+        #expect(
+            secondSettings.tabColors
+                == [
+                    TabColorRecord(sessionID: "added", cwd: folder.path, color: .amber),
+                    TabColorRecord(sessionID: "kept", cwd: folder.path, color: .mint),
+                ])
+    }
+
+    @Test(arguments: ["claudeCode", "codex"])
+    func aNativeColorStaysWhenItsHistoryCannotBeRead(provider: String) async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let folder = try fixture.directory("project")
+        try FileManager.default.createDirectory(at: fixture.store.root, withIntermediateDirectories: true)
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let native = "\(provider):\(UUID().uuidString.lowercased())"
+        fixture.settings.tabColors = [
+            TabColorRecord(sessionID: native, cwd: folder.path, color: .cyan)
+        ]
+
+        model.pruneMissingPins()
+        #expect(fixture.settings.tabColors.map(\.sessionID) == [native])
+    }
+
     @Test func aStoredUnknownColorIsSkipped() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
@@ -202,6 +291,10 @@ struct TabRenameTests {
         fixture.defaults.set(data, forKey: "tabs.colors")
         let settings = AppSettings(defaults: fixture.defaults)
         #expect(settings.tabColors == [TabColorRecord(sessionID: "a", cwd: "/tmp/sigil", color: .mint)])
+    }
+
+    private final class ScriptedSessions: @unchecked Sendable {
+        var sessions: [GrokSession] = []
     }
 
     private func spec(folder: URL, sessionID: String) -> GrokLaunchSpec {

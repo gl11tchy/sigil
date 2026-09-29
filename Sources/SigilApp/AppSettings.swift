@@ -292,9 +292,9 @@ final class AppSettings {
         kimiModel = defaults.string(forKey: Key.kimiModel) ?? KimiCode.defaultModel
     }
 
-    /// Re-reads the pin, archive and name lists, which another running copy
-    /// of the app may have changed since launch. Call it before a change, so
-    /// the write keeps that copy's edits instead of replacing them.
+    /// Re-reads the pin, archive, name and color lists, which another running
+    /// copy of the app may have changed since launch. Call it before a change,
+    /// so the write keeps that copy's edits instead of replacing them.
     func reloadSharedLists() {
         func stored<Value: Decodable>(_ key: String) -> [Value] {
             defaults.data(forKey: key).flatMap { try? JSONDecoder().decode([Value].self, from: $0) } ?? []
@@ -309,6 +309,13 @@ final class AppSettings {
         if archives != archivedConversations { archivedConversations = archives }
         let names: [ConversationName] = stored(Key.conversationNames)
         if names != conversationNames { conversationNames = names }
+        // An unknown color is skipped. Garbage leaves the list already in memory.
+        if let data = defaults.data(forKey: Key.tabColors),
+            let colors = TabColors.decode(data),
+            colors != tabColors
+        {
+            tabColors = colors
+        }
         let started: [String] = stored(Key.sigilConversations)
         if started != sigilConversations { sigilConversations = started }
     }

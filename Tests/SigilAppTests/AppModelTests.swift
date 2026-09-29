@@ -4505,12 +4505,16 @@ final class ModelFixture {
     }
 
     func model(
+        settings: AppSettings? = nil,
+        store: SessionStore? = nil,
         trashConversation: @escaping AppModel.TrashConversation = { _ in },
         presentError: @escaping AppModel.ErrorPresenter = { _ in },
         registrationRunner: BridgeRegistration.Runner? = nil,
         mcpBinary: URL? = nil,
         canonicalPath: (@Sendable (String) -> String)? = nil
     ) -> AppModel {
+        let settings = settings ?? self.settings
+        let store = store ?? self.store
         if let registrationRunner {
             return AppModel(
                 settings: settings,

@@ -910,6 +910,7 @@ final class AppModel {
             .union(settings.pinnedProjects.map { sharedKey("project", $0) })
             .union(settings.archivedConversations.map { sharedKey("archive", $0.sessionID, $0.cwd) })
             .union(settings.conversationNames.map { sharedKey("name", $0.sessionID, $0.cwd) })
+            .union(settings.tabColors.map { sharedKey("color", $0.sessionID, $0.cwd) })
     }
 
     private func sharedKey(_ parts: String...) -> String {
@@ -964,6 +965,23 @@ final class AppModel {
         settings.sigilConversationsSeeded = true
     }
 
+    /// A Codex tab can be renamed and colored before its chat id exists.
+    /// Those values move onto the chat once the id is known, or the next
+    /// summary replaces the name and the color disappears.
+    func adoptLearnedCodexSession(_ tab: TerminalTab, session: GrokSession) {
+        let chosenName = tab.sessionTitle
+        let chosenColor = tab.markColor
+        tab.learnedSessionReference = ProviderSessionReference(
+            provider: .codex, sessionID: session.nativeSessionID, cwd: tab.workingDirectory.path)
+        if let chosenName, chosenName != tab.automaticTitle {
+            renameTab(tab, to: chosenName)
+        }
+        if let chosenColor {
+            setTabColor(tab, to: chosenColor)
+            tab.markColor = nil
+        }
+    }
+
     /// Codex picks its own id for a new chat, so a new Codex tab is matched to
     /// the first Codex chat that appears in its folder after it launched. The
     /// tab then knows its chat, so the row shows as open and it can restore.
@@ -985,8 +1003,7 @@ final class AppModel {
                 }
                 .min { $0.createdAt < $1.createdAt }
             guard let match else { continue }
-            tab.learnedSessionReference = ProviderSessionReference(
-                provider: .codex, sessionID: match.nativeSessionID, cwd: tab.workingDirectory.path)
+            adoptLearnedCodexSession(tab, session: match)
             claimed.insert(match.id)
             settings.recordSigilConversations([match.id])
             persistOpenTabs()
@@ -1074,8 +1091,10 @@ final class AppModel {
 
     private func pruningMissingColors(_ records: [TabColorRecord]) -> [TabColorRecord] {
         records.filter { record in
-            store.sessions.contains { $0.id == record.sessionID && samePath($0.cwd, record.cwd) }
+            isNativeHistoryID(record.sessionID)
+                || store.sessions.contains { $0.id == record.sessionID && samePath($0.cwd, record.cwd) }
                 || tabs.contains { tabMatches($0, sessionID: record.sessionID, cwd: record.cwd) }
+                || awaitsScan(sharedKey("color", record.sessionID, record.cwd))
         }
     }
 
@@ -1762,6 +1781,7 @@ final class AppModel {
             tab.markColor = color
             return
         }
+        settings.reloadSharedLists()
         let next = TabColors.setting(
             color,
             sessionID: id,
@@ -1832,6 +1852,7 @@ final class AppModel {
     }
 
     private func clearTabColor(_ session: GrokSession) {
+        settings.reloadSharedLists()
         let next = TabColors.removing(
             sessionID: session.id,
             cwd: session.cwd,
