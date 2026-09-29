@@ -81,7 +81,8 @@
             try Data(transcript.utf8).write(to: text)
             let script = folder.appendingPathComponent("\(id).sh")
             var body = "#!/bin/bash\n# Sigil workbench fixture CLI: a fixed transcript. No model, no network.\n"
-            body += "cat '\(text.path)'\n"
+            let quoted = text.path.replacingOccurrences(of: "'", with: "'\\''")
+            body += "cat '\(quoted)'\n"
             if let exitCode {
                 body += "exit \(exitCode)\n"
             } else {

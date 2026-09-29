@@ -89,10 +89,12 @@
 
         private func startProcess(for id: String) {
             guard let task = store.tasks.first(where: { $0.id == id }), let launch = launches[id] else { return }
-            store.terminals[id]?.terminate()
+            stopProcess(for: id)
             let controller = TerminalController(theme: theme, fontSize: 13)
-            controller.onTerminate = { [weak self] code in
-                self?.store.update(id) { $0.process = .live(.exited(code: code)) }
+            controller.onTerminate = { [weak self, weak controller] code in
+                // Only the task's current process may report its exit.
+                guard let self, let controller, self.store.terminals[id] === controller else { return }
+                self.store.update(id) { $0.process = .live(.exited(code: code)) }
             }
             store.terminals[id] = controller
             let spec = GrokLaunchSpec(
@@ -101,6 +103,15 @@
                 mode: .new(sessionID: UUID()),
                 provider: task.provider)
             controller.start(spec)
+        }
+
+        /// Stops a task's process without letting its later exit report
+        /// overwrite whatever state the task moves to next.
+        private func stopProcess(for id: String) {
+            guard let controller = store.terminals[id] else { return }
+            controller.onTerminate = nil
+            controller.terminate()
+            store.terminals[id] = nil
         }
 
         // MARK: - Actions
@@ -172,8 +183,7 @@
         }
 
         private func close(_ id: String) {
-            store.terminals[id]?.terminate()
-            store.terminals[id] = nil
+            stopProcess(for: id)
             store.update(id) { $0.process = .notRunning }
         }
 
