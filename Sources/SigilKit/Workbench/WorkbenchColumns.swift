@@ -38,7 +38,8 @@ public struct WorkbenchColumns: Equatable, Sendable {
         func fit(rail: Bool, review: Bool) -> (rail: Double, review: Double)? {
             var railWidth = rail ? railWanted : 0
             var reviewWidth = review ? reviewWanted : 0
-            var over = railWidth + reviewWidth - (total - Self.chrome(rail: rail, review: review) - Self.terminalMinimum)
+            var over =
+                railWidth + reviewWidth - (total - Self.chrome(rail: rail, review: review) - Self.terminalMinimum)
             if over > 0, review {
                 let cut = min(over, reviewWidth - Self.reviewRange.lowerBound)
                 reviewWidth -= cut

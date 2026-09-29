@@ -9,7 +9,8 @@ struct WorkbenchFixtureGateTests {
 
     private static func sources() throws -> [(name: String, text: String)] {
         let folder = root.appendingPathComponent("Sources/SigilApp")
-        let files = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: nil)?
+        let files =
+            FileManager.default.enumerator(at: folder, includingPropertiesForKeys: nil)?
             .compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" } ?? []
         return try files.map { ($0.lastPathComponent, try String(contentsOf: $0, encoding: .utf8)) }
     }

@@ -1,10 +1,13 @@
 # Sigil design system
 
-Sigil is built on the principles of [Beautiful UI](https://www.beautifului.dev/)
-and on nothing else. Every surface — the Mac app, the website, and the phone
-companion — uses the same tokens, the same two typefaces, the same radii, and
-the same motion. When this file and Beautiful UI disagree, Beautiful UI wins and
-this file is wrong.
+Sigil's tokens, type, radii and motion come from [Beautiful UI](https://www.beautifului.dev/).
+Every surface — the Mac app, the website, and the phone companion — uses the
+same tokens, the same two typefaces, the same radii, and the same motion.
+Beautiful UI is the source of those values, not an authority over the product:
+layout, navigation, journeys and states follow the
+[experience contract](docs/ux/EXPERIENCE.md), which wins where this file
+describes a surface differently (the window sections below describe the tab
+window as it ships today).
 
 ## Principles
 

@@ -99,7 +99,7 @@ struct TaskRail: View {
                     .foregroundStyle(palette.ink2)
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(section.project.name), \(section.total) tasks")
+            .accessibilityLabel("\(section.project.name), \(section.total == 1 ? "1 task" : "\(section.total) tasks")")
             .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 4)
             ActionIconButton(
@@ -163,7 +163,8 @@ private struct TaskRow: View {
         .help(task.workspace.path)
         // The label replaces the button's content for VoiceOver and keeps its press action.
         .accessibilityLabel(
-            "\(task.title), \(TaskStateText.label(task)), \(task.provider.name), \(task.workspace.label)")
+            "\(task.title), \(TaskStateText.label(task)), \(task.provider.name), \(task.workspace.label)"
+        )
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 

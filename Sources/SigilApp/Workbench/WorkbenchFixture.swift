@@ -53,7 +53,8 @@
                 URL(fileURLWithPath: $0, isDirectory: true)
             } ?? FileManager.default.temporaryDirectory
         ) throws -> WorkbenchFixtureWorld {
-            let base = parent
+            let base =
+                parent
                 .appendingPathComponent("sigil-workbench-\(fixture.rawValue)-\(UUID().uuidString.prefix(8))")
             try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
             let root = URL(fileURLWithPath: GrokPaths.canonicalPath(base.path), isDirectory: true)
@@ -360,7 +361,8 @@
                 let folder = URL(fileURLWithPath: infra.path)
                 try write(
                     [
-                        "state/split.tf": "module \"network\" { source = \"./network\" }\nmodule \"app\" { source = \"./app\" }\n",
+                        "state/split.tf":
+                            "module \"network\" { source = \"./network\" }\nmodule \"app\" { source = \"./app\" }\n",
                         "main.tf": (1...10).map { "resource \"aws_instance\" \"app_\($0)\" { ami = \"ami-\($0)\" }" }
                             .joined(separator: "\n") + "\nresource \"aws_subnet\" \"a\" { vpc_id = aws_vpc.core.id }\n",
                     ], in: folder)

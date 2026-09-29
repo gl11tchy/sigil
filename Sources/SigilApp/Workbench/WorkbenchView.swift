@@ -214,7 +214,8 @@ private struct NoTaskPanel: View {
                 title: "No tasks yet",
                 message: "Start a task in \(first.name), or use the plus beside another project."
             ) {
-                ActionButton(title: "Start Task in \(first.name)", action: store.actions.startTask(first), kind: .primary)
+                ActionButton(
+                    title: "Start Task in \(first.name)", action: store.actions.startTask(first), kind: .primary)
             }
         } else {
             StatePanel(

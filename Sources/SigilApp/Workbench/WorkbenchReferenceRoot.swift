@@ -109,8 +109,9 @@
             WorkbenchActions(
                 addProject: { [weak self] in .run { self?.addProject() } },
                 startTask: { [weak self] project in
-                    guard let self, let project = project ?? self.store.selectedTask.map(self.store.project(of:))
-                        ?? self.store.projects.first
+                    guard let self,
+                        let project = project ?? self.store.selectedTask.map(self.store.project(of:))
+                            ?? self.store.projects.first
                     else { return .unavailable("Add a project first.") }
                     return .run { self.startTask(in: project) }
                 },

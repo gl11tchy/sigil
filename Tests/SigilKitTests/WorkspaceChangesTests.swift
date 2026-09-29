@@ -5,11 +5,12 @@ import Testing
 
 struct WorkspaceChangesTests {
     @Test func statusParsingCoversRenamesUntrackedConflictsAndSpaces() {
-        let raw = [
-            " M src/a file.swift", "R  new.txt", "old.txt", "?? notes/todo.md", "A  added.txt",
-            " D gone.txt", "UU both.txt", "AA also.txt", "!! ignored.log", "C  copy.txt", "orig.txt",
-            "T  link",
-        ].joined(separator: "\0") + "\0"
+        let raw =
+            [
+                " M src/a file.swift", "R  new.txt", "old.txt", "?? notes/todo.md", "A  added.txt",
+                " D gone.txt", "UU both.txt", "AA also.txt", "!! ignored.log", "C  copy.txt", "orig.txt",
+                "T  link",
+            ].joined(separator: "\0") + "\0"
         let entries = WorkspaceChangesReader.parseStatus(Data(raw.utf8))
         #expect(
             entries == [
@@ -26,7 +27,8 @@ struct WorkspaceChangesTests {
     }
 
     @Test func numstatParsingCountsRenamesAndLeavesBinaryUncounted() {
-        let raw = ["3\t1\tsrc/a.swift", "-\t-\timage.png", "2\t0\t", "old.txt", "new.txt"]
+        let raw =
+            ["3\t1\tsrc/a.swift", "-\t-\timage.png", "2\t0\t", "old.txt", "new.txt"]
             .joined(separator: "\0") + "\0"
         let counts = WorkspaceChangesReader.parseNumstat(Data(raw.utf8))
         #expect(counts["src/a.swift"]?.added == 3)
