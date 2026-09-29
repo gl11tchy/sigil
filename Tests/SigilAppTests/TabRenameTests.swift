@@ -130,10 +130,12 @@ struct TabRenameTests {
         #expect(model.tabColor(for: tab) == .violet)
         #expect(
             fixture.settings.tabColors
-                == [TabColorRecord(
-                    sessionID: "claudeCode:\(id.uuidString.lowercased())",
-                    cwd: folder.path,
-                    color: .violet)])
+                == [
+                    TabColorRecord(
+                        sessionID: "claudeCode:\(id.uuidString.lowercased())",
+                        cwd: folder.path,
+                        color: .violet)
+                ])
     }
 
     @Test func anotherAgentColorStaysOnThatTab() throws {
