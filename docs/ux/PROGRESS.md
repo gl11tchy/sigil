@@ -22,8 +22,10 @@ Scope, write ownership and done criteria for M1–M6 are in the
 ## M0: contract, baseline and reference slice
 
 Base revision `2885af2`. Commits on the branch:
-`d857727` (contract and pure models), `369c6e6` (reference slice), and the
-commit that adds this ledger, the harness and the precedence notes.
+`d857727` (contract and pure models), `369c6e6` (reference slice), `042a061`
+(this ledger, the harness, the evidence and the precedence notes), and
+`310123f` (self-review fix: a stopped fixture process can no longer overwrite
+its task's next state). PR: https://github.com/gl11tchy-team/sigil/pull/130.
 
 ### What changed
 
@@ -78,6 +80,7 @@ Interactions, driven by AX presses in the running app (no keystrokes):
 | Press New Task in infra | A new live task in `infra`, selected; its review shows infra's real changes. [img](slice/interaction-4-new-task.png) |
 | Press Hide Review, then Review | The review region closed and reopened. |
 | Narrow window: press Review, then Show Tasks | Review took the rail's room ([img](slice/interaction-6-narrow-review-over-rail.png)); Show Tasks brought the rail back and closed review ([img](slice/interaction-7-narrow-rail-back.png)) |
+| Error fixture: press Dismiss, then Resume | "Not running" with Resume; Resume ran the failing CLI again and it exited 1 again. |
 | Error fixture: press the task whose worktree was deleted | "Workspace folder is missing" with the path; Changes says there is nothing to read. [img](slice/interaction-8-workspace-missing.png) |
 
 The AX dump names every control: rows read "title, state, provider,
@@ -130,6 +133,8 @@ in the fixture build, so it shows the layout's cost, not yet the live app's.
 - Checks have no source (M3). Finish is unavailable (M4). The phone is
   unchanged (M5).
 - VoiceOver speech was not run; the AX tree was read instead.
+- In fixture mode the menu bar still belongs to the hidden tab window's model,
+  so its commands do nothing useful there. M1 gives the workbench the menus.
 - Wide captures stop at 1512×949 pt, the display's visible frame.
 - The native iPhone app was not run for the baseline; the phone column uses
   the Sidereal web companion.
