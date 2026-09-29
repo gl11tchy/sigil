@@ -150,6 +150,17 @@ struct WorkbenchColumnsTests {
         #expect(columns.screen >= WorkbenchColumns.terminalMinimum)
     }
 
+    @Test func aDefaultReviewGivesWayToTheRail() {
+        let narrow = WorkbenchColumns(width: 900, showsRail: true, showsReview: true, reviewOverridesRail: false)
+        #expect(narrow.rail == 248)
+        #expect(narrow.review == nil)
+        #expect(!narrow.railYieldedToReview)
+        let wide = WorkbenchColumns(width: 1680, showsRail: true, showsReview: true, reviewOverridesRail: false)
+        #expect(wide.review == WorkbenchColumns.reviewDefault)
+        let noRail = WorkbenchColumns(width: 900, showsRail: false, showsReview: true, reviewOverridesRail: false)
+        #expect(noRail.review != nil)
+    }
+
     @Test func closedReviewLeavesTheRailAndTheTerminal() {
         let columns = WorkbenchColumns(width: 900, showsRail: true, showsReview: false)
         #expect(columns.rail == 248)
@@ -160,8 +171,9 @@ struct WorkbenchColumnsTests {
     @Test func theTerminalKeepsItsMinimumAtTheSmallestWindow() {
         for width in stride(from: 760.0, through: 1800, by: 20) {
             for rail in [true, false] {
-                for review in [true, false] {
-                    let columns = WorkbenchColumns(width: width, showsRail: rail, showsReview: review)
+                for (review, overrides) in [(true, true), (true, false), (false, true)] {
+                    let columns = WorkbenchColumns(
+                        width: width, showsRail: rail, showsReview: review, reviewOverridesRail: overrides)
                     #expect(columns.screen >= WorkbenchColumns.terminalMinimum, "width \(width)")
                     let used =
                         (columns.rail ?? 0) + (columns.review ?? 0) + columns.screen

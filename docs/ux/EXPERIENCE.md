@@ -122,7 +122,8 @@ one from fixtures (see [Reference slice](#reference-slice)).
   provider checks; Restart and Close to the existing tab actions; review's
   scratch shell to the existing right-panel shell; Find to the existing
   terminal find bar; rename, pin and archive to the existing ledger. A second
-  control for the same action is a defect.
+  persistent control for the same action is a defect. An empty state may
+  repeat the one next step it teaches.
 - Keyboard first: ↑/↓ move through the rail, Return opens, ⌘1…⌘9 go to the
   first nine tasks in rail order, and a Next Needing Attention command walks
   the filter.

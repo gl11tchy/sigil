@@ -5,7 +5,8 @@ import Foundation
 /// The terminal comes first and keeps at least `terminalMinimum`. The review
 /// region comes next when it is open, then the rail. When all three do not
 /// fit, the review region and the rail first shrink to their minimums; then
-/// an open review region hides the rail. Nothing overlays the terminal.
+/// a review region the user opened hides the rail, while one open only by
+/// default gives way to the rail. Nothing overlays the terminal.
 public struct WorkbenchColumns: Equatable, Sendable {
     public static let terminalMinimum = 480.0
     public static let railRange = 200.0...320.0
@@ -23,9 +24,12 @@ public struct WorkbenchColumns: Equatable, Sendable {
     /// True when the user asked for the rail but the open review region took its room.
     public let railYieldedToReview: Bool
 
+    /// - Parameter reviewOverridesRail: true when the user opened the review
+    ///   region, so it may take the rail's room; false when it is open only by
+    ///   default, so it shows only beside the rail.
     public init(
         width: Double, railWidth: Double = railDefault, reviewWidth: Double = reviewDefault,
-        showsRail: Bool, showsReview: Bool
+        showsRail: Bool, showsReview: Bool, reviewOverridesRail: Bool = true
     ) {
         let total = width.isFinite ? max(0, width) : 0
         let railWanted = Self.clamp(railWidth, Self.railRange, default: Self.railDefault)
@@ -49,7 +53,10 @@ public struct WorkbenchColumns: Equatable, Sendable {
         }
 
         var attempts: [(rail: Bool, review: Bool)] = []
-        if showsReview { attempts += [(showsRail, true), (false, true)] }
+        if showsReview {
+            attempts.append((showsRail, true))
+            if reviewOverridesRail || !showsRail { attempts.append((false, true)) }
+        }
         attempts += [(showsRail, false), (false, false)]
         var chosen = (rail: false, review: false, widths: (rail: 0.0, review: 0.0))
         for attempt in attempts {

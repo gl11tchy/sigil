@@ -7,6 +7,19 @@ struct RootView: View {
     let launch: AppLaunch
 
     var body: some View {
+        #if DEBUG
+            if let fixture = WorkbenchFixture.requested {
+                WorkbenchReferenceRoot(fixture: fixture)
+            } else {
+                window
+            }
+        #else
+            window
+        #endif
+    }
+
+    @ViewBuilder
+    private var window: some View {
         if let model = launch.model {
             WindowContent(model: model)
                 .background(FirstKeyView())
@@ -418,7 +431,7 @@ private struct TopBar: View {
 
 /// Beautiful UI's loading state: the pixel loader, a shimmering label, and
 /// the elapsed time in mono.
-private struct WorkingLabel: View {
+struct WorkingLabel: View {
     let since: Date?
     @Environment(\.palette) private var palette
 
@@ -603,7 +616,7 @@ private struct BridgeInboxCard: View {
 
 /// Hides the title bar and paints the window itself, so no system grey shows through
 /// behind the content during a resize.
-private struct WindowChrome: NSViewRepresentable {
+struct WindowChrome: NSViewRepresentable {
     let background: NSColor
 
     func makeNSView(context: Context) -> NSView { NSView(frame: .zero) }
@@ -654,8 +667,9 @@ private struct EmptyDetailView: View {
 
 /// An ended session, as Beautiful UI's failed task row: a mark, what
 /// happened, and the two ways on.
-private struct ExitedCapsule: View {
+struct ExitedCapsule: View {
     let activity: TerminalTab.Activity
+    var closeTitle = "Close Tab"
     let close: () -> Void
     let restart: () -> Void
     @Environment(\.palette) private var palette
@@ -685,7 +699,7 @@ private struct ExitedCapsule: View {
                 StatusPill(text: "Failed", tone: .red)
             }
             Spacer(minLength: 12)
-            Button("Close Tab", action: close)
+            Button(closeTitle, action: close)
                 .buttonStyle(SigilButtonStyle(kind: .ghost, height: 26))
             Button("Restart", action: restart)
                 .buttonStyle(SigilButtonStyle(kind: .secondary, height: 26))
