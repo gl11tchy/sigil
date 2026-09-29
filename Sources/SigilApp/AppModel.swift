@@ -1812,6 +1812,7 @@ final class AppModel {
             return
         }
         if let id = tab.sessionID {
+            settings.reloadSharedLists()
             let next = ConversationNaming.setting(
                 raw,
                 sessionID: id,
@@ -1833,6 +1834,7 @@ final class AppModel {
             return
         }
         if let id = tab.sessionID {
+            settings.reloadSharedLists()
             let next = ConversationNaming.removing(
                 sessionID: id,
                 cwd: tab.workingDirectory.path,

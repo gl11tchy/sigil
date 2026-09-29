@@ -183,6 +183,8 @@ private struct TabChip: View {
     @State private var isCloseHovering = false
     @State private var isRenaming = false
     @State private var draft = ""
+    /// The label the rename field opened with.
+    @State private var renameBaseline: String?
     @State private var discardRename = false
     @FocusState private var renameFocused: Bool
 
@@ -335,15 +337,20 @@ private struct TabChip: View {
 
     private func beginRename() {
         draft = label
+        renameBaseline = label
         discardRename = false
         isRenaming = true
     }
 
+    /// Return or a blur with the label unchanged saves nothing: a chat with no
+    /// summary yet shows its folder, and that would stay as its name.
     private func commitRename() {
         guard isRenaming, !discardRename else { return }
         let submitted = draft
         isRenaming = false
-        rename(submitted)
+        if !AppModel.shouldNoOpRenameCommit(draft: submitted, baseline: renameBaseline) {
+            rename(submitted)
+        }
         focusTerminal()
     }
 
