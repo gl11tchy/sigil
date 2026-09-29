@@ -5,42 +5,50 @@
 [![CI](https://github.com/gl11tchy/sigil/actions/workflows/ci.yml/badge.svg)](https://github.com/gl11tchy/sigil/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-MIT-6A6A6A)
 
-A native macOS app for Claude Code, Codex, Devin, Cursor, and Grok Build.
-It runs each provider's real CLI in a terminal tab. Grok Build also has a
-searchable conversation sidebar.
+A native macOS app for Claude Code, Codex, Devin, Cursor, Kimi Code, and Grok Build.
+It runs each provider's real CLI in a terminal tab. Grok, Claude Code and Codex
+have searchable native conversation history.
 
 By gl11tchy.
 
 ![Sigil, showing the thread list beside a running session](docs/screenshot.png)
 
-*Demo data. The conversations shown are invented; the session on the right is real.*
+*Demo data. The conversations and the session shown are invented.*
 
 ## What it adds
 
 - **Provider picker.** Press ⌘T or click a new-session plus, then click a large
   provider icon to launch its CLI in the chosen folder. Claude Code uses `claude`,
-  Codex uses `codex`, Devin uses `devin`, and Cursor uses `cursor-agent`.
-  Install and sign in to each CLI separately. Sigil uses your login shell's PATH
+  Codex uses `codex`, Devin uses `devin`, Cursor uses `cursor-agent`, and Kimi Code
+  uses `kimi`. Install and sign in to each CLI separately. Kimi Code can also sign
+  in from Settings › General: with a Kimi account (`kimi login` in the browser) or
+  with a Kimi Platform API key, which stays in the Keychain. Sigil uses your login shell's PATH
   and the standard installation folders. Grok keeps its configured Settings path.
-  Other providers keep their own history inside their CLI; Sigil's sidebar,
-  transcript export, tab messaging, and automatic chat restoration remain Grok-only.
-  Restart opens a fresh CLI for other providers, not a resumed conversation.
-  Other providers have no turn-completion integration. Sigil keeps submitted work
-  active and warns before closing their running processes; silence does not mark completion.
-- **Thread sidebar.** Every conversation on this machine. Home is the project
-  list; open a folder to see its chats and start a new one with the plus. Recents
+  The sidebar lists only chats started in Sigil; chats that the terminal or other
+  apps wrote to the same Grok, Claude Code and Codex history stay hidden unless
+  Settings › Show chats from other apps is on. Known native
+  conversations can resume and restore without creating replacements. A new Codex
+  tab has no verified native ID until opened from history; Sigil does not guess it.
+  Export and tab messaging remain Grok-only. Other unsupported controls stay hidden.
+  See [provider capabilities and format limits](docs/provider-capabilities.md).
+  Only matched provider journal events can mark completion. Titles and silence cannot.
+  Claude and unidentified Codex tabs keep an explicit unknown or working state.
+- **Thread sidebar.** Recognized Grok, Claude Code and Codex conversations on this machine. Home lists the
+  sessions that are open right now, with a light on the ones still working,
+  then the project list; open a folder to see its chats and start a new one with the plus. Recents
   and Archived sit under the folders as destinations you open. Search by title, folder or
   path. Click a chat to reopen it; if it is already open, the app moves to that
   tab. Hover archive on a chat or a project. Hover X closes an open tab, or
-  deletes a closed chat. `⌘`-click selects several chats — `⇧`-click or `⇧↑`/`⇧↓`
+  deletes a closed Grok chat. `⌘`-click selects several chats — `⇧`-click or `⇧↑`/`⇧↓`
   extends the range — and the context menu archives or deletes the selection at
-  once. Workflow and subagent children stay off the list unless
-  you turn them on in Settings. They still run in the background.
+  once. Grok workflow and subagent children stay off the list unless
+  you turn them on in Settings. Native-history adapters exclude subagent directories.
+  These choices do not stop background work.
 - **Search highlight.** Matches from the sidebar Search field (`⌘⇧F`) light up in
   each visible title, in the project name or path on the subtitle, and in the
   Projects header. A hit on the CLI summary or a path still paints a visible run.
   Combine words across conversation names and folders, such as `sigil auth`.
-- **Rename.** Name a conversation from the row's context menu, `F2` in the
+- **Rename.** Name a known Grok, Claude Code or Codex conversation from the row's context menu, `F2` in the
   thread list, or `⌘⇧R` for the session on screen. The name is what the sidebar,
   tabs, and search use, and it survives the CLI rewriting its own summary.
   Reset Name, or a blank rename, brings that summary back.
@@ -62,11 +70,13 @@ By gl11tchy.
   Dock icon when a background tab finishes a turn.
 - **Terminal colors and font size**, applied live; reopen a session to apply Grok’s interface theme.
 - **Transcript export**, through `grok export`.
-- **Delete**, from the row's hover X when the chat is not open, or from the
-  context menu. The conversation folder goes to the Trash.
-- **Tab restore.** The sessions you had open come back on the next launch. Starting the
-  app never creates a new conversation.
-- **Tab messaging.** Off by default. Turn it on in Settings, and each session gets four
+- **Delete Grok history**, from the row's hover X when the chat is not open, or
+  from the context menu. The conversation folder goes to the Trash. Claude and
+  Codex history stays read-only; Archive changes only Sigil's own list.
+- **Tab restore.** Known Grok, Claude Code and Codex conversations can return on the next launch.
+  Unavailable references stay saved. New Codex tabs without a native ID cannot restore.
+  Starting the app never creates a replacement conversation.
+- **Tab messaging.** Off by default. Turn it on in Settings, and each Grok session gets four
   tools: `list_tabs`, `send_to_tab`, `ask_tab` and `reply_to`. A tab can hand work to
   another tab, or ask it a question and wait for the answer. See below.
 
@@ -105,9 +115,10 @@ terminal itself.
 | --- | --- |
 | `⌘T` | New session in the current folder |
 | `⌘⇧N` | New session in another folder |
-| `⌘W` | Close tab (warns while the agent is working) |
+| `⌘W` | Close tab (warns while work is active or uncertain) |
 | `⌘⇧]` / `⌘⇧[` | Next / previous tab |
 | `⌘1`…`⌘9` | Go to tab |
+| `⌃⌘T` | List open tabs and jump to one |
 | `⌘F` | Find in the terminal |
 | `⌘⇧F` | Find conversations |
 | `⌘B` | Hide or show the thread list |
@@ -124,7 +135,8 @@ multi-selection, `Return` opens it, and `F2` renames it.
 ## Requirements
 
 - macOS 14 or later
-- The `grok` CLI at `~/.grok/bin/grok` (set another path in Settings)
+- At least one supported provider CLI, installed and signed in separately
+- For Grok: `~/.grok/bin/grok` (set another path in Settings)
 - Optional: `~/.grok/bin/grok-sigil`, the themed CLI build described below
 
 The app is deliberately **not** sandboxed: it starts `grok` as a child process, and
@@ -198,8 +210,10 @@ Scripts/install.sh
 ```
 
 That copies `dist/Sigil.app` to `/Applications/Sigil.app` and opens it. GitHub
-cannot write to this Mac. After a merge to `main`, CI builds a zip and attaches
+cannot write to this Mac. After a merge to `main` and successful gates, CI builds a zip and attaches
 it to the rolling [latest release](https://github.com/gl11tchy/sigil/releases/latest).
+The isolated runner uses a pinned Xcode 26.5 image with an iOS 26.5 simulator.
+Guest toolchain checks must pass before a new runner base is published.
 On this Mac, agents must run `Scripts/install-latest.sh` after that merge. It
 rebuilds HEAD and swaps the new bundle into place without quitting a running
 app. Restart Sigil to load the new binary. Download the zip, or rebuild
@@ -237,9 +251,9 @@ Scripts/make-icon.sh
 
 The detail column is a program someone else drew, so theming only the window
 would leave two designs on screen. `Scripts/build-grok-cli.sh` builds the
-open-source [Grok Build](https://github.com/xai-org/grok-build) CLI with one
-patch on top — a `sigil-neon` TUI theme and a `GROK_THEME` override — and
-installs it as `~/.grok/bin/grok-sigil`.
+open-source [Grok Build](https://github.com/xai-org/grok-build) CLI with its
+theme patches on top — a `GROK_THEME` override and a `sigil-host` theme that
+takes its colours from the window — and installs it as `~/.grok/bin/grok-sigil`.
 
 ```sh
 brew install protobuf   # once; the build also needs Rust
@@ -247,9 +261,9 @@ Scripts/build-grok-cli.sh
 ```
 
 The app prefers `grok-sigil` when it is there and starts each tab with
-`GROK_THEME` set to the window's theme. App palettes without a named CLI
-theme send `sigil-host` plus `GROK_THEME_*` colour keys so the TUI matches
-the window. Delete the binary and the app falls back to the installed
+`GROK_THEME` set to the window's theme. Sigil Dark, Sigil Light, and the
+app palettes without a named CLI theme send `sigil-host` plus `GROK_THEME_*`
+colour keys so the TUI matches the window. Delete the binary and the app falls back to the installed
 `grok`, which ignores those variables and runs as before.
 The patches are `Scripts/grok-cli/sigil-neon.patch` and
 `Scripts/grok-cli/sigil-host.patch`.
@@ -258,12 +272,16 @@ The patches are `Scripts/grok-cli/sigil-neon.patch` and
 
 ```sh
 Scripts/verify.sh
+iOS/scripts/ci.sh
 ```
 
 Requires Node 22 or later for the Sidereal tests.
 
 Runs the build, native and Sidereal tests, dependency audit, shell checks, optional Swift format lint, debug app bundling, and
-a launch smoke check. The smoke launch uses temporary home, preferences, cache, and Grok
+a launch smoke check. The separate iOS gate builds the real app and both extensions,
+then runs app-hosted simulator tests through a local relay. It requires Xcode 26
+and an installed iOS 26 simulator. Neither gate makes paid model calls.
+The smoke launch uses temporary home, preferences, cache, and Grok
 folders. It does not restore tabs, register the bridge, or start a real session.
 
 ## License
@@ -277,10 +295,26 @@ the Grok Build CLI but does not include it.
 
 ## Where the conversations come from
 
-The sidebar reads `~/.grok/sessions/` (or `$GROK_HOME/sessions`), where the CLI keeps
+Grok history reads `~/.grok/sessions/` (or `$GROK_HOME/sessions`), where the CLI keeps
 one directory per working directory and one directory per conversation inside it. The
 app watches that tree, so the list stays current while sessions run — including ones
 started outside the app.
 
-New sessions are started with an app-chosen `--session-id`, so a conversation is
+New Grok sessions are started with an app-chosen `--session-id`, so a conversation is
 traceable from the tab back to its directory on disk.
+
+
+Claude and Codex use isolated, bounded, read-only native-history adapters.
+[Integration boundaries](docs/provider-capabilities.md) describe exact formats,
+resumption, lifecycle evidence and unsupported actions.
+
+### Remote compatibility
+
+This revision requires both host and phone clients to echo the phone's fresh nonce
+inside authenticated replies. Update both together; older clients receive an
+upgrade error rather than dispatching commands. Terminal menu text is unverified,
+with full available operation context and literal choices, not a verified approval.
+See [the protocol and trust boundary](docs/remote-control.md).
+
+See the [release notes](docs/release-notes-2026-09-27.md) and
+[local verification evidence](docs/qa/product-hardening/README.md).

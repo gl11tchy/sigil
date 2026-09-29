@@ -1,0 +1,27 @@
+# a32 proof, SigilUX on audit/prov-sheet 3b3b31b, 2026-09-23 19:58:21
+# Stored session folders: 16 distinct usable folders (12 seeded qa-b3/qa-recent-01..12, updated 1..12 min ago,
+# plus projects/acme-api, acme-web, sigil, terraform-infra). The current folder (acme-api) is in the list, so no extra row.
+# AX read of the New Session sheet's Recent pop-up (opened by AXPress):
+Recent popup value: /Users/Shared/sigil-ux/projects/acme-api
+Menu items (8):
+  /Users/Shared/sigil-ux/projects/acme-api
+  /Users/Shared/sigil-ux/projects/sigil
+  /Users/Shared/sigil-ux/qa-b3/qa-recent-01
+  /Users/Shared/sigil-ux/qa-b3/qa-recent-02
+  /Users/Shared/sigil-ux/qa-b3/qa-recent-03
+  /Users/Shared/sigil-ux/qa-b3/qa-recent-04
+  /Users/Shared/sigil-ux/qa-b3/qa-recent-05
+  /Users/Shared/sigil-ux/qa-b3/qa-recent-06
+
+# Re-read at screenshot time 20:14:44 (fresh launch, same seeds), PNG ps-a32-recent-menu-caps-at-eight.png:
+Recent popup value: /Users/Shared/sigil-ux/projects/acme-api
+Menu items (8):
+  /Users/Shared/sigil-ux/projects/acme-api
+  /Users/Shared/sigil-ux/projects/sigil
+  /Users/Shared/sigil-ux/qa-b3/qa-recent-01
+  /Users/Shared/sigil-ux/qa-b3/qa-recent-02
+  /Users/Shared/sigil-ux/qa-b3/qa-recent-03
+  /Users/Shared/sigil-ux/qa-b3/qa-recent-04
+  /Users/Shared/sigil-ux/qa-b3/qa-recent-05
+  /Users/Shared/sigil-ux/qa-b3/qa-recent-06
+

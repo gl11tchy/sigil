@@ -51,6 +51,20 @@ struct ScrollbackSearchTests {
         #expect(search.findNext() == first)
     }
 
+    @Test func queryStartsAtTheLastHitOnOrAboveTheGivenLine() {
+        let lines = ["one", "x", "one", "x", "one"]
+        var search = ScrollbackSearch()
+
+        search.setQuery("one", in: lines.map { ScrollbackSearch.Row(text: $0) }, startingAtOrAbove: 3)
+        #expect(search.currentMatch?.line == 2)
+
+        search.setQuery("one", in: lines.map { ScrollbackSearch.Row(text: $0) }, startingAtOrAbove: 4)
+        #expect(search.currentMatch?.line == 4)
+
+        search.setQuery("x", in: lines.map { ScrollbackSearch.Row(text: $0) }, startingAtOrAbove: 0)
+        #expect(search.currentMatch?.line == 1)
+    }
+
     @Test func emptyQueryClearsHitsAndCurrent() {
         var search = ScrollbackSearch()
         search.setQuery("keep", in: ["keep this", "and that"])
@@ -152,6 +166,21 @@ struct ScrollbackSearchTests {
             #expect(earlier.line == later.line)
             #expect(earlier.columns.upperBound <= later.columns.lowerBound)
         }
+    }
+
+    @Test func aLongSoftWrappedLineIsSearchedInLinearTime() {
+        // One minified JSON line of 192k characters, soft-wrapped over 1,600 rows.
+        let chunk = String(repeating: "{\"key\":\"value\"},", count: 8)
+        let rows = (0..<1_600).map { ScrollbackSearch.Row(text: chunk, isWrapped: $0 > 0) }
+        var search = ScrollbackSearch()
+        let clock = ContinuousClock()
+
+        let elapsed = clock.measure { search.setQuery("e", in: rows) }
+
+        #expect(search.matchCount == 1_600 * 8 * 2)
+        #expect(search.matches.last?.line == 1_599)
+        #expect(search.matches.last?.columns == (chunk.count - 4)..<(chunk.count - 3))
+        #expect(elapsed < .milliseconds(500))
     }
 
     private func slice(_ lines: [String], _ match: ScrollbackSearch.Match) -> String {

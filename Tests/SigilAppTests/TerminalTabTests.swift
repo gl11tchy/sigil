@@ -68,6 +68,32 @@ struct TerminalTabTests {
         #expect(markerChanges == 1)
     }
 
+    @Test func aReplacementKeepsQueuedMessagesButNotQuestions() {
+        let previous = makeTab()
+        previous.enqueueBridgePrompt("plain")
+        previous.enqueueBridgePrompt("question", requestID: "ask-1")
+        let replacement = makeTab()
+
+        replacement.restoreUnseenActivity(from: previous)
+        replacement.restoreUnseenActivity(from: previous)
+
+        #expect(replacement.bridgeInbox.map(\.prompt) == ["plain"])
+        #expect(replacement.hasUnseenActivity)
+        replacement.dismissNextBridgePrompt()
+        #expect(!replacement.hasUnseenActivity)
+    }
+
+    @Test func aReplacementShowsNoUnreadDotForAnAnsweredQuestion() {
+        let previous = makeTab()
+        previous.enqueueBridgePrompt("question", requestID: "ask-1")
+        let replacement = makeTab()
+
+        replacement.restoreUnseenActivity(from: previous)
+
+        #expect(replacement.bridgeInbox.isEmpty)
+        #expect(!replacement.hasUnseenActivity)
+    }
+
     @Test func recognizesOnlyGrokBusySpinnerTitles() {
         #expect(TerminalTab.isBusyTerminalTitle("⠼ - Waiting for response… - grok"))
         #expect(TerminalTab.isBusyTerminalTitle("⠹ - Thinking - grok"))
@@ -80,241 +106,187 @@ struct TerminalTabTests {
         #expect(!TerminalTab.isBusyTerminalTitle("Request to Reply Only With OK - grok"))
     }
 
-    @Test func journalUsesOnlyExactEventsAfterTheTurnStarts() async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "TerminalTabTests.\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let journal = directory.appendingPathComponent("updates.jsonl")
-        let oldCompletion = Self.completionEvent
-        try Data(oldCompletion.utf8).write(to: journal)
-
-        let tab = makeTab(
-            mode: .new(sessionID: UUID()),
-            completionEventsURL: journal
-        )
-        tab.noteTurnStarted()
-        #expect(tab.activity == .working)
-
-        // This is appended immediately, before the watcher gets a chance to
-        // poll. It must still be observed, while the old completion above must
-        // not be mistaken for this turn.
-        try append(
-            #"{"params":{"update":{"sessionUpdate":"tool_call","text":"turn_completed"}}}"#
-                + "\n",
-            to: journal
-        )
-        try await Task.sleep(for: .milliseconds(550))
-        #expect(tab.activity == .working)
-
-        try append(Self.completionEvent, to: journal)
-        let completed = await waitUntil { tab.activity == .idle }
-
-        #expect(completed)
-        #expect(tab.hasUnseenActivity)
+    @Test func readsClaudeCodeAndCodexSpinnerTitles() {
+        #expect(TerminalTab.titleShowsWork("◐ Claude Code", provider: .claudeCode) == true)
+        #expect(TerminalTab.titleShowsWork("◓ Fix the sidebar", provider: .claudeCode) == true)
+        #expect(TerminalTab.titleShowsWork("✳ Claude Code", provider: .claudeCode) == false)
+        #expect(TerminalTab.titleShowsWork("Claude Code", provider: .claudeCode) == nil)
+        #expect(TerminalTab.titleShowsWork("⠙ Reply hi | sigil", provider: .codex) == true)
+        #expect(TerminalTab.titleShowsWork("Reply hi | sigil", provider: .codex) == false)
+        #expect(TerminalTab.titleShowsWork("", provider: .codex) == nil)
+        #expect(TerminalTab.titleShowsWork("Cursor Agent", provider: .cursor) == nil)
+        #expect(TerminalTab.titleShowsWork("⠙ busy", provider: .devin) == nil)
     }
 
-    @Test func completionAppendedImmediatelyAfterSubmissionIsNotMissed() async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "TerminalTabFastEventTests.\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directory, withIntermediateDirectories: true)
+    @Test func ordinaryTitlesAndSilenceNeverCompleteWork() async throws {
+        for provider in [CLIProvider.grokBuild, .claudeCode, .codex] {
+            let tab = makeTab(provider: provider)
+            tab.noteTurnStarted()
+            tab.noteTerminalTitle("✳ Claude Code")
+            tab.noteTerminalTitle("Task complete")
+            tab.noteTerminalOutput()
+            try await Task.sleep(for: .milliseconds(1400))
+            #expect(tab.activity == .working)
+            #expect(!tab.hasUnseenActivity)
+            tab.terminate()
+        }
+    }
+
+    @Test func titlesNeverManufactureATurn() {
+        let tab = makeTab(provider: .claudeCode)
+        tab.noteTerminalTitle("◐ Claude Code")
+        #expect(tab.activity == .starting)
+        tab.noteTerminalTitle("✳ Claude Code")
+        #expect(tab.activity == .starting)
+    }
+
+    @Test func exactProviderJournalCompletesAndDuplicateDoesNotNotifyTwice() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let journal = directory.appendingPathComponent("updates.jsonl")
-        _ = FileManager.default.createFile(atPath: journal.path, contents: nil)
-        let tab = makeTab(
-            mode: .new(sessionID: UUID()),
-            completionEventsURL: journal
-        )
-
+        try Data().write(to: journal)
+        let tab = makeTab(completionEventsURL: journal)
         tab.noteTurnStarted()
-        try append(Self.completionEvent, to: journal)
-
+        let records = try events(sessionID: tab.nativeSessionID!)
+        try append(records, to: journal)
         #expect(await waitUntil { tab.activity == .idle })
+        #expect(tab.hasUnseenActivity)
+        tab.clearUnseenActivity()
+        try append(records, to: journal)
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(!tab.hasUnseenActivity)
+        tab.terminate()
+    }
+
+    @Test func interruptedTurnIsNotCompletionAndOldJournalCannotFinishNextTurn() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let journal = directory.appendingPathComponent("updates.jsonl")
+        try Data().write(to: journal)
+        let tab = makeTab(completionEventsURL: journal)
+        tab.noteTurnStarted()
+        tab.noteInterrupted()
+        #expect(tab.activity == .interrupted)
+        #expect(!tab.hasUnseenActivity)
+        try append(try events(sessionID: tab.nativeSessionID!), to: journal)
+        tab.noteTurnStarted()
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(tab.activity == .working)
+        try append(try events(sessionID: tab.nativeSessionID!), to: journal)
+        #expect(await waitUntil { tab.activity == .idle })
+        tab.terminate()
+    }
+
+    @Test func missingJournalRemainsWorkingAndLateFileCanComplete() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let journal = directory.appendingPathComponent("updates.jsonl")
+        let tab = makeTab(completionEventsURL: journal)
+        tab.noteTurnStarted()
+        try await Task.sleep(for: .milliseconds(1400))
+        #expect(tab.activity == .working)
+        try events(sessionID: tab.nativeSessionID!).write(to: journal)
+        #expect(await waitUntil { tab.activity == .idle })
+        tab.terminate()
+    }
+
+    @Test func codexNewTabNeverUsesTabUUIDAsConversationID() {
+        #expect(makeTab(provider: .codex).sessionReference == nil)
+        let claude = makeTab(provider: .claudeCode)
+        #expect(claude.sessionID == "claudeCode:\(claude.nativeSessionID!)")
     }
 
     @Test func disabledDeliveryKeepsTheQueuedPrompt() {
         let tab = makeTab()
         tab.enqueueBridgePrompt("do not inject yet")
-
         tab.deliverNextBridgePrompt()
-
         #expect(tab.bridgeInbox.count == 1)
         #expect(!tab.canDeliverBridgePrompt)
     }
 
-    @Test(
-        "submit returns to idle when the journal cannot complete the turn",
-        arguments: SilentSubmit.allCases
-    )
-    func submitReturnsToIdleWhenJournalCannotComplete(_ fixture: SilentSubmit) async throws {
-        let (tab, directory) = try makeSilentSubmitTab(fixture)
-        defer { if let directory { try? FileManager.default.removeItem(at: directory) } }
-
-        tab.noteTurnStarted()
-        #expect(tab.activity == .working)
-        #expect(await waitUntil(timeout: .seconds(3)) { tab.activity == .idle })
-
-        // A later submit must not stick in working either.
-        tab.noteTurnStarted()
-        #expect(tab.activity == .working)
-        #expect(await waitUntil(timeout: .seconds(3)) { tab.activity == .idle })
-    }
-
-    @Test func ongoingOutputStaysWorkingUntilJournalCompletes() async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "TerminalTabOutputHold.\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directory, withIntermediateDirectories: true)
+    @Test func failedProviderProcessDoesNotBecomeFinished() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let journal = directory.appendingPathComponent("updates.jsonl")
-        _ = FileManager.default.createFile(atPath: journal.path, contents: nil)
-        let tab = makeTab(mode: .new(sessionID: UUID()), completionEventsURL: journal)
-
+        let cli = directory.appendingPathComponent("failed-provider")
+        try "#!/bin/sh\nexit 7\n".write(to: cli, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)
+        let defaults = UserDefaults(suiteName: "TerminalTabFailure.\(UUID().uuidString)")!
+        let tab = TerminalTab(
+            spec: GrokLaunchSpec(executable: cli, workingDirectory: directory, mode: .new(sessionID: UUID())),
+            settings: AppSettings(defaults: defaults))
+        tab.start(isSelected: { false })
         tab.noteTurnStarted()
-        #expect(tab.activity == .working)
-
-        let holdUntil = ContinuousClock.now + TerminalTab.idleFallbackSilence + .milliseconds(400)
-        while ContinuousClock.now < holdUntil {
-            tab.noteTerminalOutput()
-            #expect(tab.activity == .working)
-            try await Task.sleep(for: .milliseconds(200))
-        }
-        #expect(tab.activity == .working)
-
-        try append(Self.completionEvent, to: journal)
-        #expect(await waitUntil { tab.activity == .idle })
-
-        tab.noteTerminalOutput()
-        #expect(tab.activity == .idle)
-    }
-
-    @Test func journalWorkRemainsWorkingAcrossOutputSilence() async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "TerminalTabJournalWork.\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let journal = directory.appendingPathComponent("updates.jsonl")
-        _ = FileManager.default.createFile(atPath: journal.path, contents: nil)
-        let tab = makeTab(mode: .new(sessionID: UUID()), completionEventsURL: journal)
-
-        tab.noteTurnStarted()
-        #expect(tab.activity == .working)
-
-        try append(
-            #"{"params":{"update":{"sessionUpdate":"tool_call"}}}"# + "\n",
-            to: journal
-        )
-        try await Task.sleep(for: TerminalTab.idleFallbackSilence + .milliseconds(400))
-        #expect(tab.activity == .working)
+        #expect(await waitUntil { tab.activity.endedInFailure })
+        #expect(tab.activity.statusName == "failed")
         #expect(!tab.hasUnseenActivity)
-
-        try append(Self.completionEvent, to: journal)
-        #expect(await waitUntil { tab.activity == .idle })
-        #expect(tab.hasUnseenActivity)
+        tab.terminateAndWait()
     }
 
-    @Test func journalWorkStillIdlesIfCompletionNeverArrives() async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "TerminalTabJournalFallback.\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let journal = directory.appendingPathComponent("updates.jsonl")
-        _ = FileManager.default.createFile(atPath: journal.path, contents: nil)
-        let tab = makeTab(mode: .new(sessionID: UUID()), completionEventsURL: journal)
-        tab.journalIdleFallbackSilence = .seconds(2)
-
-        tab.noteTurnStarted()
-        try append(
-            #"{"params":{"update":{"sessionUpdate":"tool_call"}}}"# + "\n",
-            to: journal
-        )
-        try await Task.sleep(for: TerminalTab.idleFallbackSilence + .milliseconds(400))
-        #expect(tab.activity == .working)
-
-        try await Task.sleep(for: tab.journalIdleFallbackSilence)
-        #expect(tab.activity == .idle)
-        #expect(tab.hasUnseenActivity)
-    }
-
-    @Test func stoppedJournalWatchRestartsFromTheCurrentOffset() async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "TerminalTabCancelledWatch.\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let journal = directory.appendingPathComponent("updates.jsonl")
-        _ = FileManager.default.createFile(atPath: journal.path, contents: nil)
-        let tab = makeTab(mode: .new(sessionID: UUID()), completionEventsURL: journal)
-
-        tab.noteTurnStarted()
-        #expect(tab.activity == .working)
-        await Task.yield()
-        tab.terminate()
-        try append(Self.completionEvent, to: journal)
-        await Task.yield()
-
-        tab.noteTurnStarted()
-        #expect(tab.activity == .working)
-        try append(
-            #"{"params":{"update":{"sessionUpdate":"tool_call"}}}"# + "\n",
-            to: journal
-        )
-        try await Task.sleep(for: TerminalTab.idleFallbackSilence + .milliseconds(400))
-        #expect(tab.activity == .working)
-        #expect(!tab.hasUnseenActivity)
-
-        try append(Self.completionEvent, to: journal)
-        #expect(await waitUntil { tab.activity == .idle })
-        #expect(tab.hasUnseenActivity)
-    }
-
-    @Test func resumedTabWithoutJournalStillCompletesWhenTheFileAppears() async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "TerminalTabResumeJournal.\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let journal = directory.appendingPathComponent("updates.jsonl")
-        let tab = makeTab(
-            mode: .resume(sessionID: "pre-journal-session"),
-            completionEventsURL: journal
-        )
-
-        tab.noteTurnStarted()
-        #expect(tab.activity == .working)
-
-        // Output keeps the silence fallback from firing so only the watcher
-        // can take the tab idle once the journal shows up.
-        let holdUntil = ContinuousClock.now + TerminalTab.idleFallbackSilence + .milliseconds(400)
-        while ContinuousClock.now < holdUntil {
-            tab.noteTerminalOutput()
-            #expect(tab.activity == .working)
-            try await Task.sleep(for: .milliseconds(200))
+    @Test func otherProviderTabsInDifferentFoldersHaveDifferentTitles() {
+        let suite = "TerminalTabTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let settings = AppSettings(defaults: defaults)
+        // These tests list chats from the history files directly.
+        settings.showOtherAppSessions = true
+        func claudeTab(in folder: String) -> TerminalTab {
+            TerminalTab(
+                spec: GrokLaunchSpec(
+                    executable: URL(fileURLWithPath: "/usr/bin/true"),
+                    workingDirectory: URL(fileURLWithPath: "/tmp/\(folder)"),
+                    mode: .continueLatest,
+                    provider: .claudeCode
+                ),
+                settings: settings
+            )
         }
 
-        try Data(Self.completionEvent.utf8).write(to: journal)
-        #expect(await waitUntil { tab.activity == .idle })
+        let api = claudeTab(in: "api")
+        let web = claudeTab(in: "web")
+
+        #expect(api.title == "Claude Code · api")
+        #expect(web.title == "Claude Code · web")
     }
 
-    private static let completionEvent =
-        #"{"params":{"update":{"sessionUpdate":"turn_completed"}}}"# + "\n"
+    private func events(sessionID: String) throws -> Data {
+        let timestamp = Int64(Date().addingTimeInterval(0.01).timeIntervalSince1970 * 1000)
+        let turn = UUID().uuidString
+        let objects: [[String: Any]] = [
+            [
+                "timestamp": timestamp / 1000,
+                "params": [
+                    "sessionId": sessionID,
+                    "_meta": ["eventId": UUID().uuidString, "promptId": turn, "agentTimestampMs": timestamp],
+                    "update": ["sessionUpdate": "agent_message_chunk"],
+                ],
+            ],
+            [
+                "timestamp": timestamp / 1000,
+                "params": [
+                    "sessionId": sessionID, "_meta": ["eventId": UUID().uuidString, "agentTimestampMs": timestamp],
+                    "update": ["sessionUpdate": "turn_completed", "prompt_id": turn, "stop_reason": "end_turn"],
+                ],
+            ],
+        ]
+        return try objects.reduce(into: Data()) { data, object in
+            data.append(try JSONSerialization.data(withJSONObject: object))
+            data.append(0x0A)
+        }
+    }
 
-    private func append(_ text: String, to url: URL) throws {
+    private func append(_ data: Data, to url: URL) throws {
         let handle = try FileHandle(forWritingTo: url)
         defer { try? handle.close() }
         try handle.seekToEnd()
-        try handle.write(contentsOf: Data(text.utf8))
+        try handle.write(contentsOf: data)
     }
 
-    private func waitUntil(
-        timeout: Duration = .seconds(2),
-        condition: @escaping @MainActor () -> Bool
-    ) async -> Bool {
-        let deadline = ContinuousClock.now + timeout
+    private func waitUntil(condition: @escaping @MainActor () -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now + .seconds(2)
         while ContinuousClock.now < deadline {
             if condition() { return true }
             try? await Task.sleep(for: .milliseconds(25))
@@ -322,49 +294,15 @@ struct TerminalTabTests {
         return condition()
     }
 
-    enum SilentSubmit: String, Sendable, CaseIterable {
-        case resumeWithoutJournal
-        case emptyPrompt
-        case newWithoutJournal
-    }
-
-    private func makeSilentSubmitTab(_ fixture: SilentSubmit) throws -> (
-        TerminalTab, URL?
-    ) {
-        switch fixture {
-        case .emptyPrompt:
-            return (makeTab(), nil)
-        case .resumeWithoutJournal, .newWithoutJournal:
-            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
-                "TerminalTabSilent.\(UUID().uuidString)", isDirectory: true)
-            try FileManager.default.createDirectory(
-                at: directory, withIntermediateDirectories: true)
-            let journal = directory.appendingPathComponent("updates.jsonl")
-            let mode: GrokLaunchSpec.Mode =
-                fixture == .resumeWithoutJournal
-                ? .resume(sessionID: "pre-journal-session")
-                : .new(sessionID: UUID())
-            return (makeTab(mode: mode, completionEventsURL: journal), directory)
-        }
-    }
-
-    private func makeTab(
-        mode: GrokLaunchSpec.Mode = .continueLatest,
-        completionEventsURL: URL? = nil
-    ) -> TerminalTab {
+    private func makeTab(provider: CLIProvider = .grokBuild, completionEventsURL: URL? = nil) -> TerminalTab {
         let suite = "TerminalTabTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
-        let settings = AppSettings(defaults: defaults)
-        let spec = GrokLaunchSpec(
-            executable: URL(fileURLWithPath: "/usr/bin/true"),
-            workingDirectory: FileManager.default.temporaryDirectory,
-            mode: mode
-        )
         return TerminalTab(
-            spec: spec,
-            settings: settings,
-            completionEventsURL: completionEventsURL
-        )
+            spec: GrokLaunchSpec(
+                executable: URL(fileURLWithPath: "/usr/bin/true"),
+                workingDirectory: FileManager.default.temporaryDirectory, mode: .new(sessionID: UUID()),
+                provider: provider),
+            settings: AppSettings(defaults: defaults), completionEventsURL: completionEventsURL)
     }
 }

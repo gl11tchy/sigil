@@ -12,6 +12,12 @@ if [[ -n "${SIGIL_APP:-}" ]]; then
 else
   FINAL_APP="$ROOT/dist/Sigil.app"
 fi
+# The old output is deleted wholesale below, so SIGIL_APP=~/Desktop would
+# empty the Desktop. Only ever replace a .app bundle.
+if [[ "$(basename "$FINAL_APP")" != *.app ]]; then
+  echo "error: SIGIL_APP must name a .app bundle: $FINAL_APP" >&2
+  exit 1
+fi
 CONFIG="${SIGIL_CONFIG:-release}"
 ALLOW_THIN="${SIGIL_ALLOW_THIN:-0}"
 DISTRIBUTION="${SIGIL_DISTRIBUTION:-0}"
@@ -124,7 +130,13 @@ if [[ "$IDENTITY" != "-" ]]; then
 fi
 
 # A failed build must not leave an older bundle looking like its output.
-rm -rf "$FINAL_APP"
+if [[ -e "$FINAL_APP" || -L "$FINAL_APP" ]]; then
+  if [[ ! -e "$FINAL_APP/Contents/MacOS/Sigil" ]]; then
+    echo "error: $FINAL_APP exists but is not a Sigil app; move it away first" >&2
+    exit 1
+  fi
+  rm -rf "$FINAL_APP"
+fi
 
 if [[ "$CONFIG" == "release" ]]; then
   if ! xcrun --sdk macosx metal --version >/dev/null 2>&1; then
@@ -216,6 +228,7 @@ if [[ ! -s "$ICNS" ]]; then
 fi
 
 PLIST_TEMPLATE="$ROOT/Resources/Info.plist"
+ENTITLEMENTS="$ROOT/Resources/Sigil.entitlements"
 if [[ ! -f "$PLIST_TEMPLATE" ]]; then
   echo "error: missing $PLIST_TEMPLATE" >&2
   exit 1
@@ -238,7 +251,9 @@ cp "$ROOT/LICENSE" "$CONTENTS/Resources/LICENSE.txt"
 mkdir -p "$CONTENTS/Resources/ThirdPartyLicenses"
 for license in \
   "$ROOT/Resources/ThirdPartyLicenses/SwiftTerm-LICENSE.txt" \
-  "$ROOT/Resources/ThirdPartyLicenses/swift-argument-parser-LICENSE.txt"; do
+  "$ROOT/Resources/ThirdPartyLicenses/swift-argument-parser-LICENSE.txt" \
+  "$ROOT/Resources/ThirdPartyLicenses/Inter-LICENSE.txt" \
+  "$ROOT/Resources/ThirdPartyLicenses/JetBrainsMono-LICENSE.txt"; do
   if [[ ! -f "$license" ]]; then
     echo "error: missing third-party license: $license" >&2
     exit 1
@@ -248,6 +263,13 @@ cp "$ROOT/Resources/ThirdPartyLicenses/SwiftTerm-LICENSE.txt" \
   "$CONTENTS/Resources/ThirdPartyLicenses/SwiftTerm-LICENSE.txt"
 cp "$ROOT/Resources/ThirdPartyLicenses/swift-argument-parser-LICENSE.txt" \
   "$CONTENTS/Resources/ThirdPartyLicenses/swift-argument-parser-LICENSE.txt"
+cp "$ROOT/Resources/ThirdPartyLicenses/Inter-LICENSE.txt" \
+  "$CONTENTS/Resources/ThirdPartyLicenses/Inter-LICENSE.txt"
+cp "$ROOT/Resources/ThirdPartyLicenses/JetBrainsMono-LICENSE.txt" \
+  "$CONTENTS/Resources/ThirdPartyLicenses/JetBrainsMono-LICENSE.txt"
+# Inter and JetBrains Mono, registered at launch by Typeface.registerBundledFonts.
+mkdir -p "$CONTENTS/Resources/Fonts"
+cp "$ROOT"/Resources/Fonts/*.ttf "$CONTENTS/Resources/Fonts/"
 printf 'APPL????' >"$CONTENTS/PkgInfo"
 
 cp "$PLIST_TEMPLATE" "$CONTENTS/Info.plist"
@@ -274,8 +296,13 @@ if [[ "$IDENTITY" != "-" ]]; then
   if [[ "$DISTRIBUTION" == "1" ]]; then
     echo "==> codesign (hardened runtime)"
     codesign --force --options runtime --timestamp --sign "$IDENTITY" "$CONTENTS/MacOS/sigil-mcp"
-    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$CONTENTS/MacOS/Sigil"
-    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
+    # Programs in a tab reach the camera, microphone and other private data
+    # through Sigil, so the hardened runtime needs Sigil's entitlements for
+    # macOS to ask the user at all.
+    codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS" \
+      --sign "$IDENTITY" "$CONTENTS/MacOS/Sigil"
+    codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS" \
+      --sign "$IDENTITY" "$APP"
   else
     echo "==> codesign (stable identity)"
     codesign --force --deep --sign "$IDENTITY" "$APP"

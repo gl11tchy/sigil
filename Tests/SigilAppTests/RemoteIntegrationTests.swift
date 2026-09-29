@@ -54,9 +54,13 @@ struct RemoteIntegrationTests {
         ).write(to: executable)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
         let settings = AppSettings(defaults: defaults)
+        // These tests list chats from the history files directly.
+        settings.showOtherAppSessions = true
         settings.executablePath = executable.path
         let pairingStore = InMemoryRemotePairingStore()
-        let model = AppModel(settings: settings, presentError: { _ in }, pairingStore: pairingStore)
+        let model = AppModel(
+            settings: settings, presentError: { _ in }, pairingStore: pairingStore,
+            providerInstallations: fixtureProviderInstallations(executable))
         defer { model.closeAllTabsAndWait() }
         let tab = try #require(model.newTab(in: root))
         for _ in 0..<100 {

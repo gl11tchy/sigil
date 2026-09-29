@@ -21,6 +21,33 @@ enum SidebarActivityDot {
     }
 }
 
+/// VoiceOver value for a folder row. The row combines its children, so the
+/// working dot and the pin glyph are spoken here or not at all.
+enum ProjectRowAccessibility {
+    static func value(countLabel: String, isActive: Bool, isWorking: Bool, isPinned: Bool)
+        -> String
+    {
+        var value = countLabel
+        if isActive { value += ", one open" }
+        if isWorking { value += ", working" }
+        if isPinned { value += ", pinned" }
+        return value
+    }
+}
+
+/// The outline on the arrow-key row, the only mark of where the keys are.
+/// `lineStrong` reads under 1.6:1 on the hover fill; with Increase Contrast on
+/// it steps up to `ink3` at 1.5pt, which clears 3:1 (WCAG 1.4.11).
+enum KeyboardRowOutline {
+    static func color(_ contrast: ColorSchemeContrast) -> KeyPath<Palette, Color> {
+        contrast == .increased ? \.ink3 : \.lineStrong
+    }
+
+    static func width(_ contrast: ColorSchemeContrast) -> CGFloat {
+        contrast == .increased ? 1.5 : 1
+    }
+}
+
 /// The thread viewer: every Grok Build conversation on this machine.
 ///
 /// Home is the project list. Recents and Archived sit under it as destinations
@@ -38,20 +65,29 @@ struct SidebarView: View {
     @State private var multiSelection: Set<String> = []
     @State private var selectionAnchor: String?
     @State private var pendingBulkDelete: [GrokSession]?
+    /// Minute tick for relative times and Today/Yesterday buckets.
+    @State private var now = Date()
+    /// The row under the pointer. The one `hover` fill glides to it.
+    @State private var hoveredRowID: String?
+    @Namespace private var glideSpace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// F2. Unicode private-use scalar for `NSF2FunctionKey`.
     private static let f2 = KeyEquivalent(Character("\u{F705}"))
 
     var body: some View {
+        let snapshot = model.sidebarSnapshot()
         VStack(spacing: 0) {
-            Color.clear.frame(height: 36)
+            header
             searchRow
-            modeArea
-            list
-            if showsDestinations { destinations }
+            navItems(snapshot.destinations)
+            modeArea(focusedProject: snapshot.focusedProject)
+            list(snapshot)
         }
-        .background(palette.sidebar)
-        .overlay(alignment: .trailing) { Rectangle().fill(palette.hairline).frame(width: 1) }
+        .background(palette.canvas)
+        .environment(\.sidebarGlide, glide)
+        .onChange(of: focus) { _, focus in model.isSidebarFocused = focus != nil }
+        .onDisappear { model.isSidebarFocused = false }
         .alert(
             deleteConfirmationTitle,
             isPresented: Binding(
@@ -85,16 +121,17 @@ struct SidebarView: View {
             Button("Cancel", role: .cancel) {}
         }
         .task(id: model.searchFocusToken) {
-            guard model.searchFocusToken > 0 else { return }
             await Task.yield()
+            guard !Task.isCancelled, model.consumeSearchFocusRequest() else { return }
             focus = .search
         }
         .task(id: model.renamePrepareTaskID) {
             await prepareRename(
                 forceReconfigure: model.renamingSessionKey != model.preparedRenameKey)
         }
-        .task(id: visibleRowIDs()) {
+        .task(id: snapshot.rowIDs) {
             clampKeyboardSelection()
+            showKeyboardRowIfListFocused()
             pruneMultiSelection()
             await prepareRename(forceReconfigure: false)
         }
@@ -110,35 +147,86 @@ struct SidebarView: View {
         .task {
             await restorePromptOnAppear()
         }
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                now = Date()
+            }
+        }
+    }
+
+    // MARK: - Header
+
+    /// The row beside the traffic lights: only the collapse button, at the
+    /// trailing edge, as in Beautiful UI's sidebar.
+    private var header: some View {
+        HStack {
+            Spacer()
+            IconButton(systemImage: "sidebar.leading", help: "Hide Sidebar (⌘B)", label: "Hide Sidebar") {
+                withAnimation(reduceMotion ? nil : Motion.slide) {
+                    model.isSidebarVisible.toggle()
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 44)
+    }
+
+    /// Where the gliding `hover` fill sits: the row under the pointer, else the
+    /// arrow-key row while the list has the keyboard.
+    private var glide: SidebarGlide {
+        SidebarGlide(
+            target: hoveredRowID ?? (focus == .list ? keyboardSelectionID : nil),
+            namespace: glideSpace,
+            hover: { id, inside in
+                if inside {
+                    withAnimation(reduceMotion ? nil : Motion.glide) { hoveredRowID = id }
+                } else if hoveredRowID == id {
+                    // Let the next row claim the fill first, so it glides
+                    // instead of fading out and back in.
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(60))
+                        if hoveredRowID == id {
+                            withAnimation(reduceMotion ? nil : Motion.fade) { hoveredRowID = nil }
+                        }
+                    }
+                }
+            }
+        )
     }
 
     // MARK: - Search
 
     private var searchRow: some View {
-        HStack(spacing: 6) {
-            HStack(spacing: 5) {
+        FieldFrame(isFocused: focus == .search) {
+            HStack(spacing: 7) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(focus == .search ? palette.textDim : palette.textFaint)
-                TextField("Search", text: $model.searchText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(palette.text)
-                    .focused($focus, equals: .search)
-                    .onSubmit(activateSearchResult)
-                    .onKeyPress(.downArrow) { moveFocusToList() }
-                    .onKeyPress(Self.f2) { renameKeyboardSelection() }
-                    .onKeyPress(.escape) { handleEscape() }
-                    .onExitCommand { _ = handleEscape() }
-                    .accessibilityLabel("Search conversations")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(focus == .search ? palette.ink2 : palette.ink3)
+                TextField(
+                    "", text: $model.searchText,
+                    prompt: Text("Search chats").foregroundStyle(palette.ink2)
+                )
+                .textFieldStyle(.plain)
+                .ui(13.5)
+                .foregroundStyle(palette.ink)
+                .focused($focus, equals: .search)
+                .onSubmit(activateSearchResult)
+                .onKeyPress(.downArrow) { moveFocusToList() }
+                .onKeyPress(Self.f2) { renameKeyboardSelection() }
+                .onKeyPress(.escape) { handleEscape() }
+                .onExitCommand { _ = handleEscape() }
+                .accessibilityLabel("Search conversations")
                 if !model.searchText.isEmpty {
                     Button {
                         model.searchText = ""
                     } label: {
-                        Image(systemName: "xmark.circle.fill").font(.system(size: 10))
+                        Image(systemName: "xmark.circle.fill").font(.system(size: 12))
+                            .frame(width: 20, height: 20)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(palette.textFaint)
+                    .foregroundStyle(palette.ink3)
                     .accessibilityLabel("Clear conversation search")
                     .help("Clear search")
                 } else if focus != .search {
@@ -146,76 +234,101 @@ struct SidebarView: View {
                         .transition(.opacity)
                 }
             }
-            .padding(.horizontal, 8)
-            .frame(height: 28)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(palette.raised)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(
-                                focus == .search ? palette.accent : Color.clear,
-                                lineWidth: 1
-                            )
-                    )
+        }
+        .padding(.horizontal, 8)
+        .padding(.bottom, 8)
+        .animation(Motion.fade, value: focus == .search)
+        .animation(Motion.fade, value: model.searchText.isEmpty)
+    }
+
+    // MARK: - Nav
+
+    /// Beautiful UI's nav items: where you can go, above what is in the list.
+    private func navItems(_ counts: SidebarSnapshot.Destinations) -> some View {
+        VStack(spacing: 0) {
+            NavRow(
+                id: "sigil:nav:new",
+                icon: "square.and.pencil",
+                title: "New session",
+                trailing: .key("⌘T"),
+                isSelected: false,
+                isKeyboardSelected: false,
+                help: "New Session… (⌘T)",
+                open: { model.requestNewSession() }
             )
-            IconButton(
-                systemImage: "plus",
-                help: "New Session in \(model.newSessionDirectory.abbreviatedPath) (⌘T)"
-            ) {
-                model.requestNewSession()
+            NavRow(
+                id: "sigil:nav:home",
+                icon: "house",
+                title: "Home",
+                trailing: .none,
+                isSelected: model.sidebarSurface == .folders || model.sidebarSurface == .project,
+                isKeyboardSelected: false,
+                help: "Open sessions and projects",
+                open: { model.leaveProject() }
+            )
+            if counts.recentsCount > 0 {
+                navDestination(
+                    id: SidebarOrganization.recentsID,
+                    icon: "clock",
+                    title: "Recents",
+                    count: counts.recentsCount,
+                    isSelected: model.sidebarSurface == .recents,
+                    help: "All conversations, newest first",
+                    open: { model.openRecents() }
+                )
+            }
+            if counts.archivedCount > 0 {
+                navDestination(
+                    id: SidebarOrganization.archivedID,
+                    icon: "archivebox",
+                    title: "Archived",
+                    count: counts.archivedCount,
+                    isSelected: model.sidebarSurface == .archived,
+                    help: "Archived conversations",
+                    open: { model.openArchived() }
+                )
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.bottom, 6)
-        .animation(.easeOut(duration: 0.12), value: focus == .search)
-        .animation(.easeOut(duration: 0.12), value: model.searchText.isEmpty)
+        .padding(.bottom, 4)
     }
 
     // MARK: - Mode
 
     @ViewBuilder
-    private var modeArea: some View {
-        switch model.sidebarSurface {
-        case .project:
-            if let project = model.focusedProject {
-                DrillBar(
-                    title: project.name,
-                    isPinned: model.isPinned(project),
-                    showsPin: true,
-                    showsArchive: true,
-                    canStart: true,
-                    leave: { model.leaveProject() },
-                    newChat: { model.requestNewSessionInProject(project) },
-                    togglePin: { model.togglePin(project) },
-                    toggleArchive: { model.archive(project) }
-                )
-            }
-        case .recents:
+    private func modeArea(focusedProject: SidebarProject?) -> some View {
+        if model.sidebarSurface == .project, let project = focusedProject {
             DrillBar(
-                title: "Recents",
-                leave: { model.leaveProject() }
+                title: project.name,
+                isPinned: model.isPinned(project),
+                showsPin: true,
+                showsArchive: true,
+                archiveLabel: archiveLabel(for: project),
+                canStart: true,
+                leave: { leaveFolder() },
+                newChat: { model.requestNewSessionInProject(project) },
+                togglePin: { model.togglePin(project) },
+                toggleArchive: { model.archiveOrRemove(project) }
             )
-        case .archived:
-            DrillBar(
-                title: "Archived",
-                leave: { model.leaveProject() }
-            )
-        case .folders:
-            EmptyView()
         }
     }
 
     // MARK: - List
 
     @ViewBuilder
-    private var list: some View {
-        let pinned = visiblePinned
-        let projectIndex = SidebarOrganization.indexByDirectory(model.sidebarProjects)
-        let content = listContent(projectIndex: projectIndex)
+    private func list(_ snapshot: SidebarSnapshot) -> some View {
+        let pinned = snapshot.pinned
+        let projectIndex = SidebarOrganization.indexByDirectory(snapshot.projects)
+        let content = listContent(snapshot, projectIndex: projectIndex)
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    if listKind == .projectList, !model.tabs.isEmpty {
+                        section("Open", count: model.tabs.count, isFirst: true) {
+                            ForEach(model.tabs) { tab in
+                                openTabRow(tab)
+                            }
+                        }
+                    }
                     if listKind != .projectList, listKind != .search, !pinned.isEmpty {
                         section("Pinned", count: pinned.count, isFirst: true) {
                             ForEach(pinned, id: \.directory) { session in
@@ -228,30 +341,41 @@ struct SidebarView: View {
                         }
                     }
                     content
-                    if (listKind == .projectList || pinned.isEmpty) && isListEmpty { emptyState }
+                    if (listKind == .projectList || pinned.isEmpty) && snapshot.isListEmpty { emptyState }
                 }
-                .padding(.bottom, 8)
+                .padding(.bottom, 10)
             }
             .scrollContentBackground(.hidden)
             .focusable()
             .focusEffectDisabled()
             .focused($focus, equals: .list)
-            .onKeyPress(.upArrow) {
-                if model.renamingSessionKey != nil { return .ignored }
-                return moveKeyboardSelection(by: -1)
+            .onChange(of: focus) { _, newFocus in
+                if newFocus == .list { showKeyboardRowIfListFocused() }
             }
-            .onKeyPress(.downArrow) {
+            // ⇧ comes from the key event itself, not the keyboard state when a
+            // queued or repeated press is finally handled.
+            .onKeyPress(.upArrow, phases: [.down, .repeat]) { press in
                 if model.renamingSessionKey != nil { return .ignored }
-                return moveKeyboardSelection(by: 1)
+                return moveKeyboardSelection(by: -1, shift: press.modifiers.contains(.shift))
+            }
+            .onKeyPress(.downArrow, phases: [.down, .repeat]) { press in
+                if model.renamingSessionKey != nil { return .ignored }
+                return moveKeyboardSelection(by: 1, shift: press.modifiers.contains(.shift))
             }
             .onKeyPress(.return) {
                 if model.renamingSessionKey != nil { return .ignored }
                 return activateKeyboardSelection()
             }
             .onKeyPress(Self.f2) { renameKeyboardSelection() }
+            .onKeyPress(.delete, phases: .down) { press in
+                guard press.modifiers.contains(.command) else { return .ignored }
+                return trashKeyboardSelection()
+            }
             .onKeyPress(.escape) { handleEscape() }
             .onChange(of: keyboardSelectionID) { _, id in
-                if let id { proxy.scrollTo(id, anchor: .center) }
+                // No anchor: scroll only as far as needed to reveal the row, so a
+                // click on a visible row leaves the list where it is.
+                if let id { proxy.scrollTo(id) }
             }
             .onChange(of: model.renamingSessionKey) { _, id in
                 if let id { proxy.scrollTo(id, anchor: .center) }
@@ -298,16 +422,15 @@ struct SidebarView: View {
     }
 
     @ViewBuilder
-    private func listContent(projectIndex: [URL: SidebarProject]) -> some View {
-        let unpinned = model.unpinnedSessions(from: listedSessions)
-        let afterPinned = listKind != .projectList && !visiblePinned.isEmpty
+    private func listContent(_ snapshot: SidebarSnapshot, projectIndex: [URL: SidebarProject]) -> some View {
+        let afterPinned = listKind != .projectList && !snapshot.pinned.isEmpty
         switch listKind {
         case .recents:
-            recentsSections(from: unpinned, afterPinned: afterPinned, projectIndex: projectIndex)
+            recentsSections(from: snapshot.unpinned, afterPinned: afterPinned, projectIndex: projectIndex)
         case .projectList:
-            projectList
+            projectList(snapshot)
         case .projectChats:
-            ForEach(unpinned, id: \.directory) { session in
+            ForEach(snapshot.unpinned, id: \.directory) { session in
                 sessionRow(
                     session,
                     showsProject: false,
@@ -315,17 +438,15 @@ struct SidebarView: View {
                 )
             }
         case .search:
-            ForEach(listedSessions, id: \.directory) { session in
+            ForEach(snapshot.listed, id: \.directory) { session in
                 sessionRow(
                     session,
                     showsProject: true,
                     containingProject: projectIndex[session.directory]
                 )
             }
-        case .projectSearch:
-            projectGroupedSections(from: unpinned, afterPinned: afterPinned)
         case .archived:
-            projectGroupedSections(from: unpinned, afterPinned: afterPinned)
+            projectGroupedSections(snapshot, afterPinned: afterPinned)
         }
     }
 
@@ -336,59 +457,25 @@ struct SidebarView: View {
         )
     }
 
-    private var listedSessions: [GrokSession] {
-        listKind == .projectChats ? model.focusedSidebarSessions : model.sidebarSessions
-    }
-
     @ViewBuilder
-    private var projectList: some View {
-        let pinned = visibleProjects(model.pinnedProjects(), from: listedSessions)
-        let rest = visibleProjects(model.unpinnedProjects(), from: listedSessions)
-        ForEach(pinned, id: \.id) { item in
-            projectRow(item.project, rows: item.rows)
-        }
-        ForEach(rest, id: \.id) { item in
-            projectRow(item.project, rows: item.rows)
-        }
-    }
-
-    private var showsDestinations: Bool {
-        listKind == .projectList && !destinationIDs.isEmpty
-    }
-
-    private var destinationIDs: [String] {
-        SidebarOrganization.destinationRowIDs(
-            recentsCount: listedSessions.count,
-            archivedCount: model.archivedCount
+    private func projectList(_ snapshot: SidebarSnapshot) -> some View {
+        // Home folders are grouped from the listed sessions, so no row needs a filter.
+        let pinned = snapshot.pinnedProjects.map { ProjectRows(project: $0, rows: $0.sessions) }
+        let rest = snapshot.unpinnedProjects.map { ProjectRows(project: $0, rows: $0.sessions) }
+        section(
+            "Projects",
+            count: pinned.count + rest.count,
+            isFirst: model.tabs.isEmpty,
+            add: { model.chooseProjectToAdd() },
+            content: {
+                ForEach(pinned, id: \.id) { item in
+                    projectRow(item.project, rows: item.rows)
+                }
+                ForEach(rest, id: \.id) { item in
+                    projectRow(item.project, rows: item.rows)
+                }
+            }
         )
-    }
-
-    @ViewBuilder
-    private var destinations: some View {
-        VStack(spacing: 0) {
-            Rectangle().fill(palette.hairline).frame(height: 1)
-            if listedSessions.count > 0 {
-                destinationRow(
-                    id: SidebarOrganization.recentsID,
-                    icon: "clock",
-                    title: "Recents",
-                    count: listedSessions.count,
-                    help: "All conversations, newest first",
-                    open: { model.openRecents() }
-                )
-            }
-            if model.archivedCount > 0 {
-                destinationRow(
-                    id: SidebarOrganization.archivedID,
-                    icon: "archivebox",
-                    title: "Archived",
-                    count: model.archivedCount,
-                    help: "Archived conversations",
-                    open: { model.openArchived() }
-                )
-            }
-        }
-        .padding(.bottom, 6)
     }
 
     @ViewBuilder
@@ -397,7 +484,7 @@ struct SidebarView: View {
         afterPinned: Bool,
         projectIndex: [URL: SidebarProject]
     ) -> some View {
-        let buckets = SessionBucket.bucket(sessions)
+        let buckets = SessionBucket.bucket(sessions, now: now)
         ForEach(Array(buckets.enumerated()), id: \.element.id) { index, bucket in
             section(bucket.title, count: bucket.sessions.count, isFirst: !afterPinned && index == 0) {
                 ForEach(bucket.sessions, id: \.directory) { session in
@@ -412,11 +499,11 @@ struct SidebarView: View {
     }
 
     @ViewBuilder
-    private func projectGroupedSections(from sessions: [GrokSession], afterPinned: Bool) -> some View {
+    private func projectGroupedSections(_ snapshot: SidebarSnapshot, afterPinned: Bool) -> some View {
         // Pinned folders first (pin order), then remaining folders in recency
         // order. Drop folders whose remaining rows are all pinned chats.
-        let pinned = visibleProjects(model.pinnedProjects(), from: sessions)
-        let rest = visibleProjects(model.unpinnedProjects(), from: sessions)
+        let pinned = visibleProjects(snapshot.pinnedProjects, from: snapshot.unpinned)
+        let rest = visibleProjects(snapshot.unpinnedProjects, from: snapshot.unpinned)
         ForEach(Array(pinned.enumerated()), id: \.element.id) { index, item in
             projectSection(item.project, rows: item.rows, isFirst: !afterPinned && index == 0)
         }
@@ -429,8 +516,9 @@ struct SidebarView: View {
     private func visibleProjects(
         _ projects: [SidebarProject], from sessions: [GrokSession]
     ) -> [ProjectRows] {
-        projects.compactMap { project in
-            let rows = SidebarOrganization.listedRows(in: project, from: sessions)
+        let listed = Set(sessions.map(\.directory))
+        return projects.compactMap { project in
+            let rows = SidebarOrganization.listedRows(in: project, listed: listed)
             return rows.isEmpty ? nil : ProjectRows(project: project, rows: rows)
         }
     }
@@ -474,42 +562,64 @@ struct SidebarView: View {
         }
     }
 
-    private var visiblePinned: [GrokSession] {
-        if listKind == .projectChats {
-            return model.pinnedSessions(in: model.focusedProject)
-        }
-        return model.pinnedSessions()
-    }
-
-    private var isListEmpty: Bool {
-        if listKind == .projectList { return model.sidebarProjects.isEmpty }
-        return listedSessions.isEmpty
-    }
-
-    private func destinationRow(
+    private func navDestination(
         id: String,
         icon: String,
         title: String,
         count: Int,
+        isSelected: Bool,
         help: String,
         open: @escaping () -> Void
     ) -> some View {
-        DestinationRow(
+        NavRow(
+            id: id,
             icon: icon,
             title: title,
-            count: count,
+            trailing: .count(count),
+            isSelected: isSelected,
             isKeyboardSelected: id == keyboardSelectionID,
             help: help,
             open: {
                 keyboardSelectionID = id
-                open()
+                if isSelected { model.leaveProject() } else { open() }
             }
         )
         .id(id)
     }
 
+    private func openTabRow(_ tab: TerminalTab) -> some View {
+        let rowID = SidebarOrganization.openTabRowID(tab.id)
+        return OpenTabRow(
+            rowID: rowID,
+            title: model.title(for: tab),
+            folder: tab.workingDirectory.folderName,
+            path: tab.workingDirectory.abbreviatedPath,
+            activity: tab.activity,
+            hasUnseenActivity: tab.hasUnseenActivity,
+            isSelected: tab.id == model.selectedTab?.id,
+            isKeyboardSelected: rowID == keyboardSelectionID,
+            select: {
+                keyboardSelectionID = rowID
+                model.select(tab.id)
+            },
+            close: { model.requestCloseTab(tab.id) }
+        )
+        .id(rowID)
+        .contextMenu {
+            Button("Close Tab") { model.requestCloseTab(tab.id) }
+            if case .exited = tab.activity {
+                Button("Restart Session") { model.restartTab(id: tab.id) }
+            }
+            Divider()
+            Button("New Session in This Folder") {
+                model.requestNewSession(in: tab.workingDirectory)
+            }
+        }
+    }
+
     private func projectRow(_ project: SidebarProject, rows: [GrokSession]) -> some View {
         ProjectListRow(
+            rowID: project.id,
             title: project.name,
             paths: SidebarOrganization.pathHaystacks(
                 name: project.name,
@@ -518,20 +628,20 @@ struct SidebarView: View {
                 sessions: rows
             ),
             count: rows.count,
-            relativeTime: rows.first?.updatedAt.shortRelative ?? "",
-            longRelative: rows.first?.updatedAt.longRelative ?? "",
+            relativeTime: rows.first?.updatedAt.shortRelative(to: now) ?? "",
+            longRelative: rows.first?.updatedAt.longRelative(to: now) ?? "",
             isPinned: model.isPinned(project),
             isWorking: model.isWorking(project),
-            isActive: rows.contains { model.isActive($0) },
+            isActive: rows.contains { model.isActive($0) } || model.hasSelectedTab(in: project),
             isKeyboardSelected: project.id == keyboardSelectionID,
-            canStart: true,
             open: {
                 keyboardSelectionID = project.id
                 model.openProject(project)
             },
             newChat: { model.requestNewSessionInProject(project) },
             togglePin: { model.togglePin(project) },
-            archive: { model.archive(project) }
+            archive: { model.archiveOrRemove(project) },
+            archiveLabel: archiveLabel(for: project)
         )
         .id(project.id)
         .contextMenu {
@@ -539,11 +649,15 @@ struct SidebarView: View {
             Button(model.isPinned(project) ? "Unpin Project" : "Pin Project") {
                 model.togglePin(project)
             }
-            Button("Archive Project") { model.archive(project) }
+            Button(archiveLabel(for: project)) { model.archiveOrRemove(project) }
             if let session = rows.first {
                 Button("Reveal Folder in Finder") { model.revealInFinder(session) }
             }
         }
+    }
+
+    private func archiveLabel(for project: SidebarProject) -> String {
+        model.isRemovableOnly(project) ? "Remove Project" : "Archive Project"
     }
 
     private func sessionRow(
@@ -555,6 +669,7 @@ struct SidebarView: View {
         let isPinned = model.isPinned(session)
         let isArchived = model.isArchived(session)
         let hasCustomName = model.hasCustomName(session)
+        let key = model.sessionKey(session)
         return SessionRow(
             session: session,
             title: model.title(for: session),
@@ -564,14 +679,15 @@ struct SidebarView: View {
             hasUnseenActivity: model.hasUnseenActivity(of: session),
             isPinned: isPinned,
             isArchived: isArchived,
-            isKeyboardSelected: model.sessionKey(session) == keyboardSelectionID,
-            isMultiSelected: multiSelection.contains(model.sessionKey(session)),
-            isRenaming: model.renamingSessionKey == model.sessionKey(session),
+            isKeyboardSelected: key == keyboardSelectionID,
+            isMultiSelected: multiSelection.contains(key),
+            isRenaming: model.renamingSessionKey == key,
             hasCustomName: hasCustomName,
             showsProject: showsProject,
             headerCoversQuery: headerCoversQuery,
+            now: now,
             open: {
-                keyboardSelectionID = model.sessionKey(session)
+                keyboardSelectionID = key
                 clearMultiSelection()
                 model.open(session)
             },
@@ -585,13 +701,13 @@ struct SidebarView: View {
             resetName: { model.resetName(session) },
             dismissHelp: model.isOpen(session) ? "Close Tab" : "Delete Conversation",
             dismiss: { dismissSession(session) },
-            noteMounted: { model.noteRenameFieldMounted($0, key: model.sessionKey(session)) },
+            noteMounted: { model.noteRenameFieldMounted($0, key: key) },
             mountGeneration: { model.renameFieldMountGeneration },
             consumeSelectAll: { model.consumeRenameSelectAll() },
             model: model,
             focus: $focus
         )
-        .id(model.sessionKey(session))
+        .id(key)
         .contextMenu {
             let selection = bulkSelection(containing: session)
             if selection.count > 1 {
@@ -607,8 +723,10 @@ struct SidebarView: View {
                     }
                 }
                 Divider()
-                Button("Move \(selection.count) Conversations to Trash…", role: .destructive) {
-                    pendingBulkDelete = selection
+                if selection.allSatisfy({ $0.provider.capabilities.delete }) {
+                    Button("Move \(selection.count) Conversations to Trash…", role: .destructive) {
+                        pendingBulkDelete = selection
+                    }
                 }
             } else {
                 Button(isPinned ? "Unpin" : "Pin") { model.togglePin(session) }
@@ -619,7 +737,9 @@ struct SidebarView: View {
                     Button("Reset Name") { model.resetName(session) }
                 }
                 Divider()
-                Button("Open in New Tab") { model.open(session) }
+                Button(model.isOpen(session) ? "Show Tab" : "Open in New Tab") {
+                    model.open(session)
+                }
                 if model.isOpen(session) {
                     Button("Close Tab") { dismissSession(session) }
                 }
@@ -634,35 +754,32 @@ struct SidebarView: View {
                 }
                 Button("Reveal Folder in Finder") { model.revealInFinder(session) }
                 Button("Copy Session ID") { model.copySessionID(session) }
-                Button("Export Transcript…") { model.exportTranscript(session) }
+                if session.provider.capabilities.export {
+                    Button("Export Transcript…") { model.exportTranscript(session) }
+                }
                 Divider()
-                Button("Delete Conversation…", role: .destructive) {
-                    pendingDelete = session
+                if session.provider.capabilities.delete {
+                    Button("Delete Conversation…", role: .destructive) {
+                        pendingDelete = session
+                    }
                 }
             }
         }
     }
 
+    /// A sentence-case label with a trailing mono count, as Beautiful UI's
+    /// "Chats" header. No uppercase, no tracking.
     private func section<Content: View>(
         _ title: String,
         count: Int,
         isFirst: Bool,
-        caps: Bool = true,
+        add: (() -> Void)? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
         Section {
             content()
         } header: {
-            let label = caps ? "\(title.uppercased()) (\(count))" : "\(title) (\(count))"
-            Text(label)
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .tracking(caps ? 0.6 : 0)
-                .foregroundStyle(palette.textFaint)
-                .padding(.horizontal, 14)
-                .padding(.top, isFirst ? 10 : 18)
-                .padding(.bottom, 4)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(palette.sidebar)
+            SidebarSectionLabel(title: title, count: count, isFirst: isFirst, add: add)
         }
     }
 
@@ -684,17 +801,18 @@ struct SidebarView: View {
     }
 
     private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(emptyTitle)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(palette.textDim)
+                .ui(13.5, .medium)
+                .foregroundStyle(palette.ink)
             emptyHint
-                .font(.system(size: 11))
-                .foregroundStyle(palette.textFaint)
+                .ui(12.5)
+                .foregroundStyle(palette.ink2)
+                .lineSpacing(2)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 18)
+        .padding(.horizontal, 16)
+        .padding(.top, 16)
     }
 
     private var emptyTitle: String {
@@ -712,7 +830,7 @@ struct SidebarView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(error)
                 Button("Retry") { Task { await model.store.reload() } }
-                    .controlSize(.small)
+                    .buttonStyle(SigilButtonStyle(kind: .secondary, height: 26))
             }
         } else if model.store.isLoading {
             EmptyView()
@@ -721,48 +839,24 @@ struct SidebarView: View {
         } else if listKind == .archived {
             Text("Archive a chat or a project from its row to send it here.")
         } else {
-            HStack(spacing: 4) {
-                Text("Press")
-                KbdChip(label: "⌘T", palette: palette)
-                Text("to start one. It shows up here as soon as it has a name.")
+            // The key cap sits on one short line so the explanation below wraps
+            // across the full width instead of in a narrow column beside it.
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text("Press")
+                    KbdChip(label: "⌘T", palette: palette)
+                    Text("to start one.")
+                }
+                Text("It shows up here as soon as it has a name.")
             }
         }
     }
 
     // MARK: - Keyboard
 
+    /// Event-time row order. A render reads `SidebarSnapshot.rowIDs` instead.
     private func visibleRowIDs() -> [String] {
-        switch listKind {
-        case .projectList:
-            return SidebarOrganization.homeRowIDs(
-                recentsCount: listedSessions.count,
-                archivedCount: model.archivedCount,
-                pinnedIDs: model.pinnedProjects().map(\.id),
-                restIDs: model.unpinnedProjects().map(\.id)
-            )
-        case .search:
-            return listedSessions.map { model.sessionKey($0) }
-        case .recents, .projectChats, .projectSearch, .archived:
-            return visiblePinned.map { model.sessionKey($0) }
-                + groupedUnpinnedSessions().map { model.sessionKey($0) }
-        }
-    }
-
-    /// Unpinned chats in the order the current sort draws them.
-    private func groupedUnpinnedSessions() -> [GrokSession] {
-        let unpinned = model.unpinnedSessions(from: listedSessions)
-        switch listKind {
-        case .recents, .projectChats:
-            return unpinned
-        case .search:
-            return []
-        case .projectSearch, .archived:
-            return (model.pinnedProjects() + model.unpinnedProjects()).flatMap { project in
-                SidebarOrganization.listedRows(in: project, from: unpinned)
-            }
-        case .projectList:
-            return []
-        }
+        model.eventSidebarSnapshot().rowIDs
     }
 
     private func dismissSession(_ session: GrokSession) {
@@ -770,7 +864,7 @@ struct SidebarView: View {
         case .closeTab:
             model.performSidebarDismiss(session)
         case .delete:
-            pendingDelete = session
+            if session.provider.capabilities.delete { pendingDelete = session }
         }
     }
 
@@ -781,18 +875,36 @@ struct SidebarView: View {
         }
         switch SidebarOrganization.escapeAction(
             isRenaming: model.renamingSessionKey != nil,
+            isSearching: listKind == .search,
             surface: model.sidebarSurface
         ) {
         case .cancelRename:
+            let returnFocus = model.renameReturnFocus
             model.cancelRename()
-            focus = .list
+            if returnFocus == .terminal {
+                focus = nil
+                model.focusSelectedTerminal()
+            } else {
+                focus = .list
+            }
         case .leaveFolder:
-            model.leaveProject()
+            leaveFolder()
         case .leaveList:
             focus = nil
             model.focusSelectedTerminal()
         }
         return .handled
+    }
+
+    /// Opening a folder drops the highlight (its id is not a chat row), so put
+    /// it back on the folder being left.
+    private func leaveFolder() {
+        if let id = SidebarOrganization.homeRowID(
+            leaving: model.sidebarSurface, projectID: model.focusedProject?.id)
+        {
+            keyboardSelectionID = id
+        }
+        model.leaveProject()
     }
 
     private func activateSearchResult() {
@@ -816,6 +928,23 @@ struct SidebarView: View {
             return .ignored
         }
         beginInlineRename(session)
+        return .handled
+    }
+
+    /// ⌘⌫, as in Finder: the row's X for one chat, the bulk trash alert for a
+    /// multi-selection.
+    private func trashKeyboardSelection() -> KeyPress.Result {
+        guard model.renamingSessionKey == nil else { return .ignored }
+        let sessions = SidebarOrganization.trashTargets(
+            keyboardRowID: keyboardSelectionID, selection: multiSelection, in: visibleRowIDs()
+        ).compactMap { sessionAnywhere(for: $0) }.filter { model.isOpen($0) || $0.provider.capabilities.delete }
+        if sessions.count > 1 {
+            pendingBulkDelete = sessions
+        } else if let session = sessions.first {
+            dismissSession(session)
+        } else {
+            return .ignored
+        }
         return .handled
     }
 
@@ -987,11 +1116,10 @@ struct SidebarView: View {
         return .handled
     }
 
-    private func moveKeyboardSelection(by delta: Int) -> KeyPress.Result {
+    private func moveKeyboardSelection(by delta: Int, shift: Bool) -> KeyPress.Result {
         let ids = visibleRowIDs()
         guard !ids.isEmpty else { return .ignored }
-        let extending =
-            NSEvent.modifierFlags.contains(.shift) && listKind != .projectList
+        let extending = shift && listKind != .projectList
         let anchor = extending ? (selectionAnchor ?? keyboardSelectionID) : nil
         if let current = keyboardSelectionID, let index = ids.firstIndex(of: current) {
             keyboardSelectionID = ids[min(max(index + delta, 0), ids.count - 1)]
@@ -1022,6 +1150,11 @@ struct SidebarView: View {
             model.openArchived()
             return true
         }
+        if let tabID = SidebarOrganization.openTabID(fromRowID: id) {
+            guard model.tabs.contains(where: { $0.id == tabID }) else { return false }
+            model.select(tabID)
+            return true
+        }
         if listKind == .projectList, let project = project(for: id) {
             model.openProject(project)
             return true
@@ -1032,7 +1165,7 @@ struct SidebarView: View {
     }
 
     private func session(for id: String) -> GrokSession? {
-        listedSessions.first { model.sessionKey($0) == id }
+        model.eventSidebarSnapshot().listed.first { model.sessionKey($0) == id }
     }
 
     private func project(for id: String) -> SidebarProject? {
@@ -1046,6 +1179,18 @@ struct SidebarView: View {
         }
     }
 
+    /// The list hides its focus ring, so while it has focus the arrow-key
+    /// highlight is the only mark of it and must always be on a row.
+    private func showKeyboardRowIfListFocused() {
+        guard focus == .list else { return }
+        let activeRowID =
+            listKind == .projectList
+            ? model.selectedTab.map { SidebarOrganization.openTabRowID($0.id) }
+            : model.sessionForSelectedTab().map { model.sessionKey($0) }
+        keyboardSelectionID = SidebarOrganization.keyboardRow(
+            onFocus: keyboardSelectionID, activeRowID: activeRowID, in: visibleRowIDs())
+    }
+
     // MARK: - Multi-selection
 
     /// ⌘ toggles one row, ⇧ extends a range from the anchor, a plain click
@@ -1056,7 +1201,10 @@ struct SidebarView: View {
         if modifiers.contains(.command) {
             if multiSelection.contains(key) {
                 multiSelection.remove(key)
-                if selectionAnchor == key { selectionAnchor = multiSelection.first }
+                if selectionAnchor == key {
+                    selectionAnchor = SidebarOrganization.reanchor(
+                        selection: multiSelection, in: visibleRowIDs())
+                }
             } else {
                 multiSelection.insert(key)
                 selectionAnchor = key
@@ -1079,9 +1227,10 @@ struct SidebarView: View {
     private func bulkSelection(containing session: GrokSession) -> [GrokSession] {
         let key = model.sessionKey(session)
         guard multiSelection.count > 1, multiSelection.contains(key) else { return [session] }
-        let order = visibleRowIDs()
+        let snapshot = model.eventSidebarSnapshot()
+        let order = snapshot.rowIDs
         return
-            listedSessions
+            snapshot.listed
             .filter { multiSelection.contains(model.sessionKey($0)) }
             .sorted {
                 (order.firstIndex(of: model.sessionKey($0)) ?? .max)
@@ -1133,11 +1282,158 @@ private struct ProjectRows: Identifiable {
     var rows: [GrokSession]
 }
 
+// MARK: - Glide
+
+/// The sidebar's one `hover` fill, and the row it sits on. Rows report the
+/// pointer through `hover`; the fill moves between them with
+/// `matchedGeometryEffect`, so it glides instead of blinking.
+struct SidebarGlide {
+    var target: String?
+    var namespace: Namespace.ID?
+    var hover: (String, Bool) -> Void = { _, _ in }
+}
+
+private struct SidebarGlideKey: EnvironmentKey {
+    static var defaultValue: SidebarGlide { SidebarGlide() }
+}
+
+extension EnvironmentValues {
+    var sidebarGlide: SidebarGlide {
+        get { self[SidebarGlideKey.self] }
+        set { self[SidebarGlideKey.self] = newValue }
+    }
+}
+
+/// A sidebar row's fill: the gliding `hover`, the `hover2` of the open row
+/// over it, and the rings for keyboard and multi-selection.
+private struct RowHighlight: View {
+    let id: String
+    var isSelected = false
+    var isKeyboardSelected = false
+    var isMultiSelected = false
+    var isRenaming = false
+
+    @Environment(\.palette) private var palette
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.sidebarGlide) private var glide
+
+    /// The sidebar sits on `canvas`. In dark mode `hover` lifts off it; in
+    /// light mode `hover` is lighter than the canvas, so hover darkens to `hover2`.
+    private var hoverFill: Color { palette.isDark ? palette.hover : palette.hover2 }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
+        ZStack {
+            if glide.target == id || isRenaming {
+                if let namespace = glide.namespace, !isRenaming {
+                    shape.fill(hoverFill)
+                        .matchedGeometryEffect(id: "sidebar.glide", in: namespace)
+                } else {
+                    shape.fill(hoverFill)
+                }
+            }
+            if isSelected {
+                if palette.isDark {
+                    shape.fill(palette.hover2)
+                } else {
+                    // On the light canvas the open row lifts to `surface`, as
+                    // Beautiful UI's selected segment does; a grey fill vanishes.
+                    shape.fill(palette.surface)
+                        .overlay(shape.strokeBorder(palette.ringButton, lineWidth: 1))
+                        .shadow(color: .black.opacity(0.05), radius: 1, y: 1)
+                }
+            }
+            if isMultiSelected {
+                shape.strokeBorder(palette.accent, lineWidth: 1)
+            } else if isKeyboardSelected && !isSelected {
+                shape.strokeBorder(
+                    palette[keyPath: KeyboardRowOutline.color(contrast)],
+                    lineWidth: KeyboardRowOutline.width(contrast))
+            }
+        }
+    }
+}
+
+/// "Open 3", "Projects 12": the label in `ink2`, the count in mono.
+private struct SidebarSectionLabel: View {
+    let title: String
+    let count: Int
+    let isFirst: Bool
+    var add: (() -> Void)? = nil
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .ui(12.5, .medium)
+                .foregroundStyle(palette.ink2)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityLabel("\(title), \(count)")
+            Spacer(minLength: 4)
+            // Before the count, so every section's count keeps one column.
+            if let add {
+                RowAction(systemImage: "plus", help: "Add Project", action: add)
+            }
+            Text("\(count)")
+                .mono(11.5)
+                .foregroundStyle(palette.ink2)
+                .accessibilityHidden(true)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, isFirst ? 8 : 16)
+        .padding(.bottom, add == nil ? 4 : 1)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.canvas)
+    }
+}
+
+/// A trailing action on a sidebar row: 22pt, `ink3` at rest.
+private struct RowAction: View {
+    let systemImage: String
+    var tinted = false
+    let help: String
+    let action: () -> Void
+    @Environment(\.palette) private var palette
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: 22, height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.chip, style: .continuous)
+                        .fill(isHovering ? palette.hover2 : .clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(tinted ? palette.accent : (isHovering ? palette.ink : palette.ink2))
+        .onHover { isHovering = $0 }
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
+/// The small pin a pinned row keeps at rest.
+private struct PinMark: View {
+    @Environment(\.palette) private var palette
+    var body: some View {
+        Image(systemName: "pin.fill")
+            .font(.system(size: 9, weight: .semibold))
+            .rotationEffect(.degrees(45))
+            .foregroundStyle(palette.ink3)
+            .accessibilityHidden(true)
+    }
+}
+
+/// The open project's bar: back, the name, and its actions.
 private struct DrillBar: View {
     let title: String
     var isPinned: Bool = false
     var showsPin: Bool = false
     var showsArchive: Bool = false
+    var archiveLabel = "Archive Project"
     var canStart: Bool = false
     let leave: () -> Void
     var newChat: (() -> Void)? = nil
@@ -1148,47 +1444,52 @@ private struct DrillBar: View {
     @State private var isHoveringBack = false
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 2) {
             Button(action: leave) {
-                HStack(spacing: 4) {
+                HStack(spacing: 6) {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(isHoveringBack ? palette.ink : palette.ink3)
                     Text(title)
-                        .font(.system(size: 12, weight: .medium))
+                        .ui(14, .medium)
+                        .foregroundStyle(palette.ink)
                         .lineLimit(1)
                 }
-                .foregroundStyle(isHoveringBack ? palette.text : palette.textDim)
-                .padding(.horizontal, 6)
-                .frame(height: 22)
+                .padding(.horizontal, 8)
+                .frame(height: 30)
                 .background(
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(isHoveringBack ? palette.raised : Color.clear)
+                    RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
+                        .fill(isHoveringBack ? palette.hover : Color.clear)
                 )
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .onHover { isHoveringBack = $0 }
+            .animation(Motion.fade, value: isHoveringBack)
             .help("Back to projects")
             .accessibilityLabel("Back to projects")
+            // The title is the only thing that says where the user is.
+            .accessibilityValue(title)
             Spacer(minLength: 4)
             if showsArchive, let toggleArchive {
-                IconButton(systemImage: "archivebox", help: "Archive Project") {
+                IconButton(systemImage: "archivebox", help: archiveLabel) {
                     toggleArchive()
                 }
             }
             if showsPin, let togglePin {
                 IconButton(
                     systemImage: isPinned ? "pin.fill" : "pin",
-                    help: isPinned ? "Unpin Project" : "Pin Project"
+                    help: isPinned ? "Unpin Project" : "Pin Project",
+                    isOn: isPinned
                 ) {
                     togglePin()
                 }
-                .foregroundStyle(isPinned ? palette.accent : palette.textDim)
             }
             if let newChat {
                 IconButton(
                     systemImage: "plus",
-                    help: "New Session in \(title) (⌘T)"
+                    help: "New Session in \(title) (⌘T)",
+                    label: "New Session"
                 ) {
                     newChat()
                 }
@@ -1196,76 +1497,166 @@ private struct DrillBar: View {
             }
         }
         .padding(.horizontal, 8)
-        .padding(.bottom, 8)
-        .overlay(alignment: .bottom) { Rectangle().fill(palette.hairline).frame(height: 1) }
+        .padding(.top, 4)
+        .padding(.bottom, 4)
+        .overlay(alignment: .top) {
+            Rectangle().fill(palette.line).frame(height: 1).padding(.horizontal, 16)
+        }
     }
 }
 
-private struct DestinationRow: View {
+/// A Beautiful UI nav item: a 16pt icon, a label, and a trailing count or key.
+private struct NavRow: View {
+    enum Trailing {
+        case none
+        case count(Int)
+        case key(String)
+    }
+
+    let id: String
     let icon: String
     let title: String
-    let count: Int
+    let trailing: Trailing
+    let isSelected: Bool
     let isKeyboardSelected: Bool
     let help: String
     let open: () -> Void
 
     @Environment(\.palette) private var palette
+    @Environment(\.sidebarGlide) private var glide
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(isSelected ? palette.ink : palette.ink2)
+                .frame(width: 18)
+            Text(title)
+                .ui(14, isSelected ? .medium : .regular)
+                .foregroundStyle(palette.ink)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            switch trailing {
+            case .none:
+                EmptyView()
+            case .count(let count):
+                Text("\(count)")
+                    .mono(11.5)
+                    .foregroundStyle(palette.ink2)
+            case .key(let key):
+                KbdChip(label: key, palette: palette)
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 32)
+        .background(
+            RowHighlight(id: id, isSelected: isSelected, isKeyboardSelected: isKeyboardSelected)
+        )
+        .padding(.horizontal, 8)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: open)
+        .onHover { glide.hover(id, $0) }
+        .help(help)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityLabel(title)
+        .accessibilityValue(accessibilityValue)
+        .accessibilityAction(.default, open)
+    }
+
+    private var accessibilityValue: String {
+        switch trailing {
+        case .none, .key: return ""
+        case .count(let count): return count == 1 ? "1 chat" : "\(count) chats"
+        }
+    }
+}
+
+/// One open session on the sidebar home: its state mark, its title, and its
+/// folder in mono. Click selects the tab.
+private struct OpenTabRow: View {
+    let rowID: String
+    let title: String
+    let folder: String
+    let path: String
+    let activity: TerminalTab.Activity
+    let hasUnseenActivity: Bool
+    let isSelected: Bool
+    let isKeyboardSelected: Bool
+    let select: () -> Void
+    let close: () -> Void
+
+    @Environment(\.palette) private var palette
+    @Environment(\.sidebarGlide) private var glide
     @State private var isHovering = false
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(palette.textFaint)
-                .frame(width: 16)
+            ActivityMark(activity: activity, hasUnseenActivity: hasUnseenActivity && !isSelected)
             Text(title)
-                .font(.system(size: 12))
-                .foregroundStyle(palette.text)
+                .ui(14, isSelected ? .medium : .regular)
+                .foregroundStyle(palette.ink)
                 .lineLimit(1)
+                .truncationMode(.tail)
             Spacer(minLength: 8)
-            Text(countLabel)
-                .font(.system(size: 9.5, design: .monospaced))
-                .foregroundStyle(palette.textFaint)
+            if isHovering || isKeyboardSelected {
+                RowAction(systemImage: "xmark", help: "Close Tab", action: close)
+            } else {
+                Text(folder)
+                    .mono(11.5)
+                    .foregroundStyle(activity.endedInFailure ? palette.redInk : palette.ink2)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 96, alignment: .trailing)
+                    .fixedSize(horizontal: folder.count <= 12, vertical: false)
+                    .layoutPriority(1)
+            }
         }
-        .padding(.leading, 8)
-        .padding(.trailing, 10)
-        .padding(.vertical, 6)
-        .background(rowFill)
-        .padding(.horizontal, 6)
+        .padding(.leading, 6)
+        .padding(.trailing, 5)
+        .frame(height: 32)
+        .background(
+            RowHighlight(id: rowID, isSelected: isSelected, isKeyboardSelected: isKeyboardSelected)
+        )
+        .padding(.horizontal, 8)
         .contentShape(Rectangle())
-        .onTapGesture(perform: open)
-        .onHover { isHovering = $0 }
-        .help(help)
+        .onTapGesture(perform: select)
+        .onHover { inside in
+            isHovering = inside
+            glide.hover(rowID, inside)
+        }
+        .help("\(title)\n\(path)\n\(stateLabel)")
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
-        .accessibilityLabel(title)
-        .accessibilityValue(countLabel)
-        .accessibilityAction(.default, open)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityLabel("\(title), \(folder)")
+        .accessibilityValue(isSelected ? "Selected, \(stateLabel)" : stateLabel)
+        .accessibilityAction(.default, select)
+        .accessibilityAction(named: "Close Tab", close)
     }
 
-    private var countLabel: String {
-        count == 1 ? "1 chat" : "\(count) chats"
-    }
-
-    private var fill: Color {
-        (isHovering || isKeyboardSelected) ? palette.raised : .clear
-    }
-
-    @ViewBuilder
-    private var rowFill: some View {
-        RoundedRectangle(cornerRadius: 6)
-            .fill(fill)
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(
-                        isKeyboardSelected ? palette.hairline : Color.clear,
-                        lineWidth: 1
-                    )
-            )
+    private var stateLabel: String {
+        switch activity {
+        case .starting: return "Starting"
+        case .waitingForApproval: return "Needs approval"
+        case .interrupted: return "Stopped"
+        case .failed: return "Failed"
+        case .disconnected: return "Disconnected"
+        case .unknown: return "Status unknown"
+        case .working: return "Working"
+        case .idle: return hasUnseenActivity ? "Finished" : "Idle"
+        case .exited(let code):
+            if let code, code != 0 { return "Ended · code \(code)" }
+            return "Ended"
+        }
     }
 }
 
+/// A project on the sidebar home: folder icon, name, and its latest time in
+/// mono. Hover adds archive and pin beside the plus.
 private struct ProjectListRow: View {
+    let rowID: String
     let title: String
     let paths: [String]
     let count: Int
@@ -1275,59 +1666,83 @@ private struct ProjectListRow: View {
     let isWorking: Bool
     let isActive: Bool
     let isKeyboardSelected: Bool
-    let canStart: Bool
-    var showsPin: Bool = true
     let open: () -> Void
     let newChat: () -> Void
     let togglePin: () -> Void
     var archive: (() -> Void)? = nil
+    var archiveLabel = "Archive Project"
 
     @Environment(\.palette) private var palette
+    @Environment(\.sidebarGlide) private var glide
     @State private var isHovering = false
 
     var body: some View {
         HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 12, weight: isActive ? .medium : .regular))
-                    .foregroundStyle(palette.text)
-                    .lineLimit(1)
-                Text(subtitle)
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundStyle(palette.textFaint)
-                    .lineLimit(1)
+            Image(systemName: isActive ? "folder.fill" : "folder")
+                .font(.system(size: 12.5, weight: .regular))
+                .foregroundStyle(isActive ? palette.ink2 : palette.ink3)
+                .frame(width: 16)
+            Text(title)
+                .ui(14, isActive ? .medium : .regular)
+                .foregroundStyle(palette.ink)
+                .lineLimit(1)
+            if isPinned && !showsControls {
+                PinMark()
             }
             Spacer(minLength: 8)
-            if isWorking {
-                StatusDot(activity: .working)
+            if showsControls {
+                HStack(spacing: 0) {
+                    if let archive {
+                        RowAction(systemImage: "archivebox", help: archiveLabel, action: archive)
+                    }
+                    RowAction(
+                        systemImage: isPinned ? "pin.fill" : "pin",
+                        tinted: isPinned,
+                        help: isPinned ? "Unpin Project" : "Pin Project",
+                        action: togglePin
+                    )
+                    RowAction(systemImage: "plus", help: "New Session", action: newChat)
+                }
+            } else {
+                if isWorking {
+                    PixelLoader(color: palette.accent)
+                }
+                Text(relativeTime.isEmpty ? "\(count)" : relativeTime)
+                    .mono(11.5)
+                    .foregroundStyle(palette.ink2)
+                    .fixedSize()
             }
         }
         .padding(.leading, 8)
-        .padding(.trailing, 10)
-        .padding(.vertical, 6)
-        .background(rowFill)
-        .overlay(alignment: .topTrailing) { trailing }
-        .padding(.horizontal, 6)
+        .padding(.trailing, showsControls ? 5 : 8)
+        .frame(height: 32)
+        .background(RowHighlight(id: rowID, isKeyboardSelected: isKeyboardSelected))
+        .padding(.horizontal, 8)
         .contentShape(Rectangle())
         .onTapGesture(perform: open)
-        .onHover { isHovering = $0 }
+        .onHover { inside in
+            isHovering = inside
+            glide.hover(rowID, inside)
+        }
         .help(rowHelp)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
-        .accessibilityAddTraits(isActive ? .isSelected : [])
         .accessibilityLabel(title)
-        .accessibilityValue(countLabel)
-        .accessibilityAction(.default, open)
-        .modifier(NamedActionIf(name: "New Session", enabled: canStart, action: newChat))
-        .modifier(
-            NamedActionIf(
-                name: isPinned ? "Unpin Project" : "Pin Project",
-                enabled: showsPin,
-                action: togglePin
+        .accessibilityValue(
+            ProjectRowAccessibility.value(
+                countLabel: countLabel,
+                isActive: isActive,
+                isWorking: isWorking,
+                isPinned: isPinned
             )
         )
-        .modifier(ArchiveProjectAction(archive: archive))
+        .accessibilityAction(.default, open)
+        .accessibilityAction(named: "New Session", newChat)
+        .accessibilityAction(named: isPinned ? "Unpin Project" : "Pin Project", togglePin)
+        .modifier(ArchiveProjectAction(name: archiveLabel, archive: archive))
     }
+
+    private var showsControls: Bool { isHovering || isKeyboardSelected }
 
     private var rowHelp: String {
         let path = paths.first { $0.hasPrefix("/") || $0.hasPrefix("~") } ?? title
@@ -1335,102 +1750,13 @@ private struct ProjectListRow: View {
         return "\(path)\n\(countLabel) · \(longRelative)"
     }
 
-    private var showHoverControls: Bool {
-        (isHovering || isKeyboardSelected) && (showsPin || archive != nil)
-    }
-
     private var countLabel: String {
         count == 1 ? "1 chat" : "\(count) chats"
     }
-
-    private var subtitle: String {
-        relativeTime.isEmpty ? countLabel : "\(countLabel) · \(relativeTime)"
-    }
-
-    private var fill: Color {
-        if isActive { return palette.selected }
-        return (isHovering || isKeyboardSelected) ? palette.raised : .clear
-    }
-
-    @ViewBuilder
-    private var rowFill: some View {
-        RoundedRectangle(cornerRadius: 6)
-            .fill(fill)
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(
-                        isKeyboardSelected && !isActive ? palette.hairline : Color.clear,
-                        lineWidth: 1
-                    )
-            )
-    }
-
-    @ViewBuilder
-    private var trailing: some View {
-        if canStart || showHoverControls || (isPinned && showsPin) {
-            HStack(spacing: 0) {
-                LinearGradient(
-                    colors: [fill.opacity(0), fill],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-                .frame(width: 14)
-                HStack(spacing: 0) {
-                    if canStart {
-                        Button(action: newChat) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 9, weight: .semibold))
-                                .frame(width: 22, height: 22)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(
-                            (isHovering || isKeyboardSelected) ? palette.textDim : palette.textFaint
-                        )
-                        .help("New Session")
-                        .accessibilityLabel("New Session")
-                    }
-                    if isHovering || isKeyboardSelected {
-                        if let archive {
-                            Button(action: archive) {
-                                Image(systemName: "archivebox")
-                                    .font(.system(size: 9, weight: .semibold))
-                                    .frame(width: 22, height: 22)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(palette.textDim)
-                            .help("Archive Project")
-                            .accessibilityLabel("Archive Project")
-                        }
-                        if showsPin {
-                            Button(action: togglePin) {
-                                Image(systemName: isPinned ? "pin.fill" : "pin")
-                                    .font(.system(size: 9, weight: .semibold))
-                                    .frame(width: 22, height: 22)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(isPinned ? palette.accent : palette.textDim)
-                            .help(isPinned ? "Unpin Project" : "Pin Project")
-                            .accessibilityLabel(isPinned ? "Unpin Project" : "Pin Project")
-                        }
-                    } else if isPinned && showsPin {
-                        Image(systemName: "pin.fill")
-                            .font(.system(size: 8, weight: .semibold))
-                            .foregroundStyle(palette.accent.opacity(0.9))
-                            .frame(width: 22, height: 22)
-                            .accessibilityHidden(true)
-                    }
-                }
-                .padding(.trailing, 8)
-                .padding(.top, 4)
-                .background(fill)
-            }
-        }
-    }
 }
 
+/// A project's name above its chats in Archived and in a search across
+/// projects. Search matches paint in `accentInk`.
 private struct ProjectSectionHeader: View {
     let title: String
     let paths: [String]
@@ -1451,20 +1777,39 @@ private struct ProjectSectionHeader: View {
             count: count,
             query: searchQuery
         )
-        SearchHighlightedText(
-            runs: paint.runs,
-            match: palette.accent,
-            rest: palette.textFaint
-        )
-        .font(.system(size: 10, weight: .medium, design: .monospaced))
-        .lineLimit(1)
-        .truncationMode(textTruncationMode(paint.visibleTruncation))
-        .padding(.horizontal, 14)
-        .padding(.top, isFirst ? 10 : 18)
+        HStack(spacing: 6) {
+            Image(systemName: "folder")
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(palette.ink3)
+            SearchHighlightedText(
+                runs: paint.runs,
+                match: palette.accentInk,
+                rest: palette.ink2
+            )
+            .ui(12.5, .medium)
+            .lineLimit(1)
+            .truncationMode(textTruncationMode(paint.visibleTruncation))
+            Spacer(minLength: 4)
+            if isHovering {
+                Button(action: togglePin) {
+                    Image(systemName: isPinned ? "pin.fill" : "pin")
+                        .font(.system(size: 10, weight: .medium))
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(isPinned ? palette.accent : palette.ink2)
+                .help(isPinned ? "Unpin Project" : "Pin Project")
+                .accessibilityLabel(isPinned ? "Unpin Project" : "Pin Project")
+            } else if isPinned {
+                PinMark()
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, isFirst ? 8 : 16)
         .padding(.bottom, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.sidebar)
-        .overlay(alignment: .topTrailing) { trailing }
+        .background(palette.canvas)
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .contextMenu {
@@ -1492,31 +1837,6 @@ private struct ProjectSectionHeader: View {
             togglePin()
         }
     }
-
-    @ViewBuilder
-    private var trailing: some View {
-        if isHovering {
-            Button(action: togglePin) {
-                Image(systemName: isPinned ? "pin.fill" : "pin")
-                    .font(.system(size: 8, weight: .semibold))
-                    .frame(width: 18, height: 18)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(isPinned ? palette.accent : palette.textDim)
-            .help(isPinned ? "Unpin Project" : "Pin Project")
-            .accessibilityLabel(isPinned ? "Unpin Project" : "Pin Project")
-            .padding(.trailing, 10)
-            .padding(.top, isFirst ? 6 : 14)
-        } else if isPinned {
-            Image(systemName: "pin.fill")
-                .font(.system(size: 8, weight: .semibold))
-                .foregroundStyle(palette.accent.opacity(0.9))
-                .padding(.trailing, 12)
-                .padding(.top, isFirst ? 10 : 18)
-                .accessibilityHidden(true)
-        }
-    }
 }
 
 private struct SessionRow: View {
@@ -1541,6 +1861,8 @@ private struct SessionRow: View {
     let hasCustomName: Bool
     let showsProject: Bool
     let headerCoversQuery: Bool
+    /// The sidebar's minute tick, for relative times.
+    let now: Date
     /// Plain activation (keyboard, VoiceOver): opens the conversation.
     let open: () -> Void
     /// Mouse click: modifier-aware (⌘ toggles, ⇧ ranges), falls back to open.
@@ -1561,6 +1883,7 @@ private struct SessionRow: View {
     @FocusState.Binding var focus: SidebarFocus?
 
     @Environment(\.palette) private var palette
+    @Environment(\.sidebarGlide) private var glide
     @SwiftUI.State private var isHovering = false
     @SwiftUI.State private var suppressBlurCommit = false
     @SwiftUI.State private var blurCommitTask: Task<Void, Never>?
@@ -1609,7 +1932,11 @@ private struct SessionRow: View {
             .accessibilityAction(named: isArchived ? "Unarchive" : "Archive") {
                 toggleArchive()
             }
-            .accessibilityAction(named: dismissHelp, dismiss)
+            .accessibilityActions {
+                if model.isOpen(session) || session.provider.capabilities.delete {
+                    Button(dismissHelp, action: dismiss)
+                }
+            }
             .accessibilityAction(named: "Rename") { beginRename() }
             .modifier(
                 SessionRowResetNameAction(
@@ -1623,68 +1950,127 @@ private struct SessionRow: View {
     private var interactiveRow: some View {
         rowChrome
             .onTapGesture { if !isRenaming { tap() } }
-            .onHover { isHovering = $0 }
+            .onHover { inside in
+                isHovering = inside
+                glide.hover(rowID, inside)
+            }
             .help(rowHelpText)
     }
 
+    /// One line while browsing: title, then the time (and project, in lists
+    /// that span projects) in mono. A search result adds the matched context
+    /// as a second mono line, as Beautiful UI's search results do.
     @ViewBuilder
     private var rowChrome: some View {
         let paint = rowPaint
         HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
+            if isSearchResult {
+                VStack(alignment: .leading, spacing: 2) {
+                    titleLine(runs: paint.titleRuns, truncation: paint.titleTruncation)
+                    metadata(paint)
+                }
+                Spacer(minLength: 4)
+                if !isRenaming, showsControls {
+                    actions
+                } else {
+                    stateMarks
+                }
+            } else {
                 titleLine(runs: paint.titleRuns, truncation: paint.titleTruncation)
-                SearchHighlightedText(
-                    runs: paint.subtitleRuns,
-                    match: palette.accent,
-                    rest: palette.textFaint
-                )
-                .font(.system(size: 9.5, design: .monospaced))
-                .lineLimit(1)
-                .truncationMode(textTruncationMode(paint.subtitleTruncation))
-            }
-            Spacer(minLength: 8)
-            if let activity, !isRenaming,
-                SidebarActivityDot.isVisible(
-                    activity: activity,
-                    hasUnseenActivity: hasUnseenActivity,
-                    isActive: state == .active
-                )
-            {
-                StatusDot(activity: activity)
+                    .layoutPriority(0)
+                Spacer(minLength: 8)
+                if isRenaming {
+                    EmptyView()
+                } else if showsControls {
+                    actions
+                } else {
+                    stateMarks
+                    metadata(paint)
+                        .frame(maxWidth: 120, alignment: .trailing)
+                        .fixedSize(horizontal: paint.subtitle.count <= 4, vertical: false)
+                        .layoutPriority(1)
+                }
             }
         }
         .padding(.leading, 8)
-        .padding(.trailing, 10)
-        .padding(.vertical, 6)
-        .background(rowFill)
-        .overlay(alignment: .topTrailing) { trailingOverlay }
-        .padding(.horizontal, 6)
+        .padding(.trailing, showsControls && !isRenaming ? 5 : 8)
+        .padding(.vertical, isSearchResult ? 6 : 0)
+        .frame(minHeight: 32)
+        .background(
+            RowHighlight(
+                id: rowID,
+                isSelected: state == .active,
+                isKeyboardSelected: isKeyboardSelected,
+                isMultiSelected: isMultiSelected,
+                isRenaming: isRenaming
+            )
+        )
+        .padding(.horizontal, 8)
         .contentShape(Rectangle())
     }
 
-    @ViewBuilder
-    private var rowFill: some View {
-        RoundedRectangle(cornerRadius: 6)
-            .fill(fill)
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(stroke, lineWidth: 1)
-            )
+    private var rowID: String { model.sessionKey(session) }
+
+    private var isSearchResult: Bool {
+        !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// Multi-selection wears the accent hairline — even on the active row, so
-    /// the open conversation never looks outside a bulk action it is in. The
-    /// arrow-key highlight keeps the plain one.
-    private var stroke: Color {
-        if isMultiSelected { return palette.accent }
-        if state == .active { return .clear }
-        if isKeyboardSelected { return palette.hairline }
-        return .clear
+    private var showsControls: Bool { isHovering || isKeyboardSelected }
+
+    private func metadata(_ paint: SearchMatchHighlight.RowPaint) -> some View {
+        SearchHighlightedText(
+            runs: paint.subtitleRuns,
+            match: palette.accentInk,
+            rest: palette.ink2
+        )
+        .mono(11.5)
+        .lineLimit(1)
+        .truncationMode(textTruncationMode(paint.subtitleTruncation))
+    }
+
+    /// Working light and pin, at rest.
+    @ViewBuilder
+    private var stateMarks: some View {
+        if isPinned {
+            PinMark()
+        }
+        if let activity, !isRenaming,
+            SidebarActivityDot.isVisible(
+                activity: activity,
+                hasUnseenActivity: hasUnseenActivity,
+                isActive: state == .active
+            )
+        {
+            ActivityMark(activity: activity, hasUnseenActivity: hasUnseenActivity)
+        }
+    }
+
+    private var actions: some View {
+        HStack(spacing: 0) {
+            RowAction(
+                systemImage: isArchived ? "archivebox.fill" : "archivebox",
+                tinted: isArchived,
+                help: isArchived ? "Unarchive" : "Archive",
+                action: toggleArchive
+            )
+            RowAction(
+                systemImage: isPinned ? "pin.fill" : "pin",
+                tinted: isPinned,
+                help: isPinned ? "Unpin" : "Pin",
+                action: togglePin
+            )
+            if model.isOpen(session) || session.provider.capabilities.delete {
+                RowAction(systemImage: "xmark", help: dismissHelp, action: dismiss)
+            }
+        }
     }
 
     private var rowHelpText: String {
-        "\(title)\n\(session.displayPath)\n"
-            + "\(session.messageCount) messages · \(session.updatedAt.longRelative)"
+        let messages =
+            session.provider == .grokBuild
+            ? (session.messageCount == 1 ? "1 message" : "\(session.messageCount) messages") + " · " : ""
+        return "\(title)\n\(session.displayPath)\n"
+            + "\(messages)\(session.updatedAt.longRelative(to: now))"
     }
 
     private var rowAccessibilityValue: String {
@@ -1707,7 +2093,7 @@ private struct SessionRow: View {
         SearchMatchHighlight.rowAccessibilityLabel(
             title: title,
             projectName: session.projectName,
-            longRelative: session.updatedAt.longRelative,
+            longRelative: session.updatedAt.longRelative(to: now),
             paint: rowPaint,
             isPinned: isPinned,
             isArchived: isArchived,
@@ -1732,10 +2118,10 @@ private struct SessionRow: View {
         } else {
             SearchHighlightedText(
                 runs: runs,
-                match: palette.accent,
-                rest: palette.text
+                match: palette.accentInk,
+                rest: palette.ink
             )
-            .font(.system(size: 12, weight: state == .active ? .medium : .regular))
+            .ui(14, state == .active ? .medium : .regular)
             .lineLimit(1)
             .truncationMode(textTruncationMode(truncation))
         }
@@ -1749,81 +2135,11 @@ private struct SessionRow: View {
             projectName: session.projectName,
             cwd: session.cwd,
             displayPath: session.displayPath,
-            relativeTime: session.updatedAt.shortRelative,
+            relativeTime: session.updatedAt.shortRelative(to: now),
             showsProject: showsProject,
             headerCoversQuery: headerCoversQuery,
             query: searchQuery
         )
-    }
-
-    @ViewBuilder
-    private var trailingOverlay: some View {
-        if isRenaming {
-            EmptyView()
-        } else if isHovering || isKeyboardSelected {
-            HStack(spacing: 0) {
-                LinearGradient(
-                    colors: [fill.opacity(0), fill],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-                .frame(width: 14)
-                HStack(spacing: 0) {
-                    rowActionButton(
-                        systemImage: isArchived ? "archivebox.fill" : "archivebox",
-                        tinted: isArchived,
-                        help: isArchived ? "Unarchive" : "Archive",
-                        action: toggleArchive
-                    )
-                    rowActionButton(
-                        systemImage: isPinned ? "pin.fill" : "pin",
-                        tinted: isPinned,
-                        help: isPinned ? "Unpin" : "Pin",
-                        action: togglePin
-                    )
-                    rowActionButton(
-                        systemImage: "xmark",
-                        tinted: false,
-                        help: dismissHelp,
-                        action: dismiss
-                    )
-                }
-                .padding(.trailing, 8)
-                .padding(.top, 4)
-                .background(fill)
-            }
-        } else if isPinned {
-            Image(systemName: "pin.fill")
-                .font(.system(size: 8, weight: .semibold))
-                .foregroundStyle(palette.accent.opacity(0.9))
-                .padding(.trailing, 12)
-                .padding(.top, 8)
-                .accessibilityHidden(true)
-        }
-    }
-
-    private func rowActionButton(
-        systemImage: String,
-        tinted: Bool,
-        help: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 9, weight: .semibold))
-                .frame(width: 22, height: 22)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(tinted ? palette.accent : palette.textDim)
-        .help(help)
-        .accessibilityLabel(help)
-    }
-
-    private var fill: Color {
-        if state == .active { return palette.selected }
-        return (isHovering || isKeyboardSelected || isRenaming || isMultiSelected)
-            ? palette.raised : .clear
     }
 
     @MainActor
@@ -1903,24 +2219,37 @@ private struct SessionRow: View {
     }
 
     private func commitCurrentDraft(restoreListFocus: Bool) {
+        let returnFocus = model.renameReturnFocus
         suppressBlurCommit = true
         blurCommitTask?.cancel()
         blurCommitTask = nil
         commitRename(model.renameDraft)
-        if restoreListFocus { focus = .list }
+        if restoreListFocus { restoreFocus(after: returnFocus) }
         if AppModel.shouldClearBlurSuppressionAfterCommitOrAbandon() {
             suppressBlurCommit = false
         }
     }
 
     private func abandonRename() {
+        let returnFocus = model.renameReturnFocus
         suppressBlurCommit = true
         blurCommitTask?.cancel()
         blurCommitTask = nil
         cancelRename()
-        focus = .list
+        restoreFocus(after: returnFocus)
         if AppModel.shouldClearBlurSuppressionAfterCommitOrAbandon() {
             suppressBlurCommit = false
+        }
+    }
+
+    /// A ⌘⇧R rename hands the keyboard back to the terminal it came from.
+    private func restoreFocus(after returnFocus: AppModel.RenameReturnFocus) {
+        switch returnFocus {
+        case .list:
+            focus = .list
+        case .terminal:
+            focus = nil
+            model.focusSelectedTerminal()
         }
     }
 
@@ -2010,29 +2339,38 @@ private func textTruncationMode(_ truncation: SearchMatchHighlight.Truncation) -
 }
 
 /// Accent on matched runs only. Empty query (or no hit in this string) is plain `Text`.
-private struct SearchHighlightedText: View {
+struct SearchHighlightedText: View {
     let runs: [SearchMatchHighlight.Run]
     let match: Color
     let rest: Color
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
 
     var body: some View {
         if runs.contains(where: \.isMatch) {
-            Text(Self.attributed(runs, match: match, rest: rest))
+            Text(
+                Self.attributed(
+                    runs, match: match, rest: rest, underlineMatches: differentiateWithoutColor))
         } else {
             Text(runs.map(\.text).joined())
                 .foregroundStyle(rest)
         }
     }
 
-    private static func attributed(
+    /// Nonisolated so tests can call it: on Swift 6.1 a View's statics are
+    /// inferred main-actor.
+    nonisolated static func attributed(
         _ runs: [SearchMatchHighlight.Run],
         match: Color,
-        rest: Color
+        rest: Color,
+        underlineMatches: Bool
     ) -> AttributedString {
         var result = AttributedString()
         for run in runs {
             var piece = AttributedString(run.text)
             piece.foregroundColor = run.isMatch ? match : rest
+            // The accent sits close to the title's luminance, so a user who asked
+            // not to rely on color gets an underline on the matched characters.
+            if run.isMatch, underlineMatches { piece.underlineStyle = .single }
             result += piece
         }
         return result
@@ -2053,8 +2391,8 @@ private struct SessionRenameField: View {
     var body: some View {
         TextField(placeholder, text: $model.renameDraft)
             .textFieldStyle(.plain)
-            .font(.system(size: 12, weight: emphasize ? .medium : .regular))
-            .foregroundStyle(palette.text)
+            .ui(14, emphasize ? .medium : .regular)
+            .foregroundStyle(palette.ink)
             .focused($focus, equals: .rename)
             .onSubmit(onSubmit)
             .onKeyPress(.escape) {
@@ -2110,28 +2448,14 @@ private struct SessionRowActivateTrait: ViewModifier {
     }
 }
 
-private struct NamedActionIf: ViewModifier {
-    let name: String
-    let enabled: Bool
-    let action: () -> Void
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if enabled {
-            content.accessibilityAction(named: name, action)
-        } else {
-            content
-        }
-    }
-}
-
 private struct ArchiveProjectAction: ViewModifier {
+    let name: String
     let archive: (() -> Void)?
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if let archive {
-            content.accessibilityAction(named: "Archive Project", archive)
+            content.accessibilityAction(named: name, archive)
         } else {
             content
         }

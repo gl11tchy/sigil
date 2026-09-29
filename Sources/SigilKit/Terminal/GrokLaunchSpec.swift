@@ -7,6 +7,11 @@ public struct GrokLaunchSpec: Sendable, Hashable {
     public struct HostCommand: Sendable, Equatable {
         public let executable: URL
         public let arguments: [String]
+
+        public init(executable: URL, arguments: [String]) {
+            self.executable = executable
+            self.arguments = arguments
+        }
     }
 
     /// Whether the tab opens a fresh conversation or reattaches to an existing one.
@@ -24,8 +29,12 @@ public struct GrokLaunchSpec: Sendable, Hashable {
     private let searchesPATH: Bool
     public var workingDirectory: URL
     public var mode: Mode
+    /// Exact provider-owned transcript selected by the validated history adapter.
+    public var sessionFile: URL?
     public var model: String?
     public var reasoningEffort: String?
+    /// Asks a CLI that has a fast mode to use it. Off leaves the CLI's own setting.
+    public var fastMode: Bool
     /// Anything the user typed into the advanced field, already split into arguments.
     public var extraArguments: [String]
     /// The CLI theme this tab renders in, passed as `GROK_THEME`. It matches the
@@ -37,6 +46,13 @@ public struct GrokLaunchSpec: Sendable, Hashable {
     /// `bridgeSocketPath` must be set for tab messaging to reach the app.
     public var bridgeTabID: String?
     public var bridgeSocketPath: String?
+    /// Variables only a non-Grok CLI receives, such as Kimi Code's API key.
+    /// Login-shell startup files run before the CLI and may set the same
+    /// names, so these travel under `providerEnvironmentPrefix` and the host
+    /// command exports them last.
+    public var providerEnvironment: [String: String]
+
+    public static let providerEnvironmentPrefix = "SIGIL_PROVIDER_"
 
     public init(
         executable: URL? = nil,
@@ -44,12 +60,15 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         mode: Mode,
         model: String? = nil,
         reasoningEffort: String? = nil,
+        fastMode: Bool = false,
         extraArguments: [String] = [],
         themeName: String? = nil,
         themeVariables: [String: String] = [:],
         bridgeTabID: String? = nil,
         bridgeSocketPath: String? = nil,
-        provider: CLIProvider = .grokBuild
+        providerEnvironment: [String: String] = [:],
+        provider: CLIProvider = .grokBuild,
+        sessionFile: URL? = nil
     ) {
         self.provider = provider
         self.searchesPATH = executable == nil && provider != .grokBuild
@@ -61,13 +80,16 @@ public struct GrokLaunchSpec: Sendable, Hashable {
                     .appendingPathComponent(".local/bin/\(provider.command)"))
         self.workingDirectory = workingDirectory
         self.mode = mode
+        self.sessionFile = sessionFile
         self.model = model
         self.reasoningEffort = reasoningEffort
+        self.fastMode = fastMode
         self.extraArguments = extraArguments
         self.themeName = themeName
         self.themeVariables = themeVariables
         self.bridgeTabID = bridgeTabID
         self.bridgeSocketPath = bridgeSocketPath
+        self.providerEnvironment = providerEnvironment
     }
 
     /// The session directory this launch reads and writes, when the app knows it up front.
@@ -87,7 +109,9 @@ public struct GrokLaunchSpec: Sendable, Hashable {
 
     /// Command-line arguments for the CLI, in the order `grok` documents them.
     public func arguments() -> [String] {
-        guard provider == .grokBuild else { return extraArguments }
+        guard provider == .grokBuild else {
+            return provider.sessionArguments(for: mode) + optionArguments() + extraArguments
+        }
         var args = ["--cwd", workingDirectory.path]
         switch mode {
         case .new(let sessionID):
@@ -105,6 +129,29 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         return args
     }
 
+    /// Model, effort and fast mode in another CLI's own flags. Cursor and Devin
+    /// name effort and speed inside the model id. Kimi takes none of them here.
+    private func optionArguments() -> [String] {
+        let model = model?.nilIfBlank
+        let effort = reasoningEffort?.nilIfBlank
+        var args: [String] = []
+        switch provider {
+        case .claudeCode:
+            if let model { args += ["--model", model] }
+            if let effort { args += ["--effort", effort] }
+            if fastMode { args += ["--settings", #"{"fastMode":true}"#] }
+        case .codex:
+            if let model { args += ["--model", model] }
+            if let effort { args += ["-c", "model_reasoning_effort=\"\(effort)\""] }
+            if fastMode { args += ["-c", #"service_tier="fast""#] }
+        case .cursor, .devin:
+            if let model { args += ["--model", model] }
+        case .kimi, .grokBuild:
+            break
+        }
+        return args
+    }
+
     /// Runs Grok through the user's login shell so a Finder launch receives the
     /// same PATH, credentials, and tool settings as a normal terminal.
     public func hostCommand(
@@ -113,44 +160,45 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         let fallback = URL(fileURLWithPath: "/bin/zsh")
         let requested = URL(fileURLWithPath: processEnvironment["SHELL"] ?? fallback.path)
         var shell = FileManager.default.isExecutableFile(atPath: requested.path) ? requested : fallback
+        if !["zsh", "bash", "sh", "fish"].contains(shell.lastPathComponent) {
+            shell = fallback
+        }
         if provider != .grokBuild {
-            if !["zsh", "bash", "sh", "fish"].contains(shell.lastPathComponent) {
-                shell = fallback
-            }
             let command = searchesPATH ? provider.command : executable.path
+            let prefix = Self.providerEnvironmentPrefix
+            let names = providerEnvironment.keys.filter(Self.isEnvironmentName).sorted()
             // Arguments stay positional, including paths containing shell metacharacters.
             if shell.lastPathComponent == "fish" {
+                let exports = names.map { "set -gx \($0) $\(prefix)\($0); set -e \(prefix)\($0); " }.joined()
                 return HostCommand(
                     executable: shell,
                     arguments: [
                         "-lic",
-                        "set -gx PATH $PATH (string split : -- $argv[1]); cd -- $argv[2]; or exit; exec $argv[3..-1]",
+                        exports
+                            + "set -gx PATH $PATH (string split : -- $argv[1]); cd -- $argv[2]; or exit; exec $argv[3..-1]",
                         CLIProvider.fallbackPath, workingDirectory.path, command,
                     ] + arguments()
                 )
             }
+            let exports = names.map { "export \($0)=\"$\(prefix)\($0)\"; unset \(prefix)\($0); " }.joined()
             return HostCommand(
                 executable: shell,
                 arguments: [
-                    "-lic", "export PATH=\"$PATH:$1\"; cd -- \"$2\" || exit; shift 2; exec \"$@\"",
+                    "-lic", exports + "export PATH=\"$PATH:$1\"; cd -- \"$2\" || exit; shift 2; exec \"$@\"",
                     "sigil-\(provider.rawValue)", CLIProvider.fallbackPath, workingDirectory.path, command,
                 ] + arguments()
             )
         }
-        switch shell.lastPathComponent {
-        case "zsh", "bash", "sh":
-            return HostCommand(
-                executable: shell,
-                arguments: ["-lic", "exec \"$@\"", "sigil-grok", executable.path] + arguments()
-            )
-        case "fish":
+        if shell.lastPathComponent == "fish" {
             return HostCommand(
                 executable: shell,
                 arguments: ["-lic", "exec $argv", executable.path] + arguments()
             )
-        default:
-            return HostCommand(executable: executable, arguments: arguments())
         }
+        return HostCommand(
+            executable: shell,
+            arguments: ["-lic", "exec \"$@\"", "sigil-grok", executable.path] + arguments()
+        )
     }
 
     /// Environment for the child process: the user's login environment plus the
@@ -168,6 +216,9 @@ public struct GrokLaunchSpec: Sendable, Hashable {
             }
             env.removeValue(forKey: BridgePaths.tabEnvironmentKey)
             env.removeValue(forKey: BridgePaths.socketEnvironmentKey)
+            for (name, value) in providerEnvironment where Self.isEnvironmentName(name) {
+                env[Self.providerEnvironmentPrefix + name] = value
+            }
             return env
         }
         env["GROK_WRAPPER"] = "Sigil.app"
@@ -209,5 +260,13 @@ public struct GrokLaunchSpec: Sendable, Hashable {
             env.removeValue(forKey: BridgePaths.socketEnvironmentKey)
         }
         return env
+    }
+
+    /// Only plain variable names reach the shell command text.
+    static func isEnvironmentName(_ name: String) -> Bool {
+        guard let first = name.unicodeScalars.first, first == "_" || ("A"..."Z").contains(first) else {
+            return false
+        }
+        return name.unicodeScalars.allSatisfy { $0 == "_" || ("A"..."Z").contains($0) || ("0"..."9").contains($0) }
     }
 }

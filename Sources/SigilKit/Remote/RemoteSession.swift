@@ -4,32 +4,49 @@ import Foundation
 public enum RemoteError: Error, Equatable {
     case invalidMessage
     case pairingExpired
+    /// The paired phone sent an authentic request with a field over its limit.
+    case outOfBounds(sequence: Int)
 }
 
 public struct RemoteRequest: Codable, Sendable {
     public let challenge: String
     public let sequence: Int
     public let action: String
+    /// Phone-owned freshness, echoed inside the authenticated host response.
+    public var clientNonce: String?
     public var tabID: String?
     public var text: String?
     public var name: String?
     public var index: Int?
     public var count: Int?
     public var transfer: String?
+    /// New sessions: the CLI, and for Grok its model and effort.
+    public var provider: String?
+    public var model: String?
+    public var effort: String?
+    /// New sessions: start in a fresh worktree of the project, as the Mac's sheet can.
+    public var worktree: Bool?
 
     public init(
         challenge: String, sequence: Int, action: String, tabID: String? = nil, text: String? = nil,
-        name: String? = nil, index: Int? = nil, count: Int? = nil, transfer: String? = nil
+        name: String? = nil, index: Int? = nil, count: Int? = nil, transfer: String? = nil,
+        provider: String? = nil, model: String? = nil, effort: String? = nil, worktree: Bool? = nil,
+        clientNonce: String? = RemoteCrypto.randomKey()
     ) {
         self.challenge = challenge
         self.sequence = sequence
         self.action = action
+        self.clientNonce = clientNonce
         self.tabID = tabID
         self.text = text
         self.name = name
         self.index = index
         self.count = count
         self.transfer = transfer
+        self.provider = provider
+        self.model = model
+        self.effort = effort
+        self.worktree = worktree
     }
 }
 
@@ -41,6 +58,7 @@ public struct RemoteSession: Sendable {
     public private(set) var challenge = RemoteCrypto.randomKey()
     public private(set) var deviceKey: String?
     private var lastSequence = 0
+    public private(set) var acceptedClientNonce: String?
     public var isPaired: Bool { deviceKey != nil }
 
     public init(now: Date = Date()) {
@@ -59,25 +77,37 @@ public struct RemoteSession: Sendable {
     public mutating func resetConnection() {
         challenge = RemoteCrypto.randomKey()
         lastSequence = 0
+        acceptedClientNonce = nil
     }
 
     public mutating func accept(_ frame: String, now: Date = Date()) throws -> RemoteRequest {
         let request: RemoteRequest = try RemoteCrypto.open(frame, key: deviceKey ?? pairingKey, direction: "phone")
-        let textLimit = request.action == "file" ? 48_000 : 8_192
         guard request.challenge == challenge, request.sequence > lastSequence,
-            request.sequence <= 9_007_199_254_740_991,
-            request.action.utf8.count <= 32, (request.text?.utf8.count ?? 0) <= textLimit,
-            (request.tabID?.utf8.count ?? 0) <= 64, (request.name?.utf8.count ?? 0) <= 80,
-            (request.transfer?.utf8.count ?? 0) <= 64
+            request.sequence <= 9_007_199_254_740_991
         else { throw RemoteError.invalidMessage }
+        guard request.clientNonce == nil || RemoteCrypto.isValidKey(request.clientNonce!) else {
+            throw RemoteError.invalidMessage
+        }
+        acceptedClientNonce = request.clientNonce
+        let textLimit = request.action == "file" ? 48_000 : 8_192
+        let inBounds =
+            request.action.utf8.count <= 32 && (request.text?.utf8.count ?? 0) <= textLimit
+            && (request.tabID?.utf8.count ?? 0) <= 64 && (request.name?.utf8.count ?? 0) <= 80
+            && (request.transfer?.utf8.count ?? 0) <= 64 && (request.provider?.utf8.count ?? 0) <= 32
+            && (request.model?.utf8.count ?? 0) <= 64 && (request.effort?.utf8.count ?? 0) <= 16
         if deviceKey == nil {
+            guard inBounds else { throw RemoteError.invalidMessage }
             guard now < expiresAt else { throw RemoteError.pairingExpired }
             guard request.action == "pair", let key = request.text, key != pairingKey,
                 RemoteCrypto.isValidKey(key)
             else { throw RemoteError.invalidMessage }
             deviceKey = key
-        } else if request.action == "pair" {
-            throw RemoteError.invalidMessage
+        } else {
+            guard request.action != "pair" else { throw RemoteError.invalidMessage }
+            guard inBounds else {
+                lastSequence = request.sequence
+                throw RemoteError.outOfBounds(sequence: request.sequence)
+            }
         }
         lastSequence = request.sequence
         return request
@@ -92,7 +122,12 @@ public enum RemoteCrypto {
     }
 
     public static func isValidKey(_ value: String) -> Bool {
-        value.utf8.count == 64 && value.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
+        value.utf8.count == 64 && isLowerHex(value)
+    }
+
+    /// Lower-case hex of any length, as device and activity tokens are sent.
+    public static func isLowerHex(_ value: String) -> Bool {
+        !value.isEmpty && value.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
     }
 
     private static func key(_ value: String) throws -> SymmetricKey {

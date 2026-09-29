@@ -25,11 +25,36 @@ public enum TerminalDrop {
         case tooLarge
         case notAnImage
         case nothingToPaste
+        case unsafeFileName
     }
 
     public static func isImagePath(_ path: String) -> Bool {
         let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
         return imageExtensions.contains(ext)
+    }
+
+    /// A file name may hold any byte but "/" and NUL. A control character in a
+    /// pasted path can end bracketed paste early or press Return.
+    public static func isSafeToPaste(_ path: String) -> Bool {
+        !path.unicodeScalars.contains { $0.properties.generalCategory == .control }
+    }
+
+    /// Pasted text keeps tab and line breaks and loses every other control
+    /// character: ESC, the rest of C0, DEL and C1. An embedded ESC[201~ (or the
+    /// 8-bit CSI U+009B) would otherwise end bracketed paste early.
+    public static func sanitizedPasteText(_ text: String) -> String {
+        var scalars = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars
+        where scalar == "\t" || scalar == "\n" || scalar == "\r"
+            || scalar.properties.generalCategory != .control
+        {
+            scalars.append(scalar)
+        }
+        return String(scalars)
+    }
+
+    public static func hasUnsafeFileName(_ urls: [URL]) -> Bool {
+        urls.contains { !isSafeToPaste($0.path) }
     }
 
     public static func filesToPaste(from urls: [URL]) -> [URL] {
@@ -38,6 +63,7 @@ public enum TerminalDrop {
         for url in urls {
             guard files.count < maxFiles else { break }
             let resolved = url.standardizedFileURL
+            guard isSafeToPaste(resolved.path) else { continue }
             var isDirectory: ObjCBool = false
             guard FileManager.default.fileExists(atPath: resolved.path, isDirectory: &isDirectory),
                 !isDirectory.boolValue
@@ -70,7 +96,8 @@ public enum TerminalDrop {
         return nil
     }
 
-    public static let cacheKeepCount = 8
+    /// One policy for every writer: room for two full phone messages of attachments.
+    public static let cacheKeepCount = 2 * maxFiles
 
     public static func sanitizedFileName(_ name: String) -> String {
         let base = URL(fileURLWithPath: name).lastPathComponent
@@ -94,7 +121,7 @@ public enum TerminalDrop {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("drop-\(UUID().uuidString)-\(sanitizedFileName(name))")
         try data.write(to: url, options: .withoutOverwriting)
-        pruneCache(in: directory, keeping: max(cacheKeepCount, maxFiles), protecting: url)
+        pruneCache(in: directory, keeping: cacheKeepCount, protecting: url)
         return url
     }
 
@@ -168,7 +195,9 @@ public enum TerminalDrop {
     }
 
     public static func canAccept(_ pasteboard: NSPasteboard) -> Bool {
-        if !filesToPaste(from: fileURLs(from: pasteboard)).isEmpty { return true }
+        let urls = fileURLs(from: pasteboard)
+        if hasUnsafeFileName(urls) { return false }
+        if !filesToPaste(from: urls).isEmpty { return true }
         if let png = pasteboard.data(forType: .png), png.count <= maxImageBytes,
             imageExtension(for: png) == "png"
         {
@@ -188,7 +217,9 @@ public enum TerminalDrop {
     }
 
     public static func pathsToPaste(from pasteboard: NSPasteboard) throws -> [String] {
-        let files = filesToPaste(from: fileURLs(from: pasteboard))
+        let urls = fileURLs(from: pasteboard)
+        if hasUnsafeFileName(urls) { throw Error.unsafeFileName }
+        let files = filesToPaste(from: urls)
         if !files.isEmpty {
             return files.map(\.path)
         }

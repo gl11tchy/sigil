@@ -25,7 +25,9 @@ public struct ShellLaunchSpec: Sendable, Hashable {
         let fallback = URL(fileURLWithPath: "/bin/zsh")
         let requested = URL(fileURLWithPath: processEnvironment["SHELL"] ?? fallback.path)
         let shell = FileManager.default.isExecutableFile(atPath: requested.path) ? requested : fallback
-        return HostCommand(executable: shell, arguments: ["-il"])
+        // csh and tcsh accept -l only as the sole flag, and are interactive on a terminal.
+        let cshFamily = ["csh", "tcsh"].contains(shell.lastPathComponent)
+        return HostCommand(executable: shell, arguments: cshFamily ? ["-l"] : ["-il"])
     }
 
     /// The same terminal capabilities and PATH repair the session tabs get.

@@ -3,6 +3,11 @@ import Foundation
 /// One Grok Build conversation, as recorded in `<session-dir>/summary.json`.
 public struct GrokSession: Identifiable, Hashable, Sendable {
     public let id: String
+    public let provider: CLIProvider
+    public let nativeSessionID: String
+    public var reference: ProviderSessionReference {
+        ProviderSessionReference(provider: provider, sessionID: nativeSessionID, cwd: cwd)
+    }
     /// Absolute working directory the session was started in.
     public let cwd: String
     /// The CLI's own summary line; empty for sessions that never got one.
@@ -10,6 +15,9 @@ public struct GrokSession: Identifiable, Hashable, Sendable {
     public let createdAt: Date
     public let updatedAt: Date
     public let messageCount: Int
+    /// Native history uses bounded samples, so this proves content exists
+    /// without pretending to know the full transcript message count.
+    public let hasObservedMessages: Bool
     public let modelID: String?
     public let agentName: String?
     public let reasoningEffort: String?
@@ -29,14 +37,19 @@ public struct GrokSession: Identifiable, Hashable, Sendable {
         agentName: String?,
         reasoningEffort: String?,
         kind: String? = nil,
-        directory: URL
+        directory: URL,
+        provider: CLIProvider = .grokBuild,
+        hasObservedMessages: Bool = false
     ) {
-        self.id = id
+        self.provider = provider
+        self.nativeSessionID = id
+        self.id = ProviderSessionReference(provider: provider, sessionID: id, cwd: cwd).sidebarID
         self.cwd = cwd
         self.summary = summary
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.messageCount = messageCount
+        self.hasObservedMessages = hasObservedMessages
         self.modelID = modelID
         self.agentName = agentName
         self.reasoningEffort = reasoningEffort
@@ -57,17 +70,29 @@ public struct GrokSession: Identifiable, Hashable, Sendable {
         return "Untitled session in \(projectName)"
     }
 
-    /// Last path component of `cwd`, used to group the sidebar by project.
+    /// The folder the sidebar groups this session under: the project a Sigil
+    /// worktree was made from, else `cwd`.
+    public var projectPath: String { SigilWorktree.projectPath(of: cwd) ?? cwd }
+
+    /// Last path component of `projectPath`, used to group the sidebar by project.
     public var projectName: String {
-        let name = URL(fileURLWithPath: cwd).lastPathComponent
-        return name.isEmpty ? cwd : name
+        let path = projectPath
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        return name.isEmpty ? path : name
     }
 
     /// `cwd` with the user's home replaced by `~`.
-    public var displayPath: String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        if cwd == home { return "~" }
-        if cwd.hasPrefix(home + "/") { return "~" + cwd.dropFirst(home.count) }
-        return cwd
+    public var displayPath: String { Self.abbreviated(cwd) }
+
+    /// `projectPath` with the user's home replaced by `~`.
+    public var projectDisplayPath: String { Self.abbreviated(projectPath) }
+
+    private static func abbreviated(_ path: String) -> String {
+        let home = homePath
+        if path == home { return "~" }
+        if path.hasPrefix(home + "/") { return "~" + path.dropFirst(home.count) }
+        return path
     }
+
+    private static let homePath = FileManager.default.homeDirectoryForCurrentUser.path
 }

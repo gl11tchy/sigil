@@ -33,10 +33,44 @@ struct AppSettingsTests {
         defer { defaults.reset() }
 
         let settings = AppSettings(defaults: defaults.value)
+
+        // These tests list chats from the history files directly.
+
+        settings.showOtherAppSessions = true
         settings.executablePath = root.path
         #expect(!settings.executableExists)
         settings.executablePath = "/bin/echo"
         #expect(settings.executableExists)
+    }
+
+    @Test @MainActor
+    func aChosenStockGrokPathSurvivesARelaunch() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bin = root.appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        for name in ["grok", "grok-sigil"] {
+            let file = bin.appendingPathComponent(name)
+            try Data("#!/bin/sh\nexit 0\n".utf8).write(to: file)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
+        }
+        let oldGrokHome = ProcessInfo.processInfo.environment["GROK_HOME"]
+        setenv("GROK_HOME", root.path, 1)
+        defer {
+            if let oldGrokHome { setenv("GROK_HOME", oldGrokHome, 1) } else { unsetenv("GROK_HOME") }
+        }
+        let defaults = isolatedDefaults()
+        defer { defaults.reset() }
+        let stock = bin.appendingPathComponent("grok").path
+        let themed = bin.appendingPathComponent("grok-sigil").path
+
+        // The stock path an older default stored still moves to the themed build.
+        defaults.value.set(stock, forKey: "grok.executablePath")
+        #expect(AppSettings(defaults: defaults.value).executablePath == themed)
+
+        // Once the user picks the stock CLI, a relaunch keeps it.
+        AppSettings(defaults: defaults.value).executablePath = stock
+        #expect(AppSettings(defaults: defaults.value).executablePath == stock)
     }
 
     @Test @MainActor
@@ -45,7 +79,6 @@ struct AppSettingsTests {
         defer { defaults.reset() }
 
         let first = AppSettings(defaults: defaults.value)
-        first.sidebarMode = .projects
         first.focusedProjectPath = "/tmp/sigil"
         first.pinnedConversations = [.init(sessionID: "abc", cwd: "/tmp/sigil")]
         first.pinnedProjects = ["/tmp/sigil"]
@@ -54,7 +87,6 @@ struct AppSettingsTests {
         first.showSubagentSessions = true
 
         let second = AppSettings(defaults: defaults.value)
-        #expect(second.sidebarMode == .projects)
         #expect(second.focusedProjectPath == "/tmp/sigil")
         #expect(second.pinnedConversations == [.init(sessionID: "abc", cwd: "/tmp/sigil")])
         #expect(second.pinnedProjects == ["/tmp/sigil"])
@@ -66,13 +98,17 @@ struct AppSettingsTests {
         #expect(second.showSubagentSessions)
     }
 
+    /// The app ships as Sigil Dark. A stored "Sigil Neon" — the theme it
+    /// replaced — lands on Sigil Dark too, instead of an unrelated fallback.
     @Test @MainActor
-    func sidebarDefaultsToProjectsAndKeepsAStoredRecentsValue() {
+    func themeDefaultsToSigilDarkAndTheRetiredNeonThemeMovesToIt() {
         let defaults = isolatedDefaults()
         defer { defaults.reset() }
-        #expect(AppSettings(defaults: defaults.value).sidebarMode == .projects)
-        defaults.value.set("recents", forKey: "sidebar.mode")
-        #expect(AppSettings(defaults: defaults.value).sidebarMode == .recents)
+        #expect(AppSettings(defaults: defaults.value).theme == .sigilDark)
+        defaults.value.set("Sigil Neon", forKey: "terminal.theme")
+        #expect(AppSettings(defaults: defaults.value).theme == .sigilDark)
+        defaults.value.set("Sigil Light", forKey: "terminal.theme")
+        #expect(AppSettings(defaults: defaults.value).theme == .sigilLight)
     }
 
     @Test @MainActor
@@ -80,8 +116,20 @@ struct AppSettingsTests {
         let defaults = isolatedDefaults()
         defer { defaults.reset() }
         let settings = AppSettings(defaults: defaults.value)
+        // These tests list chats from the history files directly.
+        settings.showOtherAppSessions = true
         #expect(!settings.showWorktreeSessions)
         #expect(!settings.showSubagentSessions)
+    }
+
+    @Test @MainActor
+    func optionAsMetaKeyIsOffByDefaultAndRemembered() {
+        let defaults = isolatedDefaults()
+        defer { defaults.reset() }
+        let first = AppSettings(defaults: defaults.value)
+        #expect(!first.optionAsMetaKey)
+        first.optionAsMetaKey = true
+        #expect(AppSettings(defaults: defaults.value).optionAsMetaKey)
     }
 
     @Test @MainActor
@@ -105,6 +153,8 @@ struct AppSettingsTests {
         let defaults = isolatedDefaults()
         defer { defaults.reset() }
         let settings = AppSettings(defaults: defaults.value)
+        // These tests list chats from the history files directly.
+        settings.showOtherAppSessions = true
         settings.fontSize = -20
         #expect(settings.fontSize == 8)
         settings.fontSize = 1000
@@ -128,6 +178,40 @@ struct AppSettingsTests {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         #expect(AppSettings.normalizedExecutablePath("~/bin/grok") == "\(home)/bin/grok")
         #expect(AppSettings.normalizedExecutablePath("/tmp/grok") == "/tmp/grok")
+    }
+}
+
+extension AppSettingsTests {
+    @Test @MainActor
+    func newSessionDefaultsPersist() {
+        let defaults = isolatedDefaults()
+        defer { defaults.reset() }
+
+        let fresh = AppSettings(defaults: defaults.value)
+        #expect(fresh.defaultProvider == .grokBuild)
+        #expect(fresh.startsInWorktree)
+
+        fresh.defaultProvider = .claudeCode
+        fresh.startsInWorktree = false
+        let reloaded = AppSettings(defaults: defaults.value)
+        #expect(reloaded.defaultProvider == .claudeCode)
+        #expect(!reloaded.startsInWorktree)
+    }
+
+    @Test @MainActor
+    func kimiSignInDefaultsToTheAccountAndPersists() {
+        let defaults = isolatedDefaults()
+        defer { defaults.reset() }
+
+        let fresh = AppSettings(defaults: defaults.value)
+        #expect(fresh.kimiSignIn == .kimiAccount)
+        #expect(fresh.kimiModel == KimiCode.defaultModel)
+
+        fresh.kimiSignIn = .apiKey
+        fresh.kimiModel = "kimi-k2.7-code"
+        let reloaded = AppSettings(defaults: defaults.value)
+        #expect(reloaded.kimiSignIn == .apiKey)
+        #expect(reloaded.kimiModel == "kimi-k2.7-code")
     }
 }
 

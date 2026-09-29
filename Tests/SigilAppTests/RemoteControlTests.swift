@@ -1,4 +1,7 @@
+import AppKit
 import Foundation
+import Network
+import Security
 import SigilKit
 import Testing
 
@@ -21,14 +24,14 @@ struct RemoteControlTests {
         let service = "app.sigil.remote.test.\(UUID().uuidString)"
         let store = KeychainRemotePairingStore(service: service)
         defer { store.clear() }
-        #expect(store.load() == nil)
+        #expect(try store.load() == nil)
         let pairing = RemotePairing(
             origin: "https://example.com", deviceKey: RemoteCrypto.randomKey(),
             ticket: RemoteCrypto.randomKey())
         store.save(pairing)
-        #expect(store.load() == pairing)
+        #expect(try store.load() == pairing)
         store.clear()
-        #expect(store.load() == nil)
+        #expect(try store.load() == nil)
     }
 
     @Test @MainActor func failedRevokeKeepsTheStoredPairing() {
@@ -43,6 +46,138 @@ struct RemoteControlTests {
         #expect(store.load() != nil)
         #expect(remote.error == "Could not forget this phone. Try Disconnect again.")
         #expect(!remote.isEnabled)
+    }
+
+    @Test @MainActor func failedRevokeIsNotRestoredByConnectOrAtLaunch() {
+        let origin = "http://127.0.0.1:9"
+        let store = FailingClearStore(
+            pairing: RemotePairing(
+                origin: origin, deviceKey: RemoteCrypto.randomKey(), ticket: RemoteCrypto.randomKey()))
+        let model = AppModel()
+        let remote = RemoteControl(store: store)
+        remote.start(urlText: origin, model: model)
+        #expect(remote.isPaired)
+        remote.stop(revoke: true)
+        remote.start(urlText: origin, model: model)
+        #expect(!remote.isPaired)
+        remote.stop()
+        let relaunched = RemoteControl(store: store)
+        relaunched.resumeIfPaired(model: model)
+        #expect(!relaunched.isEnabled)
+        store.clearSucceeds = true
+        relaunched.stop(revoke: true)
+        store.save(
+            RemotePairing(origin: origin, deviceKey: RemoteCrypto.randomKey(), ticket: RemoteCrypto.randomKey()))
+        relaunched.resumeIfPaired(model: model)
+        #expect(relaunched.isPaired)
+        relaunched.stop()
+    }
+
+    @Test @MainActor func failedRevokeKeepsDisconnectAvailableUntilItSucceeds() {
+        let store = FailingClearStore(
+            pairing: RemotePairing(
+                origin: "http://127.0.0.1:9", deviceKey: RemoteCrypto.randomKey(), ticket: RemoteCrypto.randomKey()))
+        let remote = RemoteControl(store: store)
+        #expect(!remote.revokeFailed)
+        remote.start(urlText: "http://127.0.0.1:9", model: AppModel())
+        remote.stop(revoke: true)
+        #expect(remote.revokeFailed)
+        #expect(RemoteControl(store: store).revokeFailed)
+        store.clearSucceeds = true
+        remote.stop(revoke: true)
+        #expect(!remote.revokeFailed)
+        #expect(remote.error == nil)
+    }
+
+    @Test @MainActor func copiedPairingLinkIsConcealedFromClipboardHistory() throws {
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("sigil-test-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        let link = try #require(URL(string: "https://example.com/#room=abc&key=def"))
+        #expect(RemoteControlView.copy(link, to: pasteboard))
+        #expect(pasteboard.string(forType: .string) == link.absoluteString)
+        #expect(pasteboard.types?.contains(NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")) == true)
+    }
+
+    @Test @MainActor func disconnectStopsAnotherCopyUsingTheSamePairing() async throws {
+        let origin = "http://127.0.0.1:9"
+        let store = InMemoryRemotePairingStore()
+        store.save(RemotePairing(origin: origin, deviceKey: RemoteCrypto.randomKey(), ticket: RemoteCrypto.randomKey()))
+        let center = NotificationCenter()
+        let model = AppModel()
+        let installed = RemoteControl(store: store, notifications: center)
+        let other = RemoteControl(store: store, notifications: center)
+        defer { other.stop() }
+        installed.resumeIfPaired(model: model)
+        other.resumeIfPaired(model: model)
+        #expect(other.isPaired)
+        installed.stop(revoke: true)
+        for _ in 0..<50 where other.isEnabled {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(!other.isEnabled)
+        #expect(!installed.revokeFailed)
+    }
+
+    @Test @MainActor func aRevokeNoticeIsIgnoredWhileThePairingIsStillSaved() async throws {
+        let store = InMemoryRemotePairingStore()
+        store.save(
+            RemotePairing(
+                origin: "http://127.0.0.1:9", deviceKey: RemoteCrypto.randomKey(), ticket: RemoteCrypto.randomKey()))
+        let center = NotificationCenter()
+        let remote = RemoteControl(store: store, notifications: center)
+        defer { remote.stop() }
+        remote.resumeIfPaired(model: AppModel())
+        center.post(name: RemoteControl.revokedNotification, object: nil)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(remote.isEnabled)
+        #expect(store.load() != nil)
+    }
+
+    @Test @MainActor func launchReadsTheSavedPairingOnlyOnce() {
+        let store = CountingStore(
+            pairing: RemotePairing(
+                origin: "http://127.0.0.1:9", deviceKey: RemoteCrypto.randomKey(), ticket: RemoteCrypto.randomKey()))
+        let remote = RemoteControl(store: store)
+        remote.resumeIfPaired(model: AppModel())
+        defer { remote.stop() }
+        #expect(remote.isPaired)
+        #expect(store.loads == 1)
+    }
+
+    @Test @MainActor func unreadableSavedPairingIsReportedAtLaunch() {
+        let remote = RemoteControl(store: UnreadableStore())
+        remote.resumeIfPaired(model: AppModel())
+        #expect(!remote.isEnabled)
+        #expect(remote.error == "Sigil could not read the saved phone pairing. Connect your phone again.")
+    }
+
+    @Test func keychainTreatsOnlyAMissingItemAsNotPaired() throws {
+        #expect(try KeychainRemotePairingStore.pairing(status: errSecItemNotFound, item: nil) == nil)
+        #expect(throws: KeychainRemotePairingStore.ReadError(status: errSecAuthFailed)) {
+            try KeychainRemotePairingStore.pairing(status: errSecAuthFailed, item: nil)
+        }
+        #expect(throws: KeychainRemotePairingStore.ReadError(status: errSecUserCanceled)) {
+            try KeychainRemotePairingStore.pairing(status: errSecUserCanceled, item: nil)
+        }
+        let pairing = RemotePairing(
+            origin: "https://example.com", deviceKey: RemoteCrypto.randomKey(), ticket: RemoteCrypto.randomKey())
+        let item = try JSONEncoder().encode(pairing) as CFData
+        #expect(try KeychainRemotePairingStore.pairing(status: errSecSuccess, item: item) == pairing)
+    }
+
+    @Test func keychainReportsAStoredPairingItCannotDecode() throws {
+        var badKey = RemotePairing(origin: "https://example.com", deviceKey: "short", ticket: RemoteCrypto.randomKey())
+        let items: [CFTypeRef?] = [
+            nil, "not data" as CFString, Data("{".utf8) as CFData,
+            try JSONEncoder().encode(badKey) as CFData,
+        ]
+        badKey.deviceKey = RemoteCrypto.randomKey()
+        badKey.ticket = "short"
+        for item in items + [try JSONEncoder().encode(badKey) as CFData] {
+            #expect(throws: KeychainRemotePairingStore.ReadError(status: errSecDecode)) {
+                try KeychainRemotePairingStore.pairing(status: errSecSuccess, item: item)
+            }
+        }
     }
 
     @Test @MainActor func restoredPairingDoesNotShowAQRAndSurvivesStop() {
@@ -152,7 +287,46 @@ struct RemoteControlTests {
         #expect(!RemoteReconnectPolicy.shouldReallocate(failures: 1))
         #expect(RemoteReconnectPolicy.shouldReallocate(failures: 3))
         #expect(RemoteReconnectPolicy.shouldReallocate(failures: 6))
-        #expect(!RemoteReconnectPolicy.shouldGiveUp(failures: 100))
+    }
+
+    @Test func keepAliveCancelsASocketWhosePingsGoUnanswered() async throws {
+        let server = try LocalWebSocketServer(answersPings: false)
+        defer { server.stop() }
+        let socket = URLSession(configuration: .ephemeral)
+            .webSocketTask(with: URL(string: "ws://127.0.0.1:\(try await server.port())/")!)
+        socket.resume()
+        let keepAlive = Task {
+            await RemoteControl.keepAlive(socket, interval: .milliseconds(100), timeout: .milliseconds(300))
+        }
+        let fallback = Task {
+            try await Task.sleep(for: .seconds(10))
+            socket.cancel()
+        }
+        defer {
+            keepAlive.cancel()
+            fallback.cancel()
+        }
+        let started = ContinuousClock.now
+        await #expect(throws: (any Error).self) { _ = try await socket.receive() }
+        #expect(ContinuousClock.now - started < .seconds(5))
+    }
+
+    @Test func keepAliveLeavesAnAnsweringSocketOpen() async throws {
+        let server = try LocalWebSocketServer(answersPings: true)
+        defer { server.stop() }
+        let socket = URLSession(configuration: .ephemeral)
+            .webSocketTask(with: URL(string: "ws://127.0.0.1:\(try await server.port())/")!)
+        socket.resume()
+        // URLSession reads pongs only while a receive is pending, as in the host loop.
+        let receiving = Task { try? await socket.receive() }
+        let keepAlive = Task {
+            await RemoteControl.keepAlive(socket, interval: .milliseconds(100), timeout: .milliseconds(300))
+        }
+        try await Task.sleep(for: .seconds(1.5))
+        #expect(socket.state == .running)
+        keepAlive.cancel()
+        socket.cancel()
+        _ = await receiving.value
     }
 
     @Test func remoteReplyCarriesAnOptionalTicket() throws {
@@ -168,8 +342,91 @@ struct RemoteControlTests {
 
 private final class FailingClearStore: RemotePairingStore {
     private var pairing: RemotePairing?
+    var clearSucceeds = false
+    var revokeFailed = false
     init(pairing: RemotePairing) { self.pairing = pairing }
     func load() -> RemotePairing? { pairing }
-    func save(_ pairing: RemotePairing) { self.pairing = pairing }
-    func clear() -> Bool { false }
+    @discardableResult func save(_ pairing: RemotePairing) -> Bool {
+        self.pairing = pairing
+        return true
+    }
+    func clear() -> Bool {
+        guard clearSucceeds else { return false }
+        pairing = nil
+        return true
+    }
+}
+
+private final class CountingStore: RemotePairingStore {
+    private let pairing: RemotePairing
+    private(set) var loads = 0
+    var revokeFailed = false
+    init(pairing: RemotePairing) { self.pairing = pairing }
+    func load() -> RemotePairing? {
+        loads += 1
+        return pairing
+    }
+    func save(_: RemotePairing) -> Bool { true }
+    func clear() -> Bool { true }
+}
+
+private final class UnreadableStore: RemotePairingStore {
+    var revokeFailed = false
+    func load() throws -> RemotePairing? { throw KeychainRemotePairingStore.ReadError(status: errSecAuthFailed) }
+    func save(_: RemotePairing) -> Bool { true }
+    func clear() -> Bool { true }
+}
+
+/// A WebSocket server on loopback that can ignore pings, like a relay that
+/// dropped this Mac while it slept.
+private final class LocalWebSocketServer: @unchecked Sendable {
+    private let listener: NWListener
+    private let queue = DispatchQueue(label: "sigil.test.websocket")
+    private var connections: [NWConnection] = []
+
+    init(answersPings: Bool) throws {
+        let websocket = NWProtocolWebSocket.Options()
+        websocket.autoReplyPing = answersPings
+        let parameters = NWParameters.tcp
+        parameters.defaultProtocolStack.applicationProtocols.insert(websocket, at: 0)
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+        listener = try NWListener(using: parameters)
+        listener.newConnectionHandler = { [weak self] connection in
+            guard let self else { return }
+            self.connections.append(connection)
+            connection.start(queue: self.queue)
+            Self.drain(connection)
+        }
+    }
+
+    func port() async throws -> UInt16 {
+        try await withCheckedThrowingContinuation { continuation in
+            listener.stateUpdateHandler = { [listener] state in
+                switch state {
+                case .ready:
+                    listener.stateUpdateHandler = nil
+                    continuation.resume(returning: listener.port?.rawValue ?? 0)
+                case .failed(let error):
+                    listener.stateUpdateHandler = nil
+                    continuation.resume(throwing: error)
+                default: break
+                }
+            }
+            listener.start(queue: queue)
+        }
+    }
+
+    func stop() {
+        queue.sync {
+            for connection in connections { connection.cancel() }
+            connections = []
+        }
+        listener.cancel()
+    }
+
+    private static func drain(_ connection: NWConnection) {
+        connection.receiveMessage { _, _, _, error in
+            if error == nil { drain(connection) }
+        }
+    }
 }

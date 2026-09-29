@@ -60,6 +60,10 @@ final class RightPanel {
     /// The scratch shell, created on first use so a hidden panel costs nothing.
     private(set) var shell: TerminalController?
     private(set) var shellDirectory: URL?
+    /// The current shell has exited. The panel offers a restart.
+    private(set) var shellExited = false
+    /// Replaced shells that are still stopping.
+    @ObservationIgnored private var stoppingShells: [ObjectIdentifier: TerminalController] = [:]
 
     init(defaults: UserDefaults = .standard, notesStore: ConversationNotesStore? = nil) {
         self.defaults = defaults
@@ -77,40 +81,59 @@ final class RightPanel {
     // MARK: - Visibility
 
     /// Opens the panel on `mode`, or closes it when that tool is already showing.
-    func toggle(_ requested: RightPanelMode? = nil, in directory: URL) {
+    func toggle(_ requested: RightPanelMode? = nil) {
         if let requested, isVisible, requested != mode {
             mode = requested
-            prepare(in: directory)
             return
         }
         isVisible.toggle()
         if let requested { mode = requested }
-        if isVisible { prepare(in: directory) }
     }
-
-    /// Starts whatever the visible tool needs and has not got yet.
-    func prepare(in _: URL) {}
 
     // MARK: - Shell
 
     /// Creates and starts the scratch shell in `directory`. A shell that is already
     /// running is left alone, even if the selected tab has since moved folder.
-    func startShellIfNeeded(in directory: URL, theme: TerminalTheme = .grokNight, fontSize: CGFloat = 13) {
+    func startShellIfNeeded(in directory: URL, theme: TerminalTheme, fontSize: CGFloat) {
         if let shell, shell.isRunning { return }
         shell?.terminateAndWait()
         let controller = TerminalController(theme: theme, fontSize: fontSize)
         shell = controller
         shellDirectory = directory
+        watchForExit(controller)
         controller.startShell(ShellLaunchSpec(workingDirectory: directory))
     }
 
-    /// Kills the shell and starts a fresh one in `directory`.
-    func restartShell(in directory: URL, theme: TerminalTheme = .grokNight, fontSize: CGFloat = 13) {
-        shell?.terminateAndWait()
-        shell = TerminalController(theme: theme, fontSize: fontSize)
+    /// Kills the shell and starts a fresh one in `directory`. The old shell is
+    /// stopped in the background: an interactive shell ignores SIGTERM, and
+    /// waiting for the SIGKILL would freeze the window.
+    func restartShell(in directory: URL, theme: TerminalTheme, fontSize: CGFloat) {
+        if let old = shell, old.isRunning {
+            // Freeing the controller kills its child at once, so hold it until
+            // the stop finishes and a command still gets its SIGTERM cleanup.
+            let id = ObjectIdentifier(old)
+            stoppingShells[id] = old
+            old.onTerminate = { [weak self] _ in self?.stoppingShells[id] = nil }
+            old.terminate()
+        }
+        let controller = TerminalController(theme: theme, fontSize: fontSize)
+        shell = controller
         shellDirectory = directory
-        shell?.startShell(ShellLaunchSpec(workingDirectory: directory))
+        watchForExit(controller)
+        controller.startShell(ShellLaunchSpec(workingDirectory: directory))
     }
+
+    /// A replaced shell that stops later does not count.
+    private func watchForExit(_ controller: TerminalController) {
+        shellExited = false
+        controller.onTerminate = { [weak self, weak controller] _ in
+            guard let self, let controller, self.shell === controller else { return }
+            self.shellExited = true
+        }
+    }
+
+    /// True while a command the user started holds the panel shell.
+    var shellHasForegroundJob: Bool { shell?.hasForegroundJob ?? false }
 
     func closeShellAndWait() {
         shell?.terminateAndWait()

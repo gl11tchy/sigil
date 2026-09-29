@@ -69,19 +69,19 @@ struct TabRenameTests {
                 workingDirectory: folder, mode: .new(sessionID: UUID()), provider: .cursor),
             settings: fixture.settings)
 
-        #expect(model.title(for: tab) == "Cursor")
+        #expect(model.title(for: tab) == "Cursor · project")
         model.renameTab(tab, to: "Auth")
         #expect(model.title(for: tab) == "Auth")
         #expect(model.hasCustomTabName(tab))
         #expect(fixture.settings.conversationNames.isEmpty)
 
-        model.renameTab(tab, to: "Cursor")
-        #expect(model.title(for: tab) == "Cursor")
+        model.renameTab(tab, to: "Cursor · project")
+        #expect(model.title(for: tab) == "Cursor · project")
         #expect(!model.hasCustomTabName(tab))
 
         model.renameTab(tab, to: "Auth")
         model.resetTabName(tab)
-        #expect(model.title(for: tab) == "Cursor")
+        #expect(model.title(for: tab) == "Cursor · project")
     }
 
     @Test func colorIsSavedWithTheConversationAndNotWithItsCopy() async throws {
@@ -114,6 +114,28 @@ struct TabRenameTests {
         #expect(model.tabColor(for: second) == .amber)
     }
 
+    @Test func aClaudeTabSavesItsColorWithTheSession() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let folder = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let id = UUID()
+        let tab = TerminalTab(
+            spec: GrokLaunchSpec(
+                workingDirectory: folder, mode: .new(sessionID: id), provider: .claudeCode),
+            settings: fixture.settings)
+
+        model.setTabColor(tab, to: .violet)
+        #expect(model.tabColor(for: tab) == .violet)
+        #expect(
+            fixture.settings.tabColors
+                == [TabColorRecord(
+                    sessionID: "claudeCode:\(id.uuidString.lowercased())",
+                    cwd: folder.path,
+                    color: .violet)])
+    }
+
     @Test func anotherAgentColorStaysOnThatTab() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
@@ -122,7 +144,7 @@ struct TabRenameTests {
         defer { model.closeAllTabsAndWait() }
         let tab = TerminalTab(
             spec: GrokLaunchSpec(
-                workingDirectory: folder, mode: .new(sessionID: UUID()), provider: .claudeCode),
+                workingDirectory: folder, mode: .new(sessionID: UUID()), provider: .cursor),
             settings: fixture.settings)
 
         model.setTabColor(tab, to: .violet)

@@ -1,0 +1,16 @@
+# a130 proof, SigilUX on audit/prov-sheet 3b3b31b, 2026-09-23 19:57:48
+# Seeded next to the normal project (all folders exist on disk, all updated in the last 4 minutes):
+#   normal   /Users/Shared/sigil-ux/qa-b3/qa-real-project                         -> expected in Recent
+#   worktree /Users/Shared/sigil-ux/qa-b3/qa-real-project/.worktrees/agent-fix-1  -> expected hidden
+#   subagent /Users/Shared/sigil-ux/qa-b3/qa-subagent-only (session_kind=subagent) -> expected hidden
+#   archived /Users/Shared/sigil-ux/qa-b3/qa-archived-only (in sidebar.archivedConversations) -> expected hidden
+# showWorktreeSessions / showSubagentSessions: not set (defaults off).
+# AX read of the New Session sheet's Recent pop-up (opened by AXPress):
+Recent popup value: /Users/Shared/sigil-ux/projects/acme-api
+Menu items:
+  /Users/Shared/sigil-ux/projects/acme-api
+  /Users/Shared/sigil-ux/projects/sigil
+  /Users/Shared/sigil-ux/qa-b3/qa-real-project
+  /Users/Shared/sigil-ux/projects/acme-web
+  /Users/Shared/sigil-ux/projects/terraform-infra
+

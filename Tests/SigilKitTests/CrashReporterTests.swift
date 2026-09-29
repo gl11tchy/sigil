@@ -177,6 +177,21 @@ struct CrashReporterTests {
         #expect(text.contains("signal: SIGILL"))
     }
 
+    @Test func aSignalReportRecreatesARemovedLogFolder() throws {
+        let directory = try makeDirectory()
+        defer {
+            CrashReporter.releaseBuffers()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let url = try #require(CrashReporter.prepare(directory: directory, now: Date()))
+        try FileManager.default.removeItem(at: directory)
+
+        CrashReporter.writeSignalReport(SIGSEGV)
+
+        let text = try String(contentsOf: url, encoding: .utf8)
+        #expect(text.contains("signal: SIGSEGV"))
+    }
+
     @Test func anUnknownSignalStillProducesAReport() throws {
         let directory = try makeDirectory()
         defer {

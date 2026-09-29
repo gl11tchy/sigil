@@ -8,6 +8,9 @@ final class TabBridge: BridgeServerDelegate {
     private weak var model: AppModel?
     private let server: BridgeServer
     let asks = PendingAskRegistry()
+    /// Unread prompts one tab may hold. A looping agent past this gets an
+    /// error back instead of burying the tab's inbox.
+    static let maxUnreadPrompts = 20
 
     init(model: AppModel, socketURL: URL = BridgePaths.configuredSocket) {
         self.model = model
@@ -177,13 +180,13 @@ final class TabBridge: BridgeServerDelegate {
         dest: BridgeTabRef,
         requestID: String? = nil
     ) -> BridgeResponse {
-        if case .exited = tab.activity {
-            let title = model?.title(for: tab) ?? dest.title
-            return .failure("tab \"\(title)\" (\(tab.id.uuidString)) is not running")
-        }
         // Never inject unsolicited keystrokes. The tab shows a small inbox and
         // the user chooses when to submit the prompt.
-        guard !prompt.isEmpty else { return .failure("message is empty") }
+        guard tab.bridgeInbox.count < Self.maxUnreadPrompts else {
+            return .failure(
+                "tab \"\(dest.title)\" already has \(Self.maxUnreadPrompts) unread messages; try again after the user reads them"
+            )
+        }
         tab.enqueueBridgePrompt(
             prompt,
             requestID: requestID,
@@ -202,8 +205,7 @@ final class TabBridge: BridgeServerDelegate {
                 sessionID: tab.sessionID,
                 title: model.title(for: tab),
                 directory: tab.workingDirectory.path,
-                status: status(of: tab),
-                isRunning: tab.isRunning
+                status: status(of: tab)
             )
         }
     }
@@ -213,11 +215,7 @@ final class TabBridge: BridgeServerDelegate {
     }
 
     private func status(of tab: TerminalTab) -> String {
-        switch tab.activity {
-        case .working: return "working"
-        case .exited: return "exited"
-        case .idle, .starting: return "idle"
-        }
+        tab.activity.statusName
     }
 
     private func formatSeconds(_ timeout: Double) -> String {

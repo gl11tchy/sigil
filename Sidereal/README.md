@@ -68,20 +68,26 @@ The paperclip attaches photos or files from the phone; Sigil writes them on the 
 and pastes their paths into the session. Keys opens terminal controls. Stop appears
 while a turn is running. Latest returns to the newest output.
 Drafts stay with each session until the page closes; a lost connection keeps them editable.
-Connection settings are under the status in the top-right corner.
-Sessions opens a searchable list. Find searches the recent output with previous/next
+Connection settings are under the dot in the top-right corner.
+The session title at the top switches between open sessions. Chats opens a
+searchable list of open and saved chats; a saved chat opens on the Mac. Scroll to the
+top of the output to load earlier output. Find searches the recent output with previous/next
 matches. Connection settings also lets you copy the displayed output.
-Ended sessions offer Restart when the connected Mac supports it; drafts move to the
-restarted session. Older Macs still ask you to restart on the desktop.
+Ended sessions offer Restart only when the native conversation can resume. Drafts
+move only after matching provider, native session ID and project path. Unknown
+identities never inherit another conversation's draft.
 
-New starts a session in Sigil's current folder. Paste fills the prompt without
+New asks which project to use, then starts a session there. Both the Mac and phone
+companion need the current secure protocol; older endpoints show an upgrade error.
+
+Paste fills the prompt without
 submitting it. Send pastes, then presses Enter. Return in the phone message box
 adds a new line; Command/Ctrl+Return sends from a hardware keyboard.
 
 The terminal view is bounded plain text, not a pixel-perfect terminal emulator.
 It shows up to 100 open tabs and the latest 12 KB of readable output. Phone files
 are written into Sigil’s drop cache (4 MB each) and pasted as paths. It does not
-list closed conversations, resize the Mac terminal, or expose MCP.
+resize the Mac terminal or expose MCP.
 
 Sigil must be running to control sessions. Scan once; the phone reconnects after
 a Sigil restart, a Mac sleep, a relay restart, or a new room. Disconnect in Sigil
@@ -91,13 +97,25 @@ must open in Safari so it uses that store. A standalone web app does not.
 Forget this Mac clears the phone's stored key; it does not revoke other copies of
 that credential. Use Disconnect on the Mac to revoke authorization.
 
+## Push alerts
+
+Set `APNS_KEY` (the contents of the `.p8`, PEM or base64), `APNS_KEY_ID`,
+`APNS_TEAM_ID` and `APNS_TOPIC` (the iPhone app's bundle id) and the relay
+forwards a host's `{pushToken, pushEnvironment}` and `{push: …}` frames to Apple
+over HTTP/2 with an ES256 token. Alert text stays sealed with the phone's device
+key; the relay adds a fixed fallback body. Live Activity updates carry only a
+status word, a timestamp and an asking flag. Without the four settings the relay
+answers `{type: "push", ok: false, reason: "off"}`.
+
 ## Security boundaries
 
 The QR carries a one-use bootstrap secret in its fragment. The phone replaces it
 with a different key during pairing. The relay sees room identifiers, timing and
 ciphertext sizes and routing tickets, but not session contents or device keys. AES-256-GCM binds
-message direction; Mac-generated connection challenges and sequences reject replay.
-The web host remains trusted to deliver the correct client JavaScript.
+message direction; Mac-generated connection challenges and sequences stop the Mac from
+accepting replayed phone requests. The phone contributes a fresh client nonce and requires its encrypted echo,
+so an old Mac challenge plus a recorded reply cannot authenticate a new connection. The web host, on the same origin as the relay, remains trusted to deliver the
+correct client JavaScript.
 
 Neither tickets nor room IDs enter WebSocket URLs. The relay sends a fresh per-connection routing
 key over WSS. The first client message is `{route: ciphertext}`: AES-256-GCM with
@@ -121,7 +139,8 @@ No commands are queued offline or automatically retried. After a lost response,
 check the terminal before manually resending.
 
 The relay limits itself to 100 rooms, 20 room allocations/minute, one phone per room,
-30 frames/second per socket, 110 KB frames, and bounded outgoing buffers. These are
+30 frames/second per socket, 110 KB frames, 60 pushes/minute per room, and bounded
+outgoing buffers. These are
 single-process limits, not a replacement for an internet-edge DoS/WAF policy.
 Pending rooms and disconnected hosts expire after five minutes. Host reconnection
 within that grace interval preserves the room. After that the Mac allocates a
@@ -142,3 +161,16 @@ then runs native tests including real URLSession → relay → phone protocol te
 Browser tests use synthetic Mac sessions through the real encrypted relay. They
 cover narrow phones, tablets, desktop, drafting, scrolling, and a simulated visual
 viewport resize. Real iOS keyboard behavior still requires a physical device check.
+
+
+## Protocol upgrade and approval limits
+
+Update the Mac and phone companion together. Each request now carries a fresh
+phone nonce, echoed in sealed replies. Missing support produces an upgrade error.
+Native event streams also require rising event counters; this PWA uses correlated
+request/reply polling. It keeps no offline command queue and does not blindly retry.
+
+A detected menu shows its available operation context and literal choices under
+**Terminal controls**. These buttons type into the terminal; they are not verified
+provider approvals. Oversized/ambiguous menus fall back to the ordinary terminal.
+Successful dispatch does not prove the provider accepted or completed an action.

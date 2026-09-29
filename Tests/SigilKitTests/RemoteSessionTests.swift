@@ -146,6 +146,32 @@ struct RemoteSessionTests {
         }
     }
 
+    @Test func oversizedRequestFromThePairedPhoneIsNotAnAuthFailure() throws {
+        let device = RemoteCrypto.randomKey()
+        var session = RemoteSession(deviceKey: device, ticket: RemoteCrypto.randomKey())
+        let oversized = try RemoteCrypto.seal(
+            RemoteRequest(
+                challenge: session.challenge, sequence: 1, action: "chats", text: String(repeating: "b", count: 8_193)),
+            key: device, direction: "phone")
+        #expect(throws: RemoteError.outOfBounds(sequence: 1)) { _ = try session.accept(oversized) }
+        #expect(throws: RemoteError.invalidMessage) { _ = try session.accept(oversized) }
+        let staleOversized = RemoteRequest(
+            challenge: RemoteCrypto.randomKey(), sequence: 2, action: "chats",
+            text: String(repeating: "b", count: 8_193))
+        #expect(throws: RemoteError.invalidMessage) {
+            _ = try session.accept(RemoteCrypto.seal(staleOversized, key: device, direction: "phone"))
+        }
+        let next = RemoteRequest(challenge: session.challenge, sequence: 2, action: "state")
+        #expect(try session.accept(RemoteCrypto.seal(next, key: device, direction: "phone")).action == "state")
+        var unpaired = RemoteSession()
+        let pair = RemoteRequest(
+            challenge: unpaired.challenge, sequence: 1, action: "pair", text: RemoteCrypto.randomKey(),
+            name: String(repeating: "n", count: 81))
+        #expect(throws: RemoteError.invalidMessage) {
+            _ = try unpaired.accept(RemoteCrypto.seal(pair, key: unpaired.pairingKey, direction: "phone"))
+        }
+    }
+
     @Test func fileChunksMayBeLargerThanPromptText() throws {
         var session = RemoteSession()
         let device = RemoteCrypto.randomKey()

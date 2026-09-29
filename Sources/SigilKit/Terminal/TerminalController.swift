@@ -22,6 +22,16 @@ public final class TerminalController {
     public var onUserSubmit: (() -> Void)?
     /// Called when the child sets the terminal title (the CLI reports its state here).
     public var onTitleChange: ((String) -> Void)?
+    /// Called on every child write, uncoalesced, so a remote stream can send the change at once.
+    public var onRemoteOutput: (() -> Void)?
+    /// Advances before observers see each child write or any terminal input.
+    public private(set) var remoteInteractionRevision: UInt64 = 0
+    public private(set) var remoteInteractionAfterInput = false
+    /// The theme in force, sent to the phone with a full screen window.
+    public private(set) var theme: TerminalTheme
+    private var screenGeneration = 0
+    private var screenRowTotal = 0
+    private var screenWasAlternate = false
 
     private let terminalView: GrokProcessTerminalView
     private let childPid = OSAllocatedUnfairLock(initialState: pid_t(0))
@@ -30,6 +40,12 @@ public final class TerminalController {
     private var escalationTask: Task<Void, Never>?
     private var reportsActivity = true
     private var didReportExit = false
+
+    /// Off by default, as in Terminal.app, so Option types the layout's characters.
+    public var optionAsMetaKey: Bool {
+        get { terminalView.optionAsMetaKey }
+        set { terminalView.optionAsMetaKey = newValue }
+    }
 
     public init(theme: TerminalTheme = .grokNight, fontSize: CGFloat = 13) {
         var options = TerminalOptions.default
@@ -42,17 +58,26 @@ public final class TerminalController {
         )
         self.terminalView = terminal
         self.view = terminal
+        self.theme = theme
+        terminal.optionAsMetaKey = false
         terminal.processDelegate = self
         terminal.onChildOutput = { [weak self] in
+            self?.remoteInteractionRevision &+= 1
+            self?.remoteInteractionAfterInput = false
             self?.noteActivity()
+            self?.onRemoteOutput?()
+        }
+        terminal.onInput = { [weak self] in
+            self?.remoteInteractionRevision &+= 1
+            self?.remoteInteractionAfterInput = true
         }
         terminal.onUserSubmit = { [weak self] in
             self?.onUserSubmit?()
         }
         terminal.setAccessibilityElement(true)
         terminal.setAccessibilityRole(.textArea)
-        terminal.setAccessibilityLabel("Grok terminal")
-        terminal.setAccessibilityValue("")
+        terminal.setAccessibilityLabel("Terminal")
+        terminal.accessibilityText = { [weak self] in self?.accessibilitySnapshot() ?? "" }
         apply(theme: theme)
     }
 
@@ -99,6 +124,7 @@ public final class TerminalController {
         lastActivityFire = nil
         activityFlushTask?.cancel()
         activityFlushTask = nil
+        terminalView.setAccessibilityLabel("Shell terminal")
 
         let environment = spec.environment().map { "\($0.key)=\($0.value)" }
         let command = spec.hostCommand()
@@ -138,9 +164,6 @@ public final class TerminalController {
         terminalView.terminateHosted()
         isRunning = false
 
-        // Only replace a running escalation when there is a new child to chase;
-        // a second terminate() must not cancel the first one's escalation.
-        escalationTask?.cancel()
         escalationTask = Task { [weak self] in
             for delay in Self.escalationDelays {
                 try? await Task.sleep(for: delay)
@@ -205,7 +228,10 @@ public final class TerminalController {
             usleep(20_000)
         }
         Self.signal(SIGKILL, to: pid)
-        Self.reap(pid)
+        // SIGKILL cannot be ignored, but the child is not reapable the instant it
+        // is sent. Wait for it so a short timeout does not leave a zombie behind.
+        let killDeadline = ContinuousClock.now + Self.killGrace
+        while !Self.reap(pid), ContinuousClock.now < killDeadline { usleep(5_000) }
     }
 
     /// Bounded readable output for an explicitly paired remote controller.
@@ -214,6 +240,94 @@ public final class TerminalController {
     /// The tail of the terminal for a crash report. Shorter than the remote
     /// snapshot: the report has to stay readable, not be complete.
     public func crashSnapshot() -> String { accessibilitySnapshot(maxCharacters: 4_000) }
+
+    /// The rows the phone shows, with their styles, addressed by buffer-absolute
+    /// index. The window is the newest rows up to `maxCharacters` of text.
+    public func remoteScreenWindow(maxRows: Int = 400, maxCharacters: Int = 12_000) -> RemoteScreenWindow {
+        let terminal = terminalView.getTerminal()
+        let count = terminalRowCount()
+        let base = terminal.buffer.totalLinesTrimmed
+        let alternate = terminal.isCurrentBufferAlternate
+        // A reset or a screen switch restarts the index space.
+        if base + count < screenRowTotal || alternate != screenWasAlternate {
+            screenGeneration += 1
+        }
+        screenRowTotal = base + count
+        screenWasAlternate = alternate
+        var rows: [RemoteScreen.Row] = []
+        var characters = 0
+        var index = count - 1
+        while index >= 0, rows.count < maxRows, characters < maxCharacters {
+            if let row = styledRow(at: index, absolute: base + index) {
+                characters += row.t.count + 1
+                rows.append(row)
+            }
+            index -= 1
+        }
+        rows.reverse()
+        // Rows older than the window belong to history, so they are not resent.
+        return RemoteScreenWindow(
+            gen: screenGeneration, alt: alternate, first: rows.first?.i ?? base + count, end: base + count,
+            rows: rows, palette: theme.ansiHex.map(RemoteScreen.hex), fg: RemoteScreen.hex(theme.foregroundHex),
+            bg: RemoteScreen.hex(theme.backgroundHex))
+    }
+
+    /// Older rows before `absolute`, for the phone's scroll-up. Same shape as the window.
+    public func remoteScreenRows(before absolute: Int, maxRows: Int = 200, maxCharacters: Int = 12_000)
+        -> [RemoteScreen.Row]
+    {
+        let base = terminalView.getTerminal().buffer.totalLinesTrimmed
+        var rows: [RemoteScreen.Row] = []
+        var characters = 0
+        var index = min(absolute - base, terminalRowCount()) - 1
+        while index >= 0, rows.count < maxRows, characters < maxCharacters {
+            if let row = styledRow(at: index, absolute: base + index) {
+                characters += row.t.count + 1
+                rows.append(row)
+            }
+            index -= 1
+        }
+        return rows.reversed()
+    }
+
+    /// One row as the phone draws it: text plus style runs over Character offsets.
+    private func styledRow(at row: Int, absolute: Int) -> RemoteScreen.Row? {
+        let terminal = terminalView.getTerminal()
+        guard let line = terminal.bufferLine(atRow: row) else { return nil }
+        let limit = line.getTrimmedLength()
+        var text = ""
+        var runs = RemoteStyleRuns()
+        var column = 0
+        var offset = 0
+        while column < limit {
+            let cell = line[column]
+            let character = terminal.getCharacter(for: cell)
+            if character == "\0", column > 0, line[column - 1].width == 2 {
+                column += 1
+                continue
+            }
+            let scalar = character == "\0" ? " " : character
+            let safe = scalar.unicodeScalars.allSatisfy { $0 == "\t" || $0.properties.generalCategory != .control }
+            text.append(safe ? scalar : " ")
+            runs.append(Self.styleCell(cell.attribute), at: offset)
+            offset += 1
+            column += max(Int(cell.width), 1)
+        }
+        return RemoteScreen.Row(i: absolute, t: text, w: line.isWrapped ? true : nil, s: runs.finish())
+    }
+
+    private static func styleCell(_ attribute: Attribute) -> RemoteStyleRuns.Cell {
+        RemoteStyleRuns.Cell(
+            fg: remoteColor(attribute.fg), bg: remoteColor(attribute.bg), flags: Int(attribute.style.rawValue))
+    }
+
+    private static func remoteColor(_ color: Attribute.Color) -> Int {
+        switch color {
+        case .defaultColor, .defaultInvertedColor: return RemoteScreen.defaultColor
+        case .ansi256(let code): return Int(code)
+        case .trueColor(let red, let green, let blue): return RemoteScreen.trueColor(red: red, green: green, blue: blue)
+        }
+    }
 
     /// Readable text immediately before the phone's already loaded window.
     /// One slice is at most 12_000 characters. This does not widen `remoteSnapshot`.
@@ -261,6 +375,11 @@ public final class TerminalController {
         case "right": selector = #selector(NSTextView.moveRight(_:))
         case "tab": selector = #selector(NSTextView.insertTab(_:))
         case "backspace": selector = #selector(NSTextView.deleteBackward(_:))
+        case "1", "2", "3", "4", "5", "6", "7", "8", "9", "y", "n", "yes", "no":
+            // Explicitly ordinary terminal controls, not verified approvals.
+            // Menu keystrokes must not acquire bracketed-paste escape wrappers.
+            terminalView.send(txt: key)
+            return true
         case "interrupt":
             terminalView.send(txt: "\u{3}")
             return true
@@ -276,6 +395,7 @@ public final class TerminalController {
     }
 
     public func apply(theme: TerminalTheme) {
+        self.theme = theme
         terminalView.installColors(theme.ansi)
         terminalView.nativeBackgroundColor = Self.nsColor(theme.background)
         terminalView.nativeForegroundColor = Self.nsColor(theme.foreground)
@@ -322,6 +442,10 @@ public final class TerminalController {
     // MARK: - Find
 
     private var search = ScrollbackSearch()
+    /// The rows as Find last read them, kept until the buffer changes.
+    private var findText: ScrollbackSearch.Text?
+    /// Full reads of the buffer rows. Tests use this to prove unchanged output is not read again.
+    private(set) var bufferRowReads = 0
 
     /// Number of hits for the current find query.
     public var findMatchCount: Int { search.matchCount }
@@ -329,35 +453,58 @@ public final class TerminalController {
     /// One-based index of the current hit, or `0` when there are none.
     public var findMatchIndex: Int { search.current.map { $0 + 1 } ?? 0 }
 
-    /// Sets a plain-text query and selects the first hit, if any.
+    /// Sets a plain-text query and selects the newest hit at or above the
+    /// bottom of the viewport, so the view stays on the output being read.
     public func setFindQuery(_ query: String) {
-        search.setQuery(query, in: findBufferRows())
+        guard !query.isEmpty else {
+            clearFind()
+            return
+        }
+        let terminal = terminalView.getTerminal()
+        let viewportBottom = terminal.buffer.yDisp + terminal.rows - 1
+        search.setQuery(query, in: currentFindText(), startingAtOrAbove: viewportBottom)
         applyFindSelection()
     }
 
     /// Drops the query, the hits, and the selection used to show them.
     public func clearFind() {
         search.clear()
+        findText = nil
         terminalView.selectNone()
     }
 
     /// Advances to the next hit, wrapping to the first.
     public func findNext() {
-        search.updateRows(findBufferRows())
+        refreshFindHits()
         search.findNext()
         applyFindSelection()
     }
 
     /// Moves to the previous hit, wrapping to the last.
     public func findPrevious() {
-        search.updateRows(findBufferRows())
+        refreshFindHits()
         search.findPrevious()
         applyFindSelection()
+    }
+
+    /// Searches again only when output or a resize changed the buffer.
+    private func refreshFindHits() {
+        guard !search.query.isEmpty else { return }
+        search.update(currentFindText())
+    }
+
+    private func currentFindText() -> ScrollbackSearch.Text {
+        let generation = terminalView.contentGeneration
+        if let findText, findText.version == generation { return findText }
+        let text = ScrollbackSearch.Text(findBufferRows(), version: generation)
+        findText = text
+        return text
     }
 
     /// One searchable row plus a Character-to-cell map. SwiftTerm stores wide
     /// characters and extended graphemes differently from Swift String offsets.
     private func findBufferRows() -> [ScrollbackSearch.Row] {
+        bufferRowReads += 1
         var rows: [ScrollbackSearch.Row] = []
         var row = 0
         while let terminalRow = terminalRow(at: row, preserveWrappedWidth: true) {
@@ -474,13 +621,15 @@ public final class TerminalController {
         let windowEnd = rendered.index(approx, offsetBy: after)
         if windowStart < windowEnd {
             let endOnce =
-                endAnchor.isEmpty ? nil : rendered.range(of: endAnchor, options: .backwards)
+                endAnchor.isEmpty ? nil : rendered.range(of: endAnchor, options: [.backwards, .literal])
             var best: String.Index?
             var bestDistance = Int.max
             var search = windowStart
-            while search < windowEnd, let range = rendered.range(of: needle, range: search..<windowEnd) {
+            while search < windowEnd,
+                let range = rendered.range(of: needle, options: .literal, range: search..<windowEnd)
+            {
                 let matchesEnd =
-                    endAnchor.isEmpty || (endOnce.map { range.lowerBound <= $0.lowerBound } ?? false)
+                    endAnchor.isEmpty || (endOnce.map { range.lowerBound <= $0.lowerBound } ?? true)
                 if matchesEnd {
                     let distance = abs(rendered.distance(from: approx, to: range.lowerBound))
                     if distance < bestDistance {
@@ -494,11 +643,19 @@ public final class TerminalController {
             }
             if let best { return best }
         }
-        guard !endAnchor.isEmpty, let end = rendered.range(of: endAnchor, options: .backwards) else {
-            return rendered.range(of: needle)?.lowerBound
+        guard !endAnchor.isEmpty, let end = rendered.range(of: endAnchor, options: [.backwards, .literal]) else {
+            // A stale end anchor proves nothing, so keep the match nearest the loaded window.
+            let earlier = rendered.range(
+                of: needle, options: [.backwards, .literal], range: rendered.startIndex..<approx)
+            let later = rendered.range(of: needle, options: .literal, range: approx..<rendered.endIndex)
+            guard let earlier else { return later?.lowerBound }
+            guard let later else { return earlier.lowerBound }
+            let earlierGap = rendered.distance(from: earlier.lowerBound, to: approx)
+            let laterGap = rendered.distance(from: approx, to: later.lowerBound)
+            return earlierGap <= laterGap ? earlier.lowerBound : later.lowerBound
         }
         let region = rendered[..<end.upperBound]
-        return region.range(of: needle, options: .backwards)?.lowerBound
+        return region.range(of: needle, options: [.backwards, .literal])?.lowerBound
     }
 
     /// Finds the first missing row in O(log n), rather than walking all 10,000
@@ -595,11 +752,9 @@ extension TerminalController {
         min(max(size, minFontSize), maxFontSize)
     }
 
+    /// JetBrains Mono when the app bundle carries it, else SF Mono.
     private static func monospacedFont(size: CGFloat) -> NSFont {
-        if let font = NSFont(name: "SF Mono", size: size) { return font }
-        if let font = NSFont(name: "SFMono-Regular", size: size) { return font }
-        if let font = NSFont(name: "Menlo", size: size) { return font }
-        return NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        Typeface.terminalFont(size: size)
     }
 
     private static func nsColor(_ color: SwiftTerm.Color) -> NSColor {
@@ -686,7 +841,7 @@ extension TerminalController {
     }
 
     private func updateAccessibilitySnapshot() {
-        terminalView.setAccessibilityValue(accessibilitySnapshot())
+        NSAccessibility.post(element: terminalView, notification: .valueChanged)
     }
 
     private func handleProcessExit(_ rawStatus: Int32?) {

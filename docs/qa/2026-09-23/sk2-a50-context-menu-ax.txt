@@ -1,0 +1,74 @@
+sk2 a50: sidebar row context menus on the SigilUX test app (build 656564c, pr-sidebar-keys), project view acme-api.
+Method: AXShowMenu on the row (System Events), then a native AX read of the AXMenu window (layer 101) under its centre,
+then AXCancel. The screenshots were captured by window id while each menu was open. AXShowMenu puts the menu at the same
+point for every row, so the row is named by the text below, not by where the menu sits in the picture.
+Expected: rows with an open tab show "Show Tab" and "Close Tab"; a closed row shows "Open in New Tab" only.
+Screenshots: sk2-a50-menu-open-tab.png (row "Fix the 401…"), sk2-a50-menu-closed-chat.png (row "Rate limit…").
+
+AXShowMenu on row "Fix the 401 on expired refresh tokens" (row AXValue "Selected, working")
+menu window: id 29864 at 197,292 size 197x318 (23:46:55)
+captured sk2-a50-menu-open-tab.png by window id 29864
+AXMenu under 295,451 (SigilUX pid 16044):
+  Pin | enabled=true
+  Archive | enabled=true
+  ---- | enabled=false
+  Rename | enabled=true
+  ---- | enabled=false
+  Show Tab | enabled=true
+  Close Tab | enabled=true
+  ---- | enabled=false
+  New Session in This Folder | enabled=true
+  Pin Project | enabled=true
+  Reveal Folder in Finder | enabled=true
+  Copy Session ID | enabled=true
+  Export Transcript… | enabled=true
+  ---- | enabled=false
+  Delete Conversation… | enabled=true
+  ---- | enabled=false
+AXCancel on the menu: ok
+menu windows left open: 0
+
+AXShowMenu on row "Summarise the acme-api service" (row AXValue "Open in another tab, working")
+menu window: id 29870 at 197,292 size 197x318 (23:47:00)
+AXMenu under 295,451 (SigilUX pid 16044):
+  Pin | enabled=true
+  Archive | enabled=true
+  ---- | enabled=false
+  Rename | enabled=true
+  ---- | enabled=false
+  Show Tab | enabled=true
+  Close Tab | enabled=true
+  ---- | enabled=false
+  New Session in This Folder | enabled=true
+  Pin Project | enabled=true
+  Reveal Folder in Finder | enabled=true
+  Copy Session ID | enabled=true
+  Export Transcript… | enabled=true
+  ---- | enabled=false
+  Delete Conversation… | enabled=true
+  ---- | enabled=false
+AXCancel on the menu: ok
+menu windows left open: 0
+
+AXShowMenu on row "Rate limit the token endpoint" (row AXValue "Closed")
+menu window: id 29874 at 197,292 size 197x294 (23:47:05)
+captured sk2-a50-menu-closed-chat.png by window id 29874
+AXMenu under 295,439 (SigilUX pid 16044):
+  Pin | enabled=true
+  Archive | enabled=true
+  ---- | enabled=false
+  Rename | enabled=true
+  ---- | enabled=false
+  Open in New Tab | enabled=true
+  ---- | enabled=false
+  New Session in This Folder | enabled=true
+  Pin Project | enabled=true
+  Reveal Folder in Finder | enabled=true
+  Copy Session ID | enabled=true
+  Export Transcript… | enabled=true
+  ---- | enabled=false
+  Delete Conversation… | enabled=true
+  ---- | enabled=false
+AXCancel on the menu: ok
+menu windows left open: 0
+

@@ -27,7 +27,7 @@ struct TabColorMark: View {
     let color: TabColor
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 4)
+        RoundedRectangle(cornerRadius: Radius.chip, style: .continuous)
             .fill(color.color)
             .frame(width: 4)
             .allowsHitTesting(false)
@@ -40,7 +40,9 @@ enum TabColorSwatch {
         let side: CGFloat = 12
         let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
             let path = NSBezierPath(
-                roundedRect: rect.insetBy(dx: 1, dy: 1), xRadius: 3, yRadius: 3)
+                roundedRect: rect.insetBy(dx: 1, dy: 1),
+                xRadius: Radius.chip,
+                yRadius: Radius.chip)
             color.nsColor.setFill()
             path.fill()
             return true

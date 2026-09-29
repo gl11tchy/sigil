@@ -1,0 +1,23 @@
+# a31 — branch audit/app-panel @ 7d58b29, 2026-09-23 18:37:44
+# Launch: throwaway home, Finder-like PATH (/usr/bin:/bin:/usr/sbin:/sbin), fake claude at /tmp/sigil-ux/home/.local/bin/claude (prints its path, never runs a real agent).
+# Steps: AXPress New Session (+) > Claude Code > Start; AXPress Show Panel; AXPress Notes.
+
+## Selected tab's terminal (Claude Code tab)
+AXTextArea | Description=Claude Code terminal | Value=FAKE CLAUDE (QA) at: /tmp/sigil-ux/home/.local/bin/claude⏎type -a claude: claude is /tmp/sigil-ux/home/.local/bin/claude;⏎args: ⏎cwd: /Users/Shared/sigil-ux/pro… | Focused=0 | Position=541,315 | Siz
+
+## Utility panel in Notes mode
+  AXGroup | Description=Utility panel | Enabled=1 | Position=926,262 | Size=280x492
+   AXButton | Description=Terminal | Help=Terminal | Focused=0 | Enabled=1 | Identifier=terminal | Position=932,269 | Size=31x22
+   AXButton | Description=Notes | Help=Notes | Selected=1 | Focused=0 | Enabled=1 | Position=965,269 | Size=66x22
+   AXButton | Description=Close Panel (⌥⌘B) | Help=Close Panel (⌥⌘B) | Focused=0 | Enabled=1 | Identifier=xmark | Position=1176,269 | Size=22x22
+   AXStaticText | Value=Notes are available for Grok Build sessions. | Enabled=1 | Position=952,519 | Size=227x14
+
+Result: with a Claude Code tab selected, the Notes tool shows 'Notes are available for Grok Build sessions.'
+
+## Control: select the Grok Build tab 'Summarise the acme-api service…' by AXPress; Notes panel then shows
+  AXGroup | Description=Utility panel | Focused=0 | Enabled=1 | Position=926,262 | Size=280x492
+   AXButton | Description=Terminal | Help=Terminal | Focused=0 | Enabled=1 | Identifier=terminal | Position=932,269 | Size=31x22
+   AXButton | Description=Notes | Help=Notes | Selected=1 | Focused=0 | Enabled=1 | Position=965,269 | Size=66x22
+   AXButton | Description=Close Panel (⌥⌘B) | Help=Close Panel (⌥⌘B) | Focused=0 | Enabled=1 | Identifier=xmark | Position=1176,269 | Size=22x22
+   AXStaticText | Help=Summarise the acme-api service and its layout — /Users/Shared/sigil-ux/projects/acme-api | Value=Summarise the acme-api service and its layout | Enabled=1 | Position=936,303 | Size=260x13
+   AXScrollArea | Focused=0 | Position=932,321 | Size=268x427

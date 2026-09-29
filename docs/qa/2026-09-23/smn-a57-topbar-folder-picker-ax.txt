@@ -1,0 +1,29 @@
+# a57 top-bar chevron > New Session in Folder… — branch audit/shell-menus @ ce79e01 (merge of origin/main with #94), SigilUX debug build, 2026-09-23 22:05
+# Method: System Events AX actions on process SigilUX only. No keystrokes, no mouse. Right panel closed.
+
+== Before: SigilUX windows: 1
+- window role=AXWindow subrole=AXStandardWindow title="SigilUX" modal=false sheets=0
+
+== AXPress on AXMenuButton "Session actions" (top-bar chevron). Menu items:
+  New Session in Folder…
+  (separator)
+  Settings…
+== AXPress on menu item "New Session in Folder…" (22:05:51)
+
+== After: SigilUX windows: 2
+- window role=AXWindow subrole=AXStandardWindow title="SigilUX" modal=false sheets=0
+- window role=AXWindow subrole=AXDialog title="Open" modal=true sheets=0
+Open dialog contents:
+  pop up button value="acme-api"   (starts in the current tab's folder)
+  button "Cancel" enabled=true
+  button "Open Session Here" enabled=true
+Screenshot: smn-a57-open-panel.png (window-id capture of the Open dialog, cropped to drop the Finder sidebar with private volume names)
+
+== AXPress on "Cancel" of the Open dialog
+SigilUX windows: 1
+- window role=AXWindow subrole=AXStandardWindow title="SigilUX" modal=false sheets=0
+New Session sheet open (exists sheet 1 of window 1): false
+sheets of window 1, 5.5 s after Cancel: 0
+Screenshot: smn-a57-after-cancel.png (main window, no sheet)
+
+Result: PASS. The chevron item opens the folder picker; Cancel closes it and opens no New Session sheet.

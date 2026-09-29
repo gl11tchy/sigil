@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { sourceHash } from './revision.mjs';
 
 const source = new URL('./', import.meta.url);
@@ -17,7 +18,12 @@ export async function stampRevision(directory = source, checkout = source) {
   return stamp;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// A caller may name this file through a symlink such as macOS's /tmp, and Node
+// may or may not resolve the main module's link itself (--preserve-symlinks-main),
+// so both sides are compared as real paths or the stamp silently never runs.
+const realHref = path => { try { return pathToFileURL(realpathSync(path)).href; } catch { return null; } };
+const invokedAs = process.argv[1] ? realHref(process.argv[1]) : null;
+if (invokedAs && realHref(fileURLToPath(import.meta.url)) === invokedAs) {
   const directory = process.argv[2] ? pathToFileURL(`${resolve(process.argv[2])}/`) : source;
   const stamp = await stampRevision(directory);
   process.stdout.write(`${stamp.revision} ${stamp.sourceSHA256}\n`);

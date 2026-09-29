@@ -1,0 +1,32 @@
+b93: Settings > General > "Let tabs message each other". For this check only, the throwaway fake grok wrapper sleeps 5 s on every `grok mcp` call so the change stays in progress long enough to read (restored afterwards). AX read with the native AX API; saved value read from the SigilUX defaults key bridge.enabled.
+While the change runs, the switch holds the requested value, is disabled, and shows a busy indicator; the saved value changes only when grok finishes.
+
+== OFF request (AXPress on the switch while saved=on):
+-- 2.5 s after the press:
+AXStaticText | t= | d= | v=Let tabs message each other | en=0 | id=
+AXBusyIndicator | t= | d= | v=0 | en=0 | id=
+AXCheckBox | t= | d= | v=0 | en=0 | id=
+AXStaticText | t= | d= | v=Applies to tabs opened after this change. | en=1 | id=
+AXStaticText | t= | d= | v=General | en=1 | id=
+  saved bridge.enabled=1
+-- 14.5 s after the press:
+AXStaticText | t= | d= | v=Let tabs message each other | en=1 | id=
+AXCheckBox | t= | d= | v=0 | en=1 | id=
+AXStaticText | t= | d= | v=Applies to tabs opened after this change. | en=1 | id=
+AXStaticText | t= | d= | v=General | en=1 | id=
+  saved bridge.enabled=0
+
+== ON request (AXPress on the switch while saved=off):
+-- 2.5 s after the press:
+AXStaticText | t= | d= | v=Let tabs message each other | en=0 | id=
+AXBusyIndicator | t= | d= | v=0 | en=0 | id=
+AXCheckBox | t= | d= | v=1 | en=0 | id=
+AXStaticText | t= | d= | v=Applies to tabs opened after this change. | en=1 | id=
+AXStaticText | t= | d= | v=General | en=1 | id=
+  saved bridge.enabled=0
+-- 15.5 s after the press:
+AXStaticText | t= | d= | v=Let tabs message each other | en=1 | id=
+AXCheckBox | t= | d= | v=1 | en=1 | id=
+AXStaticText | t= | d= | v=Applies to tabs opened after this change. | en=1 | id=
+AXStaticText | t= | d= | v=General | en=1 | id=
+  saved bridge.enabled=1

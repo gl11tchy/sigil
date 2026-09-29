@@ -43,7 +43,7 @@ function assertSecurityHeaders(res, { https = false, html = false } = {}) {
   }
   if (html) {
     const cache = res.headers.get('cache-control') || '';
-    assert.match(cache, /no-store/);
+    assert.match(cache, /no-cache/);
     assert.doesNotMatch(cache, /max-age=31536000/);
   }
 }
@@ -66,6 +66,12 @@ test('PUBLIC_ORIGIN must be HTTPS except on loopback', () => {
   assert.throws(() => createSite({ publicOrigin: 'https://sigilapp.dev/' }), /HTTPS origin/);
   assert.doesNotThrow(() => createSite({ publicOrigin: 'http://localhost' }).close());
   assert.doesNotThrow(() => createSite({ publicOrigin: 'https://sigilapp.dev' }).close());
+});
+
+test('a missing or unparsable PUBLIC_ORIGIN names the variable', () => {
+  assert.throws(() => createSite({ publicOrigin: undefined }), /PUBLIC_ORIGIN must be an HTTPS origin/);
+  assert.throws(() => createSite({ publicOrigin: '' }), /PUBLIC_ORIGIN must be an HTTPS origin/);
+  assert.throws(() => createSite({ publicOrigin: 'sigilapp.dev' }), /PUBLIC_ORIGIN must be an HTTPS origin/);
 });
 
 test('GET /health returns ok', async t => {
@@ -133,6 +139,47 @@ test('GET /screenshot.png is the app window', async t => {
   assert.match(res.headers.get('content-type'), /image\/png/);
   const bytes = await res.arrayBuffer();
   assert.ok(bytes.byteLength > 1000);
+});
+
+test('the self-hosted fonts are served as WOFF2 with their licences', async t => {
+  const { base } = await setup(t);
+  const css = await text(base, '/style.css');
+  const urls = [...css.body.matchAll(/url\("?([^")]+)"?\)/g)].map(m => m[1]);
+  assert.ok(urls.length >= 5);
+  for (const url of urls) {
+    assert.match(url, /^\/fonts\/[\w-]+\.woff2$/);
+    const res = await fetch(`${base}${url}`);
+    assert.equal(res.status, 200, url);
+    assert.equal(res.headers.get('content-type'), 'font/woff2');
+    assertSecurityHeaders(res);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    assert.equal(String.fromCharCode(...bytes.subarray(0, 4)), 'wOF2', url);
+  }
+  for (const path of ['/fonts/Inter-OFL.txt', '/fonts/JetBrainsMono-OFL.txt']) {
+    const { res, body } = await text(base, path);
+    assert.equal(res.status, 200, path);
+    assert.match(res.headers.get('content-type'), /text\/plain/);
+    assert.match(body, /SIL Open Font License/);
+  }
+});
+
+test('a query string and HEAD reach the same page', async t => {
+  const { base } = await setup(t);
+  for (const path of ['/?fbclid=abc', '/docs?ref=x', '/docs/?utm_source=y']) {
+    const { res, body } = await text(base, path);
+    assert.equal(res.status, 200, path);
+    assert.match(body, /<h1[\s>]/);
+  }
+  for (const path of ['/', '/health']) {
+    const { res, body } = await text(base, path, 'HEAD');
+    assert.equal(res.status, 200, `HEAD ${path}`);
+    assert.equal(body, '');
+    assertSecurityHeaders(res);
+  }
+  const head = await fetch(`${base}/`, { method: 'HEAD' });
+  const get = await fetch(`${base}/`);
+  assert.equal(head.headers.get('content-length'), get.headers.get('content-length'));
+  assert.equal(head.headers.get('content-type'), get.headers.get('content-type'));
 });
 
 test('relay paths are 404', async t => {

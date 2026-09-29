@@ -9,22 +9,19 @@ public struct BridgeTabRef: Equatable, Sendable, Hashable {
     public var directory: String
     /// `working`, `idle`, or `exited`.
     public var status: String
-    public var isRunning: Bool
 
     public init(
         tabID: String,
         sessionID: String? = nil,
         title: String,
         directory: String,
-        status: String,
-        isRunning: Bool
+        status: String
     ) {
         self.tabID = tabID
         self.sessionID = sessionID
         self.title = title
         self.directory = directory
         self.status = status
-        self.isRunning = isRunning
     }
 }
 
@@ -43,21 +40,15 @@ public enum BridgeTargetMatch: Equatable, Sendable {
 /// Resolves a calling peer and a send/ask target against a fixed tab list.
 public enum BridgeRouting {
 
-    /// A supplied tab id is authoritative. Only fall back to the session id
-    /// when no tab id was supplied; a stale helper must not impersonate a new tab.
+    /// Only the tab id this copy handed out identifies a caller. A session id
+    /// is not enough: another copy of Sigil can resume the same session.
     public static func matchPeer(_ peer: BridgePeer, tabs: [BridgeTabRef]) -> BridgePeerMatch {
-        if let tabID = peer.tabID?.nilIfBlank {
-            guard let tab = tabs.first(where: { $0.tabID == tabID }) else {
-                return .notFound
-            }
-            return .found(tab)
+        guard let tabID = peer.tabID?.nilIfBlank,
+            let tab = tabs.first(where: { $0.tabID == tabID })
+        else {
+            return .notFound
         }
-        if let sessionID = peer.sessionID?.nilIfBlank,
-            let tab = tabs.first(where: { $0.sessionID == sessionID })
-        {
-            return .found(tab)
-        }
-        return .notFound
+        return .found(tab)
     }
 
     /// Match `target` as a tab id first (exact), then as a title (case-insensitive).
@@ -107,12 +98,13 @@ public enum BridgePrompt {
     /// bodies so a message cannot forge a second frame that looks like Sigil.
     public static let marker = "[Sigil]"
 
-    /// Drops control characters and flattens newlines so a payload cannot close
-    /// this frame and open a forged one.
+    /// Drops control and format characters and flattens newlines so a payload
+    /// cannot close this frame and open a forged one.
     public static func sanitize(_ text: String) -> String {
+        let input = Array(text.unicodeScalars)
         var scalars: [Unicode.Scalar] = []
-        scalars.reserveCapacity(text.unicodeScalars.count)
-        for scalar in text.unicodeScalars {
+        scalars.reserveCapacity(input.count)
+        for (index, scalar) in input.enumerated() {
             if scalar == "\n" || scalar == "\r" || scalar == "\u{2028}" || scalar == "\u{2029}" {
                 scalars.append("\n")
                 continue
@@ -131,15 +123,74 @@ public enum BridgePrompt {
                 scalars.append(" ")
                 continue
             }
+            // Format and other default-ignorable characters render as nothing
+            // or reorder the text around them, so the approved banner would not
+            // match what is typed. Tag characters carry hidden text and leave
+            // no gap.
+            if scalar.properties.generalCategory == .format
+                || scalar.properties.isDefaultIgnorableCodePoint
+            {
+                if (0xE0000...0xE007F).contains(scalar.value) { continue }
+                let next = index + 1 < input.count ? input[index + 1] : nil
+                if scalar == "\u{200D}", isEmojiPart(scalars.last), isEmojiPart(next) {
+                    scalars.append(scalar)
+                } else if isVariationSelector(scalar) {
+                    // A selector only restyles the character before it, so
+                    // dropping it joins nothing. After an emoji it picks the
+                    // emoji's presentation and stays.
+                    if scalar.value >= 0xFE0E, scalar.value <= 0xFE0F, isEmojiPart(scalars.last) {
+                        scalars.append(scalar)
+                    }
+                } else {
+                    scalars.append(" ")
+                }
+                continue
+            }
             scalars.append(scalar)
         }
-        return String(String.UnicodeScalarView(scalars))
+        let flattened = String(String.UnicodeScalarView(scalars))
             .split(separator: "\n", omittingEmptySubsequences: true)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
             .joined(separator: " ")
-            .replacingOccurrences(
-                of: marker, with: "Sigil", options: .caseInsensitive)
+        return withoutMarkers(flattened)
+    }
+
+    /// Turns every marker into plain "Sigil" in one pass. A "]" that closes
+    /// "[sigil" rewrites it, and the rewritten word can complete an outer
+    /// marker on the next "]", so "[[Sigil]]" leaves none. Scalars, not
+    /// characters, so a combining mark on the "]" cannot hide one.
+    private static func withoutMarkers(_ text: String) -> String {
+        let opening = String(marker.dropLast())
+        var output: [Unicode.Scalar] = []
+        output.reserveCapacity(text.unicodeScalars.count)
+        for scalar in text.unicodeScalars {
+            if scalar == "]", output.count >= opening.unicodeScalars.count,
+                String(String.UnicodeScalarView(output.suffix(opening.unicodeScalars.count)))
+                    .caseInsensitiveCompare(opening) == .orderedSame
+            {
+                output.removeLast(opening.unicodeScalars.count)
+                output.append(contentsOf: "Sigil".unicodeScalars)
+            } else {
+                output.append(scalar)
+            }
+        }
+        return String(String.UnicodeScalarView(output))
+    }
+
+    /// A zero-width joiner is kept only between emoji, where it builds one
+    /// glyph (for example a family or a rainbow flag). ASCII digits, `#` and
+    /// `*` count as emoji in Unicode, so plain ASCII never qualifies.
+    private static func isEmojiPart(_ scalar: Unicode.Scalar?) -> Bool {
+        guard let scalar, scalar.value > 0x7F else { return false }
+        return scalar.properties.isEmoji || scalar == "\u{FE0F}"
+    }
+
+    private static func isVariationSelector(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 0x180B...0x180D, 0x180F, 0xFE00...0xFE0F, 0xE0100...0xE01EF: true
+        default: false
+        }
     }
 
     private static func displayTitle(_ title: String, fallback: String) -> String {
@@ -151,7 +202,7 @@ public enum BridgePrompt {
 /// In-flight `ask_tab` questions. Every resume path (reply, timeout, target exit,
 /// tab close) goes through one gate so the continuation runs exactly once.
 @MainActor
-public final class PendingAskRegistry: @unchecked Sendable {
+public final class PendingAskRegistry {
 
     public enum Outcome: Equatable, Sendable {
         case answered(String)

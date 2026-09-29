@@ -8,23 +8,35 @@ import { pairingFromText } from '../public/pairing.mjs';
 const source = (await readFile(new URL('../public/app.mjs', import.meta.url), 'utf8'))
   .replace(/^import .* from '\.\/.*\.mjs';\n/gm, '');
 const settle = () => new Promise(resolve => setImmediate(resolve));
+// Answers New's CLI list as a Mac from before the choice does.
+async function skipOptions(socket) {
+  const request = socket.sent.at(-1);
+  assert.equal(request.action, 'options');
+  socket.receive({ data: JSON.stringify({
+    challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: false, error: 'Unknown action.' }) });
+  await settle();
+}
 
 // Run the real handlers; only browser services and encryption are replaced.
-async function browser({ hash = '', saved } = {}) {
+async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { device: true } } } = {}) {
   const elements = new Map(), events = new Map(), timers = new Map(), sockets = [];
-  let nextTimer = 0, reloads = 0;
-  let stored = saved ?? { room: 'a'.repeat(32), key: { device: true } };
+  let nextTimer = 0, reloads = 0, randomCounter = 0;
+  let stored = saved;
   const sealed = [];
   const element = id => {
     if (!elements.has(id)) elements.set(id, {
-      id, value: '', textContent: '', hidden: false, disabled: false, dataset: {}, style: {},
+      id, value: '', textContent: '', hidden: false, disabled: false, readOnly: false, dataset: {}, style: {},
       open: false, focus() {}, contains() { return false; },
       getAttribute(name) { return this[name]; }, setAttribute(name, value) { this[name] = value; },
       addEventListener() {},
       showModal() { this.open = true; }, close() { this.open = false; },
       scrollHeight: 0, scrollTop: 0, clientHeight: 0,
       querySelector(selector) { return element(`${id}-${selector}`); },
-      replaceChildren(...children) { this.children = children; },
+      // A fragment hands over its nodes, and the text is the text of the new children.
+      replaceChildren(...children) {
+        this.children = children.flatMap(child => child.parts ?? [child]);
+        this.textContent = this.children.map(child => child.textContent).join('');
+      },
     });
     return elements.get(id);
   };
@@ -34,7 +46,7 @@ async function browser({ hash = '', saved } = {}) {
   };
   const document = {
     hidden: false, getElementById: element,
-    createDocumentFragment: () => ({ append(node) { this.parts = [...(this.parts || []), node]; } }),
+    createDocumentFragment: () => ({ parts: [], append(node) { this.parts.push(node); } }),
     createTextNode: text => ({ textContent: text }),
     createElement: () => ({
       textContent: '', dataset: {}, hidden: false, children: [],
@@ -43,7 +55,7 @@ async function browser({ hash = '', saved } = {}) {
       focus() {}, scrollIntoView() {},
     }),
     querySelectorAll: selector => selector === '[data-key]' ? [] :
-      ['new', 'tabs', 'message', 'send', 'paste', 'interrupt'].map(element),
+      ['new', 'tabs', 'message', 'send', 'paste', 'interrupt', 'stop'].map(element),
     addEventListener: (name, callback) => events.set(name, callback),
   };
   class FakeSocket {
@@ -59,8 +71,8 @@ async function browser({ hash = '', saved } = {}) {
     receive(frame) { this.onmessage({ data: JSON.stringify(frame) }); }
     reply(request = this.sent.at(-1)) {
       this.receive({ data: JSON.stringify({
-        challenge: request.challenge, sequence: request.sequence, ok: true,
-        state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
+        challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: true,
+        state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle', provider: 'grokBuild', sessionID: 'native-fixture', cwd: '/tmp/fixture' }], selectedTabID: 'tab-1', terminal: 'READY' },
       }) });
     }
     close() { this.readyState = 3; this.onclose?.(); }
@@ -88,17 +100,18 @@ async function browser({ hash = '', saved } = {}) {
       return request;
     },
   };
-  vm.runInNewContext(source, {
+  const app = {
     readableOutput, pairingFromText, document, location, history: { replaceState() {} }, indexedDB,
     window: { addEventListener: (name, callback) => events.set(name, callback) },
     navigator: {}, crypto: { subtle: {} }, URL, URLSearchParams, TextEncoder,
     WebSocket: FakeSocket,
-    importKey: async hex => ({ hex }), randomKey: () => 'e'.repeat(64),
+    importKey: async hex => ({ hex }), randomKey: () => ++randomCounter === 1 ? 'e'.repeat(64) : randomCounter.toString(16).padStart(64, '0'),
     seal: async (value, key, direction) => { sealed.push({ value, key, direction }); return JSON.stringify(value); },
     open: async frame => JSON.parse(frame),
     setTimeout(callback, delay) { const id = ++nextTimer; timers.set(id, { callback, delay }); return id; },
     clearTimeout: id => timers.delete(id),
-  });
+  };
+  vm.runInNewContext(source, app);
   await settle();
   async function authorize(ws = sockets.at(-1)) {
     ws.receive({ hello: (sockets.length % 2 ? 'b' : 'c').repeat(64) });
@@ -122,8 +135,34 @@ async function browser({ hash = '', saved } = {}) {
     element('compose').onsubmit({ preventDefault() { prevented = true; } });
     assert.equal(prevented, true);
   }
-  return { element, events, location, sockets, authorize, fireTimer, submit, sealed, timers, stored: () => structuredClone(stored), reloads: () => reloads };
+  return { app, element, events, location, sockets, authorize, fireTimer, submit, sealed, timers, stored: () => structuredClone(stored), reloads: () => reloads };
 }
+
+test('attached file names keep their extension and non-Latin letters', async () => {
+  const { app } = await browser();
+  const bytes = value => new TextEncoder().encode(value).length;
+  assert.equal(app.remoteFileName('文档.pdf'), '文档.pdf');
+  assert.equal(app.remoteFileName('Отчёт.txt'), 'Отчёт.txt');
+  assert.equal(app.remoteFileName('é.json'), 'é.json');
+  assert.equal(app.remoteFileName('???.csv'), 'file.csv');
+  const long = app.remoteFileName(`${'a'.repeat(90)}.pdf`);
+  assert.match(long, /^a+\.pdf$/);
+  assert.ok(bytes(long) <= 80);
+  const wide = app.remoteFileName(`${'文'.repeat(40)}.xlsx`);
+  assert.match(wide, /^文+\.xlsx$/);
+  assert.ok(bytes(wide) <= 80);
+});
+
+test('streamed output that overlaps each poll keeps history under the cap', async () => {
+  const { app } = await browser();
+  const bucket = { history: '', tail: '', exhausted: false };
+  const line = n => `line ${String(n).padStart(6, '0')} ${'x'.repeat(1000)}\n`;
+  const window = start => Array.from({ length: 40 }, (_, i) => line(start + i)).join('');
+  // Each poll scrolls 20 lines, and the old and new snapshots share the other 20.
+  for (let start = 0; start <= 20 * 30; start += 20) app.applyTail(bucket, window(start));
+  assert.ok(bucket.history.length <= 400_000, `history is ${bucket.history.length} characters`);
+  assert.ok((bucket.history + bucket.tail).endsWith(window(600)));
+});
 
 test('Send clears the draft only after the Enter acknowledgement', async () => {
   const page = await browser();
@@ -146,6 +185,73 @@ test('Send clears the draft only after the Enter acknowledgement', async () => {
   assert.equal(page.element('send').disabled, true); // Empty messages cannot be sent.
 });
 
+test('an 8 KB message with an attachment is refused before anything is sent', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('attach').files = [{ name: 'notes.txt', type: 'text/plain', size: 5 }];
+  page.element('attach').onchange();
+  page.element('message').value = 'a'.repeat(8192);
+  page.element('compose').onsubmit({ preventDefault() {} });
+  await settle();
+  assert.match(page.element('error').textContent, /under 8 KB/);
+  assert.deepEqual(socket.sent.map(request => request.action), ['state']);
+});
+
+test('picking more than 16 files says the rest were not added', async () => {
+  const page = await browser();
+  await page.authorize();
+  page.element('attach').files = Array.from({ length: 20 }, (_, index) => ({ name: `note${index}.txt`, type: 'text/plain', size: 5 }));
+  page.element('attach').onchange();
+  assert.equal(page.app.attachmentsFor().length, 16);
+  assert.match(page.element('error').textContent, /Up to 16 files per message/);
+});
+
+test('an oversized file keeps its own error and does not use a free slot', async () => {
+  const page = await browser();
+  await page.authorize();
+  page.element('attach').files = Array.from({ length: 15 }, (_, index) => ({ name: `note${index}.txt`, type: 'text/plain', size: 5 }));
+  page.element('attach').onchange();
+  page.element('attach').files = [
+    { name: 'big.zip', type: 'application/zip', size: 5 * 1024 * 1024 },
+    { name: 'last.txt', type: 'text/plain', size: 5 },
+  ];
+  page.element('attach').onchange();
+  assert.equal(page.app.attachmentsFor().length, 16);
+  assert.equal(page.element('error').textContent, 'Keep files under 4 MB.');
+});
+
+test('a sent attachment leaves the queue when the Mac switches tabs during the send', async () => {
+  const page = await browser();
+  page.app.btoa = btoa;
+  const socket = await page.authorize();
+  const both = selectedTabID => ({ tabs: [
+    { id: 'tab-1', title: 'One', status: 'idle' }, { id: 'tab-2', title: 'Two', status: 'idle' }],
+    selectedTabID, terminal: 'READY' });
+  const answer = (request, state) => socket.receive({ data: JSON.stringify({
+    challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: true, state }) });
+  page.element('attach').files = [{ name: 'notes.txt', type: 'text/plain', size: 5,
+    arrayBuffer: async () => new Uint8Array([1, 2, 3, 4, 5]).buffer }];
+  page.element('attach').onchange();
+  page.element('message').value = 'look';
+  page.element('compose').onsubmit({ preventDefault() {} });
+  await settle(); await settle();
+  const file = socket.sent.at(-1);
+  assert.equal(file.action, 'file');
+  assert.equal(file.tabID, 'tab-1');
+  answer(file, both('tab-2'));
+  await settle(); await settle();
+  answer(socket.sent.at(-1), both('tab-2'));
+  await settle();
+  await page.fireTimer(100);
+  answer(socket.sent.at(-1), both('tab-2'));
+  await settle();
+  assert.deepEqual(socket.sent.map(request => request.action), ['state', 'file', 'input', 'key']);
+  await page.fireTimer(1000);
+  answer(socket.sent.at(-1), both('tab-1'));
+  await settle();
+  assert.equal(page.element('attachments').hidden, true);
+});
+
 test('a refused Enter keeps the sent draft and reports the failure', async () => {
   const page = await browser();
   const socket = await page.authorize();
@@ -157,7 +263,7 @@ test('a refused Enter keeps the sent draft and reports the failure', async () =>
   const enter = socket.sent.at(-1);
   assert.equal(enter.action, 'key');
   socket.receive({ data: JSON.stringify({
-    challenge: enter.challenge, sequence: enter.sequence, ok: false, error: 'Refused.' }) });
+    challenge: enter.challenge, clientNonce: enter.clientNonce, sequence: enter.sequence, ok: false, error: 'Refused.' }) });
   await settle();
   assert.equal(page.element('message').value, 'fixture input');
   assert.equal(page.element('error').hidden, false);
@@ -170,7 +276,7 @@ test('a Mac tab switch during Send files the sent draft under its own tab', asyn
   page.submit();
   await settle();
   const input = socket.sent.at(-1);
-  socket.receive({ data: JSON.stringify({ challenge: input.challenge, sequence: input.sequence, ok: true,
+  socket.receive({ data: JSON.stringify({ challenge: input.challenge, clientNonce: input.clientNonce, sequence: input.sequence, ok: true,
     state: { tabs: [{ id: 'tab-1', title: 'One', status: 'idle' }, { id: 'tab-2', title: 'Two', status: 'idle' }],
       selectedTabID: 'tab-2', terminal: 'TWO' } }) });
   await settle();
@@ -179,7 +285,7 @@ test('a Mac tab switch during Send files the sent draft under its own tab', asyn
   const enter = socket.sent.at(-1);
   assert.equal(enter.action, 'key');
   assert.equal(enter.tabID, 'tab-1');
-  socket.receive({ data: JSON.stringify({ challenge: enter.challenge, sequence: enter.sequence, ok: true,
+  socket.receive({ data: JSON.stringify({ challenge: enter.challenge, clientNonce: enter.clientNonce, sequence: enter.sequence, ok: true,
     state: { tabs: [{ id: 'tab-1', title: 'One', status: 'idle' }, { id: 'tab-2', title: 'Two', status: 'idle' }],
       selectedTabID: 'tab-2', terminal: 'TWO' } }) });
   await settle();
@@ -219,7 +325,7 @@ test('a malformed state rejects the command, closes the socket, and recovers', a
   await settle();
   const request = socket.sent.at(-1);
   assert.equal(request.action, 'select');
-  socket.receive({ data: JSON.stringify({ challenge: request.challenge, sequence: request.sequence, ok: true,
+  socket.receive({ data: JSON.stringify({ challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: true,
     state: { tabs: [{ id: 'x', title: 'A', status: 'idle' }, { id: 'x', title: 'B', status: 'idle' }],
       selectedTabID: 'x', terminal: '' } }) });
   await settle();
@@ -240,7 +346,7 @@ test('a state naming an unknown selected tab is rejected the same way', async ()
   page.element('paste').onclick();
   await settle();
   const request = socket.sent.at(-1);
-  socket.receive({ data: JSON.stringify({ challenge: request.challenge, sequence: request.sequence, ok: true,
+  socket.receive({ data: JSON.stringify({ challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: true,
     state: { tabs: [{ id: 'tab-1', title: 'A', status: 'idle' }], selectedTabID: 'ghost', terminal: '' } }) });
   await settle();
   assert.equal(socket.readyState, 3);
@@ -258,35 +364,87 @@ test('an unanswered connection reports and closes after ten seconds', async () =
   assert.equal(page.element('status').textContent, 'Connected');
 });
 
-test('a command that times out keeps the socket so later commands can use it', async () => {
+test('New falls back to a new session when the Mac has no project list', async () => {
   const page = await browser();
   const socket = await page.authorize();
   page.element('new').onclick();
   await settle();
-  assert.equal(socket.sent.at(-1).action, 'projects');
-  await page.fireTimer(10000);
-  assert.equal(socket.readyState, 1);
-  assert.equal(page.element('error').hidden, false);
-  page.element('new').onclick();
+  const projects = socket.sent.at(-1);
+  assert.equal(projects.action, 'projects');
+  socket.receive({ data: JSON.stringify({
+    challenge: projects.challenge, clientNonce: projects.clientNonce, sequence: projects.sequence, ok: false, error: 'Unknown action.' }) });
   await settle();
-  assert.equal(socket.sent.at(-1).action, 'projects');
-  assert.equal(socket.readyState, 1);
+  const created = socket.sent.at(-1);
+  assert.equal(created.action, 'new');
+  assert.equal(created.text, undefined);
+  socket.reply(created);
+  await settle();
+  assert.equal(page.element('error').hidden, true);
+  assert.equal(page.element('project-dialog').open, false);
 });
 
-test('a late reply after a command timeout does not close the socket', async () => {
+test('a Sigil restart carries the draft and attachments to the restored tab', async () => {
   const page = await browser();
   const socket = await page.authorize();
-  page.element('new').onclick();
+  page.element('message').value = 'long message';
+  page.element('attach').files = [{ name: 'notes.txt', type: 'text/plain', size: 5 }];
+  page.element('attach').onchange();
+  assert.equal(page.element('attachments').children.length, 1);
+  // The restarted Mac joins again, so the relay brings a new handshake.
+  socket.receive({ hello: 'd'.repeat(64) });
   await settle();
+  const state = socket.sent.at(-1);
+  assert.equal(state.action, 'state');
+  socket.receive({ data: JSON.stringify({ challenge: state.challenge, clientNonce: state.clientNonce, sequence: state.sequence, ok: true,
+    state: { tabs: [{ id: 'tab-9', title: 'Fixture', status: 'idle', provider: 'grokBuild', sessionID: 'native-fixture', cwd: '/tmp/fixture' }], selectedTabID: 'tab-9', terminal: 'READY' } }) });
+  await settle();
+  assert.equal(page.element('message').value, 'long message');
+  assert.equal(page.element('attachments').children.length, 1);
+});
+
+test('a new session on the same Mac does not take the closed tab\'s draft', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('message').value = 'long message';
+  page.element('attach').files = [{ name: 'notes.txt', type: 'text/plain', size: 5 }];
+  page.element('attach').onchange();
+  await page.fireTimer(1000);
+  const poll = socket.sent.at(-1);
+  assert.equal(poll.action, 'state');
+  socket.receive({ data: JSON.stringify({ challenge: poll.challenge, clientNonce: poll.clientNonce, sequence: poll.sequence, ok: true,
+    state: { tabs: [{ id: 'tab-9', title: 'Other', status: 'idle' }], selectedTabID: 'tab-9', terminal: 'READY' } }) });
+  await settle();
+  assert.equal(page.element('message').value, '');
+  assert.equal(page.element('attachments').children.length, 0);
+});
+
+test('a command timeout closes the connection before later commands can run', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('new').onclick(); await settle();
+  assert.equal(socket.sent.at(-1).action, 'projects');
+  await page.fireTimer(10000);
+  assert.equal(socket.readyState, 3);
+  assert.equal(page.element('error').hidden, false);
+  const count = socket.sent.length;
+  page.element('new').onclick(); await settle();
+  assert.equal(socket.sent.length, count);
+  assert.notEqual(page.element('status').textContent, 'Connected');
+});
+
+test('a late reply after a command timeout cannot repaint a disconnected session', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('new').onclick(); await settle();
   const timedOut = socket.sent.at(-1);
   await page.fireTimer(10000);
   socket.receive({ data: JSON.stringify({
-    challenge: timedOut.challenge, sequence: timedOut.sequence, ok: true,
+    challenge: timedOut.challenge, clientNonce: timedOut.clientNonce, sequence: timedOut.sequence, ok: true,
     state: { tabs: [{ id: 'tab-1', title: 'Late', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'LATE' },
   }) });
   await settle();
-  assert.equal(socket.readyState, 1);
-  assert.equal(page.element('status').textContent, 'Connected');
+  assert.equal(socket.readyState, 3);
+  assert.notEqual(page.element('status').textContent, 'Connected');
   assert.equal(page.element('terminal').textContent, 'READY');
 });
 
@@ -342,7 +500,7 @@ test('an ended session disables remote actions but keeps local editing and picke
   await page.fireTimer(1000);
   const request = socket.sent.at(-1);
   assert.equal(request.action, 'state');
-  socket.receive({ data: JSON.stringify({ challenge: request.challenge, sequence: request.sequence, ok: true,
+  socket.receive({ data: JSON.stringify({ challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: true,
     state: { tabs: [{ id: 'tab-1', title: 'Done', status: 'exited' }], selectedTabID: 'tab-1', terminal: '' } }) });
   await settle();
   assert.equal(page.element('tabs').children[0].textContent, 'Done · Ended');
@@ -361,7 +519,7 @@ test('an empty session list keeps a labelled placeholder and disables the picker
   const socket = await page.authorize();
   await page.fireTimer(1000);
   const request = socket.sent.at(-1);
-  socket.receive({ data: JSON.stringify({ challenge: request.challenge, sequence: request.sequence, ok: true,
+  socket.receive({ data: JSON.stringify({ challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: true,
     state: { tabs: [], selectedTabID: null, terminal: '' } }) });
   await settle();
   const placeholder = page.element('tabs').children[0];
@@ -372,12 +530,144 @@ test('an empty session list keeps a labelled placeholder and disables the picker
   assert.equal(page.element('empty-output-h2').textContent, 'No open sessions.');
 });
 
+async function selectionFixture(entry = 'picker') {
+  const page = await browser();
+  const socket = await page.authorize();
+  const tabs = [
+    { id: 'tab-1', title: 'One', status: 'idle' }, { id: 'tab-2', title: 'Two', status: 'idle' },
+  ];
+  const state = selectedTabID => ({ tabs, selectedTabID, terminal: selectedTabID });
+  page.element('message').value = 'First draft';
+  page.app.render(state('tab-2')); page.element('message').value = 'Second draft';
+  page.app.render(state('tab-1'));
+  const select = () => {
+    if (entry === 'picker') { page.element('tabs').value = 'tab-2'; page.element('tabs').onchange(); }
+    else if (entry === 'browse') {
+      page.element('sessions-dialog').open = true; page.app.renderSessionList();
+      page.element('session-list').children[1].onclick();
+    } else {
+      page.element('sessions-dialog').open = true; page.element('session-search').value = 'Two';
+      page.app.renderSaved([{ id: 'native-two', title: 'Two', folder: '/tmp/two' }]);
+      page.element('saved-list').children[0].onclick();
+    }
+  };
+  const reply = (request, selectedTabID, ws = socket) => ws.receive({ data: JSON.stringify({
+    challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: true, state: state(selectedTabID),
+  }) });
+  return { page, socket, state, select, reply };
+}
+
+for (const entry of ['picker', 'browse', 'saved']) {
+  test(`pending ${entry} selection makes the composer readonly without losing either draft`, async () => {
+    const { page, socket, state, select, reply } = await selectionFixture(entry);
+    select(); await settle();
+    const request = socket.sent.at(-1);
+    assert.equal(request.action, entry === 'saved' ? 'open' : 'select');
+    assert.equal(page.element('message').readOnly, true);
+    assert.equal(page.element('message').disabled, false);
+    assert.equal(page.element('compose-status').textContent, 'Switching…');
+    assert.equal(page.element('message').value, 'First draft');
+    page.app.render(state('tab-1')); // An old state poll must not unlock the pending selection.
+    assert.equal(page.element('message').readOnly, true);
+    reply(request, 'tab-2'); await settle();
+    assert.equal(page.element('message').readOnly, false);
+    assert.equal(page.element('message').value, 'Second draft');
+    page.app.render(state('tab-1'));
+    assert.equal(page.element('message').value, 'First draft');
+    assert.equal(socket.sent.some(r => ['input', 'key'].includes(r.action)), false);
+  });
+
+  test(`failed ${entry} selection restores an editable composer for the old target`, async () => {
+    const { page, socket, select } = await selectionFixture(entry);
+    select(); await settle();
+    assert.equal(page.element('message').readOnly, true);
+    const request = socket.sent.at(-1);
+    socket.receive({ data: JSON.stringify({ challenge: request.challenge, clientNonce: request.clientNonce,
+      sequence: request.sequence, ok: false, error: 'This tab is closed.' }) });
+    await settle();
+    assert.equal(page.element('message').readOnly, false);
+    assert.equal(page.element('tabs').value, 'tab-1');
+    assert.equal(page.element('message').value, 'First draft');
+    assert.equal(page.element('send').disabled, false);
+    assert.equal(socket.sent.some(r => ['input', 'key'].includes(r.action)), false);
+  });
+}
+
+for (const end of ['disconnect', 'timeout']) {
+  test(`selection ${end} restores the old target and never replays the selection`, async () => {
+    const { page, socket, select, reply } = await selectionFixture();
+    select(); await settle();
+    assert.equal(page.element('message').readOnly, true);
+    const oldRequest = socket.sent.at(-1);
+    if (end === 'disconnect') socket.close(); else await page.fireTimer(10000);
+    await settle();
+    assert.equal(page.element('message').readOnly, false);
+    assert.equal(page.element('message').disabled, false);
+    assert.equal(page.element('tabs').value, 'tab-1');
+    assert.equal(page.element('message').value, 'First draft');
+    page.app.connect(); const current = page.sockets.at(-1);
+    current.receive({ hello: 'c'.repeat(64) }); await settle(); reply(current.sent.at(-1), 'tab-1', current); await settle();
+    assert.equal(current.sent.some(r => r.action === 'select'), false);
+    select(); await settle(); const pending = current.sent.at(-1);
+    reply(oldRequest, 'tab-2'); await settle();
+    assert.equal(page.element('message').readOnly, true);
+    assert.equal(page.element('message').value, 'First draft');
+    reply(pending, 'tab-2', current); await settle();
+    assert.equal(page.element('message').readOnly, false);
+    assert.equal(page.element('message').value, 'Second draft');
+  });
+}
+
+test('pending selection blocks Stop and Interrupt without queuing a key for the old target', async () => {
+  const { page, socket, select, reply } = await selectionFixture();
+  select(); await settle();
+  const request = socket.sent.at(-1);
+  assert.equal(page.element('stop').disabled, true);
+  assert.equal(page.element('interrupt').disabled, true);
+  void page.element('stop').onclick(); void page.element('interrupt').onclick();
+  await settle(); reply(request, 'tab-2'); await settle();
+  assert.equal(socket.sent.some(r => r.action === 'key'), false);
+});
+
+test('a selection timeout releases its draft before the socket close event arrives', async () => {
+  const { page, socket, select } = await selectionFixture();
+  select(); await settle();
+  assert.equal(page.element('message').readOnly, true);
+  // Browser WebSocket.close() initiates an asynchronous close handshake.
+  const close = socket.close.bind(socket);
+  socket.close = () => { socket.readyState = 2; };
+  await page.fireTimer(10000);
+  assert.equal(page.element('message').readOnly, false);
+  assert.equal(page.element('tabs').value, 'tab-1');
+  assert.equal(page.element('message').value, 'First draft');
+  assert.equal(socket.sent.some(r => ['input', 'key'].includes(r.action)), false);
+  close();
+});
+
+test('an old selection completion cannot unlock a newer connection selection', async () => {
+  const { page, select, reply } = await selectionFixture();
+  const original = page.app.request;
+  let release;
+  page.app.request = () => new Promise(resolve => { release = resolve; });
+  select(); await settle(); assert.equal(page.element('message').readOnly, true);
+  page.app.request = original;
+  page.app.connect(); const current = page.sockets.at(-1);
+  current.receive({ hello: 'c'.repeat(64) }); await settle(); reply(current.sent.at(-1), 'tab-1', current); await settle();
+  select(); await settle(); const pending = current.sent.at(-1);
+  release({ ok: true }); await settle();
+  assert.equal(page.element('message').readOnly, true);
+  assert.equal(page.element('send').disabled, true);
+  reply(pending, 'tab-2', current); await settle();
+  assert.equal(page.element('message').readOnly, false);
+  assert.equal(page.element('message').value, 'Second draft');
+});
+
 test('a failed selection restores the picker to the displayed session', async () => {
   const page = await browser();
   const socket = await page.authorize();
   await page.fireTimer(1000);
   const poll = socket.sent.at(-1);
-  socket.receive({ data: JSON.stringify({ challenge: poll.challenge, sequence: poll.sequence, ok: true,
+  socket.receive({ data: JSON.stringify({ challenge: poll.challenge, clientNonce: poll.clientNonce, sequence: poll.sequence, ok: true,
     state: { tabs: [{ id: 'tab-1', title: 'One', status: 'idle' }, { id: 'tab-2', title: 'Two', status: 'idle' }],
       selectedTabID: 'tab-1', terminal: '' } }) });
   await settle();
@@ -386,7 +676,7 @@ test('a failed selection restores the picker to the displayed session', async ()
   await settle();
   const request = socket.sent.at(-1);
   assert.equal(request.action, 'select');
-  socket.receive({ data: JSON.stringify({ challenge: request.challenge, sequence: request.sequence,
+  socket.receive({ data: JSON.stringify({ challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence,
     ok: false, error: 'This tab is closed.' }) });
   await settle();
   assert.equal(page.element('tabs').value, 'tab-1');
@@ -431,8 +721,8 @@ test('a ticket in a Mac reply is stored and used on reconnect', async () => {
   const poll = socket.sent.at(-1);
   const ticket = 'cd'.repeat(32);
   socket.receive({ data: JSON.stringify({
-    challenge: poll.challenge, sequence: poll.sequence, ok: true, ticket,
-    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
+    challenge: poll.challenge, clientNonce: poll.clientNonce, sequence: poll.sequence, ok: true, ticket,
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle', provider: 'grokBuild', sessionID: 'native-fixture', cwd: '/tmp/fixture' }], selectedTabID: 'tab-1', terminal: 'READY' },
   }) });
   await settle();
   assert.equal(page.stored().ticket, ticket);
@@ -463,6 +753,9 @@ test('sending never disables the editor or erases a newer draft', async () => {
   page.submit();
   await settle();
   assert.equal(page.element('message').disabled, false);
+  assert.equal(page.element('message').readOnly, false);
+  assert.equal(page.element('stop').disabled, false);
+  assert.equal(page.element('interrupt').disabled, false);
   page.element('message').value = 'My next thought';
   socket.reply();
   await settle();
@@ -489,7 +782,7 @@ test('a replayed reply from a stale epoch is dropped without consuming the curre
   const current = socket.sent.at(-1);
   assert.equal(current.sequence, stale.sequence);
   assert.notEqual(current.challenge, stale.challenge);
-  socket.receive({ data: JSON.stringify({ challenge: stale.challenge, sequence: stale.sequence,
+  socket.receive({ data: JSON.stringify({ challenge: stale.challenge, clientNonce: stale.clientNonce, sequence: stale.sequence,
     ok: true, ticket: 'f'.repeat(64), state: { tabs: [], terminal: 'REPLAY' } }) });
   await settle();
   assert.equal(socket.readyState, 1);
@@ -521,7 +814,7 @@ test('duplicate hello does not reset sequence or replace a pending request', asy
 });
 
 test('unauthorized after a dropped pairing acknowledgement retries with the persisted device key', async () => {
-  const page = await browser({ hash: `#room=${'a'.repeat(32)}&key=${'b'.repeat(64)}` });
+  const page = await browser({ hash: `#room=${'a'.repeat(32)}&key=${'b'.repeat(64)}`, saved: null });
   const socket = page.sockets.at(-1);
   socket.receive({ hello: 'c'.repeat(64) });
   await settle();
@@ -551,6 +844,19 @@ test('unauthorized without bootstrap stops automatic reconnect and asks for a ne
   assert.equal(page.element('status').textContent, 'Disconnected');
 });
 
+test('a rejected pairing shows Scan and Paste so the phone can pair again', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  socket.receive({ error: 'unauthorized' });
+  await settle();
+  assert.equal(page.element('welcome').hidden, false);
+  assert.equal(page.element('controls').hidden, true);
+  assert.equal(page.element('welcome-actions').hidden, false);
+  assert.equal(page.element('welcome-.pairing-steps').hidden, false);
+  assert.equal(page.element('welcome-h2').textContent, 'Pair again');
+  assert.match(page.element('error').textContent, /Scan a new code/);
+});
+
 
 test('routing uses a separate sealed first message, never the URL or the device key', async () => {
   const ticket = 'd'.repeat(64);
@@ -578,11 +884,12 @@ test('a new chat asks which project and cancel does not start one', async () => 
   assert.equal(socket.sent.at(-1).action, 'projects');
   const request = socket.sent.at(-1);
   socket.receive({ data: JSON.stringify({
-    challenge: request.challenge, sequence: request.sequence, ok: true,
+    challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: true,
     projects: [{ name: 'Widget', folder: '/work/widget' }, { name: 'Other', folder: '/work/other' }],
-    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle', provider: 'grokBuild', sessionID: 'native-fixture', cwd: '/tmp/fixture' }], selectedTabID: 'tab-1', terminal: 'READY' },
   }) });
   await settle();
+  await skipOptions(socket);
   assert.equal(page.element('project-dialog').open, true);
   assert.equal(page.element('project-list').children.length, 2);
   const labels = page.element('project-list').children.map(button => button.children.map(node => node.textContent).join(' '));
@@ -595,15 +902,79 @@ test('a new chat asks which project and cancel does not start one', async () => 
   const again = socket.sent.at(-1);
   assert.equal(again.action, 'projects');
   socket.receive({ data: JSON.stringify({
-    challenge: again.challenge, sequence: again.sequence, ok: true,
+    challenge: again.challenge, clientNonce: again.clientNonce, sequence: again.sequence, ok: true,
     projects: [{ name: 'Widget', folder: '/work/widget' }],
-    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle', provider: 'grokBuild', sessionID: 'native-fixture', cwd: '/tmp/fixture' }], selectedTabID: 'tab-1', terminal: 'READY' },
   }) });
   await settle();
+  await skipOptions(socket);
   page.element('project-list').children[0].onclick();
   await settle();
   assert.equal(socket.sent.at(-1).action, 'new');
   assert.equal(socket.sent.at(-1).text, '/work/widget');
+  assert.equal(socket.sent.at(-1).provider, undefined);
+  assert.equal(page.element('provider-field').hidden, true);
+});
+
+test('New offers the Mac\'s CLIs and starts the chosen one', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  const providers = [
+    { id: 'grokBuild', name: 'Grok Build', takesModel: true },
+    { id: 'claudeCode', name: 'Claude Code', takesModel: false },
+    { id: 'kimi', name: 'Kimi Code', takesModel: false, problem: 'Set up Kimi Code sign-in in Sigil on your Mac, then try again.' },
+  ];
+  async function openNew() {
+    page.element('new').onclick();
+    await settle();
+    const projects = socket.sent.at(-1);
+    assert.equal(projects.action, 'projects');
+    socket.receive({ data: JSON.stringify({
+      challenge: projects.challenge, clientNonce: projects.clientNonce, sequence: projects.sequence, ok: true,
+      projects: [{ name: 'Widget', folder: '/work/widget' }],
+    }) });
+    await settle();
+    const options = socket.sent.at(-1);
+    assert.equal(options.action, 'options');
+    socket.receive({ data: JSON.stringify({
+      challenge: options.challenge, clientNonce: options.clientNonce, sequence: options.sequence, ok: true,
+      options: { providers, provider: 'grokBuild', models: [], model: '', efforts: [], effort: '', locations: [] },
+    }) });
+    await settle();
+    assert.equal(page.element('project-dialog').open, true);
+  }
+  await openNew();
+  assert.equal(page.element('provider-field').hidden, false);
+  assert.deepEqual(page.element('provider').children.map(option => [option.value, option.textContent]),
+    providers.map(provider => [provider.id, provider.name]));
+  assert.equal(page.element('provider').value, 'grokBuild');
+  assert.equal(page.element('provider-problem').hidden, true);
+
+  page.element('provider').value = 'kimi';
+  page.element('provider').onchange();
+  assert.equal(page.element('provider-problem').hidden, false);
+  assert.match(page.element('provider-problem').textContent, /Kimi Code sign-in/);
+  assert.equal(page.element('project-list').children[0].disabled, true);
+  page.element('project-list').children[0].onclick();
+  await settle();
+  assert.equal(socket.sent.filter(item => item.action === 'new').length, 0);
+
+  page.element('provider').value = 'claudeCode';
+  page.element('provider').onchange();
+  assert.equal(page.element('provider-problem').hidden, true);
+  assert.equal(page.element('project-list').children[0].disabled, false);
+  page.element('project-list').children[0].onclick();
+  await settle();
+  const created = socket.sent.at(-1);
+  assert.equal(created.action, 'new');
+  assert.equal(created.text, '/work/widget');
+  assert.equal(created.provider, 'claudeCode');
+  socket.reply(created);
+  await settle();
+
+  // The next New keeps this page's choice over the Mac's default.
+  await openNew();
+  assert.equal(page.element('provider').value, 'claudeCode');
 });
 
 test('a snapshot with no overlap keeps the previous tail', async () => {
@@ -612,20 +983,65 @@ test('a snapshot with no overlap keeps the previous tail', async () => {
   await page.fireTimer(1000);
   const first = socket.sent.at(-1);
   socket.receive({ data: JSON.stringify({
-    challenge: first.challenge, sequence: first.sequence, ok: true,
-    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'OLD_TAIL_MARKER' },
+    challenge: first.challenge, clientNonce: first.clientNonce, sequence: first.sequence, ok: true,
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle', provider: 'grokBuild', sessionID: 'native-fixture', cwd: '/tmp/fixture' }], selectedTabID: 'tab-1', terminal: 'OLD_TAIL_MARKER' },
   }) });
   await settle();
   await page.fireTimer(1000);
   const next = socket.sent.at(-1);
   socket.receive({ data: JSON.stringify({
-    challenge: next.challenge, sequence: next.sequence, ok: true,
-    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'NEW_WINDOW_ONLY' },
+    challenge: next.challenge, clientNonce: next.clientNonce, sequence: next.sequence, ok: true,
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle', provider: 'grokBuild', sessionID: 'native-fixture', cwd: '/tmp/fixture' }], selectedTabID: 'tab-1', terminal: 'NEW_WINDOW_ONLY' },
   }) });
   await settle();
   const text = page.element('terminal').textContent;
   assert.match(text, /OLD_TAIL_MARKER/);
   assert.match(text, /NEW_WINDOW_ONLY/);
+});
+
+test('a sliding snapshot under a fixed footer keeps each line once', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  const lines = Array.from({ length: 40 }, (_, index) => `line ${String(index).padStart(3, '0')} of the streamed answer`);
+  const snapshot = step => lines.slice(step * 3, step * 3 + 20).join('\n') + `\n\nFOOTER Thinking… ${9 + step}s`;
+  for (let step = 0; step < 6; step++) {
+    await page.fireTimer(1000);
+    const poll = socket.sent.at(-1);
+    socket.receive({ data: JSON.stringify({
+      challenge: poll.challenge, clientNonce: poll.clientNonce, sequence: poll.sequence, ok: true,
+      state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'working' }], selectedTabID: 'tab-1', terminal: snapshot(step) },
+    }) });
+    await settle();
+  }
+  const text = page.element('terminal').textContent;
+  for (const line of lines.slice(0, 35)) assert.equal(text.split(line).length - 1, 1, line);
+  assert.equal(text.split('FOOTER').length - 1, 1);
+  assert.match(text, /FOOTER Thinking… 14s$/);
+});
+
+test('a repeated block keeps the text between its copies when the snapshot slides', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  const block = Array.from({ length: 8 }, (_, index) => `    at frame${index} (worker.js:${index + 10})`).join('\n');
+  const snapshots = [
+    `PREFIX_LINE\n${block}\nUNIQUE_BETWEEN_COPIES\n${block}\n\nFOOTER Thinking… 9s`,
+    `${block}\nNEW_AFTER_SECOND_COPY\n\nFOOTER Thinking… 10s`,
+  ];
+  for (const terminal of snapshots) {
+    await page.fireTimer(1000);
+    const poll = socket.sent.at(-1);
+    socket.receive({ data: JSON.stringify({
+      challenge: poll.challenge, clientNonce: poll.clientNonce, sequence: poll.sequence, ok: true,
+      state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'working' }], selectedTabID: 'tab-1', terminal },
+    }) });
+    await settle();
+  }
+  const text = page.element('terminal').textContent;
+  for (const marker of ['PREFIX_LINE', 'UNIQUE_BETWEEN_COPIES', 'NEW_AFTER_SECOND_COPY']) {
+    assert.equal(text.split(marker).length - 1, 1, marker);
+  }
+  assert.equal(text.split('at frame0 ').length - 1, 2);
+  assert.equal(text.split('FOOTER').length - 1, 1);
 });
 
 test('a redraw replaces the live tail instead of appending it', async () => {
@@ -635,15 +1051,15 @@ test('a redraw replaces the live tail instead of appending it', async () => {
   const poll = socket.sent.at(-1);
   assert.equal(poll.action, 'state');
   socket.receive({ data: JSON.stringify({
-    challenge: poll.challenge, sequence: poll.sequence, ok: true,
-    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'task [\\]' },
+    challenge: poll.challenge, clientNonce: poll.clientNonce, sequence: poll.sequence, ok: true,
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle', provider: 'grokBuild', sessionID: 'native-fixture', cwd: '/tmp/fixture' }], selectedTabID: 'tab-1', terminal: 'task [\\]' },
   }) });
   await settle();
   await page.fireTimer(1000);
   const next = socket.sent.at(-1);
   socket.receive({ data: JSON.stringify({
-    challenge: next.challenge, sequence: next.sequence, ok: true,
-    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'task [|]' },
+    challenge: next.challenge, clientNonce: next.clientNonce, sequence: next.sequence, ok: true,
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle', provider: 'grokBuild', sessionID: 'native-fixture', cwd: '/tmp/fixture' }], selectedTabID: 'tab-1', terminal: 'task [|]' },
   }) });
   await settle();
   const text = page.element('terminal').textContent;
@@ -660,9 +1076,9 @@ test('a new search clears the previous saved chats before the reply', async () =
   await settle();
   const first = socket.sent.at(-1);
   socket.receive({ data: JSON.stringify({
-    challenge: first.challenge, sequence: first.sequence, ok: true,
+    challenge: first.challenge, clientNonce: first.clientNonce, sequence: first.sequence, ok: true,
     chats: [{ id: 'chat-1', title: 'One', folder: '/work/one' }],
-    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle', provider: 'grokBuild', sessionID: 'native-fixture', cwd: '/tmp/fixture' }], selectedTabID: 'tab-1', terminal: 'READY' },
   }) });
   await settle();
   assert.equal(page.element('saved-list').children.length, 1);
@@ -676,6 +1092,46 @@ test('a new search clears the previous saved chats before the reply', async () =
   assert.equal(socket.sent.filter(item => item.action === 'open').length, 0);
 });
 
+test('a long chats search sends only the 200 characters the Mac reads', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('sessions-toggle').onclick();
+  page.element('session-search').value = `${'😀'.repeat(150)}${'x'.repeat(9000)}`;
+  page.element('session-search').oninput();
+  await settle();
+  const sent = socket.sent.at(-1);
+  assert.equal(sent.action, 'chats');
+  assert.equal([...sent.text].length, 200);
+  assert.ok(sent.text.startsWith('😀'.repeat(150)));
+  assert.equal(socket.readyState, 1);
+});
+
+test('a chats search counts characters the way the Mac does', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('sessions-toggle').onclick();
+  // Each family emoji is five code points and one character to the Mac.
+  const query = `${'👨‍👩‍👧'.repeat(100)}needle`;
+  page.element('session-search').value = query;
+  page.element('session-search').oninput();
+  await settle();
+  assert.equal(socket.sent.at(-1).text, query);
+});
+
+test('a chats search of stacked accents stays under the 8 KB the Mac accepts', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('sessions-toggle').onclick();
+  page.element('session-search').value = `e${'\u0301'.repeat(100)}`.repeat(200);
+  page.element('session-search').oninput();
+  await settle();
+  const sent = socket.sent.at(-1);
+  assert.equal(sent.action, 'chats');
+  assert.ok(new TextEncoder().encode(sent.text).length <= 8192);
+  assert.ok(sent.text.startsWith(`e${'\u0301'.repeat(100)}`));
+  assert.equal(socket.readyState, 1);
+});
+
 test('a shortened chat list says it is partial', async () => {
   const page = await browser();
   const socket = await page.authorize();
@@ -685,9 +1141,9 @@ test('a shortened chat list says it is partial', async () => {
   await settle();
   const request = socket.sent.at(-1);
   socket.receive({ data: JSON.stringify({
-    challenge: request.challenge, sequence: request.sequence, ok: true, chatsTruncated: true,
+    challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: true, chatsTruncated: true,
     chats: [{ id: 'chat-1', title: 'Wide one', folder: '/work/one' }],
-    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle', provider: 'grokBuild', sessionID: 'native-fixture', cwd: '/tmp/fixture' }], selectedTabID: 'tab-1', terminal: 'READY' },
   }) });
   await settle();
   assert.equal(page.element('saved-list').children.length, 1);
@@ -702,11 +1158,12 @@ test('an empty project list can still start a session in the current folder', as
   await settle();
   const request = socket.sent.at(-1);
   socket.receive({ data: JSON.stringify({
-    challenge: request.challenge, sequence: request.sequence, ok: true,
+    challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: true,
     projects: [],
-    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle', provider: 'grokBuild', sessionID: 'native-fixture', cwd: '/tmp/fixture' }], selectedTabID: 'tab-1', terminal: 'READY' },
   }) });
   await settle();
+  await skipOptions(socket);
   assert.equal(page.element('project-dialog').open, true);
   const choice = page.element('project-list').children[0];
   assert.ok(choice);
@@ -725,10 +1182,11 @@ test('a full project page can ask for the next page', async () => {
   const request = socket.sent.at(-1);
   const projects = Array.from({ length: 40 }, (_, index) => ({ name: `P${index}`, folder: `/work/${index}` }));
   socket.receive({ data: JSON.stringify({
-    challenge: request.challenge, sequence: request.sequence, ok: true, projects,
-    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
+    challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: true, projects,
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle', provider: 'grokBuild', sessionID: 'native-fixture', cwd: '/tmp/fixture' }], selectedTabID: 'tab-1', terminal: 'READY' },
   }) });
   await settle();
+  await skipOptions(socket);
   const more = [...page.element('project-list').children].find(button => button.dataset.more === 'true');
   assert.ok(more);
   more.onclick();
@@ -744,11 +1202,12 @@ test('a shortened project page can still ask for the rest', async () => {
   await settle();
   const request = socket.sent.at(-1);
   socket.receive({ data: JSON.stringify({
-    challenge: request.challenge, sequence: request.sequence, ok: true, projectsTruncated: true,
+    challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: true, projectsTruncated: true,
     projects: [{ name: 'One', folder: '/work/one' }, { name: 'Two', folder: '/work/two' }],
-    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle', provider: 'grokBuild', sessionID: 'native-fixture', cwd: '/tmp/fixture' }], selectedTabID: 'tab-1', terminal: 'READY' },
   }) });
   await settle();
+  await skipOptions(socket);
   const more = [...page.element('project-list').children].find(button => button.dataset.more === 'true');
   assert.ok(more);
   more.onclick();
@@ -764,10 +1223,11 @@ test('a project click does nothing while the next page is loading', async () => 
   const request = socket.sent.at(-1);
   const projects = Array.from({ length: 40 }, (_, index) => ({ name: `P${index}`, folder: `/work/${index}` }));
   socket.receive({ data: JSON.stringify({
-    challenge: request.challenge, sequence: request.sequence, ok: true, projects,
-    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
+    challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: true, projects,
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle', provider: 'grokBuild', sessionID: 'native-fixture', cwd: '/tmp/fixture' }], selectedTabID: 'tab-1', terminal: 'READY' },
   }) });
   await settle();
+  await skipOptions(socket);
   const more = [...page.element('project-list').children].find(button => button.dataset.more === 'true');
   more.onclick();
   await settle();
@@ -789,9 +1249,9 @@ test('saved chat search sends titles and folders and opens the chosen chat', asy
   assert.equal(request.action, 'chats');
   assert.equal(request.text, 'widget');
   socket.receive({ data: JSON.stringify({
-    challenge: request.challenge, sequence: request.sequence, ok: true,
+    challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: true,
     chats: [{ id: 'chat-1', title: 'Fix the widget', folder: '/work/widget', transcript: 'SECRET_TRANSCRIPT' }],
-    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'READY' },
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle', provider: 'grokBuild', sessionID: 'native-fixture', cwd: '/tmp/fixture' }], selectedTabID: 'tab-1', terminal: 'READY' },
   }) });
   await settle();
   const row = page.element('saved-list').children[0];
@@ -821,8 +1281,8 @@ test('scrolling up prepends an earlier slice and a later tail keeps it', async (
   assert.ok(request.text);
   assert.ok(request.name);
   socket.receive({ data: JSON.stringify({
-    challenge: request.challenge, sequence: request.sequence, ok: true, earlier: 'EARLY_MARKER\n',
-    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'TAIL_MARKER' },
+    challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: true, earlier: 'EARLY_MARKER\n',
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle', provider: 'grokBuild', sessionID: 'native-fixture', cwd: '/tmp/fixture' }], selectedTabID: 'tab-1', terminal: 'TAIL_MARKER' },
   }) });
   await settle();
   assert.match(terminal.textContent, /EARLY_MARKER/);
@@ -831,8 +1291,8 @@ test('scrolling up prepends an earlier slice and a later tail keeps it', async (
   assert.equal(socket.sent.at(-1).action, 'state');
   const poll = socket.sent.at(-1);
   socket.receive({ data: JSON.stringify({
-    challenge: poll.challenge, sequence: poll.sequence, ok: true,
-    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle' }], selectedTabID: 'tab-1', terminal: 'AIL_MARKER!' },
+    challenge: poll.challenge, clientNonce: poll.clientNonce, sequence: poll.sequence, ok: true,
+    state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle', provider: 'grokBuild', sessionID: 'native-fixture', cwd: '/tmp/fixture' }], selectedTabID: 'tab-1', terminal: 'AIL_MARKER!' },
   }) });
   await settle();
   assert.match(terminal.textContent, /EARLY_MARKER/);
@@ -841,4 +1301,53 @@ test('scrolling up prepends an earlier slice and a later tail keeps it', async (
   page.element('find-query').value = 'EARLY_MARKER';
   page.element('find-query').oninput();
   assert.match(page.element('find-count').textContent, /1 of 1/);
+});
+
+test('Send never crosses a same-socket reauthorization between paste and Enter', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.submit(); await settle();
+  socket.reply(); await settle();
+  socket.receive({ hello: 'd'.repeat(64) }); await settle();
+  assert.notEqual(page.element('status').textContent, 'Connected');
+  socket.reply(); await settle();
+  await page.fireTimer(100);
+  assert.equal(socket.sent.filter(r => r.action === 'key').length, 0);
+  assert.equal(page.element('message').value, 'fixture input');
+});
+
+test('a lost acknowledgement invalidates queued keys before reconnect', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  await page.fireTimer(1000);
+  const queued = page.app.request('key', 'enter', 'tab-1').catch(error => error.message);
+  await page.fireTimer(10000);
+  await queued;
+  assert.equal(socket.readyState, 3);
+  assert.equal(socket.sent.some(r => r.action === 'key'), false);
+});
+
+
+test('delayed ticket persistence cannot apply an old connection snapshot', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const originalStorage = page.app.storage;
+  page.app.storage = async (mode, value) => {
+    if (mode === 'put') await held;
+    return originalStorage(mode, value);
+  };
+  await page.fireTimer(1000);
+  const old = socket.sent.at(-1);
+  socket.receive({ data: JSON.stringify({ challenge: old.challenge, clientNonce: old.clientNonce,
+    sequence: old.sequence, ok: true, ticket: 'f'.repeat(64),
+    state: { tabs: [{ id: 'old-tab', title: 'Old Mac', status: 'idle' }], selectedTabID: 'old-tab', terminal: 'STALE_PRIVATE_OUTPUT' },
+  }) });
+  await settle();
+  page.app.connect();
+  await page.authorize();
+  release(); await settle();
+  assert.equal(page.element('terminal').textContent, 'READY');
+  assert.equal(page.element('tabs').value, 'tab-1');
 });

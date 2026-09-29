@@ -1,0 +1,32 @@
+# a36 proof: every call SigilUX (pid 69376, branch audit/prov-sheet 3b3b31b) made to the fake Grok CLI.
+# The CLI at $GROK_HOME/bin/grok was a QA wrapper for this run: it logs each call (time, pid, ppid, args),
+# answers `models` with grok-qa-alpha/beta/gamma, and, while a flag file exists, waits 2s before answering
+# and logs SIGTERM if it is killed. Other calls exec /tmp/sigil-ux/harness/fake-grok.py.
+# Lines "--- MARK" are written by the tester just before each AX action.
+#
+# Note: RootView always builds NewSessionSheet(model:) with the default provider .grokBuild, so the sheet
+# always opens on Grok and one `grok models` runs per open. A non-Grok provider can only be selected after open.
+# Note: the 19:54:12 attempt did not reopen the sheet (it was still open); that press started a Claude Code
+# tab instead. The tab was stopped and closed at once and its files were removed. It made no `grok` call.
+#
+19:52:43 pid=69403 ppid=69376 args=[--cwd /Users/Shared/sigil-ux/projects/acme-api --resume d056008d-bb5e-42ce-941f-eb4b87ebd992]
+19:52:43 pid=69398 ppid=69376 args=[--cwd /Users/Shared/sigil-ux/projects/sigil --resume 2711bc82-e76d-4bca-9157-79839b73ff75]
+19:52:43 pid=69397 ppid=69376 args=[--cwd /Users/Shared/sigil-ux/projects/acme-api --resume 8c271d1e-ad31-40dd-a8ac-8c439b990d9e]
+19:53:06 --- MARK: AXPress File > New Session (sheet opens, Grok selected by default)
+19:53:06 pid=70649 ppid=69376 args=[models]
+19:53:06 pid=70649 models answered
+19:53:44 --- MARK: AXPress Claude Code tile (select)
+19:53:46 --- MARK: AXPress Codex tile (select)
+19:53:47 --- MARK: AXPress Devin tile (select)
+19:53:48 --- MARK: AXPress Cursor tile (select)
+19:53:49 --- MARK: AXPress Claude Code tile (select); sheet stays open 6s
+19:54:12 --- MARK: models answers after 2s now. AXPress File > New Session, then at once AXPress Claude Code tile
+19:54:12 --- MARK: Claude Code selected
+19:55:27 --- MARK: models now answers after 2s. AXPress File > New Session, then at once AXPress Claude Code tile (select)
+19:55:27 pid=92320 ppid=69376 args=[models]
+19:55:27 pid=92320 models got SIGTERM (cancelled)
+19:55:27 --- MARK: Claude Code selected
+19:55:37 --- MARK: AXPress Grok Build tile (select)
+19:55:37 pid=93197 ppid=69376 args=[models]
+19:55:37 pid=93197 models answered
+19:56:28 --- MARK: Cancel pressed, sheet closed

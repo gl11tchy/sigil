@@ -1,0 +1,20 @@
+## a136: SigilUX launched with the Finder PATH (/usr/bin:/bin:/usr/sbin:/sbin); fake claude only at $HOME/.claude/local/claude (HOME=/tmp/sigil-ux/home)
+## pre-check outside the app, same login-shell command before the fake existed: 'claude not found'
+## tab strip (18:08:26)
+   AXButton | Description=Summarise the acme-api service and its layout | Help=/Users/Shared/sigil-ux/projects/acme-api | Value=background, working | Focused=0 | Enabled=1 | Position=602,268 | Size=72x24
+   AXButton | Description=Make the sidebar search rank folders too | Help=/Users/Shared/sigil-ux/projects/sigil | Value=background, working | Focused=0 | Enabled=1 | Position=700,268 | Size=72x24
+   AXButton | Description=acme-api | Help=/Users/Shared/sigil-ux/projects/acme-api | Value=background, working | Focused=0 | Enabled=1 | Position=798,268 | Size=72x24
+   AXButton | Description=Claude Code | Help=/Users/Shared/sigil-ux/projects/acme-api | Value=selected, idle | Selected=1 | Focused=0 | Enabled=1 | Position=896,268 | Size=72x24
+
+## Claude Code terminal, full AXValue
+FAKE CLAUDE CODE (sigil-ux QA) running from: /tmp/sigil-ux/home/.claude/local/claude
+type -a claude:
+claude is /tmp/sigil-ux/home/.claude/local/claude
+args:
+cwd: /Users/Shared/sigil-ux/projects/acme-api
+>
+  --
+
+## terminal element
+  AXDescription = Claude Code terminal
+  AXRole = AXTextArea
