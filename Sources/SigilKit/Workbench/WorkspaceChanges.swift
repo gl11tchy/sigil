@@ -205,8 +205,9 @@ public enum WorkspaceChangesReader {
     }
 }
 
-/// One bounded Git run: both pipes drained while it runs, a deadline, and
-/// an environment that cannot point it at another repository or prompt.
+/// One bounded Git run: both pipes drained while it runs, one deadline for
+/// the exit and the drain, and an environment that cannot point it at
+/// another repository or prompt.
 struct GitOutput {
     static let byteLimit = 4 << 20
 
@@ -232,7 +233,12 @@ struct GitOutput {
         return env
     }
 
+    /// Nil when Git cannot start, or when it has not both exited and closed
+    /// its pipes by the deadline. A child Git started can hold the pipes open
+    /// after Git exits, so a successful exit alone is not an answer.
     static func run(git: URL, arguments: [String], timeout: Duration) -> GitOutput? {
+        let seconds = Double(timeout.components.seconds) + Double(timeout.components.attoseconds) / 1e18
+        let deadline = DispatchTime.now() + seconds
         let process = Process()
         process.executableURL = git
         process.arguments = arguments
@@ -244,48 +250,56 @@ struct GitOutput {
         process.standardError = error
         let exited = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in exited.signal() }
+        // Closing the read ends releases them on every path. A child still
+        // writing then gets EPIPE instead of blocking.
+        defer {
+            try? output.fileHandleForReading.close()
+            try? error.fileHandleForReading.close()
+        }
         do { try process.run() } catch { return nil }
 
-        let out = Collected()
-        let err = Collected()
-        let drained = DispatchGroup()
-        for (pipe, box) in [(output, out), (error, err)] {
-            DispatchQueue.global(qos: .utility).async(group: drained) {
-                let handle = pipe.fileHandleForReading
-                while true {
-                    let chunk = handle.availableData
-                    if chunk.isEmpty { break }
-                    box.append(chunk, limit: byteLimit)
+        let drained = drain(
+            [output.fileHandleForReading.fileDescriptor, error.fileHandleForReading.fileDescriptor],
+            until: deadline)
+        guard let drained, exited.wait(timeout: deadline) == .success else {
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+            return nil
+        }
+        return GitOutput(
+            status: process.terminationStatus, data: drained[0], error: String(decoding: drained[1], as: UTF8.self))
+    }
+
+    /// Reads every descriptor to end of file on this thread, keeping at most
+    /// `byteLimit` bytes of each. Nil when the deadline passes first; no
+    /// reader is left blocked, because the descriptors are non-blocking.
+    private static func drain(_ descriptors: [Int32], until deadline: DispatchTime) -> [Data]? {
+        var collected = descriptors.map { _ in Data() }
+        var open = descriptors.map { fd in fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) != -1 }
+        guard !open.contains(false) else { return nil }
+        var buffer = [UInt8](repeating: 0, count: 64 << 10)
+        while open.contains(true) {
+            let now = DispatchTime.now().uptimeNanoseconds
+            guard now < deadline.uptimeNanoseconds else { return nil }
+            let milliseconds = Int32(clamping: (deadline.uptimeNanoseconds - now + 999_999) / 1_000_000)
+            var polled = descriptors.indices.filter { open[$0] }.map {
+                pollfd(fd: descriptors[$0], events: Int16(POLLIN), revents: 0)
+            }
+            let ready = poll(&polled, nfds_t(polled.count), milliseconds)
+            if ready < 0, errno != EINTR { return nil }
+            guard ready > 0 else { continue }
+            // One read per ready stream, so a child that never stops writing
+            // still meets the deadline check above.
+            for entry in polled where entry.revents != 0 {
+                guard let index = descriptors.firstIndex(of: entry.fd) else { continue }
+                let count = read(entry.fd, &buffer, buffer.count)
+                if count > 0 {
+                    let room = max(0, byteLimit - collected[index].count)
+                    collected[index].append(contentsOf: buffer.prefix(min(count, room)))
+                } else if count == 0 || (errno != EAGAIN && errno != EINTR) {
+                    open[index] = false
                 }
             }
         }
-        let seconds = Double(timeout.components.seconds) + Double(timeout.components.attoseconds) / 1e18
-        if exited.wait(timeout: .now() + seconds) == .timedOut {
-            // Not waiting for the pipes: a child Git started could hold them open.
-            kill(process.processIdentifier, SIGKILL)
-            return nil
-        }
-        drained.wait()
-        return GitOutput(
-            status: process.terminationStatus, data: out.data,
-            error: String(decoding: err.data, as: UTF8.self))
-    }
-
-    private final class Collected: @unchecked Sendable {
-        private let lock = NSLock()
-        private var stored = Data()
-
-        func append(_ chunk: Data, limit: Int) {
-            lock.lock()
-            defer { lock.unlock() }
-            let room = max(0, limit - stored.count)
-            stored.append(chunk.prefix(room))
-        }
-
-        var data: Data {
-            lock.lock()
-            defer { lock.unlock() }
-            return stored
-        }
+        return collected
     }
 }

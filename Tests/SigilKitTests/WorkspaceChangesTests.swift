@@ -124,12 +124,76 @@ struct WorkspaceChangesTests {
         defer { try? FileManager.default.removeItem(at: plain) }
         let missing = URL(fileURLWithPath: "/nonexistent/git")
         #expect(await WorkspaceChangesReader.read(plain, git: missing) == .failed("Git did not answer."))
+    }
 
-        let slow = plain.appendingPathComponent("slow-git")
-        try "#!/bin/sh\nsleep 5\n".write(to: slow, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: slow.path)
-        let reading = await WorkspaceChangesReader.read(plain, git: slow, timeout: .milliseconds(200))
+    @Test func aGitThatOutlivesTheDeadlineIsKilledAndFails() async throws {
+        let plain = try scratch()
+        let pids = plain.appendingPathComponent("pids")
+        defer {
+            killRecorded(pids)
+            try? FileManager.default.removeItem(at: plain)
+        }
+        // The Git itself sleeps, and a child it started holds the pipes too.
+        let slow = try fakeGit(
+            in: plain, "echo $$ >> \(quoted(pids))\nsleep 10 &\necho $! >> \(quoted(pids))\nexec sleep 10\n")
+
+        let start = ContinuousClock.now
+        let output = GitOutput.run(git: slow, arguments: [], timeout: .seconds(1))
+        #expect(output == nil)
+        #expect(ContinuousClock.now - start < .seconds(3))
+        let git = try #require(recorded(pids).first)
+        #expect(await exits(git), "the timed-out Git is killed")
+        let reading = await WorkspaceChangesReader.read(plain, git: slow, timeout: .seconds(1))
         #expect(reading == .failed("Git did not answer."))
+    }
+
+    @Test func aGitThatNeverStopsWritingIsKilledAtTheDeadline() async throws {
+        let plain = try scratch()
+        let pids = plain.appendingPathComponent("pids")
+        defer {
+            killRecorded(pids)
+            try? FileManager.default.removeItem(at: plain)
+        }
+        let chatty = try fakeGit(in: plain, "echo $$ >> \(quoted(pids))\nexec yes\n")
+
+        let start = ContinuousClock.now
+        #expect(GitOutput.run(git: chatty, arguments: [], timeout: .seconds(1)) == nil)
+        #expect(ContinuousClock.now - start < .seconds(3))
+        let git = try #require(recorded(pids).first)
+        #expect(await exits(git), "the timed-out Git is killed")
+    }
+
+    @Test func aChildHoldingThePipesAfterGitExitsCannotOutlastTheDeadline() async throws {
+        let plain = try scratch()
+        let pids = plain.appendingPathComponent("pids")
+        defer {
+            killRecorded(pids)
+            try? FileManager.default.removeItem(at: plain)
+        }
+        // Git answers and exits 0, but a child it started keeps the pipes open.
+        let answered = plain.appendingPathComponent("answered")
+        let git = try fakeGit(
+            in: plain, "sleep 10 &\necho $! >> \(quoted(pids))\necho true\ntouch \(quoted(answered))\nexit 0\n")
+
+        let start = ContinuousClock.now
+        let output = GitOutput.run(git: git, arguments: [], timeout: .seconds(1))
+        #expect(output == nil)
+        #expect(ContinuousClock.now - start < .seconds(3))
+        #expect(FileManager.default.fileExists(atPath: answered.path), "Git ran to its successful exit")
+        let reading = await WorkspaceChangesReader.read(plain, git: git, timeout: .seconds(1))
+        #expect(reading == .failed("Git did not answer."))
+        #expect(ContinuousClock.now - start < .seconds(6))
+    }
+
+    @Test func aGitThatClosesItsPipesIsReadInFull() throws {
+        let plain = try scratch()
+        defer { try? FileManager.default.removeItem(at: plain) }
+        let git = try fakeGit(in: plain, "printf 'out'\nprintf 'err' >&2\nexit 3\n")
+
+        let output = try #require(GitOutput.run(git: git, arguments: [], timeout: .seconds(5)))
+        #expect(output.status == 3)
+        #expect(output.text == "out")
+        #expect(output.error == "err")
     }
 
     @Test func gitRunsWithoutLocksPromptsOrAnInheritedRepository() {
@@ -147,6 +211,36 @@ private func scratch() throws -> URL {
         .appendingPathComponent("sigil-changes-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return URL(fileURLWithPath: GrokPaths.canonicalPath(url.path))
+}
+
+private func fakeGit(in directory: URL, _ body: String) throws -> URL {
+    let url = directory.appendingPathComponent("fake-git")
+    try ("#!/bin/sh\n" + body).write(to: url, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+    return url
+}
+
+private func quoted(_ url: URL) -> String {
+    "'" + url.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+}
+
+private func recorded(_ pids: URL) -> [pid_t] {
+    ((try? String(contentsOf: pids, encoding: .utf8)) ?? "")
+        .split(whereSeparator: \.isNewline).compactMap { pid_t($0) }
+}
+
+/// Every process a fake Git recorded, stopped so no test leaves one behind.
+private func killRecorded(_ pids: URL) {
+    for pid in recorded(pids) { kill(pid, SIGKILL) }
+}
+
+/// True once `pid` is gone. A killed child stays a zombie until it is reaped.
+private func exits(_ pid: pid_t) async -> Bool {
+    for _ in 0..<40 {
+        if kill(pid, 0) != 0, errno == ESRCH { return true }
+        try? await Task.sleep(for: .milliseconds(50))
+    }
+    return false
 }
 
 @discardableResult
