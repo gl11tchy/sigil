@@ -107,6 +107,18 @@ of its text; the text tells two terminals with the same label apart.
 | A hidden terminal kept the keyboard | Busy fixture: New Task in infra, then the Bump Node to 22 row (Not running). The AX focused element stayed the new task's Grok Build terminal, mounted at opacity 0 | Selecting a task without a terminal takes the keyboard from any terminal that holds it and gives it to the rail, where ↑ and ↓ work. With the rail hidden, the window keeps it | AX focused element was the rail's list inside the Tasks group after Bump Node, again after a live row and Bump Node, and after ↓ and ↑ (sent to the test app's pid only), which moved the selection. [img](slice/focus-5-no-terminal.png). `WorkbenchFocusTests` covers the rail and the hidden rail; it runs in CI |
 | Two review rows had one ID | `git rm --cached kept.txt` makes Git list `D  kept.txt` and `?? kept.txt`; both rows had the ID `kept.txt` | A row's ID is its path and whether it is the untracked side. Counts are unchanged; the untracked row takes none | `WorkspaceChangesTests`: a real repository gives two rows with distinct IDs, the same IDs on a second read, and Git's totals. In the running app, `git rm --cached main.tf` in infra showed Deleted main.tf +0 −16 and Untracked main.tf, totals +2 −16 as Git counted. [img](slice/review-rm-cached.png) |
 
+### A work-tree rename read as a second file
+
+| Defect | Reproduction before the fix | Fix | Proof after |
+|---|---|---|---|
+| The reader took a rename's old path only when the index column (X) said `R` or `C`. Git also reports a rename in the work-tree column (Y) when the new path is intent-to-add, and a copy there with `status.renames=copies` | Git 2.54: commit `ab/x.txt` (4 lines) and `x.txt`; `mv ab/x.txt new.txt`; `git add -N new.txt`; edit `x.txt`. `git status --porcelain=v1 -z --untracked-files=all` printed ` R new.txt\0ab/x.txt\0 M x.txt\0`. The reader read `ab/x.txt` as its own entry: status from `a`,`b`, path `x.txt`. Rows: Modified new.txt, Modified x.txt twice (one ID for two rows), totals +2 −0 against Git's +1 −0. `old_name.txt` → `new_name.txt` gave a false Modified `_name.txt` | `parseStatus` takes the old-path field when X or Y is `R` or `C`. `status(x:y:)` names the entry Renamed or Copied from either column. `join` is unchanged: the new path takes its own count, and the old path's count only when no tracked entry owns it. A work-tree rename of a path with staged changes also lists that path (`M  a.txt\0 R c.txt\0a.txt\0`); that entry keeps its own count, so no line is counted twice | `WorkspaceChangesTests`: a parse case (` R`, a staged rename followed by a work-tree rename, ` C`), the reproduction in a real repository (rows, distinct IDs, Git's totals), and a staged change then a work-tree rename where numstat does not pair the files (Git +5 −6, reader +5 −6). The three failed before the fix with the phantom `x.txt`, `_name.txt` and `xt` rows. In the running app (`SigilWBRename`, busy fixture), the same steps in infra showed Modified main.tf +1 −6, Renamed new.txt +0 −0, Added state/split.tf +2 −0, Modified x.txt +1 −0, totals +4 −6, as Git counted. [img](slice/review-worktree-rename.png) |
+
+| Command | Result |
+|---|---|
+| `swift test --filter WorkspaceChangesTests`, before the fix | 18 tests; the 3 new ones failed as above |
+| `swift test --filter WorkspaceChangesTests`, after the fix | 18 tests passed |
+| `swift-format lint` on the two changed files | No findings |
+
 ### Journeys: baseline and slice
 
 The baseline is [baseline/BASELINE.md](baseline/BASELINE.md) (app at `2885af2`,
