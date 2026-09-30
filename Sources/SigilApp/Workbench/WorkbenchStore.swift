@@ -57,6 +57,8 @@ final class WorkbenchStore {
     /// The selected task whose terminal takes the keyboard once its view is
     /// in a window. A new or restarted terminal is selected before it mounts.
     @ObservationIgnored private var pendingFocusID: String?
+    /// Gives the rail the keyboard. The rail sets it when it appears.
+    @ObservationIgnored var focusRail: (() -> Void)?
     private(set) var changes: [String: WorkspaceChangesReading] = [:]
     private(set) var readingChanges: Set<String> = []
     @ObservationIgnored var actions: WorkbenchActions = .unavailable
@@ -84,12 +86,18 @@ final class WorkbenchStore {
     /// Selecting a task marks its finished turn as seen, as switching to a tab
     /// does. A click hands the keyboard to its terminal, now or once the
     /// terminal attaches to the window; arrow keys in the rail keep it there.
+    /// A task without a terminal hands the keyboard to the rail.
     func select(_ id: String?, focusingTerminal: Bool = true) {
         selectedTaskID = id
         pendingFocusID = nil
         guard let id, let index = tasks.firstIndex(where: { $0.id == id }) else { return }
         if tasks[index].hasUnseenFinish { tasks[index].hasUnseenFinish = false }
-        guard focusingTerminal, let terminal = terminals[id] else { return }
+        guard focusingTerminal else { return }
+        guard let terminal = terminals[id] else {
+            releaseTerminalFocus()
+            focusRail?()
+            return
+        }
         if terminal.view.window != nil {
             terminal.focus()
         } else {
@@ -108,6 +116,18 @@ final class WorkbenchStore {
             else { return }
             self.pendingFocusID = nil
             terminal.focus()
+        }
+    }
+
+    /// Every live terminal stays mounted while hidden, so the one that had
+    /// the keyboard keeps it after another task is selected. Its window
+    /// takes it back, so no keystroke reaches a process nobody can see.
+    private func releaseTerminalFocus() {
+        for terminal in terminals.values {
+            guard let window = terminal.view.window,
+                let responder = window.firstResponder as? NSView, responder.isDescendant(of: terminal.view)
+            else { continue }
+            window.makeFirstResponder(nil)
         }
     }
 

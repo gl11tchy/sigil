@@ -36,7 +36,16 @@ public struct WorkspaceChanges: Equatable, Sendable {
         public let added: Int?
         public let removed: Int?
 
-        public var id: String { path }
+        /// A path can be two rows: `git rm --cached` lists it as deleted and
+        /// as untracked. Git lists each tracked path once and each untracked
+        /// path once, so the side and the path name a row, and a tracked
+        /// file keeps its row when its status changes.
+        public struct ID: Hashable, Sendable {
+            public let path: String
+            public let isUntracked: Bool
+        }
+
+        public var id: ID { ID(path: path, isUntracked: status == .untracked) }
 
         public init(path: String, oldPath: String? = nil, status: Status, added: Int?, removed: Int?) {
             self.path = path

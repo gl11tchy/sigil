@@ -100,6 +100,13 @@ Three review findings, each reproduced before its fix.
 `ax.sh <pid> focused` prints the focused element's role, label and the start
 of its text; the text tells two terminals with the same label apart.
 
+### Two defects found during the PR 130 review fixes
+
+| Defect | Reproduction before the fix | Fix | Proof after |
+|---|---|---|---|
+| A hidden terminal kept the keyboard | Busy fixture: New Task in infra, then the Bump Node to 22 row (Not running). The AX focused element stayed the new task's Grok Build terminal, mounted at opacity 0 | Selecting a task without a terminal takes the keyboard from any terminal that holds it and gives it to the rail, where ↑ and ↓ work. With the rail hidden, the window keeps it | AX focused element was the rail's list inside the Tasks group after Bump Node, again after a live row and Bump Node, and after ↓ and ↑ (sent to the test app's pid only), which moved the selection. [img](slice/focus-5-no-terminal.png). `WorkbenchFocusTests` covers the rail and the hidden rail; it runs in CI |
+| Two review rows had one ID | `git rm --cached kept.txt` makes Git list `D  kept.txt` and `?? kept.txt`; both rows had the ID `kept.txt` | A row's ID is its path and whether it is the untracked side. Counts are unchanged; the untracked row takes none | `WorkspaceChangesTests`: a real repository gives two rows with distinct IDs, the same IDs on a second read, and Git's totals. In the running app, `git rm --cached main.tf` in infra showed Deleted main.tf +0 −16 and Untracked main.tf, totals +2 −16 as Git counted. [img](slice/review-rm-cached.png) |
+
 ### Journeys: baseline and slice
 
 The baseline is [baseline/BASELINE.md](baseline/BASELINE.md) (app at `2885af2`,
