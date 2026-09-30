@@ -119,6 +119,27 @@ of its text; the text tells two terminals with the same label apart.
 | `swift test --filter WorkspaceChangesTests`, after the fix | 18 tests passed |
 | `swift-format lint` on the two changed files | No findings |
 
+### An intent-to-add file read as Modified, and paths that start with a combining mark
+
+Found in the stand-in review of PR 135.
+
+| Defect | Reproduction before the fix | Fix | Proof after |
+|---|---|---|---|
+| `status(x:y:)` named an entry Added only when X was `A`. A lone intent-to-add file is ` A` | Git 2.54: commit `a.txt`; write `new.txt` (3 lines); `git add -N new.txt`. Status printed ` A new.txt\0`; `git diff HEAD --numstat -M` printed `3 0 new.txt`. The reader showed Modified new.txt +3 −0 | Y `A` is also Added. Git's porcelain table has Y `A` only for ` A` (intent-to-add) and `UA`, which the conflict check catches first. The numstat join is unchanged, so totals still equal Git's | `WorkspaceChangesTests`: a parse case (` A`, `A `, `UA`) and the reproduction in a real repository (one Added row +3 −0, Git's totals). Both failed before the fix with Modified |
+| `parseStatus` read X, Y and the path as `Character`s. The separator space and a leading combining mark (U+0301) form one grapheme | Git 2.54: commit `ab.txt` and `\u{301}x.txt`; `mv ab.txt \u{301}`; `git add -N \u{301}`; edit `\u{301}x.txt`; write `\u{301}u.txt`. Status printed ` R \u{301}\0ab.txt\0 M \u{301}x.txt\0?? \u{301}u.txt\0`. ` R \u{301}` had three Characters and was skipped, so `ab.txt` was read as its own entry: status from `a`,`b`, path `txt`. The other two lost the mark: Modified `x.txt`, Untracked `u.txt`. No row matched a numstat path, so the totals were +0 −0 against Git's +1 −0 | `parseStatus` splits the output as bytes and reads X and Y from bytes 0 and 1, and the path from byte 3 on as UTF-8. `parseNumstat` is unchanged: its separator is a tab, a control character, which Unicode never joins with a following mark | `WorkspaceChangesTests`: a parse case (` R`, ` M`, `??` with the mark, then a plain entry) and the reproduction in a real repository (Renamed `\u{301}` from `ab.txt` +0 −0, Modified `\u{301}x.txt` +1 −0, Untracked `\u{301}u.txt`, distinct IDs, Git's totals). Both failed before the fix with the `txt`, `x.txt` and `u.txt` rows |
+
+In the running app (`SigilWBIntent`, busy fixture), in infra: `git add -N` of a
+new 3-line `notes.txt`, `README.md` moved to `\u{301}` and `git add -N`, and an
+untracked `\u{301}x.txt`. Review showed Modified main.tf +1 −6, Added notes.txt
++3 −0, Added state/split.tf +2 −0, Renamed `\u{301}` +0 −0, Untracked
+`\u{301}x.txt`, totals +6 −6, as Git counted. [img](slice/review-intent-to-add.png)
+
+| Command | Result |
+|---|---|
+| `swift test --filter WorkspaceChangesTests`, before the fix | 22 tests; the 4 new ones failed as above |
+| `swift test --filter WorkspaceChangesTests`, after the fix | 22 tests passed |
+| `swift-format lint` on the two changed files | No findings |
+
 ### Journeys: baseline and slice
 
 The baseline is [baseline/BASELINE.md](baseline/BASELINE.md) (app at `2885af2`,
