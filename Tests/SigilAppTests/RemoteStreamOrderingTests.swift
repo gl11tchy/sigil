@@ -150,8 +150,9 @@ struct RemoteStreamOrderingTests {
         view.feed(text: "\u{1b}[H\u{1b}[0mNEW_GENERATION\u{1b}[K")
         remote.noteChange()
         let changed = try #require(tab.controller.remoteScreenWindow().rows.first { $0.t.contains("NEW_GENERATION") })
-        try await Task.sleep(for: .milliseconds(650))
-        // A solicited reply is a barrier after every scheduled event send.
+        // Every event frame is on the socket before the request below is handled,
+        // so its solicited reply arrives after all of them. A sleep cannot promise that.
+        await remote.changesSent()
         try await paired.phone.send([
             "data": RemoteCrypto.seal(
                 RemoteRequest(challenge: paired.challenge, sequence: 3, action: "state"),

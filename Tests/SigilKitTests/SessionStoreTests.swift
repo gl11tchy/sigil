@@ -261,6 +261,37 @@ struct SessionStoreTests {
         }
     }
 
+    @Test func retryLoopRescansARootDeletedBeforeFSEventsReportsIt() async throws {
+        let timing = SessionStoreTiming(
+            debounceDelay: .milliseconds(50),
+            maximumDebounceDelay: .milliseconds(150),
+            watcherRetryDelay: .milliseconds(50),
+            watcherLatency: 0.05
+        )
+        let harness = try FixtureHarness(timing: timing)
+        defer { harness.tearDown() }
+        try harness.write(
+            fixture: "minimal.json",
+            cwd: "/Users/exec",
+            id: "019ffeab-c76b-7fe1-be40-508369febd51"
+        )
+        harness.store.start()
+        try await waitUntil(timeout: .seconds(4)) {
+            harness.store.sessions.map(\.id) == ["019ffeab-c76b-7fe1-be40-508369febd51"]
+        }
+
+        // Under load a retry tick can stop the stream before FSEvents delivers
+        // the deletion, which drops the event. Stop it first to force that order,
+        // and let queued scans finish so none of them sees the deletion.
+        harness.store.watcher.stop()
+        try await Task.sleep(for: .milliseconds(300))
+        try FileManager.default.removeItem(at: harness.root)
+
+        try await waitUntil(timeout: .seconds(4)) {
+            harness.store.loadError?.contains("does not exist") == true
+        }
+    }
+
     @Test func aMissingRootDoesNotRescanOnUnrelatedFolderChanges() async throws {
         // Without ~/.grok the nearest existing folder is the home folder;
         // its churn must not drive scans.
