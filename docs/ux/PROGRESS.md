@@ -87,6 +87,19 @@ The AX dump names every control: rows read "title, state, provider,
 workspace", section headers are headings, and the file rows read their status
 and counts.
 
+### Review fixes on PR 130
+
+Three review findings, each reproduced before its fix.
+
+| Finding | Reproduction before the fix | Fix | Proof after |
+|---|---|---|---|
+| Git timeout did not cover the pipe drain | A fake Git that starts `sleep 10 &`, prints, and exits 0: a 1 s deadline returned after 10.19 s with success; the whole read took 60.2 s and returned changes | `GitOutput.run` reads both pipes non-blocking on its own thread until one deadline for the exit and the drain; a miss returns failure, kills a Git still running, and closes the read ends | `WorkspaceChangesTests`: inherited pipes after exit 0, a Git that outlives the deadline, a Git that never stops writing, a Git read in full. Each fake Git records its pids and the test kills them |
+| New tasks did not get keyboard focus | AX focused element in `SigilWB` (busy fixture) was the window after launch, New Task, Resume and Restart. Pressing an already mounted task's row did focus. [img](slice/focus-0-before-new-task.png) (hollow caret) | `WorkbenchStore.select` focuses at once when the terminal is in a window, else remembers the task; `TerminalPane`'s `onWindowAttachment` calls `terminalDidAttach`, which focuses only the still-selected task that asked. Arrow keys select without focus and cancel a pending one | AX focused element was the selected task's own terminal, read by its text, after launch ([img](slice/focus-1-launch.png)), New Task ([img](slice/focus-2-new-task.png)), Resume ([img](slice/focus-3-resume.png)) and Restart ([img](slice/focus-4-restart.png)). `WorkbenchFocusTests` covers the four paths and arrow keys; it runs in CI |
+| A staged rename lost its deleted lines | `old.txt` (3 lines) committed, `git mv old.txt new.txt`, 4 new lines: Git +4 −3, reader +4 −0. A file removed from the index but kept on disk also counted its deletion twice | Each numstat count goes to one entry: its own path, or a rename's old path when no tracked entry owns it; untracked entries take none | `WorkspaceChangesTests`: the reproduction, and a mixed repository whose totals equal Git's. In the running app, `git mv README.md NOTES.md` with new text showed Renamed NOTES.md +2 −1 and totals +5 −7, as Git counted. [img](slice/review-rename-counts.png) |
+
+`ax.sh <pid> focused` prints the focused element's role, label and the start
+of its text; the text tells two terminals with the same label apart.
+
 ### Journeys: baseline and slice
 
 The baseline is [baseline/BASELINE.md](baseline/BASELINE.md) (app at `2885af2`,
@@ -127,9 +140,14 @@ in the fixture build, so it shows the layout's cost, not yet the live app's.
 - Fixture states other than the process exit are asserted by the fixture
   (working, needs input, finished). The exit-with-code-1 and missing-folder
   states come through the real paths.
-- Rail ↑/↓ and Return are unit-tested (`WorkbenchRail.move`) but not driven
-  in the running app, because the harness sends no keystrokes. ⌘1…⌘9 and Next
-  Needing Attention are not in the menus yet (M2).
+- Rail ↑/↓ and Return are unit-tested (`WorkbenchRail.move`, and
+  `WorkbenchFocusTests` for focus) but not driven in the running app, because
+  the harness sends no keystrokes. For the PR 130 focus fix, setting AX focus on
+  the rail had no effect, so arrow events posted to the `SigilWB` pid only
+  reached its focused fixture terminal. ⌘1…⌘9 and Next Needing Attention are
+  not in the menus yet (M2).
+- Selecting a task with no live terminal leaves keyboard focus on the terminal
+  that had it, now hidden. Unchanged by the PR 130 fixes.
 - Checks have no source (M3). Finish is unavailable (M4). The phone is
   unchanged (M5).
 - VoiceOver speech was not run; the AX tree was read instead.

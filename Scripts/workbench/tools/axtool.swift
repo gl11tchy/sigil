@@ -2,6 +2,7 @@ import ApplicationServices
 import Foundation
 // axtool <pid> dump            — roles and labels of the app's first window
 // axtool <pid> press <prefix>  — AXPress the first button whose label starts with <prefix>
+// axtool <pid> focused         — role, label and start of the value of the element with keyboard focus
 let args = CommandLine.arguments
 guard args.count >= 3, let pid = pid_t(args[1]) else { print("usage"); exit(2) }
 let app = AXUIElementCreateApplication(pid)
@@ -20,6 +21,17 @@ func label(_ e: AXUIElement) -> String {
         let v = attr(e, name); if !v.isEmpty { return v }
     }
     return ""
+}
+if args[2] == "focused" {
+    var focused: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+        let focused, CFGetTypeID(focused) == AXUIElementGetTypeID()
+    else { print("no focused element"); exit(1) }
+    let element = focused as! AXUIElement
+    // The value tells two terminals with the same label apart.
+    let value = attr(element, kAXValueAttribute).split(whereSeparator: \.isNewline).joined(separator: " / ")
+    print(attr(element, kAXRoleAttribute) + " | " + label(element) + " | " + String(value.prefix(160)))
+    exit(0)
 }
 var windows: CFTypeRef?
 AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &windows)
