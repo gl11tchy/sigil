@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import SigilKit
@@ -53,6 +54,9 @@ final class WorkbenchStore {
     private(set) var reviewWasChosen = false
     /// Live terminals by task ID. A task without one shows a panel instead.
     var terminals: [String: TerminalController] = [:]
+    /// The selected task whose terminal takes the keyboard once its view is
+    /// in a window. A new or restarted terminal is selected before it mounts.
+    @ObservationIgnored private var pendingFocusID: String?
     private(set) var changes: [String: WorkspaceChangesReading] = [:]
     private(set) var readingChanges: Set<String> = []
     @ObservationIgnored var actions: WorkbenchActions = .unavailable
@@ -78,13 +82,33 @@ final class WorkbenchStore {
     }
 
     /// Selecting a task marks its finished turn as seen, as switching to a tab
-    /// does. A click hands the keyboard to its terminal; arrow keys in the
-    /// rail keep it there.
+    /// does. A click hands the keyboard to its terminal, now or once the
+    /// terminal attaches to the window; arrow keys in the rail keep it there.
     func select(_ id: String?, focusingTerminal: Bool = true) {
         selectedTaskID = id
+        pendingFocusID = nil
         guard let id, let index = tasks.firstIndex(where: { $0.id == id }) else { return }
         if tasks[index].hasUnseenFinish { tasks[index].hasUnseenFinish = false }
-        if focusingTerminal { terminals[id]?.focus() }
+        guard focusingTerminal, let terminal = terminals[id] else { return }
+        if terminal.view.window != nil {
+            terminal.focus()
+        } else {
+            pendingFocusID = id
+        }
+    }
+
+    /// A task's terminal view entered the window. Only the selected task's
+    /// terminal takes focus, and only when its selection asked for it. Focus
+    /// moves after the view update that attached it, as in the tab window.
+    func terminalDidAttach(_ id: String) {
+        guard pendingFocusID == id else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.pendingFocusID == id, self.selectedTaskID == id,
+                let terminal = self.terminals[id], terminal.view.window != nil
+            else { return }
+            self.pendingFocusID = nil
+            terminal.focus()
+        }
     }
 
     func moveSelection(by offset: Int) {

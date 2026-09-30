@@ -104,7 +104,8 @@ struct WorkbenchView: View {
                             controller: terminal,
                             background: Palette.nsColor(theme.backgroundHex),
                             cornerRadius: Radius.window - 1,
-                            roundsTopCorners: false
+                            roundsTopCorners: false,
+                            onWindowAttachment: { store.terminalDidAttach(task.id) }
                         )
                         .padding([.leading, .trailing, .bottom], 1)
                         .opacity(isSelected ? 1 : 0)
