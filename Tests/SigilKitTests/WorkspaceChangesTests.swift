@@ -278,6 +278,25 @@ struct WorkspaceChangesTests {
         #expect(changes.files.first?.added == 2)
     }
 
+    @Test func readsASHA256RepositoryWithNoCommitYet() async throws {
+        let repo = try scratch()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try git(["init", "-q", "--object-format=sha256", "-b", "trunk"], in: repo)
+        try "x\ny\n".write(to: repo.appendingPathComponent("first.txt"), atomically: true, encoding: .utf8)
+        try git(["add", "first.txt"], in: repo)
+
+        let reading = await WorkspaceChangesReader.read(repo)
+        guard case .changes(let changes) = reading else {
+            Issue.record("expected changes, got \(reading)")
+            return
+        }
+        #expect(changes.head == "trunk")
+        #expect(changes.files.map(\.path) == ["first.txt"])
+        #expect(changes.files.first?.status == .added)
+        #expect(changes.files.first?.added == 2)
+        #expect(changes.files.first?.removed == 0)
+    }
+
     @Test func cleanRepositoryHasNoFiles() async throws {
         let repo = try scratch()
         defer { try? FileManager.default.removeItem(at: repo) }
