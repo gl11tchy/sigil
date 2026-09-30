@@ -82,6 +82,9 @@ struct TaskRail: View {
             terminal.focus()
             return .handled
         }
+        .onAppear {
+            store.focusRail = { [focus = $isFocused] in focus.wrappedValue = true }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Tasks")
     }

@@ -113,6 +113,42 @@ struct WorkbenchFocusTests {
         #expect(window.firstResponder === rail)
     }
 
+    @Test func selectingATaskWithoutATerminalHandsTheKeyboardToTheRail() async throws {
+        let store = WorkbenchStore(projects: [project], tasks: [task("a"), task("history", process: .notRunning)])
+        let a = TerminalController()
+        store.terminals = ["a": a]
+        let window = makeWindow()
+        let rail = FocusableView()
+        try #require(window.contentView).addSubview(rail)
+        store.focusRail = { window.makeFirstResponder(rail) }
+        try attach(a, as: "a", to: window, store: store)
+        store.select("a")
+        #expect(window.firstResponder === a.view)
+
+        // The hidden terminal stays mounted; it must not keep the keyboard.
+        store.select("history")
+        #expect(window.firstResponder === rail)
+
+        store.moveSelection(by: -1)
+        await flushMainAsync()
+        #expect(store.selectedTaskID == "a")
+        #expect(window.firstResponder === rail, "arrow keys keep working from the rail")
+    }
+
+    @Test func withTheRailHiddenAHiddenTerminalStillLetsGoOfTheKeyboard() async throws {
+        let store = WorkbenchStore(projects: [project], tasks: [task("a"), task("history", process: .notRunning)])
+        let a = TerminalController()
+        store.terminals = ["a": a]
+        let window = makeWindow()
+        try attach(a, as: "a", to: window, store: store)
+        store.select("a")
+        #expect(window.firstResponder === a.view)
+
+        store.select("history")
+        await flushMainAsync()
+        #expect(window.firstResponder === window)
+    }
+
     @Test func movingOnBeforeATerminalAttachesCancelsItsFocus() async throws {
         let store = WorkbenchStore(projects: [project], tasks: [task("a"), task("b")])
         let a = TerminalController()
