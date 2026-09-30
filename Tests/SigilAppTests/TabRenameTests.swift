@@ -266,6 +266,35 @@ struct TabRenameTests {
                 ])
     }
 
+    @Test func aSecondCopyKeepsANameItDidNotSet() throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let folder = try fixture.directory("project")
+        let first = fixture.model()
+        let secondSettings = AppSettings(defaults: fixture.defaults)
+        let second = fixture.model(settings: secondSettings)
+        defer {
+            first.closeAllTabsAndWait()
+            second.closeAllTabsAndWait()
+        }
+        let kept = TerminalTab(spec: spec(folder: folder, sessionID: "kept"), settings: fixture.settings)
+        let added = TerminalTab(spec: spec(folder: folder, sessionID: "added"), settings: secondSettings)
+
+        first.renameTab(kept, to: "Kept")
+        second.renameTab(added, to: "Added")
+        #expect(
+            secondSettings.conversationNames
+                == [
+                    ConversationName(sessionID: "added", cwd: folder.path, name: "Added"),
+                    ConversationName(sessionID: "kept", cwd: folder.path, name: "Kept"),
+                ])
+
+        first.resetTabName(kept)
+        #expect(
+            fixture.settings.conversationNames
+                == [ConversationName(sessionID: "added", cwd: folder.path, name: "Added")])
+    }
+
     @Test(arguments: ["claudeCode", "codex"])
     func aNativeColorStaysWhenItsHistoryCannotBeRead(provider: String) async throws {
         let fixture = try ModelFixture()
