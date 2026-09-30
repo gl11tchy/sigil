@@ -141,6 +141,37 @@ struct WorkspaceChangesTests {
         #expect(binary?.added == nil)
     }
 
+    @Test func aFileRemovedFromTheIndexButKeptOnDiskIsTwoRowsWithTheirOwnIDs() async throws {
+        let repo = try scratch()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try "k\nl\n".write(to: repo.appendingPathComponent("kept.txt"), atomically: true, encoding: .utf8)
+        try git(["init", "-q", "-b", "main"], in: repo)
+        try git(["add", "."], in: repo)
+        try git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"], in: repo)
+        try git(["rm", "-q", "--cached", "kept.txt"], in: repo)
+        // Git lists the path twice: `D  kept.txt` and `?? kept.txt`.
+        #expect(try git(["status", "--porcelain=v1"], in: repo) == "D  kept.txt\n?? kept.txt")
+
+        guard case .changes(let changes) = await WorkspaceChangesReader.read(repo) else {
+            Issue.record("expected changes")
+            return
+        }
+        #expect(
+            changes.files == [
+                .init(path: "kept.txt", status: .deleted, added: 0, removed: 2),
+                .init(path: "kept.txt", status: .untracked, added: nil, removed: nil),
+            ])
+        #expect(Set(changes.files.map(\.id)).count == 2, "each row needs its own identity")
+        #expect(changes.added == 0)
+        #expect(changes.removed == 2)
+
+        guard case .changes(let again) = await WorkspaceChangesReader.read(repo) else {
+            Issue.record("expected changes")
+            return
+        }
+        #expect(again.files.map(\.id) == changes.files.map(\.id), "the same state reads to the same identities")
+    }
+
     @Test func readsARepositoryWithNoCommitYet() async throws {
         let repo = try scratch()
         defer { try? FileManager.default.removeItem(at: repo) }
