@@ -46,6 +46,33 @@ struct WorkspaceChangesTests {
             ])
     }
 
+    @Test func statusParsingNamesALoneIntentToAddFileAdded() {
+        // `git add -N new.txt` with no deletion to pair it with.
+        let raw = [" A new.txt", "A  staged.txt", "UA theirs.txt"].joined(separator: "\0") + "\0"
+        let entries = WorkspaceChangesReader.parseStatus(Data(raw.utf8))
+        #expect(
+            entries == [
+                .init(path: "new.txt", oldPath: nil, status: .added),
+                .init(path: "staged.txt", oldPath: nil, status: .added),
+                .init(path: "theirs.txt", oldPath: nil, status: .conflicted),
+            ])
+    }
+
+    @Test func statusParsingKeepsAPathThatStartsWithACombiningMark() {
+        // As Characters, the separator space and U+0301 are one grapheme.
+        let raw =
+            [" R \u{301}", "ab.txt", " M \u{301}x.txt", "?? \u{301}u.txt", " M last.txt"]
+            .joined(separator: "\0") + "\0"
+        let entries = WorkspaceChangesReader.parseStatus(Data(raw.utf8))
+        #expect(
+            entries == [
+                .init(path: "\u{301}", oldPath: "ab.txt", status: .renamed),
+                .init(path: "\u{301}x.txt", oldPath: nil, status: .modified),
+                .init(path: "\u{301}u.txt", oldPath: nil, status: .untracked),
+                .init(path: "last.txt", oldPath: nil, status: .modified),
+            ])
+    }
+
     @Test func numstatParsingCountsRenamesAndLeavesBinaryUncounted() {
         let raw =
             ["3\t1\tsrc/a.swift", "-\t-\timage.png", "2\t0\t", "old.txt", "new.txt"]
@@ -259,6 +286,68 @@ struct WorkspaceChangesTests {
             ])
         #expect(changes.added == 5)
         #expect(changes.removed == 6)
+    }
+
+    @Test func aLoneIntentToAddFileIsAddedAndCountedAsGitCountsIt() async throws {
+        let repo = try scratch()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try "1\n2\n".write(to: repo.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        try git(["init", "-q", "-b", "main"], in: repo)
+        try git(["add", "."], in: repo)
+        try git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"], in: repo)
+        try "n1\nn2\nn3\n".write(to: repo.appendingPathComponent("new.txt"), atomically: true, encoding: .utf8)
+        try git(["add", "-N", "new.txt"], in: repo)
+        // With no deletion to pair it with, Git reports it in the work-tree column.
+        let status = GitOutput.run(
+            git: URL(fileURLWithPath: "/usr/bin/git"),
+            arguments: ["-C", repo.path, "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            timeout: .seconds(5))
+        #expect(status?.text == " A new.txt\0")
+
+        guard case .changes(let changes) = await WorkspaceChangesReader.read(repo) else {
+            Issue.record("expected changes")
+            return
+        }
+        #expect(changes.files == [.init(path: "new.txt", status: .added, added: 3, removed: 0)])
+        let git = try gitTotals(in: repo)
+        #expect(changes.added == git.added)
+        #expect(changes.removed == git.removed)
+    }
+
+    @Test func aPathThatStartsWithACombiningMarkKeepsItsNameAndItsOldPath() async throws {
+        let repo = try scratch()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let mark = "\u{301}"
+        try "p\nq\n".write(to: repo.appendingPathComponent("ab.txt"), atomically: true, encoding: .utf8)
+        try "k\n".write(to: repo.appendingPathComponent(mark + "x.txt"), atomically: true, encoding: .utf8)
+        try git(["init", "-q", "-b", "main"], in: repo)
+        try git(["add", "."], in: repo)
+        try git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"], in: repo)
+        try FileManager.default.moveItem(
+            at: repo.appendingPathComponent("ab.txt"), to: repo.appendingPathComponent(mark))
+        try git(["add", "-N", mark], in: repo)
+        try "k\nl\n".write(to: repo.appendingPathComponent(mark + "x.txt"), atomically: true, encoding: .utf8)
+        try "u\n".write(to: repo.appendingPathComponent(mark + "u.txt"), atomically: true, encoding: .utf8)
+        let status = GitOutput.run(
+            git: URL(fileURLWithPath: "/usr/bin/git"),
+            arguments: ["-C", repo.path, "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            timeout: .seconds(5))
+        #expect(status?.text == " R \u{301}\0ab.txt\0 M \u{301}x.txt\0?? \u{301}u.txt\0")
+
+        guard case .changes(let changes) = await WorkspaceChangesReader.read(repo) else {
+            Issue.record("expected changes")
+            return
+        }
+        #expect(
+            changes.files == [
+                .init(path: mark, oldPath: "ab.txt", status: .renamed, added: 0, removed: 0),
+                .init(path: mark + "x.txt", status: .modified, added: 1, removed: 0),
+                .init(path: mark + "u.txt", status: .untracked, added: nil, removed: nil),
+            ])
+        #expect(Set(changes.files.map(\.id)).count == changes.files.count, "each row needs its own identity")
+        let git = try gitTotals(in: repo)
+        #expect(changes.added == git.added)
+        #expect(changes.removed == git.removed)
     }
 
     @Test func readsARepositoryWithNoCommitYet() async throws {
