@@ -47,14 +47,16 @@ struct WorkspaceChangesTests {
     }
 
     @Test func statusParsingNamesALoneIntentToAddFileAdded() {
-        // `git add -N new.txt` with no deletion to pair it with.
-        let raw = [" A new.txt", "A  staged.txt", "UA theirs.txt"].joined(separator: "\0") + "\0"
+        // `git add -N new.txt` with no deletion to pair it with. `DA` is a
+        // path HEAD has, removed from the index and added back with -N.
+        let raw = [" A new.txt", "A  staged.txt", "UA theirs.txt", "DA back.txt"].joined(separator: "\0") + "\0"
         let entries = WorkspaceChangesReader.parseStatus(Data(raw.utf8))
         #expect(
             entries == [
                 .init(path: "new.txt", oldPath: nil, status: .added),
                 .init(path: "staged.txt", oldPath: nil, status: .added),
                 .init(path: "theirs.txt", oldPath: nil, status: .conflicted),
+                .init(path: "back.txt", oldPath: nil, status: .modified),
             ])
     }
 
@@ -312,6 +314,47 @@ struct WorkspaceChangesTests {
         let git = try gitTotals(in: repo)
         #expect(changes.added == git.added)
         #expect(changes.removed == git.removed)
+    }
+
+    @Test func aPathRemovedFromTheIndexAndAddedBackWithIntentIsModified() async throws {
+        let repo = try scratch()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try "1\n2\n".write(to: repo.appendingPathComponent("f.txt"), atomically: true, encoding: .utf8)
+        try git(["init", "-q", "-b", "main"], in: repo)
+        try git(["add", "."], in: repo)
+        try git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"], in: repo)
+        try git(["rm", "-q", "--cached", "f.txt"], in: repo)
+        try git(["add", "-N", "f.txt"], in: repo)
+        try "1\n2\n3\n".write(to: repo.appendingPathComponent("f.txt"), atomically: true, encoding: .utf8)
+        // HEAD still has the file, so numstat counts a modification: +1 −0.
+        let status = GitOutput.run(
+            git: URL(fileURLWithPath: "/usr/bin/git"),
+            arguments: ["-C", repo.path, "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            timeout: .seconds(5))
+        #expect(status?.text == "DA f.txt\0")
+
+        guard case .changes(let changes) = await WorkspaceChangesReader.read(repo) else {
+            Issue.record("expected changes")
+            return
+        }
+        #expect(changes.files == [.init(path: "f.txt", status: .modified, added: 1, removed: 0)])
+        let git = try gitTotals(in: repo)
+        #expect(changes.added == git.added)
+        #expect(changes.removed == git.removed)
+    }
+
+    @Test func anIntentToAddFileBeforeTheFirstCommitIsAdded() async throws {
+        let repo = try scratch()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try git(["init", "-q", "-b", "main"], in: repo)
+        try "a\nb\nc\n".write(to: repo.appendingPathComponent("n.txt"), atomically: true, encoding: .utf8)
+        try git(["add", "-N", "n.txt"], in: repo)
+
+        guard case .changes(let changes) = await WorkspaceChangesReader.read(repo) else {
+            Issue.record("expected changes")
+            return
+        }
+        #expect(changes.files == [.init(path: "n.txt", status: .added, added: 3, removed: 0)])
     }
 
     @Test func aPathThatStartsWithACombiningMarkKeepsItsNameAndItsOldPath() async throws {

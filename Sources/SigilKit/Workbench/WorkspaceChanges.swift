@@ -201,12 +201,15 @@ public enum WorkspaceChangesReader {
     }
 
     /// Outside a conflict, Git puts `A` in the work-tree column only for an
-    /// intent-to-add path (` A`), which numstat counts as added.
+    /// intent-to-add path. ` A` is new, as numstat counts it. `DA` is a path
+    /// HEAD still has, removed from the index and added back with -N, so
+    /// against HEAD it is modified.
     static func status(x: Character, y: Character) -> WorkspaceChanges.Status {
         if x == "?" { return .untracked }
         if x == "U" || y == "U" || (x == "A" && y == "A") || (x == "D" && y == "D") { return .conflicted }
         if x == "R" || y == "R" { return .renamed }
         if x == "C" || y == "C" { return .copied }
+        if x == "D" && y == "A" { return .modified }
         if x == "A" || y == "A" { return .added }
         if x == "D" || y == "D" { return .deleted }
         if x == "T" || y == "T" { return .typeChanged }
