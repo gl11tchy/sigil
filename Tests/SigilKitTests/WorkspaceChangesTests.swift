@@ -26,6 +26,26 @@ struct WorkspaceChangesTests {
             ])
     }
 
+    @Test func statusParsingReadsTheOldPathOfAWorkTreeRenameOrCopy() {
+        // Git 2.54 output. The work-tree column carries R when the new path is
+        // intent-to-add, and C with `status.renames=copies`.
+        let raw =
+            [
+                " R new.txt", "ab/x.txt", " M x.txt", "R  b.txt", "a.txt", " R c.txt", "b.txt", " C copy.txt",
+                "orig.txt", " M last.txt",
+            ].joined(separator: "\0") + "\0"
+        let entries = WorkspaceChangesReader.parseStatus(Data(raw.utf8))
+        #expect(
+            entries == [
+                .init(path: "new.txt", oldPath: "ab/x.txt", status: .renamed),
+                .init(path: "x.txt", oldPath: nil, status: .modified),
+                .init(path: "b.txt", oldPath: "a.txt", status: .renamed),
+                .init(path: "c.txt", oldPath: "b.txt", status: .renamed),
+                .init(path: "copy.txt", oldPath: "orig.txt", status: .copied),
+                .init(path: "last.txt", oldPath: nil, status: .modified),
+            ])
+    }
+
     @Test func numstatParsingCountsRenamesAndLeavesBinaryUncounted() {
         let raw =
             ["3\t1\tsrc/a.swift", "-\t-\timage.png", "2\t0\t", "old.txt", "new.txt"]
@@ -170,6 +190,75 @@ struct WorkspaceChangesTests {
             return
         }
         #expect(again.files.map(\.id) == changes.files.map(\.id), "the same state reads to the same identities")
+    }
+
+    @Test func aWorkTreeRenameIsOneRowAndItsOldPathIsNotReadAsAnotherFile() async throws {
+        let repo = try scratch()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let folder = repo.appendingPathComponent("ab")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try "1\n2\n3\n4\n".write(to: folder.appendingPathComponent("x.txt"), atomically: true, encoding: .utf8)
+        try "x\n".write(to: repo.appendingPathComponent("x.txt"), atomically: true, encoding: .utf8)
+        try "p\nq\nr\n".write(to: repo.appendingPathComponent("old_name.txt"), atomically: true, encoding: .utf8)
+        try git(["init", "-q", "-b", "main"], in: repo)
+        try git(["add", "."], in: repo)
+        try git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"], in: repo)
+        try FileManager.default.moveItem(
+            at: folder.appendingPathComponent("x.txt"), to: repo.appendingPathComponent("new.txt"))
+        try FileManager.default.moveItem(
+            at: repo.appendingPathComponent("old_name.txt"), to: repo.appendingPathComponent("new_name.txt"))
+        try git(["add", "-N", "new.txt", "new_name.txt"], in: repo)
+        try "x\ny\n".write(to: repo.appendingPathComponent("x.txt"), atomically: true, encoding: .utf8)
+        // Intent-to-add new paths make Git report the renames in the work-tree column.
+        let status = GitOutput.run(
+            git: URL(fileURLWithPath: "/usr/bin/git"),
+            arguments: ["-C", repo.path, "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+            timeout: .seconds(5))
+        #expect(status?.text == " R new.txt\0ab/x.txt\0 R new_name.txt\0old_name.txt\0 M x.txt\0")
+
+        guard case .changes(let changes) = await WorkspaceChangesReader.read(repo) else {
+            Issue.record("expected changes")
+            return
+        }
+        #expect(
+            changes.files == [
+                .init(path: "new.txt", oldPath: "ab/x.txt", status: .renamed, added: 0, removed: 0),
+                .init(path: "new_name.txt", oldPath: "old_name.txt", status: .renamed, added: 0, removed: 0),
+                .init(path: "x.txt", status: .modified, added: 1, removed: 0),
+            ])
+        #expect(Set(changes.files.map(\.id)).count == changes.files.count, "each row needs its own identity")
+        let git = try gitTotals(in: repo)
+        #expect(changes.added == git.added)
+        #expect(changes.removed == git.removed)
+    }
+
+    @Test func aWorkTreeRenameOfAPathWithStagedChangesCountsEachLineOnce() async throws {
+        let repo = try scratch()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try "1\n2\n3\n4\n5\n6\n".write(to: repo.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        try git(["init", "-q", "-b", "main"], in: repo)
+        try git(["add", "."], in: repo)
+        try git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"], in: repo)
+        try "p\nq\nr\ns\ne\n".write(to: repo.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        try git(["add", "a.txt"], in: repo)
+        try FileManager.default.moveItem(
+            at: repo.appendingPathComponent("a.txt"), to: repo.appendingPathComponent("c.txt"))
+        try git(["add", "-N", "c.txt"], in: repo)
+        // Status pairs the index's a.txt with c.txt and also lists a.txt's
+        // staged change; numstat, from HEAD, does not pair them: a.txt −6, c.txt +5.
+        #expect(try gitTotals(in: repo) == (added: 5, removed: 6))
+
+        guard case .changes(let changes) = await WorkspaceChangesReader.read(repo) else {
+            Issue.record("expected changes")
+            return
+        }
+        #expect(
+            changes.files == [
+                .init(path: "a.txt", status: .modified, added: 0, removed: 6),
+                .init(path: "c.txt", oldPath: "a.txt", status: .renamed, added: 5, removed: 0),
+            ])
+        #expect(changes.added == 5)
+        #expect(changes.removed == 6)
     }
 
     @Test func readsARepositoryWithNoCommitYet() async throws {
