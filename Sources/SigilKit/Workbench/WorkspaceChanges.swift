@@ -142,8 +142,10 @@ public enum WorkspaceChangesReader {
     /// path's count when no tracked entry owns that path: status pairs a
     /// staged rename against the index, but numstat compares HEAD with the
     /// working tree and reports a deletion and an addition once the file no
-    /// longer resembles its original. Untracked entries take nothing, as Git
-    /// counts nothing for them, even when a deleted path is back on disk.
+    /// longer resembles its original. A work-tree rename (` R`) of a path with
+    /// staged changes also lists that path, which keeps its own count.
+    /// Untracked entries take nothing, as Git counts nothing for them, even
+    /// when a deleted path is back on disk.
     static func join(
         _ entries: [StatusEntry], _ counts: [String: (added: Int?, removed: Int?)]
     ) -> [WorkspaceChanges.File] {
@@ -171,7 +173,8 @@ public enum WorkspaceChangesReader {
     }
 
     /// `git status --porcelain=v1 -z`: `XY path`, and for a rename or copy a
-    /// second field with the old path.
+    /// second field with the old path. Either column can name the rename:
+    /// Git pairs a work-tree deletion with an intent-to-add path as ` R`.
     static func parseStatus(_ data: Data) -> [StatusEntry] {
         var fields = data.split(separator: 0, omittingEmptySubsequences: false).map {
             String(decoding: $0, as: UTF8.self)
@@ -188,7 +191,7 @@ public enum WorkspaceChangesReader {
             let path = String(field.dropFirst(3))
             if x == "!" { continue }
             var oldPath: String?
-            if x == "R" || x == "C", index < fields.count {
+            if [x, y].contains(where: { $0 == "R" || $0 == "C" }), index < fields.count {
                 oldPath = fields[index]
                 index += 1
             }
@@ -200,8 +203,8 @@ public enum WorkspaceChangesReader {
     static func status(x: Character, y: Character) -> WorkspaceChanges.Status {
         if x == "?" { return .untracked }
         if x == "U" || y == "U" || (x == "A" && y == "A") || (x == "D" && y == "D") { return .conflicted }
-        if x == "R" { return .renamed }
-        if x == "C" { return .copied }
+        if x == "R" || y == "R" { return .renamed }
+        if x == "C" || y == "C" { return .copied }
         if x == "A" { return .added }
         if x == "D" || y == "D" { return .deleted }
         if x == "T" || y == "T" { return .typeChanged }
