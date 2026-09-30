@@ -21,8 +21,11 @@ what needs attention, respond, and return to the same conversation.
 
 ## Design
 
-Dark, dense, keyboard-first. Preserve the terminal, the project context, and the
-existing design system. No replacement chat interface or extra provider.
+A native coding workbench, not a terminal launcher: one journey from project to
+task to review to the phone, set out in the [experience contract](docs/ux/EXPERIENCE.md),
+which owns layout, navigation and states. Dense and keyboard-first. The real
+provider terminal stays the conversation. No replacement chat interface, web
+wrapper or extra provider.
 
 ## Continuity and safety
 
@@ -37,5 +40,6 @@ input reached the host dispatch path, not provider acceptance or successful work
 
 ## Non-goals
 
-Replacing provider CLIs, inventing unsupported integration, redesigning the product,
-or treating a launch smoke test as proof of complete product correctness.
+Replacing provider CLIs, inventing unsupported integration, promising a uniform
+native transcript without a justified provider integration, or treating a launch
+smoke test as proof of complete product correctness.
