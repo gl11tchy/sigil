@@ -532,6 +532,16 @@ final class RemoteControl {
         }
     }
 
+    /// Waits until every change noted so far has gone out, for ordering tests.
+    /// Only the one change loop is awaited, so this holds while flushes stay serial.
+    func changesSent() async {
+        while let task = changeTask {
+            await task.value
+            // An early return leaves the finished task in place; do not spin on it.
+            guard changeTask != task else { return }
+        }
+    }
+
     private func startWatching(
         _ command: RemoteRequest, model: AppModel, socket: URLSessionWebSocketTask, peer: String,
         session: RemoteSession
