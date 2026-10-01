@@ -47,6 +47,9 @@ final class TerminalTab: Identifiable {
 
     /// Preferred label. The session summary wins once the sidebar knows one.
     var sessionTitle: String?
+    /// Color for a tab that is not a saved Grok conversation. Saved
+    /// conversations keep their color in settings, keyed by session id.
+    var markColor: TabColor?
 
     private var isSelected: () -> Bool = { false }
     private let completionEventsURL: URL?
@@ -95,13 +98,18 @@ final class TerminalTab: Identifiable {
 
     var workingDirectory: URL { spec.workingDirectory }
 
-    var title: String {
-        if let sessionTitle, !sessionTitle.isEmpty { return sessionTitle }
+    /// The label before a person renames the tab. Two tabs of one provider
+    /// must not share a title, so other agents include the folder.
+    var automaticTitle: String {
         let name = workingDirectory.lastPathComponent
         let folder = workingDirectory.sigilWorktreeLabel ?? (name.isEmpty ? workingDirectory.path : name)
-        // Two tabs of one provider must not share a title.
         if spec.provider != .grokBuild { return "\(spec.provider.name) · \(folder)" }
         return folder
+    }
+
+    var title: String {
+        if let sessionTitle, !sessionTitle.isEmpty { return sessionTitle }
+        return automaticTitle
     }
 
     var isRunning: Bool {
