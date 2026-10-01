@@ -175,24 +175,24 @@ public enum WorkspaceChangesReader {
     /// `git status --porcelain=v1 -z`: `XY path`, and for a rename or copy a
     /// second field with the old path. Either column can name the rename:
     /// Git pairs a work-tree deletion with an intent-to-add path as ` R`.
+    /// The prefix is read as bytes: a path that starts with a combining mark
+    /// would join the separator space into one `Character`.
     static func parseStatus(_ data: Data) -> [StatusEntry] {
-        var fields = data.split(separator: 0, omittingEmptySubsequences: false).map {
-            String(decoding: $0, as: UTF8.self)
-        }
-        if fields.last == "" { fields.removeLast() }
+        var fields = data.split(separator: 0, omittingEmptySubsequences: false)
+        if fields.last?.isEmpty == true { fields.removeLast() }
         var entries: [StatusEntry] = []
         var index = 0
         while index < fields.count {
             let field = fields[index]
             index += 1
             guard field.count > 3 else { continue }
-            let x = field[field.startIndex]
-            let y = field[field.index(after: field.startIndex)]
-            let path = String(field.dropFirst(3))
+            let x = Character(Unicode.Scalar(field[field.startIndex]))
+            let y = Character(Unicode.Scalar(field[field.startIndex + 1]))
+            let path = String(decoding: field.dropFirst(3), as: UTF8.self)
             if x == "!" { continue }
             var oldPath: String?
             if [x, y].contains(where: { $0 == "R" || $0 == "C" }), index < fields.count {
-                oldPath = fields[index]
+                oldPath = String(decoding: fields[index], as: UTF8.self)
                 index += 1
             }
             entries.append(StatusEntry(path: path, oldPath: oldPath, status: status(x: x, y: y)))
@@ -200,12 +200,17 @@ public enum WorkspaceChangesReader {
         return entries
     }
 
+    /// Outside a conflict, Git puts `A` in the work-tree column only for an
+    /// intent-to-add path. ` A` is new, as numstat counts it. `DA` is a path
+    /// HEAD still has, removed from the index and added back with -N, so
+    /// against HEAD it is modified.
     static func status(x: Character, y: Character) -> WorkspaceChanges.Status {
         if x == "?" { return .untracked }
         if x == "U" || y == "U" || (x == "A" && y == "A") || (x == "D" && y == "D") { return .conflicted }
         if x == "R" || y == "R" { return .renamed }
         if x == "C" || y == "C" { return .copied }
-        if x == "A" { return .added }
+        if x == "D" && y == "A" { return .modified }
+        if x == "A" || y == "A" { return .added }
         if x == "D" || y == "D" { return .deleted }
         if x == "T" || y == "T" { return .typeChanged }
         return .modified
