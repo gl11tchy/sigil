@@ -56,12 +56,32 @@ public enum ConversationNaming {
         onto names: [ConversationName],
         samePath: (String, String) -> Bool
     ) -> [ConversationName] {
-        guard let submitted = normalized(raw), submitted != session.title else {
-            return removing(session, from: names, samePath: samePath)
+        setting(
+            raw,
+            sessionID: session.id,
+            cwd: session.cwd,
+            cliTitle: session.title,
+            onto: names,
+            samePath: samePath
+        )
+    }
+
+    /// Empty, whitespace, or a name equal to `cliTitle` removes the override.
+    /// A tab can be named before the store has listed the session.
+    public static func setting(
+        _ raw: String,
+        sessionID: String,
+        cwd: String,
+        cliTitle: String,
+        onto names: [ConversationName],
+        samePath: (String, String) -> Bool
+    ) -> [ConversationName] {
+        guard let submitted = normalized(raw), submitted != cliTitle else {
+            return removing(sessionID: sessionID, cwd: cwd, from: names, samePath: samePath)
         }
-        var next = removing(session, from: names, samePath: samePath)
+        var next = removing(sessionID: sessionID, cwd: cwd, from: names, samePath: samePath)
         next.insert(
-            ConversationName(sessionID: session.id, cwd: session.cwd, name: submitted),
+            ConversationName(sessionID: sessionID, cwd: cwd, name: submitted),
             at: 0
         )
         return next

@@ -107,6 +107,7 @@ struct TabListView: View {
                     ForEach(entries) { entry in
                         TabListRow(
                             entry: entry,
+                            color: color(of: entry.id),
                             isSelected: entry.id == model.selectedTabID,
                             isHighlighted: entry.id == highlighted,
                             choose: { choose(entry.id) }
@@ -183,6 +184,11 @@ struct TabListView: View {
         choose(id)
     }
 
+    private func color(of id: UUID) -> TabColor? {
+        guard let tab = model.tabs.first(where: { $0.id == id }) else { return nil }
+        return model.tabColor(for: tab)
+    }
+
     private func choose(_ id: UUID) {
         guard let chosen = TabListRows.selectedID(afterChoosing: id, in: entries) else { return }
         model.select(chosen)
@@ -194,6 +200,7 @@ struct TabListView: View {
 /// the folder and state in mono on the trailing side.
 private struct TabListRow: View {
     let entry: TabListEntry
+    let color: TabColor?
     let isSelected: Bool
     let isHighlighted: Bool
     let choose: () -> Void
@@ -233,9 +240,21 @@ private struct TabListRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .overlay(alignment: .leading) {
+            if let color {
+                TabColorMark(color: color)
+                    .padding(.vertical, 8)
+                    .padding(.leading, 2)
+            }
+        }
         .onHover { isHovering = $0 }
-        .accessibilityLabel(entry.label)
+        .accessibilityLabel(spokenLabel)
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+
+    private var spokenLabel: String {
+        guard let color else { return entry.label }
+        return "\(entry.label), \(color.label)"
     }
 
     private var fill: Color {

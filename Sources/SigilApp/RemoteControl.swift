@@ -29,6 +29,8 @@ final class RemoteControl {
     @ObservationIgnored private var stream = RemoteScreenStream()
     @ObservationIgnored private var changeTask: Task<Void, Never>?
     @ObservationIgnored private var changePending = false
+    @ObservationIgnored private var flushesInFlight = 0
+    @ObservationIgnored private var flushWaiters: [CheckedContinuation<Void, Never>] = []
     /// A deterministic socket-write pause for revocation race tests.
     @ObservationIgnored var afterPushRegistrationSend: (@MainActor () async -> Void)?
     @ObservationIgnored private var lastSentTabs: [RemoteState.Tab]?
@@ -532,6 +534,23 @@ final class RemoteControl {
         }
     }
 
+    /// Waits until every change noted so far has gone out, for ordering tests.
+    /// It waits for every flush, not only the change loop, so it holds even if flushes overlap.
+    func changesSent() async {
+        var finished: Task<Void, Never>?
+        while true {
+            // An early return leaves the finished task in place; do not wait on it again.
+            if let task = changeTask, task != finished {
+                await task.value
+                finished = task
+            } else if flushesInFlight > 0 {
+                await withCheckedContinuation { flushWaiters.append($0) }
+            } else {
+                return
+            }
+        }
+    }
+
     private func startWatching(
         _ command: RemoteRequest, model: AppModel, socket: URLSessionWebSocketTask, peer: String,
         session: RemoteSession
@@ -586,6 +605,14 @@ final class RemoteControl {
     }
 
     private func flushChanges() async {
+        flushesInFlight += 1
+        defer {
+            flushesInFlight -= 1
+            if flushesInFlight == 0 {
+                for waiter in flushWaiters { waiter.resume() }
+                flushWaiters = []
+            }
+        }
         guard let watcher, let model = watchedModel else { return }
         let tabs = RemoteCommands.visibleTabs(
             RemoteCommands.tabRecords(model), selectedID: model.selectedTab?.id.uuidString)
