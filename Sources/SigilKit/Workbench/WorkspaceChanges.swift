@@ -85,8 +85,6 @@ public enum WorkspaceChangesReading: Equatable, Sendable {
 /// working in the same checkout may need.
 public enum WorkspaceChangesReader {
     public static let fileLimit = 500
-    /// Git's empty tree, for a repository with no commit yet.
-    static let emptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
     public static func read(
         _ directory: URL, git: URL = URL(fileURLWithPath: "/usr/bin/git"), timeout: Duration = .seconds(5)
@@ -117,8 +115,18 @@ public enum WorkspaceChangesReader {
         }
         guard status.status == 0 else { return .failed(status.errorSummary) }
 
-        let hasCommit = run(["rev-parse", "--verify", "--quiet", "HEAD"])?.status == 0
-        guard let numstat = run(["diff", hasCommit ? "HEAD" : emptyTree, "--numstat", "-z", "-M"]) else {
+        var base = "HEAD"
+        if run(["rev-parse", "--verify", "--quiet", "HEAD"])?.status != 0 {
+            // No commit yet: diff against the empty tree, which Git names in
+            // the repository's own object format (SHA-1 or SHA-256).
+            guard let tree = run(["hash-object", "-t", "tree", "/dev/null"]) else {
+                return .failed("Git did not answer.")
+            }
+            guard tree.status == 0, let sha = tree.text.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
+            else { return .failed(tree.errorSummary) }
+            base = sha
+        }
+        guard let numstat = run(["diff", base, "--numstat", "-z", "-M"]) else {
             return .failed("Git did not answer.")
         }
         guard numstat.status == 0 else { return .failed(numstat.errorSummary) }

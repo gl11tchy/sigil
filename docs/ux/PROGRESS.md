@@ -144,6 +144,21 @@ untracked `\u{301}x.txt`. Review showed Modified main.tf +1 −6, Added notes.tx
 | `swift test --filter WorkspaceChangesTests`, after the `DA` fix | 24 tests passed |
 | `swift-format lint` on the two changed files | No findings |
 
+### A SHA-256 repository with no commit failed to read
+
+Found in the stand-in review of PR 137.
+
+| Defect | Reproduction before the fix | Fix | Proof after |
+|---|---|---|---|
+| With no commit, the reader diffed against a hard-coded empty tree, `4b825dc6…`. That is the SHA-1 name; a SHA-256 repository does not know it, so every SHA-256 repository with no commit read as `.failed` | Git 2.50.1: `git init --object-format=sha256`; write `f.txt` (2 lines); `git add f.txt`. `git diff 4b825dc642cb6eb9a060e54bf8d69288fbee4904 --numstat` exited 128 with `fatal: ambiguous argument '4b825dc6…': unknown revision or path not in the working tree.` In the same repository `git hash-object -t tree /dev/null` printed `6ef19b41…5321`, and a diff against it printed `2 0 f.txt` | With no commit, `readNow` asks Git for the empty tree with `git hash-object -t tree /dev/null` in the repository, so the name is in the repository's own object format. It runs through `GitOutput.run` with the same timeout. No answer, a non-zero exit or a blank name fails the read; there is no SHA-1 fallback. The constant is gone | `WorkspaceChangesTests.readsASHA256RepositoryWithNoCommitYet`: a SHA-256 repository with no commit and one staged 2-line file gives one row, Added first.txt +2 −0, head `trunk`. It failed before the fix with the `ambiguous argument` error. `aGitThatCannotNameTheEmptyTreeFailsTheRead`: a fake Git whose `hash-object` fails gives `.failed` with Git's message, so no guessed empty tree comes back. The SHA-1 no-commit test now sets `--object-format=sha1`, so a Git that defaults to SHA-256 cannot turn it into a second SHA-256 test (stand-in review nits on PR 138) |
+
+| Command | Result |
+|---|---|
+| `swift test --filter WorkspaceChangesTests`, before the fix | 20 tests; the 2 new ones failed as above (the fake-Git test got a diff exit instead of Git's message) |
+| `swift test --filter WorkspaceChangesTests`, after the fix | 20 tests passed |
+| `swift test --filter WorkspaceChangesTests`, after merging main with PR 137 | 26 tests passed |
+| `swift-format lint` on the two changed files | No findings |
+
 ### Journeys: baseline and slice
 
 The baseline is [baseline/BASELINE.md](baseline/BASELINE.md) (app at `2885af2`,

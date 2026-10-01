@@ -396,7 +396,7 @@ struct WorkspaceChangesTests {
     @Test func readsARepositoryWithNoCommitYet() async throws {
         let repo = try scratch()
         defer { try? FileManager.default.removeItem(at: repo) }
-        try git(["init", "-q", "-b", "trunk"], in: repo)
+        try git(["init", "-q", "--object-format=sha1", "-b", "trunk"], in: repo)
         try "x\ny\n".write(to: repo.appendingPathComponent("first.txt"), atomically: true, encoding: .utf8)
         try git(["add", "first.txt"], in: repo)
 
@@ -408,6 +408,25 @@ struct WorkspaceChangesTests {
         #expect(changes.files.map(\.path) == ["first.txt"])
         #expect(changes.files.first?.status == .added)
         #expect(changes.files.first?.added == 2)
+    }
+
+    @Test func readsASHA256RepositoryWithNoCommitYet() async throws {
+        let repo = try scratch()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        try git(["init", "-q", "--object-format=sha256", "-b", "trunk"], in: repo)
+        try "x\ny\n".write(to: repo.appendingPathComponent("first.txt"), atomically: true, encoding: .utf8)
+        try git(["add", "first.txt"], in: repo)
+
+        let reading = await WorkspaceChangesReader.read(repo)
+        guard case .changes(let changes) = reading else {
+            Issue.record("expected changes, got \(reading)")
+            return
+        }
+        #expect(changes.head == "trunk")
+        #expect(changes.files.map(\.path) == ["first.txt"])
+        #expect(changes.files.first?.status == .added)
+        #expect(changes.files.first?.added == 2)
+        #expect(changes.files.first?.removed == 0)
     }
 
     @Test func cleanRepositoryHasNoFiles() async throws {
@@ -439,6 +458,26 @@ struct WorkspaceChangesTests {
         defer { try? FileManager.default.removeItem(at: plain) }
         let missing = URL(fileURLWithPath: "/nonexistent/git")
         #expect(await WorkspaceChangesReader.read(plain, git: missing) == .failed("Git did not answer."))
+    }
+
+    @Test func aGitThatCannotNameTheEmptyTreeFailsTheRead() async throws {
+        let plain = try scratch()
+        defer { try? FileManager.default.removeItem(at: plain) }
+        // No commit, and `hash-object` fails. Any other command, such as a
+        // diff against a guessed empty tree, exits 2.
+        let fake = try fakeGit(
+            in: plain,
+            """
+            case "$3 $4" in
+            "rev-parse --is-inside-work-tree") echo true ;;
+            "status "*) ;;
+            "rev-parse --verify") exit 1 ;;
+            "hash-object "*) echo "fatal: no empty tree" >&2; exit 1 ;;
+            *) exit 2 ;;
+            esac
+
+            """)
+        #expect(await WorkspaceChangesReader.read(plain, git: fake) == .failed("fatal: no empty tree"))
     }
 
     @Test func aGitThatOutlivesTheDeadlineIsKilledAndFails() async throws {
