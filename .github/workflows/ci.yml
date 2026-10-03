@@ -53,13 +53,14 @@ jobs:
           restore-keys: |
             swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ hashFiles('Package.resolved') }}-
 
+      - name: Clear restored native verification evidence
+        if: always()
+        run: rm -rf .build/native-verification
+
       - name: Install shellcheck
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
         run: brew install shellcheck
-
-      - name: Clear restored native verification evidence
-        run: rm -rf .build/native-verification
 
       - name: Check Metal toolchain
         run: xcrun --sdk macosx metal --version

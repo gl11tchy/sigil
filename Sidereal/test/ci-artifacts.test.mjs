@@ -12,7 +12,8 @@ const step = name => steps.find(block => block.split('\n')[0] === name);
 test('restored result bundles are removed before any check without deleting build caches', t => {
   const cleanup = step('Clear restored native verification evidence');
   assert.ok(cleanup);
-  assert.ok(steps.indexOf(step('Restore Swift build cache')) < steps.indexOf(cleanup));
+  assert.equal(steps.indexOf(cleanup), steps.indexOf(step('Restore Swift build cache')) + 1);
+  assert.match(cleanup, /\n        if: always\(\)\n/);
   assert.ok(steps.indexOf(cleanup) < steps.indexOf(step('Verify')));
   const directory = mkdtempSync(join(tmpdir(), 'sigil-ci-artifacts-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
