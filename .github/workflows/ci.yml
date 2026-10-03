@@ -58,6 +58,9 @@ jobs:
           HOMEBREW_NO_AUTO_UPDATE: "1"
         run: brew install shellcheck
 
+      - name: Clear restored native verification evidence
+        run: rm -rf .build/native-verification
+
       - name: Check Metal toolchain
         run: xcrun --sdk macosx metal --version
 
@@ -72,6 +75,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: iPhone-native-verification
+          retention-days: 7
           path: .build/native-verification/*.xcresult
           if-no-files-found: error
 
@@ -84,18 +88,12 @@ jobs:
         run: Scripts/build-app.sh
 
       - name: Zip the app
+        id: zip_app
         if: github.event_name != 'pull_request'
         run: ditto -c -k --keepParent dist/Sigil.app dist/Sigil.zip
 
-      - name: Upload app zip
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Sigil.app
-          path: dist/Sigil.zip
-          if-no-files-found: error
-
       - name: Publish latest GitHub Release
+        id: publish_release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -120,3 +118,12 @@ jobs:
               || ! gh release view "$old" >/dev/null 2>&1 \
               || echo "::warning::could not delete release $old"
           done
+
+      - name: Upload app zip
+        if: ${{ !cancelled() && steps.zip_app.outcome == 'success' && steps.publish_release.outcome != 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sigil.app
+          retention-days: 7
+          path: dist/Sigil.zip
+          if-no-files-found: error
