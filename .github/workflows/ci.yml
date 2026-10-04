@@ -69,6 +69,8 @@ jobs:
         run: Scripts/verify.sh
 
       - name: iPhone app, shipping extensions, and native relay tests
+        env:
+          SIGIL_NATIVE_ARTIFACTS: ${{ runner.temp }}/sigil-native-${{ github.run_id }}-${{ github.run_attempt }}
         run: iOS/scripts/ci.sh
 
       - name: Upload native verification evidence
@@ -77,7 +79,7 @@ jobs:
         with:
           name: iPhone-native-verification
           retention-days: 7
-          path: .build/native-verification/*.xcresult
+          path: ${{ runner.temp }}/sigil-native-${{ github.run_id }}-${{ github.run_attempt }}/*.xcresult
           if-no-files-found: error
 
       - name: Build release bundle
