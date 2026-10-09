@@ -13,11 +13,14 @@ struct SidebarVersionNoticeTests {
         _ = NSApplication.shared
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
+        // These generated projects live under the temporary root and must survive the ephemeral-path filter.
+        fixture.settings.showWorktreeSessions = true
         for index in 0..<8 {
             let folder = try fixture.directory("project-\(index)")
             try fixture.writeListedSession(id: "session-\(index)", cwd: folder.path)
         }
         await fixture.store.reload()
+        try #require(fixture.store.sessions.count == 8)
 
         func model(versions: [CLIProvider: String]) -> AppModel {
             AppModel(
@@ -33,7 +36,9 @@ struct SidebarVersionNoticeTests {
         let checked = model(versions: [:])
         checked.archive(try #require(fixture.store.sessions.first))
         let newer = model(versions: [.claudeCode: "2.2.0", .codex: "0.160.0", .grokBuild: "1.0.41"])
-        #expect(newer.sidebarSnapshot().destinations.archivedCount == 1)
+        let snapshot = newer.sidebarSnapshot()
+        try #require(snapshot.destinations == .init(recentsCount: 7, archivedCount: 1))
+        try #require(snapshot.projects.count == 7)
         let baseline = host(checked)
         defer { baseline.window.close() }
         let notices = host(newer)

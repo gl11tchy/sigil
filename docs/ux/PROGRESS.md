@@ -10,7 +10,8 @@ The Codex minor-version cap and installed-versus-checked notices are recorded in
 [the ticket verification record](../qa/rea-1214.md). Synthetic history and lifecycle
 checks passed. Version notices now share the history scroll area. New Session
 rendering and the 200pt × 460pt sidebar regression are covered by CI-only app
-tests; the new sidebar fixture compiled locally and awaits CI execution. The
+tests. CI exposed a fixture filter omission; the corrected fixture requires all
+synthetic rows and navigation counts, compiled locally, and awaits CI execution. The
 local AX and screenshot attempt did not produce usable visual evidence. No UX mission or
 new-tab identity-binding change is claimed by this ticket.
 
