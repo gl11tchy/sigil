@@ -12,12 +12,15 @@ checks passed. Version notices now share the history scroll area. New Session
 rendering and the 200pt × 460pt sidebar regression are covered by CI-only app
 tests. CI proved the fixture's data, viewport and scrolling checks after its filter
 correction. The exported-tree walker reached only the window and empty hosting
-group in CI; all three notice assertions failed. A diagnostic-only addition now
-compiles plain SwiftUI and native control checks alongside read-only host state,
-preserving all original assertions. It awaits one exact-head CI observation; no
-accessibility repair or product exposure is claimed. The
-local AX and screenshot attempt did not produce usable visual evidence. No UX mission or
-new-tab identity-binding change is claimed by this ticket.
+group in CI; all three notice assertions failed. The independent diagnostic
+controls also failed in the command-line host, which reported no running app
+loop. A dedicated CI-only SwiftUI app host now owns startup and event processing.
+All data, viewport, scrolling, control and notice assertions remain. The native
+control identifier moved to its exported NSButtonCell. Compile-only host and
+configuration checks passed, as did all 28 focused non-UI tests. Exact-head CI
+evidence remains; no product accessibility repair or exposure is
+claimed. The local AX and screenshot attempt did not produce usable visual
+evidence. No UX mission or new-tab identity-binding change is claimed by this ticket.
 
 ## Mission status
 

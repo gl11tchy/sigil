@@ -10,8 +10,8 @@ import Testing
 struct SidebarVersionNoticeTests {
     /// CI only: this hosts SwiftUI in a window, using generated history and fake installations.
     @Test func threeNoticesPreserveTheListViewportInANarrowShortSidebar() async throws {
-        _ = NSApplication.shared
-        let fixture = try ModelFixture()
+        try #require(NSApplication.shared.isRunning, "The fixture requires the SwiftUI app-host event loop")
+        let fixture = try SidebarFixture()
         defer { fixture.cleanup() }
         // These generated projects live under the temporary root and must survive the ephemeral-path filter.
         fixture.settings.showWorktreeSessions = true
@@ -46,7 +46,8 @@ struct SidebarVersionNoticeTests {
                 rootView: AccessibilityControl { controlAccessibilityEnabled = $0 }))
         defer { control.window.close() }
         let nativeButton = NSButton(title: "Native diagnostic button", target: nil, action: nil)
-        nativeButton.setAccessibilityIdentifier("diagnostic-native-button")
+        let nativeCell = try #require(nativeButton.cell as? NSButtonCell)
+        nativeCell.setAccessibilityIdentifier("diagnostic-native-button")
         let nativeControl = host(nativeButton)
         defer { nativeControl.window.close() }
         let baseline = host(checked)
@@ -201,5 +202,59 @@ private struct AccessibilityControl: View {
         }
         .onAppear { observe(accessibilityEnabled) }
         .onChange(of: accessibilityEnabled) { _, enabled in observe(enabled) }
+    }
+}
+
+/// This single hosted test needs only generated Grok rows and a fake executable.
+@MainActor
+private final class SidebarFixture {
+    let root: URL
+    let executable: URL
+    let defaults: UserDefaults
+    let settings: AppSettings
+    let store: SessionStore
+    let notesRoot: URL
+    private let defaultsName = "SigilSidebarHostTests.\(UUID().uuidString)"
+    private let oldGrokHome: String?
+
+    init() throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let grokHome = root.appendingPathComponent("grok-home")
+        oldGrokHome = ProcessInfo.processInfo.environment["GROK_HOME"]
+        setenv("GROK_HOME", grokHome.path, 1)
+        executable = root.appendingPathComponent("fake-grok")
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        defaults = UserDefaults(suiteName: defaultsName)!
+        settings = AppSettings(defaults: defaults)
+        settings.showOtherAppSessions = true
+        settings.executablePath = executable.path
+        store = SessionStore(root: grokHome.appendingPathComponent("sessions"))
+        notesRoot = root.appendingPathComponent("notes")
+    }
+
+    func directory(_ name: String) throws -> URL {
+        let url = root.appendingPathComponent(name).resolvingSymlinksInPath()
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    func writeListedSession(id: String, cwd: String) throws {
+        let directory = GrokPaths.sessionDirectory(cwd: cwd, sessionID: id)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let summary: [String: Any] = [
+            "info": ["id": id, "cwd": cwd], "session_summary": "Session",
+            "created_at": "2026-08-01T00:00:00Z", "updated_at": "2026-08-01T00:00:00Z",
+            "num_chat_messages": 4,
+        ]
+        try JSONSerialization.data(withJSONObject: summary).write(
+            to: directory.appendingPathComponent("summary.json"), options: .atomic)
+    }
+
+    func cleanup() {
+        if let oldGrokHome { setenv("GROK_HOME", oldGrokHome, 1) } else { unsetenv("GROK_HOME") }
+        defaults.removePersistentDomain(forName: defaultsName)
+        try? FileManager.default.removeItem(at: root)
     }
 }

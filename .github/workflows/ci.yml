@@ -66,7 +66,18 @@ jobs:
         run: xcrun --sdk macosx metal --version
 
       - name: Verify
+        env:
+          SIGIL_SIDEBAR_ARTIFACTS: ${{ runner.temp }}/sigil-sidebar-${{ github.run_id }}-${{ github.run_attempt }}
         run: Scripts/verify.sh
+
+      - name: Upload sidebar app-hosted verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidebar-app-hosted-verification
+          retention-days: 7
+          path: ${{ runner.temp }}/sigil-sidebar-${{ github.run_id }}-${{ github.run_attempt }}/*.xcresult
+          if-no-files-found: warn
 
       - name: iPhone app, shipping extensions, and native relay tests
         env:

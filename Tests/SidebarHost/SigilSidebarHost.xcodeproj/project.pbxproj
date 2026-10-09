@@ -1,0 +1,270 @@
+// !$*UTF8*$!
+{
+    archiveVersion = 1;
+    classes = {
+    };
+    objectVersion = 77;
+    objects = {
+        A00000000000000000000001 = {
+            isa = PBXProject;
+            attributes = {
+                LastUpgradeCheck = 2600;
+                TargetAttributes = {
+                    A00000000000000000000010 = {
+                        CreatedOnToolsVersion = 26.0;
+                    };
+                    A00000000000000000000020 = {
+                        CreatedOnToolsVersion = 26.0;
+                        TestTargetID = A00000000000000000000010;
+                    };
+                };
+            };
+            buildConfigurationList = A00000000000000000000002;
+            compatibilityVersion = "Xcode 16.0";
+            developmentRegion = en;
+            knownRegions = (
+                en,
+                Base
+            );
+            mainGroup = A00000000000000000000003;
+            productRefGroup = A00000000000000000000004;
+            projectDirPath = "";
+            projectRoot = "";
+            packageReferences = (
+                A00000000000000000000040
+            );
+            targets = (
+                A00000000000000000000010,
+                A00000000000000000000020
+            );
+        };
+        A00000000000000000000002 = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                A00000000000000000000005
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Debug;
+        };
+        A00000000000000000000003 = {
+            isa = PBXGroup;
+            children = (
+                A00000000000000000000006,
+                A00000000000000000000007,
+                A00000000000000000000008,
+                A00000000000000000000004
+            );
+            sourceTree = "<group>";
+        };
+        A00000000000000000000004 = {
+            isa = PBXGroup;
+            children = (
+                A00000000000000000000011,
+                A00000000000000000000021
+            );
+            name = Products;
+            sourceTree = "<group>";
+        };
+        A00000000000000000000005 = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                SDKROOT = macosx;
+                ONLY_ACTIVE_ARCH = YES;
+                COPY_PHASE_STRIP = NO;
+                ALWAYS_SEARCH_USER_PATHS = NO;
+                CLANG_ENABLE_MODULES = YES;
+                MACOSX_DEPLOYMENT_TARGET = 14.0;
+                SWIFT_VERSION = 6.0;
+                SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+                SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+                ENABLE_TESTABILITY = YES;
+                CODE_SIGN_IDENTITY = "-";
+                CODE_SIGN_STYLE = Manual;
+            };
+            name = Debug;
+        };
+        A00000000000000000000006 = {
+            isa = PBXFileSystemSynchronizedRootGroup;
+            exceptions = (
+                A00000000000000000000009
+            );
+            path = ../../Sources/SigilApp;
+            sourceTree = "<group>";
+        };
+        A00000000000000000000007 = {
+            isa = PBXFileReference;
+            lastKnownFileType = sourcecode.swift;
+            path = HostApp.swift;
+            sourceTree = "<group>";
+        };
+        A00000000000000000000008 = {
+            isa = PBXFileReference;
+            lastKnownFileType = sourcecode.swift;
+            path = ../SigilAppTests/SidebarVersionNoticeTests.swift;
+            sourceTree = "<group>";
+        };
+        A00000000000000000000009 = {
+            isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+            membershipExceptions = (
+                SigilApp.swift
+            );
+            target = A00000000000000000000010;
+        };
+        A00000000000000000000010 = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = A00000000000000000000012;
+            buildPhases = (
+                A00000000000000000000013,
+                A00000000000000000000014
+            );
+            buildRules = (
+            );
+            dependencies = (
+            );
+            fileSystemSynchronizedGroups = (
+                A00000000000000000000006
+            );
+            name = SigilSidebarFixtureHost;
+            packageProductDependencies = (
+                A00000000000000000000041
+            );
+            productName = SigilSidebarFixtureHost;
+            productReference = A00000000000000000000011;
+            productType = "com.apple.product-type.application";
+        };
+        A00000000000000000000011 = {
+            isa = PBXFileReference;
+            explicitFileType = wrapper.application;
+            includeInIndex = 0;
+            path = SigilSidebarFixtureHost.app;
+            sourceTree = BUILT_PRODUCTS_DIR;
+        };
+        A00000000000000000000012 = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                A00000000000000000000015
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Debug;
+        };
+        A00000000000000000000013 = {
+            isa = PBXSourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                A00000000000000000000016
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+        A00000000000000000000014 = {
+            isa = PBXFrameworksBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                A00000000000000000000017
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+        A00000000000000000000015 = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                PRODUCT_NAME = "$(TARGET_NAME)";
+                PRODUCT_MODULE_NAME = SigilApp;
+                PRODUCT_BUNDLE_IDENTIFIER = com.gl11tchy.sigil.sidebar-fixture-host;
+                GENERATE_INFOPLIST_FILE = YES;
+                INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+                INFOPLIST_KEY_CFBundleDisplayName = "Sigil Sidebar Fixture Host";
+            };
+            name = Debug;
+        };
+        A00000000000000000000016 = {
+            isa = PBXBuildFile;
+            fileRef = A00000000000000000000007;
+        };
+        A00000000000000000000017 = {
+            isa = PBXBuildFile;
+            productRef = A00000000000000000000041;
+        };
+        A00000000000000000000020 = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = A00000000000000000000022;
+            buildPhases = (
+                A00000000000000000000023,
+                A00000000000000000000024
+            );
+            buildRules = (
+            );
+            dependencies = (
+                A00000000000000000000025
+            );
+            name = SigilSidebarHostTests;
+            productName = SigilSidebarHostTests;
+            productReference = A00000000000000000000021;
+            productType = "com.apple.product-type.bundle.unit-test";
+        };
+        A00000000000000000000021 = {
+            isa = PBXFileReference;
+            explicitFileType = wrapper.cfbundle;
+            includeInIndex = 0;
+            path = SigilSidebarHostTests.xctest;
+            sourceTree = BUILT_PRODUCTS_DIR;
+        };
+        A00000000000000000000022 = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                A00000000000000000000027
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Debug;
+        };
+        A00000000000000000000023 = {
+            isa = PBXSourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                A00000000000000000000028
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+        A00000000000000000000024 = {
+            isa = PBXFrameworksBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+        A00000000000000000000025 = {
+            isa = PBXTargetDependency;
+            target = A00000000000000000000010;
+            targetProxy = A00000000000000000000026;
+        };
+        A00000000000000000000026 = {
+            isa = PBXContainerItemProxy;
+            containerPortal = A00000000000000000000001;
+            proxyType = 1;
+            remoteGlobalIDString = A00000000000000000000010;
+            remoteInfo = SigilSidebarFixtureHost;
+        };
+        A00000000000000000000027 = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                PRODUCT_NAME = "$(TARGET_NAME)";
+                PRODUCT_BUNDLE_IDENTIFIER = com.gl11tchy.sigil.sidebar-fixture-tests;
+                GENERATE_INFOPLIST_FILE = YES;
+                BUNDLE_LOADER = "$(TEST_HOST)";
+                TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SigilSidebarFixtureHost.app/Contents/MacOS/SigilSidebarFixtureHost";
+            };
+            name = Debug;
+        };
+        A00000000000000000000028 = {
+            isa = PBXBuildFile;
+            fileRef = A00000000000000000000008;
+        };
+        A00000000000000000000040 = {
+            isa = XCLocalSwiftPackageReference;
+            relativePath = ../..;
+        };
+        A00000000000000000000041 = {
+            isa = XCSwiftPackageProductDependency;
+            productName = SigilKit;
+        };
+    };
+    rootObject = A00000000000000000000001;
+}
