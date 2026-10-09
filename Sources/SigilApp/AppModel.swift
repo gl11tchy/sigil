@@ -111,6 +111,7 @@ final class AppModel {
     typealias ProviderProbe = @Sendable (CLIProvider, URL?) async -> ProviderInstallation
     @ObservationIgnored private let providerProbe: ProviderProbe
     @ObservationIgnored private var providerCheckGeneration = UUID()
+    @ObservationIgnored private(set) var codexBindingTask: Task<Void, Never>?
 
     init(
         settings: AppSettings = AppSettings(),
@@ -968,11 +969,14 @@ final class AppModel {
     /// A Codex tab can be renamed and colored before its chat id exists.
     /// Those values move onto the chat once the id is known, or the next
     /// summary replaces the name and the color disappears.
-    func adoptLearnedCodexSession(_ tab: TerminalTab, session: GrokSession) {
+    private func adoptLearnedCodexSession(
+        _ tab: TerminalTab, session: GrokSession, generation: ChildProcessGeneration? = nil
+    ) {
         let chosenName = tab.sessionTitle
         let chosenColor = tab.markColor
         tab.learnedSessionReference = ProviderSessionReference(
             provider: .codex, sessionID: session.nativeSessionID, cwd: tab.workingDirectory.path)
+        tab.codexBindingGeneration = generation
         if let chosenName, chosenName != tab.automaticTitle {
             renameTab(tab, to: chosenName)
         }
@@ -980,34 +984,109 @@ final class AppModel {
             setTabColor(tab, to: chosenColor)
             tab.markColor = nil
         }
+        settings.recordSigilConversations([session.id])
+        persistOpenTabs()
+        remoteControl.noteChange()
+        remoteControl.noteTab(tab, model: self)
     }
 
-    /// Codex picks its own id for a new chat, so a new Codex tab is matched to
-    /// the first Codex chat that appears in its folder after it launched. The
-    /// tab then knows its chat, so the row shows as open and it can restore.
-    private func recordStartedCodexSessions() {
-        let waiting =
-            tabs
-            .filter { $0.spec.provider == .codex && $0.sessionReference == nil }
-            .sorted { $0.launchedAt < $1.launchedAt }
-        guard !waiting.isEmpty else { return }
-        var claimed = Set(tabs.compactMap(\.sessionID))
-        for tab in waiting {
-            let folder = GrokPaths.canonicalPath(tab.workingDirectory.path)
-            let match = store.sessions
-                .filter {
-                    $0.provider == .codex && !claimed.contains($0.id)
-                        && !settings.isSigilConversation($0.id)
-                        && $0.createdAt >= tab.launchedAt.addingTimeInterval(-5)
-                        && GrokPaths.canonicalPath($0.cwd) == folder
-                }
-                .min { $0.createdAt < $1.createdAt }
-            guard let match else { continue }
-            adoptLearnedCodexSession(tab, session: match)
-            claimed.insert(match.id)
-            settings.recordSigilConversations([match.id])
-            persistOpenTabs()
+    /// Each waiting tab needs its own process-generation-scoped file proof.
+    /// A newer scan cancels pending results; closed/stopped/replaced tabs cannot
+    /// receive a result from an earlier process. Filesystem work stays off UI.
+    func recordStartedCodexSessions() {
+        codexBindingTask?.cancel()
+        codexBindingTask = nil
+        guard let historyRoot = store.codexHistoryRoot else { return }
+        let waiting = tabs.compactMap { tab -> (UUID, ChildProcessGeneration, URL)? in
+            guard tab.spec.provider == .codex,
+                tab.sessionReference == nil || tab.codexBindingGeneration != nil, tab.controller.isRunning,
+                let generation = tab.controller.processGeneration
+            else { return nil }
+            return (tab.id, generation, tab.workingDirectory)
         }
+        guard !waiting.isEmpty else { return }
+        let sessions = store.sessions
+        codexBindingTask = Task { [weak self] in
+            let matches = await Task.detached(priority: .utility) {
+                waiting.compactMap { id, generation, cwd -> (UUID, ChildProcessGeneration, GrokSession)? in
+                    guard
+                        let match = CodexSessionBinding.resolve(
+                            process: generation, historyRoot: historyRoot, sessions: sessions, workingDirectory: cwd)
+                    else { return nil }
+                    return (id, generation, match)
+                }
+            }.value
+            guard !Task.isCancelled, let self else { return }
+            self.codexBindingTask = nil
+            // Two process trees holding the same conversation are ambiguous,
+            // regardless of tab order. Neither gets to claim it first.
+            let claims = Dictionary(grouping: matches, by: { $0.2.id })
+            let unambiguous = matches.filter { claims[$0.2.id]?.count == 1 }
+            for (id, generation, _) in waiting {
+                guard let tab = self.tabs.first(where: { $0.id == id }), tab.controller.isRunning,
+                    tab.controller.processGeneration == generation, tab.codexBindingGeneration == generation,
+                    unambiguous.first(where: { $0.0 == id })?.2.id != tab.sessionID
+                else { continue }
+                // `/new` can leave several files open. Earlier proof must not
+                // keep presenting the old conversation as this live process.
+                tab.markColor = self.tabColor(for: tab)
+                tab.learnedSessionReference = nil
+                tab.codexBindingGeneration = nil
+                self.persistOpenTabs()
+                self.remoteControl.noteChange()
+                self.remoteControl.noteTab(tab, model: self)
+            }
+            for (id, generation, session) in unambiguous {
+                guard let tab = self.tabs.first(where: { $0.id == id }), tab.controller.isRunning,
+                    tab.controller.processGeneration == generation, tab.sessionReference == nil,
+                    self.canLinkCodexSession(session, to: tab)
+                else { continue }
+                self.adoptLearnedCodexSession(tab, session: session, generation: generation)
+            }
+        }
+    }
+
+    /// Folder matching narrows a user-choice menu only. It never binds a tab.
+    func codexLinkCandidates(for tab: TerminalTab) -> [GrokSession] {
+        guard tab.spec.provider == .codex, tab.sessionReference == nil, tabs.contains(where: { $0 === tab }) else {
+            return []
+        }
+        let claimed = Set(tabs.compactMap(\.sessionID))
+        let counts = Dictionary(grouping: store.sessions, by: \.id)
+        return store.sessions.filter {
+            $0.provider == .codex && !$0.isSubagent && !claimed.contains($0.id)
+                && counts[$0.id]?.count == 1 && samePath($0.cwd, tab.workingDirectory.path)
+        }
+    }
+
+    private func canLinkCodexSession(_ session: GrokSession, to tab: TerminalTab) -> Bool {
+        session.provider == .codex && !session.isSubagent && samePath(session.cwd, tab.workingDirectory.path)
+            && !tabs.contains(where: { $0.sessionID == session.id })
+            && store.sessions.filter({ $0.id == session.id }).count == 1
+            && store.sessions.contains(where: {
+                $0.id == session.id && $0.directory == session.directory && samePath($0.cwd, session.cwd)
+            })
+    }
+
+    /// Called only by the explicit "Link this tab…" user action. Revalidate
+    /// the envelope and the still-open target after the asynchronous read.
+    @discardableResult
+    func linkCodexSession(_ session: GrokSession, to tabID: UUID) async -> Bool {
+        guard let tab = tabs.first(where: { $0.id == tabID }),
+            codexLinkCandidates(for: tab).contains(where: { $0 == session })
+        else { return false }
+        let validated = await Task.detached(priority: .utility) {
+            CodexSessionBinding.validateForExplicitLink(session)
+        }.value
+        guard tabs.contains(where: { $0 === tab }), tab.sessionReference == nil,
+            canLinkCodexSession(session, to: tab)
+        else { return false }
+        guard let validated else {
+            showError(title: "Conversation is unavailable", message: "Read history again, then try linking this tab.")
+            return false
+        }
+        adoptLearnedCodexSession(tab, session: validated)
+        return true
     }
 
     /// One-time move of UserDefaults folder notes onto per-conversation files.
@@ -2220,6 +2299,8 @@ final class AppModel {
     /// left to finish an asynchronous kill. Does not persist — the last user
     /// mutation already wrote the tabs that should come back next launch.
     func closeAllTabsAndWait() {
+        codexBindingTask?.cancel()
+        codexBindingTask = nil
         remoteControl.stop()
         stopTabMessaging()
         panel.closeShellAndWait()

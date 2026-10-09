@@ -13,6 +13,8 @@ public final class TerminalController {
 
     /// False once the child process exits.
     public private(set) var isRunning: Bool = false
+    /// Captured at spawn. It is never learned later from a possibly reused PID.
+    public private(set) var processGeneration: ChildProcessGeneration?
 
     /// Called when the child exits, with its exit code when one is available.
     public var onTerminate: ((Int32?) -> Void)?
@@ -114,6 +116,7 @@ public final class TerminalController {
         isRunning = terminalView.isProcessRunning
         let pid = terminalView.hostedPid
         childPid.withLock { $0 = pid }
+        processGeneration = spec.provider == .codex && isRunning ? ProcessOpenFiles.ownedChild(pid) : nil
     }
 
     /// Spawns a plain login shell with `spec`. Does nothing if already running.
@@ -137,6 +140,7 @@ public final class TerminalController {
         isRunning = terminalView.isProcessRunning
         let pid = terminalView.hostedPid
         childPid.withLock { $0 = pid }
+        processGeneration = nil
     }
 
     /// Stops the child: SIGTERM first, then SIGKILL if it is still there.
@@ -146,6 +150,7 @@ public final class TerminalController {
     /// that window can be lost — leaving an orphaned `grok` behind. So the signal
     /// is repeated, then escalated.
     public func terminate() {
+        processGeneration = nil
         reportsActivity = false
         activityFlushTask?.cancel()
         activityFlushTask = nil
@@ -193,6 +198,7 @@ public final class TerminalController {
     /// Stops the child without returning until it is gone. Used when the app is
     /// quitting, where there is no run loop left to finish an async escalation.
     public func terminateAndWait(timeout: Duration = .milliseconds(1500)) {
+        processGeneration = nil
         let pid = childPid.withLock { pid in
             let current = pid
             pid = 0
@@ -850,6 +856,7 @@ extension TerminalController {
         updateAccessibilitySnapshot()
         isRunning = false
         escalationTask?.cancel()
+        processGeneration = nil
         escalationTask = nil
         childPid.withLock { $0 = 0 }
         reportsActivity = false

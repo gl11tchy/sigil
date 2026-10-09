@@ -24,9 +24,31 @@ The host sends those contextual capabilities to the phone clients.
 | Verified structured remote approval | No | No | No | No |
 
 Codex allocates its own native ID. Sigil does not turn a tab UUID, a recent file,
-or a working-directory match into a conversation ID. A newly launched Codex tab
-cannot be restored or safely restarted until opened from its discovered native
-history. The original transcript remains owned by Codex.
+or a working-directory/time match into a conversation ID. Automatic binding of a
+new Codex tab requires a captured kernel PID/birth identity for its own direct
+child, a stable descendant tree, and exactly one held JSONL file below the
+store's captured Codex history root. That file must be writable, created since
+the child started, and match the discovered rollout's exact canonical path,
+device and inode. A fresh supported session envelope must agree on its native ID
+and project path. Kernel identity/file snapshots must agree before and after
+validation; npm-style shims may supply evidence through their descendants.
+
+Missing, denied, partial or changing evidence leaves the tab without identity.
+Multiple held rollouts remain ambiguous, including unreadable or unsupported
+ones; file recency and tab order never choose one. Reused PIDs, reparented
+descendants and closed/replaced tabs cannot inherit an earlier observation.
+Automatic live bindings are rechecked on scans: `/new` ambiguity removes the
+live reference and saved-open entry, while keeping the earlier history and names.
+
+An unbound Codex tab offers **Link Conversation…** in Session actions. Each
+same-folder history choice explicitly asks to link that tab to the named native
+conversation. The click revalidates its envelope and still-open target; a
+conversation already bound to another tab or duplicated in history is excluded.
+Until process proof or an explicit user link succeeds, the existing unknown-ID
+Restart message remains and the tab is not saved for restoration. Opening a
+known conversation from history still resumes it normally. Linking does not
+start another process or certify turn completion (REA-1218). The original
+transcript remains owned by Codex.
 
 A failed resume never falls back to a new conversation. Missing projects,
 inaccessible history, unavailable executables, and authentication errors retain

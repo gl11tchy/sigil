@@ -105,6 +105,10 @@ enum NativeSessionScanner {
     private static func boundedContents(_ file: URL, size: UInt64) throws -> Data {
         let handle = try FileHandle(forReadingFrom: file)
         defer { try? handle.close() }
+        return try boundedContents(handle, size: size)
+    }
+
+    static func boundedContents(_ handle: FileHandle, size: UInt64) throws -> Data {
         var data = try handle.read(upToCount: prefixLimit) ?? Data()
         if size > UInt64(prefixLimit) {
             // Discard the partial prefix record rather than concatenate unrelated JSON.

@@ -196,44 +196,26 @@ struct TabRenameTests {
     }
 
     @Test func aCodexTabKeepsTheNameAndColorItHadBeforeItsChatId() async throws {
-        let fixture = try ModelFixture()
+        let fixture = try CodexBindingFixture()
         defer { fixture.cleanup() }
-        let folder = try fixture.directory("project")
-        let native = UUID().uuidString.lowercased()
-        let script = ScriptedSessions()
-        script.sessions = [
-            GrokSession(
-                id: native, cwd: folder.path, summary: "CLI summary",
-                createdAt: .now, updatedAt: .now, messageCount: 1,
-                modelID: nil, agentName: nil, reasoningEffort: nil,
-                directory: folder, provider: .codex)
-        ]
-        let store = SessionStore(
-            root: fixture.store.root, timing: SessionStoreTiming(),
-            scanOperation: { _, _, _ in
-                SessionScanner.Result(sessions: script.sessions, cache: [:], loadError: nil)
-            })
-        try FileManager.default.createDirectory(at: fixture.store.root, withIntermediateDirectories: true)
-        await store.reload()
-
-        let model = fixture.model(store: store)
-        defer { model.closeAllTabsAndWait() }
-        let tab = TerminalTab(
-            spec: GrokLaunchSpec(
-                workingDirectory: folder, mode: .new(sessionID: UUID()), provider: .codex),
-            settings: fixture.settings)
+        let folder = fixture.cwd
+        let model = fixture.model
+        let tab = try await fixture.newTab()
         model.renameTab(tab, to: "Auth")
         model.setTabColor(tab, to: .amber)
-        model.adoptLearnedCodexSession(tab, session: script.sessions[0])
+        let native = try await fixture.prompt(tab)
+        await fixture.store.reload()
+        await fixture.awaitBinding()
 
+        #expect(tab.nativeSessionID == native)
         #expect(model.title(for: tab) == "Auth")
         #expect(model.tabColor(for: tab) == .amber)
         #expect(model.hasCustomTabName(tab))
         #expect(
-            fixture.settings.conversationNames
+            fixture.source.settings.conversationNames
                 == [ConversationName(sessionID: "codex:\(native)", cwd: folder.path, name: "Auth")])
         #expect(
-            fixture.settings.tabColors
+            fixture.source.settings.tabColors
                 == [TabColorRecord(sessionID: "codex:\(native)", cwd: folder.path, color: .amber)])
     }
 

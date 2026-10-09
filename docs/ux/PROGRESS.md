@@ -258,6 +258,37 @@ wired to the existing New Session sheet, `restartTab`, `closeTab`,
 
 ## Resume
 
+### REA-1216 — Codex tab identity (2026-10-09)
+
+- Reproduced both defects with the unchanged `recordStartedCodexSessions`
+  method extracted into a synthetic Swift harness: a same-folder outside
+  writer was adopted, and reversed first use swapped two tabs' conversations.
+  This was a selector reproduction, not an AppModel/UI runtime test.
+- Replaced folder/time automatic adoption with scoped child-generation and
+  exact held-rollout evidence. Device/inode and fresh native metadata must
+  agree. Before/after process, descendant and file observations must agree;
+  missing/denied evidence and multiple held files remain unbound.
+- Added an explicit **Link Conversation…** choice to the shipping Session
+  actions menu. The click revalidates the history envelope and target tab;
+  unknown-ID Restart behavior and lifecycle-journal boundaries are retained.
+- A generated own-child C probe passed `proc_pidinfo`, `proc_listchildpids`
+  and `proc_pidfdinfo` under existing permissions. The libproc Swift code
+  type-checked against the installed SDK. No personal history or real CLI
+  prompt was read/run; no entitlements changed.
+- Local focused `swift test --no-parallel --jobs 2 --filter
+  ProcessOpenFilesTests` stopped before tests at `sandbox-exec: sandbox_apply:
+  Operation not permitted`. Static module compilation reached the same nested
+  sandbox restriction in the Observation macro host. Neither gate was retried
+  with broader permissions. Regression execution and integrated verification
+  are required in CI; no local AppModel test, hosted UI smoke, installation or
+  release was run. The previous process-inventory denial remains untouched.
+- Tests cover scoped outside writers, reversed first use, same-folder tabs,
+  shims/descendants, reused/reparented/new descendants, old writable files,
+  initial and later `/new` ambiguity,
+  replaced/stale envelopes, explicit linking and closed tabs. Limits: this is
+  bounded kernel file evidence, not a documented Codex active-session API or
+  proof of turn completion. Actual authenticated Codex behavior is untested.
+
 ```bash
 Scripts/workbench/build.sh
 Scripts/workbench/matrix.sh docs/ux/slice
