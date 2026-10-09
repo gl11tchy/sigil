@@ -4,6 +4,26 @@ The resumable record for the [experience contract](EXPERIENCE.md). Each entry
 says what was built, how it was checked, what the check showed, and what is
 still open. Nothing here is a timing; counts are counted actions.
 
+## REA-1195: outside note edits
+
+Built from `2c99cda` in a separate worktree; blocked PR #140 remains untouched.
+Temporary Markdown fixtures reproduced two failures before the fix: idle atomic
+replacement stayed stale, and a queued local save overwrote outside text without
+a conflict file. The first run had 15 passing tests and those two failures.
+
+Notes now observe directory/replace events, compare identity plus bytes, preserve
+the current outside revision before saving dirty local text, and expose concise
+saved/unsaved conflict notices in the panel. The 300ms debounce remains; cached
+reads and keystrokes do not add disk reads. Failed preservation keeps disk and
+both drafts safe; Retry uses the same preservation path.
+
+Verification: 37 focused notes/watcher tests passed, then the final 524 SigilKit
+tests passed in 27.995 seconds. An inverted conflict condition made the preservation
+regression fail; the source was restored. Strict Swift formatting and diff checks
+passed. CI results are recorded in the PR. Tests use a throwaway home and temporary notes. SigilAppTests and hosted UI run only in CI;
+no local UI smoke, daily-app replacement, personal notes or provider transcripts.
+The notes contract and limits are in [provider capabilities](../provider-capabilities.md#conversation-notes).
+
 ## Mission status
 
 | ID | State | Evidence or boundary |

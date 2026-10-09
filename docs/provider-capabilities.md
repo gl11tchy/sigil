@@ -96,6 +96,25 @@ A finished alert means the observed provider turn ended. It does not prove that
 its requested programming work passed tests or achieved its goal. Failed process
 exits and normal process stops are distinct from finished turns.
 
+## Conversation notes
+
+Notes remain plain Markdown in Sigil's existing provider/session/folder paths.
+Directory events refresh cached idle notes, including atomic editor saves and
+deletion. A local draft stays in memory during the existing 300ms write debounce.
+The save compares file identity and bytes, so equal timestamps do not hide edits.
+If both versions changed, the latest outside bytes are preserved beside the note
+as `<id>.conflict-<milliseconds>-<suffix>.md` before saving the local draft.
+Existing conflict files are never overwritten. Outside deletion keeps a dirty
+local draft and shows a notice; idle deletion clears the pad.
+
+Failed preservation leaves the canonical file untouched, retains both versions
+in memory, and shows an unsaved conflict with Retry. Successfully preserved files
+survive relaunch. Unsaved local text remains memory-only if disk writes keep failing.
+File coordination serializes other Sigil instances and cooperating editors. A
+fresh read after preservation checks independent outside edits; an uncoordinated
+writer racing the final check and atomic replacement is not a filesystem transaction.
+Synthetic tests prove the recorded cases, not every external editor's save protocol.
+
 ## Verification limits
 
 Deterministic fixtures cover format changes, identity mismatch, delayed journals,

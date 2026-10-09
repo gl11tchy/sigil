@@ -91,6 +91,8 @@ struct RightPanelView: View {
                 NotesPane(
                     title: model.title(for: tab),
                     subtitle: tab.workingDirectory.abbreviatedPath,
+                    notice: panel.notesNotice(forSessionID: sessionID, cwd: cwd),
+                    retry: { panel.retryNotesSave() },
                     text: Binding(
                         get: { panel.notes(forSessionID: sessionID, cwd: cwd) },
                         set: { panel.setNotes($0, forSessionID: sessionID, cwd: cwd) }
@@ -116,6 +118,8 @@ struct RightPanelView: View {
 private struct NotesPane: View {
     let title: String
     let subtitle: String
+    let notice: ConversationNotesStore.Notice?
+    let retry: () -> Void
     @Binding var text: String
     @Environment(\.palette) private var palette
 
@@ -136,6 +140,23 @@ private struct NotesPane: View {
             .padding(.top, 10)
             .padding(.bottom, 4)
             .help("\(title) — \(subtitle)")
+            if let notice {
+                HStack(spacing: 6) {
+                    Text(noticeText(notice))
+                        .ui(12)
+                        .foregroundStyle(palette.orangeInk)
+                    if case .conflictPreserved(let file) = notice {
+                        Button("Show file") { NSWorkspace.shared.activateFileViewerSelecting([file]) }
+                            .buttonStyle(SigilButtonStyle(kind: .secondary, height: 24))
+                    } else if notice == .conflictUnsaved || notice == .saveFailed {
+                        Button("Retry", action: retry)
+                            .buttonStyle(SigilButtonStyle(kind: .secondary, height: 24))
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 4)
+                .accessibilityIdentifier("notes-save-notice")
+            }
             TextEditor(text: $text)
                 .mono(12.5)
                 .foregroundStyle(palette.ink)
@@ -146,6 +167,15 @@ private struct NotesPane: View {
                 .accessibilityLabel("Notes for \(title)")
         }
         .background(palette.page)
+    }
+
+    private func noticeText(_ notice: ConversationNotesStore.Notice) -> String {
+        switch notice {
+        case .conflictPreserved: "Outside edits saved in a separate file."
+        case .conflictUnsaved: "Conflict: notes not saved. Both versions are kept."
+        case .outsideDeletion: "Outside deletion detected. Your notes were kept."
+        case .saveFailed: "Notes not saved."
+        }
     }
 }
 

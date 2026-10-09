@@ -5,6 +5,21 @@ import Testing
 @testable import SigilKit
 
 struct SessionDirectoryWatcherTests {
+    @Test func notesPolicyIncludesMarkdownAndParentReplacementEventsOnly() {
+        let contents = SessionDirectoryWatcher.Contents.notes(root: URL(fileURLWithPath: "/sigil/notes"))
+        let file = FSEventStreamEventFlags(kFSEventStreamEventFlagItemIsFile)
+        let directory = FSEventStreamEventFlags(kFSEventStreamEventFlagItemIsDir)
+        for path in ["/sigil/notes/project/id.md", "/sigil/notes/codex/project/id.md"] {
+            #expect(SessionDirectoryWatcher.shouldScan(path: path, flags: file, contents: contents))
+        }
+        for path in ["/sigil/notes-other/id.md", "/sigil/notes/id.md.tmp", "/sigil/other/id.md"] {
+            #expect(!SessionDirectoryWatcher.shouldScan(path: path, flags: file, contents: contents))
+        }
+        for path in ["/sigil", "/sigil/notes", "/sigil/notes/project"] {
+            #expect(SessionDirectoryWatcher.shouldScan(path: path, flags: directory, contents: contents))
+        }
+        #expect(!SessionDirectoryWatcher.shouldScan(path: "/sigil/other", flags: directory, contents: contents))
+    }
     @Test func nativePolicyIncludesOnlyTranscriptsAndExactAdjacentIndex() {
         let contents = SessionDirectoryWatcher.Contents.nativeHistory(
             root: URL(fileURLWithPath: "/codex/sessions"),
