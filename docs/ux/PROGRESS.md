@@ -8,8 +8,10 @@ still open. Nothing here is a timing; counts are counted actions.
 
 The Codex minor-version cap and installed-versus-checked notices are recorded in
 [the ticket verification record](../qa/rea-1214.md). Synthetic history and lifecycle
-checks passed. New Session rendering is covered by CI-only app tests; the local AX
-and screenshot attempt did not produce usable visual evidence. No UX mission or
+checks passed. Version notices now share the history scroll area. New Session
+rendering and the 200pt × 460pt sidebar regression are covered by CI-only app
+tests; the new sidebar fixture compiled locally and awaits CI execution. The
+local AX and screenshot attempt did not produce usable visual evidence. No UX mission or
 new-tab identity-binding change is claimed by this ticket.
 
 ## Mission status

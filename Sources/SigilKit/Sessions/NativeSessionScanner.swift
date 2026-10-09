@@ -163,8 +163,12 @@ enum NativeSessionScanner {
                     if let cwd, cwd != path { return nil }
                     nativeID = id
                     cwd = path
+                    // Resuming appends metadata for the existing conversation, not a new creation.
+                    if !supported {
+                        created = SessionTimestamp.parse(
+                            payload["timestamp"] as? String ?? object["timestamp"] as? String)
+                    }
                     supported = true
-                    created = SessionTimestamp.parse(payload["timestamp"] as? String ?? object["timestamp"] as? String)
                     isSubagent = payload["source"] is [String: Any] || payload["parent_thread_id"] as? String != nil
                 } else if type == "turn_context" {
                     model = payload["model"] as? String ?? model
@@ -269,6 +273,6 @@ enum NativeSessionScanner {
         // Minor updates can keep the supported envelope. The metadata's shape,
         // UUID and absolute cwd still have to validate; a new major stays closed.
         guard let parsed = CLIVersion(version) else { return false }
-        return parsed.major == 0
+        return parsed.major == 0 && parsed.minor >= 1
     }
 }

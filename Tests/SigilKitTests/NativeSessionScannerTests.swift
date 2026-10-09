@@ -40,11 +40,19 @@ struct NativeSessionScannerTests {
         #expect(try Data(contentsOf: rollout) == data)
     }
 
-    @Test func aNewerResumeHeaderKeepsTheExistingCodexConversation() {
-        let data = codexFixture() + Data([0x0A]) + codexFixture(version: "0.158.0")
-        let session = NativeSessionScanner.parse(provider: .codex, data: data, file: file, modified: Date())
+    @Test(arguments: ["0.158.0", "0.158.0-alpha.2", "0.160.0"])
+    func aNewerResumeHeaderKeepsTheExistingCodexConversation(version: String) throws {
+        let original = "2026-09-27T10:00:00Z"
+        let resumed = "2026-10-09T08:00:00Z"
+        let modified = try #require(SessionTimestamp.parse(resumed))
+        let data =
+            codexFixture(timestamp: original) + Data([0x0A])
+            + codexFixture(version: version, timestamp: resumed)
+        let session = NativeSessionScanner.parse(provider: .codex, data: data, file: file, modified: modified)
         #expect(session?.nativeSessionID == id)
         #expect(session?.cwd == "/tmp/project")
+        #expect(session?.createdAt == SessionTimestamp.parse(original))
+        #expect(session?.updatedAt == modified)
     }
 
     @Test(arguments: ["0.1", "0.157.1", "0.158", "0.158.0+build.3"])
@@ -55,8 +63,10 @@ struct NativeSessionScannerTests {
                 == id)
     }
 
-    @Test(arguments: ["1.0.0", "9.0", "", "0.bad", "0.-1.0", "0.158.0.1", "0.158.0-", "0.158.0+"])
-    func unsupportedMajorAndMalformedVersionsStayRejected(version: String) {
+    @Test(arguments: [
+        "0.0", "0.0.0", "0.0.99", "1.0.0", "9.0", "", "0.bad", "0.-1.0", "0.158.0.1", "0.158.0-", "0.158.0+",
+    ])
+    func unsupportedAndMalformedVersionsStayRejected(version: String) {
         #expect(
             NativeSessionScanner.parse(
                 provider: .codex, data: codexFixture(version: version), file: file, modified: Date()) == nil)
@@ -224,10 +234,12 @@ struct NativeSessionScannerTests {
         print("Native history 900 sessions: cold=\(coldDuration), cached=\(warmDuration), search=\(searchDuration)")
     }
 
-    private func codexFixture(version: String = "0.157.1", nativeID: String? = nil) -> Data {
+    private func codexFixture(
+        version: String = "0.157.1", nativeID: String? = nil, timestamp: String = "2026-09-27T10:00:00Z"
+    ) -> Data {
         Data(
             """
-            {"timestamp":"2026-09-27T10:00:00Z","type":"session_meta","payload":{"id":"\(nativeID ?? id)","cwd":"/tmp/project","cli_version":"\(version)","source":"cli"}}
+            {"timestamp":"\(timestamp)","type":"session_meta","payload":{"id":"\(nativeID ?? id)","cwd":"/tmp/project","cli_version":"\(version)","source":"cli"}}
             {"type":"event_msg","payload":{"type":"user_message","message":"Check the API"}}
             """.utf8)
     }

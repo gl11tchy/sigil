@@ -51,7 +51,9 @@ This optional local gate requires installed CLIs; ordinary CI does not.
   Session name both versions in a quiet compatibility notice. Compatible versions
   say history and turn state are best effort; an unsupported Codex or Claude major
   says its history format is unsupported. Unknown version output makes no version
-  claim. A version notice does not prevent starting the installed CLI.
+  claim. Sidebar notices share the history scroll area so wrapped text preserves
+  navigation and the list viewport at small window sizes. A version notice does
+  not prevent starting the installed CLI.
 
 ## History format boundaries
 
@@ -61,12 +63,14 @@ Its adjacent `session_index.jsonl` supplies validated native display names; each
 scan reads at most its latest 2 MiB.
 `NativeSessionScanner` is the only native JSONL history parser. It validates
 provider version, UUID, absolute project path, and record shape. It accepts the
-Claude 2.x shape and any well-formed Codex 0.x version only when `session_meta`
-validates. Compatible newer minor releases, including prerelease suffixes and a
-resumed conversation's newer metadata, are accepted without a minor-version cap.
-Every observed metadata header must keep the same session ID and cwd. Codex 1.x,
-malformed metadata and unsupported envelopes remain a visible read problem,
-not invented conversations. The checked Codex contract stays **0.157.1**; accepting
+Claude 2.x shape and well-formed Codex 0.x versions with a minor version of at
+least 1, only when `session_meta` validates. Compatible newer minor releases,
+including prerelease suffixes and a resumed conversation's newer metadata, are
+accepted without a minor-version cap.
+Every observed metadata header must keep the same session ID and cwd. The first
+accepted header supplies the creation timestamp; resumed headers cannot replace
+it. Codex 0.0.x, Codex 1.x, malformed metadata and unsupported envelopes remain a
+visible read problem, not invented conversations. The checked Codex contract stays **0.157.1**; accepting
 a synthetic newer-version envelope is not a claim that a newer CLI was fully checked.
 
 Each changed file contributes at most a 512 KiB prefix and 128 KiB tail. The

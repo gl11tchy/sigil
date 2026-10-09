@@ -5,6 +5,7 @@ import Foundation
 struct CLIVersion: Equatable, Comparable {
     let text: String
     let major: Int
+    let minor: Int
     private let numbers: [Int]
     private let prerelease: [Substring]
 
@@ -24,6 +25,7 @@ struct CLIVersion: Equatable, Comparable {
         }
         self.text = text
         major = values[0]
+        minor = values[1]
         numbers = values.count == 2 ? values + [0] : values
         prerelease = suffix
     }
