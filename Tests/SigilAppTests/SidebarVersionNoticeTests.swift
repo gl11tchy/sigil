@@ -43,7 +43,11 @@ struct SidebarVersionNoticeTests {
         defer { baseline.window.close() }
         let notices = host(newer)
         defer { notices.window.close() }
-        await Task.yield()
+        // Let SwiftUI build its exported accessibility tree after the window becomes visible.
+        let deadline = ContinuousClock.now + .seconds(2)
+        while notices.view.accessibilityChildren()?.isEmpty != false, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         #expect(notices.view.frame.size == NSSize(width: 200, height: 460))
         let baselineScroll = try #require(scrollView(in: baseline.view))
         let noticeScroll = try #require(scrollView(in: notices.view))
@@ -57,20 +61,26 @@ struct SidebarVersionNoticeTests {
         let maximumOffset = document.bounds.height - noticeScroll.contentView.bounds.height
         try #require(maximumOffset > 0)
         var identifiers: Set<String> = []
+        var tree: [String] = []
         let offsets =
             Array(stride(from: 0.0, through: maximumOffset, by: noticeViewport.height / 2))
             + [maximumOffset]
         for offset in offsets {
             noticeScroll.contentView.scroll(to: NSPoint(x: 0, y: offset))
             noticeScroll.reflectScrolledClipView(noticeScroll.contentView)
-            await Task.yield()
+            try await Task.sleep(for: .milliseconds(20))
             notices.view.layoutSubtreeIfNeeded()
             notices.window.displayIfNeeded()
-            identifiers.formUnion(accessibilityIdentifiers(in: noticeScroll))
+            // SwiftUI owns the accessible hierarchy; the native NSScrollView is only its rendering backend.
+            var visited: Set<ObjectIdentifier> = []
+            identifiers.formUnion(
+                accessibilityIdentifiers(in: notices.window, visited: &visited, tree: &tree))
         }
         #expect(noticeScroll.contentView.bounds.minY > 0)
         for provider in [CLIProvider.claudeCode, .codex, .grokBuild] {
-            #expect(identifiers.contains("sidebar-\(provider.rawValue)-version-notice"))
+            #expect(
+                identifiers.contains("sidebar-\(provider.rawValue)-version-notice"),
+                "Exported accessibility tree: \(tree)")
         }
     }
 
@@ -82,6 +92,7 @@ struct SidebarVersionNoticeTests {
             styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = view
+        window.orderFront(nil)
         view.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
         return (window, view)
@@ -95,13 +106,44 @@ struct SidebarVersionNoticeTests {
         return nil
     }
 
-    private func accessibilityIdentifiers(in element: any NSAccessibilityProtocol) -> Set<String> {
-        var identifiers = Set(element.accessibilityIdentifier().map { [$0] } ?? [])
-        for child in element.accessibilityChildren() ?? [] {
-            if let accessible = child as? any NSAccessibilityProtocol {
-                identifiers.formUnion(accessibilityIdentifiers(in: accessible))
+    private func accessibilityIdentifiers(
+        in element: any NSObjectProtocol,
+        visited: inout Set<ObjectIdentifier>,
+        tree: inout [String]
+    ) -> Set<String> {
+        guard visited.count < 512 else {
+            if !tree.contains("Accessibility tree exceeded the 512-object fixture bound") {
+                tree.append("Accessibility tree exceeded the 512-object fixture bound")
+            }
+            return []
+        }
+        guard visited.insert(ObjectIdentifier(element)).inserted else { return [] }
+        // AppKit accessibility supports these getters without formal NSAccessibilityProtocol conformance.
+        let role =
+            accessibilityValue(in: element, selector: #selector(NSAccessibilityProtocol.accessibilityRole))
+            as? String
+        let identifier =
+            accessibilityValue(
+                in: element, selector: #selector(NSAccessibilityProtocol.accessibilityIdentifier)) as? String
+        let description =
+            "\(type(of: element)): role=\(role ?? "nil"), id=\(identifier ?? "nil")"
+        if !tree.contains(description) { tree.append(description) }
+        var identifiers = Set(identifier.map { [$0] } ?? [])
+        let children =
+            accessibilityValue(
+                in: element, selector: #selector(NSAccessibilityProtocol.accessibilityChildren)) as? [Any] ?? []
+        for child in NSAccessibility.unignoredChildren(from: children) {
+            if let accessible = child as? any NSObjectProtocol {
+                identifiers.formUnion(
+                    accessibilityIdentifiers(
+                        in: accessible, visited: &visited, tree: &tree))
             }
         }
         return identifiers
+    }
+
+    private func accessibilityValue(in element: any NSObjectProtocol, selector: Selector) -> Any? {
+        guard element.responds(to: selector) else { return nil }
+        return element.perform(selector)?.takeUnretainedValue()
     }
 }
