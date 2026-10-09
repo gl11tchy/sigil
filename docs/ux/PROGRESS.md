@@ -4,6 +4,14 @@ The resumable record for the [experience contract](EXPERIENCE.md). Each entry
 says what was built, how it was checked, what the check showed, and what is
 still open. Nothing here is a timing; counts are counted actions.
 
+## REA-1214: Codex version compatibility
+
+The Codex minor-version cap and installed-versus-checked notices are recorded in
+[the ticket verification record](../qa/rea-1214.md). Synthetic history and lifecycle
+checks passed. New Session rendering is covered by CI-only app tests; the local AX
+and screenshot attempt did not produce usable visual evidence. No UX mission or
+new-tab identity-binding change is claimed by this ticket.
+
 ## Mission status
 
 | ID | State | Evidence or boundary |

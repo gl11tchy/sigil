@@ -98,6 +98,11 @@ struct NewSessionSheet: View {
 
     private var canStart: Bool { directoryIsAvailable && !isCreatingWorktree }
 
+    var providerVersionNotice: String? {
+        guard model.providerLaunchProblem(provider) == nil else { return nil }
+        return provider.versionNotice(for: model.providerInstallations[provider])
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
@@ -115,6 +120,10 @@ struct NewSessionSheet: View {
                 if let problem = model.providerLaunchProblem(provider) {
                     Text(problem).ui(12).foregroundStyle(palette.ink2)
                         .accessibilityIdentifier("new-session-provider-problem")
+                } else if let notice = providerVersionNotice {
+                    Text(notice).ui(12).foregroundStyle(palette.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("new-session-provider-version-notice")
                 }
             }
             .padding(.bottom, 16)

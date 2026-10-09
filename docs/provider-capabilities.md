@@ -46,6 +46,12 @@ This optional local gate requires installed CLIs; ordinary CI does not.
 - Installed-version detection runs login-shell executable lookup and `--version`
   off the UI thread. It bounds time and output. Availability does not establish
   authentication or model entitlement.
+- `CLIProvider.checkedVersion` records these checked contracts. When an available
+  CLI reports a newer semantic version, the sidebar and selected provider in New
+  Session name both versions in a quiet compatibility notice. Compatible versions
+  say history and turn state are best effort; an unsupported Codex or Claude major
+  says its history format is unsupported. Unknown version output makes no version
+  claim. A version notice does not prevent starting the installed CLI.
 
 ## History format boundaries
 
@@ -55,8 +61,13 @@ Its adjacent `session_index.jsonl` supplies validated native display names; each
 scan reads at most its latest 2 MiB.
 `NativeSessionScanner` is the only native JSONL history parser. It validates
 provider version, UUID, absolute project path, and record shape. It accepts the
-Claude 2.x shape and Codex 0.1–0.157 envelopes; unfamiliar formats remain a visible
-read problem, not invented conversations.
+Claude 2.x shape and any well-formed Codex 0.x version only when `session_meta`
+validates. Compatible newer minor releases, including prerelease suffixes and a
+resumed conversation's newer metadata, are accepted without a minor-version cap.
+Every observed metadata header must keep the same session ID and cwd. Codex 1.x,
+malformed metadata and unsupported envelopes remain a visible read problem,
+not invented conversations. The checked Codex contract stays **0.157.1**; accepting
+a synthetic newer-version envelope is not a claim that a newer CLI was fully checked.
 
 Each changed file contributes at most a 512 KiB prefix and 128 KiB tail. The
 scanner keeps metadata and display fields, not full transcripts. Large history
@@ -82,6 +93,11 @@ truncation invalidates active turn evidence rather than replaying the file.
 Grok uses `params._meta.agentTimestampMs` for precise event time and requires a matching `promptId` / `prompt_id` and `end_turn`; cancellation is
 interrupted. Codex requires validated session metadata and matching
 `task_started` / `task_complete` turn IDs. Unknown stop reasons stay unknown.
+History acceptance alone does not certify events: Codex lifecycle still requires
+the owned file's validated session identity, supported `event_msg` types, a valid
+post-submission timestamp and matching nonempty native turn IDs. Unknown or
+malformed event shapes cannot complete a turn. A new appended metadata header
+invalidates the current reader's writer/turn evidence.
 These journal formats are version-sensitive, not promised stable provider APIs.
 Grok tab-message delivery waits for confirmed idle. An unknown or active tab
 keeps queued messages rather than typing them into an uncertain prompt.
@@ -103,3 +119,10 @@ partial lines, oversized records, duplicate completion, replacement, truncation,
 and real subprocess writes. Version probes never make model calls. These checks
 do not prove live authenticated responses, expired-account recovery, or native
 provider behavior after every future CLI update.
+
+REA-1214 owns the Codex version rule and the compatibility notice. New-tab identity
+binding remains a separate verified-identity requirement in [REA-1216](https://linear.app/reasonable-glyph/issue/REA-1216).
+It does not gain evidence from a compatible envelope or a cwd/time match. Separating
+unsupported-format notices from I/O failures and housekeeping is [REA-1264](https://linear.app/reasonable-glyph/issue/REA-1264);
+the existing read-error behavior remains here. Installation captions and the CLIs
+Settings list belong to [REA-1261](https://linear.app/reasonable-glyph/issue/REA-1261).

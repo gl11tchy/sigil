@@ -132,7 +132,10 @@ enum NativeSessionScanner {
                 let type = object["type"] as? String
             else { continue }
             if provider == .codex {
-                guard let payload = object["payload"] as? [String: Any] else { continue }
+                guard let payload = object["payload"] as? [String: Any] else {
+                    if type == "session_meta" { return nil }
+                    continue
+                }
                 if type == "event_msg", payload["type"] as? String == "user_message" {
                     hasObservedMessages =
                         hasObservedMessages || !(payload["message"] as? String ?? "").isEmpty
@@ -263,9 +266,9 @@ enum NativeSessionScanner {
     }
 
     private static func supportedCodexVersion(_ version: String) -> Bool {
-        let pieces = version.split(separator: ".")
-        guard pieces.count >= 2, pieces[0] == "0", let minor = Int(pieces[1]) else { return false }
-        // This parser is tested against the rollout envelope through CLI 0.157.
-        return (1...157).contains(minor)
+        // Minor updates can keep the supported envelope. The metadata's shape,
+        // UUID and absolute cwd still have to validate; a new major stays closed.
+        guard let parsed = CLIVersion(version) else { return false }
+        return parsed.major == 0
     }
 }
