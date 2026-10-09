@@ -153,6 +153,14 @@ final class RightPanel {
         notesStore.setNote(text, for: sessionID, cwd: cwd)
     }
 
+    func notesNotice(forSessionID sessionID: String, cwd: String) -> ConversationNotesStore.Notice? {
+        notesStore.notice(for: sessionID, cwd: cwd)
+    }
+
+    func retryNotesSave() {
+        notesStore.retrySaves()
+    }
+
     func deleteNotes(forSessionID sessionID: String, cwd: String) {
         notesStore.deleteNote(for: sessionID, cwd: cwd)
     }

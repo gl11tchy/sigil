@@ -8,6 +8,8 @@ final class SessionDirectoryWatcher: Sendable {
         case grokSummaries
         /// Native transcripts are under `root`; Codex's title index is beside it.
         case nativeHistory(root: URL, titleIndex: URL?)
+        /// Markdown notes, including atomic replacements and deleted parents.
+        case notes(root: URL)
     }
 
     /// `FSEventStreamRef` is not Sendable; keep the handle as a bit pattern under the lock.
@@ -138,6 +140,13 @@ final class SessionDirectoryWatcher: Sendable {
             & FSEventStreamEventFlags(
                 kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagItemIsDir) != 0
         switch contents {
+        case .notes(let root):
+            let event = canonicalURL(URL(fileURLWithPath: path)).path
+            let root = canonicalURL(root).path
+            if directoryEvent {
+                return event == root || event.hasPrefix(root + "/") || root.hasPrefix(event + "/")
+            }
+            return event.hasPrefix(root + "/") && URL(fileURLWithPath: path).pathExtension == "md"
         case .grokSummaries:
             // Journals and lock files churn constantly; only summaries feed Grok history.
             return directoryEvent || URL(fileURLWithPath: path).lastPathComponent == "summary.json"

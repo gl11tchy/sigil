@@ -1,8 +1,10 @@
 import AppKit
 import Foundation
+import Observation
 import SigilKit
 import SwiftTerm
 import Testing
+import os
 
 @testable import SigilApp
 
@@ -61,6 +63,40 @@ struct RightPanelTests {
         panel.setNotes("", forSessionID: "session-a", cwd: "/tmp/project-a")
         panel.notesStore.flushNow()
         #expect(panel.notes(forSessionID: "session-a", cwd: "/tmp/project-a") == "")
+    }
+
+    @Test @MainActor
+    func outsideNotesRefreshThePanelBindingAndExposeConflicts() async throws {
+        let (panel, root) = makePanel()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cwd = "/tmp/project-a"
+        panel.setNotes("original", forSessionID: "session-a", cwd: cwd)
+        panel.flushNotes()
+        let file = root.appendingPathComponent(GrokPaths.sessionFolderName(forCanonicalPath: cwd))
+            .appendingPathComponent("session-a.md")
+        let changed = OSAllocatedUnfairLock(initialState: false)
+        withObservationTracking {
+            _ = panel.notes(forSessionID: "session-a", cwd: cwd)
+            _ = panel.notesNotice(forSessionID: "session-a", cwd: cwd)
+        } onChange: {
+            changed.withLock { $0 = true }
+        }
+        try Data("outside".utf8).write(to: file, options: .atomic)
+        let deadline = ContinuousClock.now + .seconds(3)
+        while panel.notes(forSessionID: "session-a", cwd: cwd) != "outside", ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(changed.withLock { $0 })
+        #expect(panel.notes(forSessionID: "session-a", cwd: cwd) == "outside")
+        panel.setNotes("local", forSessionID: "session-a", cwd: cwd)
+        try Data("new outside".utf8).write(to: file, options: .atomic)
+        panel.flushNotes()
+        guard case .conflictPreserved(let backup) = panel.notesNotice(forSessionID: "session-a", cwd: cwd) else {
+            Issue.record("Panel did not expose the saved outside revision")
+            return
+        }
+        #expect(try String(contentsOf: backup, encoding: .utf8) == "new outside")
+        #expect(panel.notes(forSessionID: "session-a", cwd: cwd) == "local")
     }
 
     @Test @MainActor
