@@ -97,9 +97,10 @@ with tempfile.TemporaryDirectory(prefix='sigil-sidebar-host-') as temporary:
         artifacts = Path(os.environ.get('SIGIL_SIDEBAR_ARTIFACTS', root / '.build/sidebar-host-verification'))
         artifacts.mkdir(parents=True, exist_ok=True)
         result = artifacts / f'sidebar-host-{time.time_ns()}.xcresult'
+        # Omit repetition and retry options for the normal single execution.
         run([
             'xcodebuild', '-xctestrun', str(test_run), '-destination', f'platform=macOS,arch={platform.machine()}',
-            '-parallel-testing-enabled', 'NO', '-test-iterations', '1',
+            '-parallel-testing-enabled', 'NO',
             '-test-timeouts-enabled', 'YES', '-default-test-execution-time-allowance', '120',
             '-resultBundlePath', str(result), 'test-without-building', '-quiet',
         ], environment, 240)

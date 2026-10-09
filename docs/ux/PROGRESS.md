@@ -17,7 +17,10 @@ controls also failed in the command-line host, which reported no running app
 loop. A dedicated CI-only SwiftUI app host now owns startup and event processing.
 All data, viewport, scrolling, control and notice assertions remain. The native
 control identifier moved to its exported NSButtonCell. Compile-only host and
-configuration checks passed, as did all 28 focused non-UI tests. Exact-head CI
+configuration checks passed, as did all 28 focused non-UI tests. CI then passed
+all 997 SwiftPM tests but rejected the explicit single-iteration option before
+the hosted fixture executed. A command-only correction removes that option;
+the normal single run and every assertion remain required. Corrected-head CI
 evidence remains; no product accessibility repair or exposure is
 claimed. The local AX and screenshot attempt did not produce usable visual
 evidence. No UX mission or new-tab identity-binding change is claimed by this ticket.
