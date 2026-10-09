@@ -100,7 +100,9 @@ public final class ConversationNotesStore {
 
     public func setNote(_ text: String, for sessionID: String, cwd: String) {
         guard let url = fileURL(for: sessionID, cwd: cwd) else { return }
-        load(url, legacyID: Self.isValidSessionID(sessionID) ? sessionID : nil)
+        // Edits/deletes must not adopt a flat note that another folder still
+        // needs. Adoption remains exclusive to the first explicit note read.
+        load(url)
         entries[url.path]?.text = text
         entries[url.path]?.generation &+= 1
         entries[url.path]?.dirty = true

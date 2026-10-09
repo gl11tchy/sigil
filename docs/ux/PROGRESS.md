@@ -17,11 +17,16 @@ saved/unsaved conflict notices in the panel. The 300ms debounce remains; cached
 reads and keystrokes do not add disk reads. Failed preservation keeps disk and
 both drafts safe; Retry uses the same preservation path.
 
-Verification: 37 focused notes/watcher tests passed, then the final 524 SigilKit
-tests passed in 27.995 seconds. An inverted conflict condition made the preservation
+Verification: 37 focused notes/watcher tests passed, then 524 SigilKit tests
+passed in 27.995 seconds. An inverted conflict condition made the preservation
 regression fail; the source was restored. Strict Swift formatting and diff checks
 passed. CI results are recorded in the PR. Tests use a throwaway home and temporary notes. SigilAppTests and hosted UI run only in CI;
 no local UI smoke, daily-app replacement, personal notes or provider transcripts.
+The first CI run executed 1,001 Swift tests and caught one regression: deleting
+an unread note adopted a shared flat note. The panel binding test passed. Two
+new SigilKit fixtures reproduced deletion/edit adoption before the repair;
+adoption now remains read-only, as before. The repaired 526 SigilKit tests passed
+in 29.098 seconds. The next exact-head CI result is recorded in the PR.
 The notes contract and limits are in [provider capabilities](../provider-capabilities.md#conversation-notes).
 
 ## Mission status

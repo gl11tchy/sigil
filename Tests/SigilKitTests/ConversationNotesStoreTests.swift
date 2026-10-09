@@ -503,6 +503,34 @@ struct ConversationNotesStoreTests {
     }
 
     @Test @MainActor
+    func deletingAnUnreadNoteKeepsASharedFlatNoteForAnotherFolder() throws {
+        let (store, root) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let flat = root.appendingPathComponent("a-1.md")
+        try Data("shared legacy note".utf8).write(to: flat)
+        store.deleteNote(for: "a-1", cwd: "/tmp/one")
+        store.flushNow()
+        #expect(FileManager.default.fileExists(atPath: flat.path))
+        #expect(!FileManager.default.fileExists(atPath: noteFile(root, "a-1", "/tmp/one").path))
+        #expect(store.note(for: "a-1", cwd: "/tmp/two") == "shared legacy note")
+    }
+
+    @Test @MainActor
+    func editingAnUnreadNoteDoesNotAdoptAnotherFoldersFlatNote() throws {
+        let (store, root) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let flat = root.appendingPathComponent("a-1.md")
+        try Data("shared legacy note".utf8).write(to: flat)
+        store.setNote("new local note", for: "a-1", cwd: "/tmp/one")
+        store.flushNow()
+        #expect(FileManager.default.fileExists(atPath: flat.path))
+        #expect(store.note(for: "a-1", cwd: "/tmp/one") == "new local note")
+        #expect(store.note(for: "a-1", cwd: "/tmp/two") == "shared legacy note")
+    }
+
+    @Test @MainActor
     func idsThatCouldEscapeTheFolderAreRefused() throws {
         let (store, root) = try makeStore()
         defer { try? FileManager.default.removeItem(at: root) }
