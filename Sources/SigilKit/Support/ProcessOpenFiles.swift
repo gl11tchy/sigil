@@ -104,10 +104,12 @@ enum ProcessOpenFiles {
         let capacity = Int32(buffer.count * MemoryLayout<pid_t>.stride)
         errno = 0
         let count = proc_listchildpids(pid, &buffer, capacity)
-        guard count >= 0, count < capacity, count % Int32(MemoryLayout<pid_t>.stride) == 0,
+        // This convenience wrapper returns PID count; proc_pidinfo below
+        // returns bytes. A full buffer may be truncated, so supplies no proof.
+        guard count >= 0, count < Int32(buffer.count),
             count > 0 || errno == 0
         else { return nil }
-        return Array(buffer.prefix(Int(count) / MemoryLayout<pid_t>.stride))
+        return Array(buffer.prefix(Int(count)))
     }
 
     private static func heldFiles(_ pid: pid_t, below historyPath: String) -> [FileIdentity: HeldFile]? {

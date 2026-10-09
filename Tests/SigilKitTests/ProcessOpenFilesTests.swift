@@ -121,6 +121,23 @@ struct ProcessOpenFilesTests {
                 sessions: [session], workingDirectory: fixture.cwd)?.nativeSessionID == session.nativeSessionID)
     }
 
+    @Test func aFourChildShimCannotOmitThreeHeldRollouts() async throws {
+        let fixture = try HeldRolloutFixture()
+        defer { fixture.cleanup() }
+        let child = try fixture.start("forest", descendant: true, childCount: 4)
+        defer { child.stop() }
+        let session = try await fixture.session("forest")
+        for index in 1..<4 { try await fixture.awaitReady("forest.ready.\(index)", suffix: "") }
+        let generation = try #require(ProcessOpenFiles.ownedChild(child.process.processIdentifier))
+        let snapshot = try #require(ProcessOpenFiles.snapshot(of: generation, historyRoot: fixture.root))
+        #expect(snapshot.nodes.count == 5)
+        #expect(snapshot.files.count == 4)
+        #expect(
+            CodexSessionBinding.resolve(
+                process: generation, historyRoot: fixture.root,
+                sessions: [session], workingDirectory: fixture.cwd) == nil)
+    }
+
     @Test func multipleHeldFilesStayAmbiguousEvenWhenOneIsMalformed() async throws {
         let fixture = try HeldRolloutFixture()
         defer { fixture.cleanup() }
@@ -257,7 +274,7 @@ private final class HeldRolloutFixture {
     }
     func start(
         _ name: String, writes: Bool = true, descendant: Bool = false,
-        extraFile: Bool = false, readOnly: Bool = false
+        extraFile: Bool = false, readOnly: Bool = false, childCount: Int = 1
     ) throws -> HeldChild {
         let body = String(decoding: try data(name), as: UTF8.self)
         let worker = root.appendingPathComponent("\(name).sh")
@@ -279,7 +296,22 @@ private final class HeldRolloutFixture {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         let args = [worker.path, file(name).path, body, root.appendingPathComponent("\(name).ready").path]
-        process.arguments = descendant ? ["-c", "/bin/sh \"$@\" <&0 & wait $!", "shim"] + args : args
+        if descendant, childCount > 1 {
+            // Three children hold empty extra rollouts. All four PIDs and
+            // files must still enter the ambiguity set before envelope parsing.
+            let shim = """
+                i=1
+                while [ "$i" -lt "$5" ]; do
+                    /bin/sh -c 'exec 3>"$1"; printf ready >"$2"; read -r done' sibling "$2.$i.jsonl" "$4.$i" <&0 &
+                    i=$((i + 1))
+                done
+                /bin/sh "$1" "$2" "$3" "$4" <&0 &
+                wait
+                """
+            process.arguments = ["-c", shim, "shim"] + args + [String(childCount)]
+        } else {
+            process.arguments = descendant ? ["-c", "/bin/sh \"$@\" <&0 & wait $!", "shim"] + args : args
+        }
         process.environment = ["PATH": "/usr/bin:/bin", "CODEX_HOME": root.path]
         let input = Pipe()
         process.standardInput = input
@@ -288,8 +320,8 @@ private final class HeldRolloutFixture {
         try process.run()
         return HeldChild(process: process, input: input)
     }
-    func awaitReady(_ name: String) async throws {
-        let marker = root.appendingPathComponent("\(name).ready")
+    func awaitReady(_ name: String, suffix: String = ".ready") async throws {
+        let marker = root.appendingPathComponent("\(name)\(suffix)")
         let deadline = ContinuousClock.now + .seconds(2)
         while !FileManager.default.fileExists(atPath: marker.path), ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(10))

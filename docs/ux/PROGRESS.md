@@ -288,6 +288,10 @@ wired to the existing New Session sheet, `restartTab`, `closeTab`,
   replaced/stale envelopes, explicit linking and closed tabs. Limits: this is
   bounded kernel file evidence, not a documented Codex active-session API or
   proof of turn completion. Actual authenticated Codex behavior is untested.
+- Automatic review identified a PID-count/byte-count mistake in the child-list
+  wrapper. Verified Apple's libproc implementation, corrected the count and
+  full-buffer guard, and added a four-child ambiguity regression alongside the
+  existing one-child shim test. Final-head runtime results are tracked in the PR.
 
 ```bash
 Scripts/workbench/build.sh
