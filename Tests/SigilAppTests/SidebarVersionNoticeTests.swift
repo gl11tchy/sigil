@@ -39,6 +39,16 @@ struct SidebarVersionNoticeTests {
         let snapshot = newer.sidebarSnapshot()
         try #require(snapshot.destinations == .init(recentsCount: 7, archivedCount: 1))
         try #require(snapshot.projects.count == 7)
+        // Ordinary controls distinguish SwiftUI export from this sidebar's content and the walker itself.
+        var controlAccessibilityEnabled: Bool?
+        let control = host(
+            NSHostingView(
+                rootView: AccessibilityControl { controlAccessibilityEnabled = $0 }))
+        defer { control.window.close() }
+        let nativeButton = NSButton(title: "Native diagnostic button", target: nil, action: nil)
+        nativeButton.setAccessibilityIdentifier("diagnostic-native-button")
+        let nativeControl = host(nativeButton)
+        defer { nativeControl.window.close() }
         let baseline = host(checked)
         defer { baseline.window.close() }
         let notices = host(newer)
@@ -77,16 +87,46 @@ struct SidebarVersionNoticeTests {
                 accessibilityIdentifiers(in: notices.window, visited: &visited, tree: &tree))
         }
         #expect(noticeScroll.contentView.bounds.minY > 0)
+        var controlVisited: Set<ObjectIdentifier> = []
+        var controlTree: [String] = []
+        let controlIdentifiers = accessibilityIdentifiers(
+            in: control.window, visited: &controlVisited, tree: &controlTree)
+        var nativeVisited: Set<ObjectIdentifier> = []
+        var nativeTree: [String] = []
+        let nativeIdentifiers = accessibilityIdentifiers(
+            in: nativeControl.window, visited: &nativeVisited, tree: &nativeTree)
+        let hostState = """
+            running=\(NSApp.isRunning), active=\(NSApp.isActive), hidden=\(NSApp.isHidden), \
+            activationPolicy=\(NSApp.activationPolicy().rawValue), voiceOver=\(NSWorkspace.shared.isVoiceOverEnabled), \
+            plainSwiftUIAccessibilityEnabled=\(controlAccessibilityEnabled.map(String.init) ?? "unobserved"), \
+            noticeWindowVisible=\(notices.window.isVisible), noticeWindowKey=\(notices.window.isKeyWindow), \
+            noticeChildren=\(notices.view.accessibilityChildren()?.count ?? 0), \
+            noticeNavigationChildren=\(notices.view.accessibilityChildrenInNavigationOrder()?.count ?? 0)
+            """
+        let diagnostic = """
+            Host: \(hostState)
+            Ordinary SwiftUI control tree: \(controlTree)
+            Native control tree: \(nativeTree)
+            """
+        print("REA-1214 accessibility diagnostic: \(diagnostic)")
+        #expect(nativeIdentifiers.contains("diagnostic-native-button"), "\(diagnostic)")
+        for identifier in ["diagnostic-swiftui-text", "diagnostic-swiftui-button"] {
+            #expect(controlIdentifiers.contains(identifier), "\(diagnostic)")
+        }
         for provider in [CLIProvider.claudeCode, .codex, .grokBuild] {
             #expect(
                 identifiers.contains("sidebar-\(provider.rawValue)-version-notice"),
-                "Exported accessibility tree: \(tree)")
+                "Exported accessibility tree: \(tree). \(diagnostic)")
         }
     }
 
     private func host(_ model: AppModel) -> (window: NSWindow, view: NSView) {
-        let view = NSHostingView(
-            rootView: SidebarView(model: model).environment(\.palette, Palette(theme: .sigilDark)))
+        host(
+            NSHostingView(
+                rootView: SidebarView(model: model).environment(\.palette, Palette(theme: .sigilDark))))
+    }
+
+    private func host(_ view: NSView) -> (window: NSWindow, view: NSView) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 200, height: 460),
             styleMask: [.borderless], backing: .buffered, defer: false)
@@ -145,5 +185,21 @@ struct SidebarVersionNoticeTests {
     private func accessibilityValue(in element: any NSObjectProtocol, selector: Selector) -> Any? {
         guard element.responds(to: selector) else { return nil }
         return element.perform(selector)?.takeUnretainedValue()
+    }
+}
+
+private struct AccessibilityControl: View {
+    // Observe the real environment; do not enable assistive technology or override the value.
+    // https://developer.apple.com/documentation/swiftui/environmentvalues/accessibilityenabled
+    @Environment(\.accessibilityEnabled) private var accessibilityEnabled
+    let observe: (Bool) -> Void
+
+    var body: some View {
+        VStack {
+            Text("SwiftUI diagnostic text").accessibilityIdentifier("diagnostic-swiftui-text")
+            Button("SwiftUI diagnostic button") {}.accessibilityIdentifier("diagnostic-swiftui-button")
+        }
+        .onAppear { observe(accessibilityEnabled) }
+        .onChange(of: accessibilityEnabled) { _, enabled in observe(enabled) }
     }
 }

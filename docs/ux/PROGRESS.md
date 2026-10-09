@@ -11,8 +11,11 @@ The Codex minor-version cap and installed-versus-checked notices are recorded in
 checks passed. Version notices now share the history scroll area. New Session
 rendering and the 200pt × 460pt sidebar regression are covered by CI-only app
 tests. CI proved the fixture's data, viewport and scrolling checks after its filter
-correction. Its accessibility walker now queries the exported window tree without
-requiring full protocol conformance; that correction compiled and awaits CI. The
+correction. The exported-tree walker reached only the window and empty hosting
+group in CI; all three notice assertions failed. A diagnostic-only addition now
+compiles plain SwiftUI and native control checks alongside read-only host state,
+preserving all original assertions. It awaits one exact-head CI observation; no
+accessibility repair or product exposure is claimed. The
 local AX and screenshot attempt did not produce usable visual evidence. No UX mission or
 new-tab identity-binding change is claimed by this ticket.
 
