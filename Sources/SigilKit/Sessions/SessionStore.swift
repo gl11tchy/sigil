@@ -126,34 +126,12 @@ public final class SessionStore {
     }
 
     deinit {
-        #if DEBUG
-            let tracesFixture = root.path.contains("/Sigil-native-watch-")
-            func trace(_ stage: String) {
-                guard tracesFixture else { return }
-                let line = "[SessionStore teardown \(Date().timeIntervalSince1970)] \(stage)\n"
-                try? FileHandle.standardError.write(contentsOf: Data(line.utf8))
-            }
-            trace("deinit entered: inflight=\(inflight), nativeWatchers=\(nativeWatchers.count)")
-            defer { trace("deinit body exited") }
-        #endif
         eventContinuation.finish()
-        #if DEBUG
-            trace("eventContinuation.finish returned")
-        #endif
         eventPump?.cancel()
-        #if DEBUG
-            trace("eventPump.cancel returned")
-        #endif
         watcherRetryTask?.cancel()
         debounceTask?.cancel()
-        #if DEBUG
-            trace("retry/debounce cancellation returned")
-        #endif
         watcher.stop()
         for watcher in nativeWatchers.values { watcher.stop() }
-        #if DEBUG
-            trace("watcher stops returned")
-        #endif
     }
 
     /// Begins watching the sessions directory and performs the first scan.
