@@ -191,6 +191,217 @@ struct ProviderLaunchAvailabilityTests {
         #expect(fixture.settings.openTabs.tabs.isEmpty)
     }
 
+    @Test(arguments: ["new", "open", "restart"], [false, true])
+    func remoteLaunchChecksExpiryOrDisappearanceAndRecovers(action: String, removed: Bool) async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .claudeCode)
+        defer { fixture.cleanup() }
+        await fixture.store.reload()
+        let executable = fixture.root.appendingPathComponent("claude")
+        try FileManager.default.copyItem(at: fixture.shell, to: executable)
+        var available = fixtureProviderInstallations(fixture.shell)
+        available[.claudeCode] = .init(executable: executable, version: "fixture", problem: nil)
+        let clock = ProviderCheckClock()
+        let gate = HeldProviderProbe()
+        let model = fixture.makeModel(
+            installations: available, probe: { provider, _ in await gate.probe(provider) }, clock: { clock.now })
+        defer { model.closeAllTabsAndWait() }
+        var ended: TerminalTab?
+        if action == "restart" {
+            model.open(fixture.session)
+            let tab = try #require(model.selectedTab)
+            tab.terminateAndWait()
+            ended = tab
+        }
+        let live = try #require(model.newTab(in: fixture.root, provider: .grokBuild))
+        let before = model.tabs.map(\.id)
+        let missing = fixture.root.appendingPathComponent("removed-claude")
+        if removed {
+            try FileManager.default.moveItem(at: executable, to: missing)
+        } else {
+            clock.advance(300)
+        }
+        let request = RemoteRequest(
+            challenge: "test", sequence: 1, action: action, tabID: ended?.id.uuidString,
+            text: action == "open" ? fixture.session.cwd : nil,
+            name: action == "open" ? fixture.session.id : nil, provider: CLIProvider.claudeCode.rawValue,
+            worktree: false)
+        let launch = Task { await RemoteCommands.execute(request, model: model) }
+        let firstCalls = removed ? 1 : 6
+        await gate.waitForCalls(firstCalls)
+        #expect(model.tabs.map(\.id) == before)
+        #expect(live.controller.isRunning)
+        #expect(model.providerLaunchProblem(.claudeCode) != nil)
+        var result = available
+        if removed { result[.claudeCode] = nil }
+        await gate.release(round: 1, results: result)
+        let reply = await launch.value
+        #expect(reply.ok == !removed)
+        #expect(await gate.totalCalls == firstCalls)
+        #expect(live.controller.isRunning)
+        if removed {
+            #expect(model.tabs.map(\.id) == before)
+            #expect(reply.error == "Fixture CLI is missing.")
+            try FileManager.default.moveItem(at: missing, to: executable)
+            let retry = Task { await RemoteCommands.execute(request, model: model) }
+            await gate.waitForCalls(2)
+            await gate.release(round: 2, results: available)
+            #expect(await retry.value.ok)
+            #expect(await gate.totalCalls == 2)
+        }
+        let selected = try #require(model.selectedTab)
+        #expect(selected.spec.provider == .claudeCode)
+        #expect(selected.workingDirectory == fixture.root)
+        if let ended { #expect(selected.id != ended.id) }
+    }
+
+    @Test func remoteRequestsJoinPendingChecksAndCancelledWaitersNeverLaunch() async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .claudeCode)
+        defer { fixture.cleanup() }
+        let gate = HeldProviderProbe()
+        let model = fixture.makeModel(probe: { provider, _ in await gate.probe(provider) })
+        defer { model.closeAllTabsAndWait() }
+        let refresh = Task { await model.refreshProviderInstallations() }
+        await gate.waitForCalls(6)
+        let request = RemoteRequest(
+            challenge: "test", sequence: 1, action: "new", provider: CLIProvider.claudeCode.rawValue)
+        let cancelled = Task { await RemoteCommands.execute(request, model: model) }
+        let joined = Task { await RemoteCommands.execute(request, model: model) }
+        for _ in 0..<20 { await Task.yield() }
+        cancelled.cancel()
+        let cancelledReply = await cancelled.value
+        #expect(!cancelledReply.ok)
+        #expect(cancelledReply.error == "Remote was turned off.")
+        #expect(model.tabs.isEmpty)
+        #expect(await gate.totalCalls == 6)
+        await gate.release(round: 1, results: fixtureProviderInstallations(fixture.shell))
+        await refresh.value
+        #expect(await joined.value.ok)
+        #expect(model.tabs.count == 1)
+        #expect(await gate.totalCalls == 6)
+        #expect(model.providerLaunchProblem(.claudeCode) == nil)
+    }
+
+    @Test func remoteOptionsRefreshExpiredInventoryBeforeReplying() async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .claudeCode)
+        defer { fixture.cleanup() }
+        let clock = ProviderCheckClock()
+        let gate = HeldProviderProbe()
+        let model = fixture.makeModel(
+            installations: fixtureProviderInstallations(fixture.shell),
+            probe: { provider, _ in await gate.probe(provider) }, clock: { clock.now })
+        clock.advance(300)
+        let options = Task {
+            await RemoteCommands.execute(.init(challenge: "test", sequence: 1, action: "options"), model: model)
+        }
+        await gate.waitForCalls(6)
+        #expect(model.tabs.isEmpty)
+        await gate.release(round: 1, results: fixtureProviderInstallations(fixture.shell))
+        let reply = await options.value
+        #expect(reply.ok)
+        #expect(reply.options?.providers.allSatisfy { $0.problem == nil } == true)
+        #expect(model.tabs.isEmpty)
+    }
+
+    @Test(arguments: [false, true])
+    func optionsLeftOpenCanCheckAgainBeforeStartingItsChosenOptions(removed: Bool) async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .claudeCode)
+        defer { fixture.cleanup() }
+        let project = fixture.root.appendingPathComponent("chosen-project")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        let executable = fixture.root.appendingPathComponent("claude")
+        try FileManager.default.copyItem(at: fixture.shell, to: executable)
+        var available = fixtureProviderInstallations(fixture.shell)
+        available[.claudeCode] = .init(executable: executable, version: "fixture", problem: nil)
+        let clock = ProviderCheckClock()
+        let gate = HeldProviderProbe()
+        let model = fixture.makeModel(
+            installations: available, probe: { provider, _ in await gate.probe(provider) }, clock: { clock.now })
+        defer { model.closeAllTabsAndWait() }
+        let live = try #require(model.newTab(in: fixture.root, provider: .grokBuild))
+        model.requestNewSession(in: project)
+        model.showNewSessionOptions()
+        #expect(NewSessionLaunch.canRequestStart(.claudeCode, model: model))
+        if removed {
+            try FileManager.default.moveItem(at: executable, to: fixture.root.appendingPathComponent("removed-claude"))
+        } else {
+            clock.advance(300)
+        }
+        #expect(model.providerLaunchProblem(.claudeCode) == "Check Claude Code before starting.")
+        #expect(NewSessionLaunch.canRequestStart(.claudeCode, model: model))
+        let launch = Task {
+            await NewSessionLaunch.start(
+                .claudeCode, model: model, project: project, useWorktree: false,
+                launch: (model: "sonnet", effort: "high", fastMode: false))
+        }
+        await gate.waitForCalls(removed ? 1 : 6)
+        #expect(!NewSessionLaunch.canRequestStart(.claudeCode, model: model))
+        #expect(model.tabs.count == 1)
+        #expect(live.controller.isRunning)
+        var result = available
+        if removed { result[.claudeCode] = nil }
+        await gate.release(round: 1, results: result)
+        #expect(await launch.value == !removed)
+        #expect(live.controller.isRunning)
+        if removed {
+            #expect(model.selectedTab === live)
+            #expect(!NewSessionLaunch.canRequestStart(.claudeCode, model: model))
+        } else {
+            let tab = try #require(model.selectedTab)
+            #expect(tab.workingDirectory == project)
+            #expect(tab.spec.model == "sonnet")
+            #expect(tab.spec.reasoningEffort == "high")
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func closingOptionsWhileItsCheckRunsPreventsTheLateLaunch(cancelled: Bool) async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .claudeCode)
+        defer { fixture.cleanup() }
+        let gate = HeldProviderProbe()
+        let model = fixture.makeModel(probe: { provider, _ in await gate.probe(provider) })
+        model.showNewSessionOptions()
+        let launch = Task {
+            await NewSessionLaunch.start(
+                .claudeCode, model: model, project: fixture.root, useWorktree: false,
+                launch: (model: "sonnet", effort: "high", fastMode: false))
+        }
+        await gate.waitForCalls(6)
+        model.isShowingNewSessionSheet = false
+        if cancelled { launch.cancel() }
+        await gate.release(round: 1, results: fixtureProviderInstallations(fixture.shell))
+        #expect(await !launch.value)
+        #expect(model.tabs.isEmpty)
+    }
+
+    @Test func remoteRestartDoesNotReplaceAnotherTabIfItsTargetClosesDuringTheCheck() async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .claudeCode)
+        defer { fixture.cleanup() }
+        let clock = ProviderCheckClock()
+        let gate = HeldProviderProbe()
+        let model = fixture.makeModel(
+            installations: fixtureProviderInstallations(fixture.shell),
+            probe: { provider, _ in await gate.probe(provider) }, clock: { clock.now })
+        defer { model.closeAllTabsAndWait() }
+        model.open(fixture.session)
+        let ended = try #require(model.selectedTab)
+        ended.terminateAndWait()
+        let live = try #require(model.newTab(in: fixture.root, provider: .grokBuild))
+        clock.advance(300)
+        let restart = Task {
+            await RemoteCommands.execute(
+                .init(challenge: "test", sequence: 1, action: "restart", tabID: ended.id.uuidString), model: model)
+        }
+        await gate.waitForCalls(6)
+        model.closeTab(ended.id)
+        await gate.release(round: 1, results: fixtureProviderInstallations(fixture.shell))
+        let reply = await restart.value
+        #expect(!reply.ok)
+        #expect(reply.error == "This tab is closed.")
+        #expect(reply.restartedTabID == nil)
+        #expect(model.tabs.map(\.id) == [live.id])
+        #expect(live.controller.isRunning)
+    }
+
     @Test(arguments: CLIProvider.allCases)
     func unprobedProviderCannotStartLocallyOrRemotely(provider: CLIProvider) async throws {
         let fixture = try LaunchAvailabilityFixture(provider: provider)
@@ -256,8 +467,13 @@ struct ProviderLaunchAvailabilityTests {
         #expect(model.selectedTab === tab)
         #expect(fixture.alerts == alerts)
         tab.terminateAndWait()
-        let reply = await RemoteCommands.execute(
-            .init(challenge: "test", sequence: 1, action: "restart", tabID: tab.id.uuidString), model: model)
+        let remote = Task {
+            await RemoteCommands.execute(
+                .init(challenge: "test", sequence: 1, action: "restart", tabID: tab.id.uuidString), model: model)
+        }
+        for _ in 0..<20 { await Task.yield() }
+        remote.cancel()
+        let reply = await remote.value
         #expect(!reply.ok)
         #expect(fixture.alerts == alerts)
         #expect(model.selectedTab === tab)

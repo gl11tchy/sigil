@@ -149,7 +149,6 @@ enum RemoteCommands {
             } else {
                 provider = model.settings.defaultProvider
             }
-            if let problem = startProblem(provider, model: model) { return failure(request, problem) }
             // The phone lists Grok's models and efforts only.
             let takesModel = provider == .grokBuild
             let chosenModel = takesModel ? request.model.map(GrokModelCatalog.normalized) : ""
@@ -170,6 +169,7 @@ enum RemoteCommands {
             }
             guard AppModel.isUsableDirectory(project)
             else { return failure(request, "Restore the folder on your Mac, then try again.") }
+            if let problem = await checkedStartProblem(provider, model: model) { return failure(request, problem) }
             // As the Mac's New Session sheet does: a git repository gets a new worktree when
             // Settings says so. A phone that shows the toggle sends its own answer.
             var start = project
@@ -186,7 +186,7 @@ enum RemoteCommands {
             let remembered = model.settings.defaultDirectory
             let focused = model.settings.focusedProjectPath
             // A provider refresh may have started while the worktree was created.
-            if let problem = startProblem(provider, model: model) { return failure(request, problem) }
+            if let problem = await checkedStartProblem(provider, model: model) { return failure(request, problem) }
             guard model.newTab(in: start, model: chosenModel, effort: chosenEffort, provider: provider) != nil
             else { return failure(request, "Could not start a session. Check Sigil on your Mac.") }
             if !named.isEmpty {
@@ -198,6 +198,8 @@ enum RemoteCommands {
                 }
             }
         case "options":
+            await model.refreshProviderInstallationsForEntry()
+            guard !Task.isCancelled else { return failure(request, "Remote was turned off.") }
             reply.options = newSessionOptions(model)
         case "createProject":
             let name = (request.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -245,7 +247,9 @@ enum RemoteCommands {
             else { return failure(request, "That chat is not available.") }
             // AppModel reports these with a modal alert, which would block this loop.
             if !model.isOpen(session) {
-                if let problem = startProblem(session.provider, model: model) { return failure(request, problem) }
+                if let problem = await checkedStartProblem(session.provider, model: model) {
+                    return failure(request, problem)
+                }
                 guard AppModel.isUsableDirectory(URL(fileURLWithPath: session.cwd))
                 else { return failure(request, "Restore the folder on your Mac, then try again.") }
             }
@@ -268,7 +272,7 @@ enum RemoteCommands {
                     before: anchor, endAnchor: request.name ?? "", loadedCharacters: loaded)
             reply.earlier = boundedSuffix(slice, bytes: 12_000)
         case "restart":
-            guard let tab, let index = model.tabs.firstIndex(where: { $0.id == tab.id }) else {
+            guard let tab else {
                 return failure(request, "This tab is closed.")
             }
             guard case .exited = tab.activity, !tab.controller.isRunning else {
@@ -279,7 +283,12 @@ enum RemoteCommands {
             }
             guard AppModel.isUsableDirectory(tab.workingDirectory)
             else { return failure(request, "Restore the folder on your Mac, then try again.") }
-            if let problem = startProblem(tab.spec.provider, model: model) { return failure(request, problem) }
+            if let problem = await checkedStartProblem(tab.spec.provider, model: model) {
+                return failure(request, problem)
+            }
+            guard let index = model.tabs.firstIndex(where: { $0.id == tab.id }) else {
+                return failure(request, "This tab is closed.")
+            }
             model.restartTab(id: tab.id)
             guard index < model.tabs.count, model.tabs[index].id != tab.id else {
                 return failure(request, "Could not restart this session. Check Sigil on your Mac.")
@@ -454,6 +463,12 @@ enum RemoteCommands {
             return "Set up \(provider.name) sign-in in Sigil on your Mac, then try again."
         }
         return nil
+    }
+
+    private static func checkedStartProblem(_ provider: CLIProvider, model: AppModel) async -> String? {
+        let problem = await model.checkedProviderLaunchProblem(provider)
+        guard !Task.isCancelled else { return "Remote was turned off." }
+        return problem ?? startProblem(provider, model: model)
     }
 
     /// Empty picks the CLI default. Anything else is one argument, never a flag.

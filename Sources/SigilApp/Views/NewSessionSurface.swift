@@ -72,9 +72,10 @@ struct NewSessionSurface: View {
         }
         .background(terminalBackground)
         .accessibilityIdentifier("new-session-surface")
-        .defaultFocus($isProviderRowFocused, true)
         .task(id: model.newSessionFocusToken) {
-            guard !model.isShowingNewSessionSheet else { return }
+            // First show keeps the window's established key-view loop.
+            // Explicit New Session and returning from Options focus this row.
+            guard model.newSessionFocusToken > 0, !model.isShowingNewSessionSheet else { return }
             keyboardProvider = model.settings.defaultProvider
             isProviderRowFocused = true
         }

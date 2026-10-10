@@ -17,6 +17,12 @@ final class ProviderChecks {
     }
     @ObservationIgnored private var receipts: [CLIProvider: Receipt] = [:]
     @ObservationIgnored private var generationsByProvider: [CLIProvider: UUID] = [:]
+    private struct Waiter {
+        let provider: CLIProvider
+        let generation: UUID
+        let continuation: CheckedContinuation<Void, Never>
+    }
+    @ObservationIgnored private var waiters: [UUID: Waiter] = [:]
     @ObservationIgnored private let settings: AppSettings
     @ObservationIgnored private let probe: Probe
     @ObservationIgnored private let clock: @Sendable () -> TimeInterval
@@ -68,6 +74,9 @@ final class ProviderChecks {
         } onChange: { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else { return }
+                if let generation = self.generationsByProvider[.grokBuild] {
+                    self.finishWaiters(provider: .grokBuild, generation: generation)
+                }
                 self.generationsByProvider[.grokBuild] = UUID()
                 self.receipts[.grokBuild] = nil
                 self.installations[.grokBuild] = nil
@@ -96,8 +105,11 @@ final class ProviderChecks {
             receipts[provider] = nil
         }
         defer {
-            for provider in providers where generationsByProvider[provider] == generations[provider] {
-                checking.remove(provider)
+            for provider in providers {
+                if generationsByProvider[provider] == generations[provider] { checking.remove(provider) }
+                if let generation = generations[provider] {
+                    finishWaiters(provider: provider, generation: generation)
+                }
             }
         }
         let found = await withTaskGroup(of: (CLIProvider, ProviderInstallation).self) { group in
@@ -128,19 +140,49 @@ final class ProviderChecks {
         }
     }
 
+    /// Join only the generations already pending when this call begins. A
+    /// replacement generation remains blocked and needs another launch attempt.
+    /// Cancelling a waiter never cancels a check owned by another request.
+    func waitForPendingChecks() async {
+        let pending = checking.compactMap { provider in
+            generationsByProvider[provider].map { (provider, $0) }
+        }
+        for (provider, generation) in pending {
+            guard !Task.isCancelled else { return }
+            let id = UUID()
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { continuation in
+                    guard !Task.isCancelled, checking.contains(provider),
+                        generationsByProvider[provider] == generation
+                    else {
+                        continuation.resume()
+                        return
+                    }
+                    waiters[id] = .init(provider: provider, generation: generation, continuation: continuation)
+                }
+            } onCancel: {
+                Task { @MainActor [weak self] in self?.waiters.removeValue(forKey: id)?.continuation.resume() }
+            }
+        }
+    }
+
+    private func finishWaiters(provider: CLIProvider, generation: UUID) {
+        let ids = waiters.filter { $0.value.provider == provider && $0.value.generation == generation }.map(\.key)
+        for id in ids { waiters.removeValue(forKey: id)?.continuation.resume() }
+    }
+
     /// Shared by desktop, phone, and restoration. An absent result is unknown,
     /// never permission to launch. Existing open tabs remain usable during checks.
     func problem(_ provider: CLIProvider) -> String? {
         if provider == .grokBuild, !settings.executableExists {
             return "Restore the Grok CLI on your Mac, then try again."
         }
-        guard !checking.contains(provider), let installation = installations[provider] else {
-            return "Checking \(provider.name)… Try again shortly."
-        }
+        if checking.contains(provider) { return "Checking \(provider.name)… Try again shortly." }
+        guard let installation = installations[provider] else { return "Check \(provider.name) before starting." }
         guard installation.isAvailable else {
             return installation.problem ?? "\(provider.name) is unavailable."
         }
-        guard hasFreshProviderCheck(provider) else { return "Checking \(provider.name)… Try again shortly." }
+        guard hasFreshProviderCheck(provider) else { return "Check \(provider.name) before starting." }
         return nil
     }
 

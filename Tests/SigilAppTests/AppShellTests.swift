@@ -343,7 +343,13 @@ struct AppShellTests {
         let model = fixture.model()
         let tab = try #require(model.newTab(in: try fixture.directory("project")))
         defer { model.closeAllTabsAndWait() }
-        let window = makeClosableWindow()
+        // CI's test app may never become active. Stand in for the key window
+        // that is required for AppModel to hand focus back to its terminal.
+        let window = InlineEntryKeyWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 200),
+            styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
         try #require(window.contentView).addSubview(tab.controller.view)
         defer { tab.controller.view.removeFromSuperview() }
         model.requestNewSession()
@@ -395,6 +401,10 @@ struct AppShellTests {
         window.isReleasedWhenClosed = false
         return window
     }
+}
+
+private final class InlineEntryKeyWindow: NSWindow {
+    override var isKeyWindow: Bool { true }
 }
 
 /// Points HOME at an empty folder and SHELL at /bin/sh, so a panel shell

@@ -37,7 +37,9 @@ and Grok model `saved-synthetic-model` / effort `high`.
 not image-renderer mockups. All inline glyphs use existing monochrome paths,
 the selected terminal theme's actual background, and restrained inset depth.
 Names/status use normal text contrast; the keyboard ring and glyph edge are
-stronger on focus. Parent visual approval is still required before merge.
+stronger on focus. The parent reviewed and approved both dark/light captures
+from the initial PR head. The functional remediation below awaits code
+re-review; the glyph treatment and screenshot files are unchanged.
 
 ## Automated validation and limits
 
@@ -63,5 +65,31 @@ The initial workspace-home fixture timed out before reaching its fake scripts;
 the cause was not established. A fresh temporary runtime reached them and passed.
 A later missing-file replay initially disabled its own test-enabling guard; that
 fixture guard was latched and the shell made fail-closed before replay passed.
-The attempted direct screenshot notification to parent thread
-`01a118da-e3a1-724f-8643-93bb2be6c0e8` returned `thread not found`.
+
+## Launch recovery remediation
+
+Remote new/open/restart and Options now start or join a bounded, coalesced
+routine check before launch, then revalidate availability, executable existence
+and cancellation. A cancelled waiter leaves another request's check running;
+configuration changes and superseded generations cannot authorize a launch.
+Remote options refresh before reporting inventory. Options keeps the chosen
+folder/model/effort while checking and cancels its launch task on disappearance.
+Idle stale/unknown status says a check is required; only pending work says
+Checking. A missing executable becomes an explicit unavailable result.
+
+Added CI-only tests cover remote new/open/restart at the five-minute boundary
+and after executable disappearance, recovery on a later request, joined and
+cancelled requests, remote options, Options left open with chosen overrides,
+closed/cancelled Options and a restart target closed during a check.
+
+The first ordinary CI run at `af238c7` ran 1,021 tests and failed with seven
+focus assertions in two tests. The cancel-focus test now uses a key-window
+stand-in, matching AppModel's key-window requirement. Initial empty entry keeps
+the established startup key-view loop instead of competing with it; an explicit
+New Session or return from Options still focuses the provider row. Existing
+startup focus coverage remains intact for the next CI run.
+
+Remediation validation: app and test targets compiled, three bounded Kit tests
+passed, and strict format/diff checks passed locally. These new AppTests have
+not run locally. No additional native UI replay was performed for remediation;
+the parent will re-review and verify ordinary CI on the new exact head.

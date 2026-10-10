@@ -50,7 +50,9 @@ This optional local gate requires installed CLIs; ordinary CI does not.
   or explicitly refreshed results require a current check; an in-flight
   replacement never permits launch from its old result. Grok path changes
   invalidate immediately. Existing terminals keep running, and saved restoration
-  waits for the current batch to retain order. Availability does not establish
+  waits for the current batch to retain order. Remote launch actions and Options
+  start or join a required check and revalidate after it finishes; cancelling a
+  waiter does not cancel another request's check. Availability does not establish
   authentication or model entitlement; a cached result cannot prove an executable
   or authentication will remain usable at launch. Automatic timeout retries and
   the Settings CLI inventory remain separate work (REA-1250 and REA-1261).

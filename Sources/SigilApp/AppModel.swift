@@ -1914,12 +1914,7 @@ final class AppModel {
         defer { isStartingNewSession = false }
         // A surface left open beyond the cache lifetime can still display
         // the earlier availability. This click checks before it launches.
-        if providerLaunchProblem(provider) != nil {
-            if !Self.isRunningAutomatedTests || hasInjectedProviderProbe {
-                await refreshProviderInstallations(force: false)
-            }
-            guard providerLaunchProblem(provider) == nil else { return }
-        }
+        guard await checkedProviderLaunchProblem(provider) == nil else { return }
         guard showsNewSessionSurface, canSignIn(provider) else { return }
         guard Self.isUsableDirectory(project) else {
             showError(title: "Folder is unavailable", message: "Choose another folder in Options.")
@@ -1939,9 +1934,24 @@ final class AppModel {
     }
 
     /// Explicit refresh replaces all results; routine entry reuses bounded successes.
-    func refreshProviderInstallations(force: Bool = true) async {
+    func refreshProviderInstallations(force: Bool = true, waitForPending: Bool = false) async {
         await providerChecks.refresh(force: force)
+        if waitForPending { await providerChecks.waitForPendingChecks() }
         if !Task.isCancelled, checkingProviders.isEmpty, !deferredOpenTabs.isEmpty { restoreOpenTabs() }
+    }
+
+    /// User entry may start or join a bounded check. Test launches without an
+    /// injected probe never inspect installed CLIs.
+    func refreshProviderInstallationsForEntry() async {
+        guard !Task.isCancelled, !Self.isRunningAutomatedTests || hasInjectedProviderProbe else { return }
+        await refreshProviderInstallations(force: false, waitForPending: true)
+    }
+
+    func checkedProviderLaunchProblem(_ provider: CLIProvider) async -> String? {
+        guard !Task.isCancelled else { return "Session launch was cancelled." }
+        if providerLaunchProblem(provider) != nil { await refreshProviderInstallationsForEntry() }
+        guard !Task.isCancelled else { return "Session launch was cancelled." }
+        return providerLaunchProblem(provider)
     }
 
     /// Shared by desktop, phone and restoration. Unknown never permits launch.

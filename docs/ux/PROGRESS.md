@@ -316,3 +316,10 @@ Native synthetic receipts, screenshots, validation and limits are recorded in
 The earlier modal-entry audit above is retained as historical evidence.
 REA-1250, REA-1261 and REA-1225 retain the independent work listed in that receipt.
 Parent reviews final code and native screenshots before merge.
+
+Parent review approved the initial dark/light provider impressions. The
+follow-up remediation starts or joins required checks from remote launches and
+Options, preserving cancellation, current generations and existing terminals.
+It also addresses the first PR CI run's cancel/startup focus failures without
+changing the glyph treatment. Updated coverage and remaining CI/native limits
+are recorded in the same evidence file; parent code re-review is pending.
