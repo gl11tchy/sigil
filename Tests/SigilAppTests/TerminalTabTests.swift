@@ -140,6 +140,18 @@ struct TerminalTabTests {
         #expect(tab.activity == .starting)
     }
 
+    @Test(arguments: [CLIProvider.claudeCode, .codex, .devin, .cursor, .kimi])
+    func unobservableProviderSubmissionRemainsUnknown(provider: CLIProvider) {
+        let tab = makeTab(provider: provider)
+        #expect(!tab.capabilities.lifecycle)
+
+        tab.noteTurnStarted()
+
+        #expect(tab.activity == .unknown)
+        #expect(tab.workingSince == nil)
+        #expect(!tab.hasUnseenActivity)
+    }
+
     @Test func exactProviderJournalCompletesAndDuplicateDoesNotNotifyTwice() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
