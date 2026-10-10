@@ -323,3 +323,16 @@ Options, preserving cancellation, current generations and existing terminals.
 It also addresses the first PR CI run's cancel/startup focus failures without
 changing the glyph treatment. Updated coverage and remaining CI/native limits
 are recorded in the same evidence file; parent code re-review is pending.
+
+## REA-1246 — stamped Site and Sidereal uploads
+
+Site health now exposes the shared source revision contract. Both deployment
+wrappers require verified source, explicit target identities and an existing
+health destination, stage from a common manifest contract, upload once, then wait
+up to five minutes for the exact commit and source hash. A matching stamp proves
+source identity; it does not establish operational health.
+
+[REA-1246 evidence](rea-1246/EVIDENCE.md) records generated fake-CLI and loopback
+fixtures, the baseline failure, verification and limits. No production deploy or
+native application change ran. REA-1248 owns future CI deployment wiring. Parent
+reviews the final code and exact-head CI before any merge.

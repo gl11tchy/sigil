@@ -24,6 +24,7 @@ const source = new URL('../', import.meta.url);
 // Real path: the module loader resolves /var to /private/var on macOS, and reads are matched by URL.
 const root = pathToFileURL(`${fs.realpathSync(fs.mkdtempSync(`${tmpdir()}/sigil-site-cache-`))}/`);
 fs.copyFileSync(new URL('server.mjs', source), new URL('server.mjs', root));
+fs.copyFileSync(new URL('../Sidereal/revision.mjs', source), new URL('revision.mjs', root));
 fs.cpSync(new URL('public/', source), new URL('public/', root), { recursive: true });
 process.on('exit', () => fs.rmSync(root, { recursive: true, force: true }));
 const { createSite } = await import(new URL('server.mjs', root));
