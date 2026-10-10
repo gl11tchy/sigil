@@ -1,0 +1,19 @@
+{
+  "before": {
+    "grok": 6,
+    "cursor-agent": 6,
+    "devin": 6,
+    "kimi": 6,
+    "claude": 6,
+    "codex": 6
+  },
+  "after": {
+    "grok": 6,
+    "cursor-agent": 6,
+    "devin": 6,
+    "kimi": 6,
+    "claude": 6,
+    "codex": 6
+  },
+  "delta": {}
+}

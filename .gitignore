@@ -3,6 +3,7 @@
 build/
 dist/
 *.xcodeproj
+!Tests/SidebarHost/SigilSidebarHost.xcodeproj/
 .DS_Store
 .swiftpm-cache/
 

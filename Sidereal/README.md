@@ -19,23 +19,24 @@ proxy terminates TLS. Keep the Node port private to that proxy. The PWA and rela
 must use the same origin. Health check: `GET /health` returns JSON with `status`,
 `revision`, `gitSHA`, `dirty`, and `sourceSHA256`. An unstamped local checkout reports
 `revision: "development"`, never a guessed commit.
-The Dockerfile supports hosts such as Railway with the build root set to `Sidereal`.
+The Dockerfile supports hosts such as Railway using a stamped runtime bundle.
 Use one replica and do not enable sleeping/serverless behavior for the relay.
 
 ## Stamped uploads
 
 Run `Scripts/verify.sh` from the repo root before releasing. Then use
-`Scripts/deploy-sidereal.sh --project <id> --environment <id> --service <id>`.
-The script stages only Docker/runtime files, stamps the actual Git HEAD and a
-SHA-256 of the staged runtime and Dockerfile, and uploads that directory. No `.git`, local
-credentials, test output, or `node_modules` enter the upload. The generated stamp
-travels with the bundle even though local `Sidereal/revision.json` is gitignored.
+`Scripts/deploy-sidereal.sh --project <id> --environment <id> --service <id>
+--health-url https://<relay-host>/health`.
+The [shared deployment contract](../docs/deployment.md) requires clean source at
+fresh `origin/main`, verifies the exact target and existing domain, stages only
+manifested inputs, and uploads once. Explicit dirty and non-main overrides are
+documented there. The generated stamp travels with the bundle even though local
+`Sidereal/revision.json` is gitignored.
 
-Uncommitted changes add `-dirty` to the revision; the source hash distinguishes
-uploads from the same commit. This does not pretend uncommitted code is in Git.
-Docker rejects a missing, malformed, or stale stamp at build time and startup.
-After deployment, compare `/health` with the revision and source hash printed by
-the upload script. A successful upload alone does not prove the running revision.
+The wrapper exits zero only when `/health` matches both commit and source hash
+within five minutes. Docker rejects missing, malformed or stale stamps during
+build and startup. This proves running source identity; operational checks still
+belong to a separately authorized rollout. CLI output and credentials are not logged.
 
 For a manual Docker build, run `npm --prefix Sidereal run stamp` immediately before
 `docker build Sidereal`. Re-stamp after any runtime edit. GitHub auto-deploy is not

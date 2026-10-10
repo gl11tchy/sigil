@@ -1,10 +1,10 @@
 import AppKit
 import Foundation
-import SigilKit
 import SwiftUI
 import Testing
 
 @testable import SigilApp
+@testable import SigilKit
 
 struct NewSessionSheetTests {
     private let cliList = """
@@ -317,6 +317,32 @@ struct NewSessionSheetTests {
     }
 
     @Test @MainActor
+    func newerInstalledCodexShowsBothVersionsWithoutBlockingStart() throws {
+        _ = NSApplication.shared
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+        let name = "SigilNewSessionVersion.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = AppModel(
+            settings: AppSettings(defaults: defaults),
+            store: SessionStore(root: root.appendingPathComponent("sessions")),
+            trashConversation: { _ in }, presentError: { _ in },
+            providerInstallations: [
+                .codex: .init(executable: URL(fileURLWithPath: "/bin/sh"), version: "codex-cli 0.160.0", problem: nil)
+            ])
+        let sheet = NewSessionSheet(model: model, provider: .codex)
+        #expect(
+            sheet.providerVersionNotice
+                == "Codex 0.160.0 is newer than Sigil checked (0.157.1). History and turn state are best effort.")
+        #expect(model.providerLaunchProblem(.codex) == nil)
+        #expect(NewSessionSheet(model: model, provider: .claudeCode).providerVersionNotice == nil)
+        #expect(try png(of: sheet).count > 1000)
+    }
+
+    @Test @MainActor
     func sheetRendersLogosAndGrokOptionsOnlyForGrok() throws {
         _ = NSApplication.shared
         NSApp.appearance = NSAppearance(named: .darkAqua)
@@ -339,11 +365,16 @@ struct NewSessionSheetTests {
             presentError: { _ in }
         )
         model.requestNewSession(in: FileManager.default.homeDirectoryForCurrentUser)
+        #expect(!model.isShowingNewSessionSheet)
+        model.showNewSessionOptions()
+        #expect(model.isShowingNewSessionSheet)
 
+        let inline = try png(of: NewSessionSurface(model: model).frame(width: 650, height: 450))
         let grok = try png(of: NewSessionSheet(model: model))
         let cursor = try png(of: NewSessionSheet(model: model, provider: .cursor))
         #expect(grok.count > 1000)
         #expect(cursor.count > 1000)
+        #expect(inline.count > 1000)
     }
 
     @Test func providerLogosUseTheInstalledApps() {

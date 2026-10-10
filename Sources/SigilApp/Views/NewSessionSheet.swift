@@ -29,6 +29,40 @@ enum NewSessionLaunch: Equatable {
         selected == tapped ? .start(tapped) : .select(tapped)
     }
 
+    @MainActor
+    static func canRequestStart(_ provider: CLIProvider, model: AppModel) -> Bool {
+        !model.checkingProviders.contains(provider)
+            && (model.providerLaunchProblem(provider) == nil || model.providerRequiresCheck(provider))
+    }
+
+    /// The Options sheet can outlive a successful check. Its Start action
+    /// checks again and retains the chosen overrides across that suspension.
+    @MainActor
+    static func start(
+        _ provider: CLIProvider, model: AppModel, project: URL, useWorktree: Bool,
+        launch: (model: String, effort: String, fastMode: Bool)
+    ) async -> Bool {
+        guard model.isShowingNewSessionSheet,
+            await model.checkedProviderLaunchProblem(provider) == nil,
+            model.isShowingNewSessionSheet, model.canSignIn(provider), AppModel.isUsableDirectory(project)
+        else { return false }
+        var folder = project
+        if useWorktree {
+            do {
+                folder = try await SigilWorktree.create(for: project) ?? project
+            } catch {
+                if !Task.isCancelled {
+                    model.showError(title: "Could not create a worktree", message: error.localizedDescription)
+                }
+                return false
+            }
+        }
+        guard !Task.isCancelled, model.isShowingNewSessionSheet else { return false }
+        return model.newTab(
+            in: folder, model: launch.model, effort: launch.effort, fastMode: launch.fastMode, provider: provider)
+            != nil
+    }
+
     /// Left and right arrows walk the row in screen order and stop at its ends.
     static func provider(after current: CLIProvider, movingBy offset: Int) -> CLIProvider {
         let all = CLIProvider.allCases
@@ -37,7 +71,7 @@ enum NewSessionLaunch: Equatable {
     }
 }
 
-/// Chooses a provider and starts its CLI in the requested folder.
+/// Optional launch overrides, opened from the inline terminal surface.
 struct NewSessionSheet: View {
     @Bindable var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -51,7 +85,8 @@ struct NewSessionSheet: View {
     @State private var grokModels = GrokModelCatalog.fallback
     @State private var menus: [CLIProvider: ProviderModelMenu] = [:]
     @State private var startsInWorktree: Bool
-    @State private var isCreatingWorktree = false
+    @State private var isStartingSession = false
+    @State private var startTask: Task<Void, Never>?
     @FocusState private var focusedProvider: CLIProvider?
     @FocusState private var isProviderRowFocused: Bool
 
@@ -96,15 +131,20 @@ struct NewSessionSheet: View {
 
     private var isRepository: Bool { SigilWorktree.isInRepository(directory) }
 
-    private var canStart: Bool { directoryIsAvailable && !isCreatingWorktree }
+    private var canStart: Bool { directoryIsAvailable && !isStartingSession }
+
+    var providerVersionNotice: String? {
+        guard model.providerLaunchProblem(provider) == nil else { return nil }
+        return provider.versionNotice(for: model.providerInstallations[provider])
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("New session")
+                Text("Session options")
                     .ui(15, .semibold)
                     .foregroundStyle(palette.ink)
-                Text("Pick a CLI and a folder. Press a CLI twice to start it.")
+                Text("Adjust the folder, worktree or model for this session.")
                     .ui(13)
                     .foregroundStyle(palette.ink2)
             }
@@ -115,6 +155,10 @@ struct NewSessionSheet: View {
                 if let problem = model.providerLaunchProblem(provider) {
                     Text(problem).ui(12).foregroundStyle(palette.ink2)
                         .accessibilityIdentifier("new-session-provider-problem")
+                } else if let notice = providerVersionNotice {
+                    Text(notice).ui(12).foregroundStyle(palette.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("new-session-provider-version-notice")
                 }
             }
             .padding(.bottom, 16)
@@ -191,9 +235,9 @@ struct NewSessionSheet: View {
             .surface(palette.isDark ? palette.inset : palette.surface, radius: Radius.card, elevation: .flat)
 
             HStack(spacing: 8) {
-                if isCreatingWorktree {
+                if isStartingSession {
                     ProgressView().controlSize(.small)
-                    Text("Creating worktree…")
+                    Text("Starting session…")
                         .ui(12)
                         .foregroundStyle(palette.ink2)
                 }
@@ -201,11 +245,11 @@ struct NewSessionSheet: View {
                 Button("Cancel", role: .cancel) { dismiss() }
                     .buttonStyle(.secondary)
                     .keyboardShortcut(.cancelAction)
-                    .disabled(isCreatingWorktree)
+                    .disabled(isStartingSession)
                 Button("Start") { start(provider) }
                     .buttonStyle(.primary)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(!canStart || model.providerLaunchProblem(provider) != nil)
+                    .disabled(!canStart || !NewSessionLaunch.canRequestStart(provider, model: model))
             }
             .padding(.top, 20)
         }
@@ -217,7 +261,9 @@ struct NewSessionSheet: View {
         .tint(Palette(theme: model.settings.theme).accent)
         .animation(reduceMotion ? nil : Motion.slide, value: provider)
         .defaultFocus($isProviderRowFocused, true)
-        .interactiveDismissDisabled(isCreatingWorktree)
+        .interactiveDismissDisabled(isStartingSession)
+        .onDisappear { startTask?.cancel() }
+        .task(id: provider) { await model.refreshProviderInstallationsForEntry() }
         .onAppear {
             let initial = model.pendingSessionDirectory ?? model.newSessionDirectory
             directory =
@@ -332,27 +378,19 @@ struct NewSessionSheet: View {
     }
 
     private func start(_ provider: CLIProvider) {
-        guard canStart, model.providerLaunchProblem(provider) == nil, model.canSignIn(provider) else { return }
+        guard canStart else { return }
         let launch = menu(for: provider)?.launch(choice(for: provider)) ?? (model: "", effort: "", fastMode: false)
         let project = directory
         let useWorktree = startsInWorktree && isRepository
-        isCreatingWorktree = useWorktree
-        Task {
-            defer { isCreatingWorktree = false }
-            var folder = project
-            if useWorktree {
-                do {
-                    folder = try await SigilWorktree.create(for: project) ?? project
-                } catch {
-                    model.showError(
-                        title: "Could not create a worktree", message: error.localizedDescription)
-                    return
-                }
+        isStartingSession = true
+        startTask = Task {
+            defer {
+                isStartingSession = false
+                startTask = nil
             }
-            if model.newTab(
-                in: folder, model: launch.model, effort: launch.effort, fastMode: launch.fastMode,
-                provider: provider
-            ) != nil {
+            if await NewSessionLaunch.start(
+                provider, model: model, project: project, useWorktree: useWorktree, launch: launch)
+            {
                 dismiss()
             }
         }

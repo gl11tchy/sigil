@@ -126,7 +126,7 @@ struct TerminalTabTests {
             tab.noteTerminalTitle("Task complete")
             tab.noteTerminalOutput()
             try await Task.sleep(for: .milliseconds(1400))
-            #expect(tab.activity == .working)
+            #expect(tab.activity == (provider == .grokBuild ? .working : .unknown))
             #expect(!tab.hasUnseenActivity)
             tab.terminate()
         }
@@ -138,6 +138,101 @@ struct TerminalTabTests {
         #expect(tab.activity == .starting)
         tab.noteTerminalTitle("✳ Claude Code")
         #expect(tab.activity == .starting)
+    }
+
+    @Test(arguments: [CLIProvider.claudeCode, .codex, .devin, .cursor, .kimi])
+    func unobservableProviderSubmissionRemainsUnknown(provider: CLIProvider) {
+        let tab = makeTab(provider: provider)
+        #expect(!tab.capabilities.lifecycle)
+
+        tab.noteTurnStarted()
+
+        #expect(tab.activity == .unknown)
+        #expect(tab.workingSince == nil)
+        #expect(tab.lastSubmittedAt != nil)
+        #expect(!tab.isWatchingForCompletion)
+        #expect(!tab.hasUnseenActivity)
+    }
+
+    @Test func claudeHistoryNeverStartsACompletionWatch() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let journal = directory.appendingPathComponent("claude.jsonl")
+        try Data("{\"type\":\"user\",\"message\":{\"content\":\"fixture\"}}\n".utf8).write(to: journal)
+        let tab = makeTab(provider: .claudeCode, completionEventsURL: journal)
+
+        tab.noteTurnStarted()
+        tab.noteTurnStarted()
+
+        #expect(!tab.capabilities.lifecycle)
+        #expect(tab.activity == .unknown)
+        #expect(tab.workingSince == nil)
+        #expect(!tab.isWatchingForCompletion)
+    }
+
+    @Test(arguments: ["missing", "malformed", "wrong-id", "mixed", "unsupported-version"])
+    func unvalidatedCodexHistoryRemainsUnknown(problem: String) throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let journal = directory.appendingPathComponent("codex.jsonl")
+        let sessionID = UUID().uuidString.lowercased()
+        if problem != "missing" {
+            let metadata: Data
+            switch problem {
+            case "malformed": metadata = Data("not JSON\n".utf8)
+            case "wrong-id": metadata = try codexMetadata(sessionID: UUID().uuidString.lowercased())
+            case "mixed":
+                metadata =
+                    try codexMetadata(sessionID: sessionID) + codexMetadata(sessionID: UUID().uuidString.lowercased())
+            case "unsupported-version": metadata = try codexMetadata(sessionID: sessionID, version: "1.0.0")
+            default: metadata = try codexMetadata(sessionID: sessionID)
+            }
+            try metadata.write(to: journal)
+        }
+        let tab = makeCodexTab(journal: journal, sessionID: sessionID)
+
+        #expect(!tab.capabilities.lifecycle)
+        tab.noteTurnStarted()
+
+        #expect(tab.activity == .unknown)
+        #expect(tab.workingSince == nil)
+        #expect(tab.lastSubmittedAt != nil)
+        #expect(!tab.isWatchingForCompletion)
+    }
+
+    @Test(arguments: ["appended-header", "replacement", "truncation"])
+    func validatedCodexHistoryCompletesAndIdentityLossStopsWatching(boundary: String) async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let journal = directory.appendingPathComponent("codex.jsonl")
+        let sessionID = UUID().uuidString.lowercased()
+        let metadata = try codexMetadata(sessionID: sessionID)
+        try metadata.write(to: journal)
+        let tab = makeCodexTab(journal: journal, sessionID: sessionID)
+        defer { tab.terminate() }
+        #expect(tab.capabilities.lifecycle)
+
+        tab.noteTurnStarted()
+        #expect(tab.activity == .working)
+        #expect(tab.isWatchingForCompletion)
+        try append(try codexEvents(turn: "one"), to: journal)
+        #expect(await waitUntil { tab.activity == .idle })
+        #expect(tab.hasUnseenActivity)
+        tab.clearUnseenActivity()
+
+        tab.noteTurnStarted()
+        switch boundary {
+        case "replacement": try metadata.write(to: journal, options: .atomic)
+        case "truncation": try Data().write(to: journal)
+        default: try append(metadata, to: journal)
+        }
+        #expect(await waitUntil { tab.activity == .unknown && !tab.isWatchingForCompletion })
+        #expect(!tab.capabilities.lifecycle)
+        #expect(tab.workingSince == nil)
+        #expect(!tab.hasUnseenActivity)
     }
 
     @Test func exactProviderJournalCompletesAndDuplicateDoesNotNotifyTwice() async throws {
@@ -276,6 +371,37 @@ struct TerminalTabTests {
             data.append(try JSONSerialization.data(withJSONObject: object))
             data.append(0x0A)
         }
+    }
+
+    private func codexMetadata(sessionID: String, version: String = "0.157.1") throws -> Data {
+        try JSONSerialization.data(withJSONObject: [
+            "type": "session_meta", "payload": ["id": sessionID, "cwd": "/tmp", "cli_version": version],
+        ]) + Data([0x0A])
+    }
+
+    private func codexEvents(turn: String) throws -> Data {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let timestamp = formatter.string(from: Date().addingTimeInterval(0.01))
+        return try ["task_started", "task_complete"].reduce(into: Data()) { data, type in
+            data.append(
+                try JSONSerialization.data(withJSONObject: [
+                    "timestamp": timestamp, "type": "event_msg", "payload": ["type": type, "turn_id": turn],
+                ]))
+            data.append(0x0A)
+        }
+    }
+
+    private func makeCodexTab(journal: URL, sessionID: String) -> TerminalTab {
+        let suite = "TerminalTabCodex.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        return TerminalTab(
+            spec: GrokLaunchSpec(
+                executable: URL(fileURLWithPath: "/usr/bin/true"),
+                workingDirectory: journal.deletingLastPathComponent(),
+                mode: .resume(sessionID: sessionID), provider: .codex, sessionFile: journal),
+            settings: AppSettings(defaults: defaults))
     }
 
     private func append(_ data: Data, to url: URL) throws {

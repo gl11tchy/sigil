@@ -118,8 +118,11 @@ one from fixtures (see [Reference slice](#reference-slice)).
   decorative or dead controls.
 - Fixture-only surfaces compile only in debug builds (`#if DEBUG`) and never
   appear in release UI.
-- Reuse before adding: New task maps to the existing New Session sheet and
-  provider checks; Restart and Close to the existing tab actions; review's
+- Reuse before adding: New task maps to the inline empty terminal with monochrome
+  provider glyphs impressed into its own ground, with shallow inset shadows and
+  highlights. One click starts with saved/default settings, and Options
+  opens the existing configuration sheet. Reuse provider checks; Restart and
+  Close map to the existing tab actions; review's
   scratch shell to the existing right-panel shell; Find to the existing
   terminal find bar; rename, pin and archive to the existing ledger. A second
   persistent control for the same action is a defect. An empty state may
@@ -127,6 +130,13 @@ one from fixtures (see [Reference slice](#reference-slice)).
 - Keyboard first: ↑/↓ move through the rail, Return opens, ⌘1…⌘9 go to the
   first nine tasks in rail order, and a Next Needing Attention command walks
   the filter.
+- File → Archive Conversation (⌃⌘A) and Pin Conversation (⌃⌘P) use the
+  focused sidebar's multi-selection, then its keyboard row; otherwise they
+  use the selected tab's known conversation. All-archived or all-pinned
+  targets reverse the command; mixed selections archive or pin every target.
+  Project rows reuse project archive/removal and pinning. Unsupported
+  providers and text editing disable the commands. A canceled stop prompt
+  keeps the selection; a removed range leaves the highlight on the next row.
 
 ## Truth and attention
 

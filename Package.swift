@@ -34,7 +34,9 @@ let package = Package(
         ),
         .testTarget(
             name: "SigilAppTests",
-            dependencies: ["SigilApp", "SigilKit"]
+            // Required CI coverage runs in the SwiftUI app host, not the SwiftPM command-line runner.
+            dependencies: ["SigilApp", "SigilKit"],
+            exclude: ["SidebarVersionNoticeTests.swift"]
         ),
     ]
 )

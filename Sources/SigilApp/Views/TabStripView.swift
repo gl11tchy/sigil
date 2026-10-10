@@ -74,7 +74,7 @@ struct TabStripView: View {
                                     label: model.title(for: tab),
                                     color: model.tabColor(for: tab),
                                     hasCustomName: model.hasCustomTabName(tab),
-                                    isSelected: tab.id == model.selectedTab?.id,
+                                    isSelected: !model.showsNewSessionSurface && tab.id == model.selectedTab?.id,
                                     select: { model.select(tab.id) },
                                     close: { model.requestCloseTab(tab.id) },
                                     rename: { model.renameTab(tab, to: $0) },
@@ -215,7 +215,8 @@ private struct TabChip: View {
                         if showsMark {
                             ActivityMark(
                                 activity: tab.activity,
-                                hasUnseenActivity: tab.hasUnseenActivity && !isSelected)
+                                hasUnseenActivity: tab.hasUnseenActivity && !isSelected,
+                                lastSubmittedAt: tab.lastSubmittedAt)
                         }
                         Text(label)
                             .ui(12.5, .medium)

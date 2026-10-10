@@ -355,6 +355,7 @@ struct PixelLoader: View {
 struct ActivityMark: View {
     let activity: TerminalTab.Activity
     var hasUnseenActivity: Bool = false
+    var lastSubmittedAt: Date?
 
     @Environment(\.palette) private var palette
 
@@ -380,6 +381,13 @@ struct ActivityMark: View {
         .frame(width: 10, height: 10)
         .accessibilityElement()
         .accessibilityLabel(label)
+        .help(inputHelp)
+    }
+
+    private var inputHelp: String {
+        guard activity == .unknown, let lastSubmittedAt else { return "" }
+        // A fixed timestamp stays truthful without a timer refreshing the mark.
+        return "Input sent \(lastSubmittedAt.formatted(date: .abbreviated, time: .shortened))"
     }
 
     private func dot(_ color: Color) -> some View {
