@@ -31,6 +31,24 @@ FOCUSED_PARAMETERS = (
 )
 FOCUSED_SUMMARY = re.compile(rb"Test run with (\d+) tests(?: in \d+ suites?)? passed")
 EVENT = re.compile(rb"(?:Test |Suite |Test run ).*(?:started\.|passed|failed|recorded an issue)")
+STARTUP_SECONDS = 45
+STARTUP_BUDGET = 2 * SAMPLER_TIMEOUT_SECONDS + SAMPLE_GAP_SECONDS
+
+
+class SampleQuota:
+    """One two-file/attempt allowance shared by focused and full verification."""
+    def __init__(self):
+        self.used = 0
+
+    def take(self):
+        if self.used >= 2:
+            return None
+        self.used += 1
+        return self.used
+
+    def settle(self, numbers, attempted):
+        if numbers in ([1], [2], [1, 2]) and self.used == numbers[-1] and 0 <= attempted <= len(numbers):
+            self.used = numbers[0] - 1 + attempted
 
 
 @dataclass(frozen=True)
@@ -110,6 +128,229 @@ def find_test(root, processes):
     return matches[0]
 
 
+def startup_target(root, processes):
+    pending, leaves, visited = [(root,)], [], set()
+    while pending:
+        chain = pending.pop()
+        revalidate(chain, processes)
+        parent = chain[-1]
+        if parent.pid in visited or len(visited) >= 128 or len(chain) > 16:
+            raise RuntimeError("owned process tree exceeds bound")
+        visited.add(parent.pid)
+        children = processes.children(parent.pid)
+        if len(children) >= 64:
+            raise RuntimeError("owned child enumeration exceeds bound")
+        if not children:
+            leaves.append(chain)
+        for pid in children:
+            pending.append(chain + (processes.identity(pid, parent.pid),))
+    revalidate((root,), processes)
+    if len(leaves) != 1:
+        return None
+    revalidate(leaves[0], processes)
+    return leaves[0]
+
+
+def unreaped_exit(child):
+    # Exact child only: reserve its PID through collector cancellation/cleanup.
+    return os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+
+
+def save_startup(evidence, receipt):
+    data = (json.dumps(receipt, indent=2) + "\n").encode()
+    if len(data) > PROGRESS_LIMIT:
+        raise RuntimeError("startup metadata exceeds bound")
+    fd = os.open(evidence / "focused-startup-receipt.json",
+                 os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "wb") as destination:
+        destination.write(data)
+
+
+def collect_startup(evidence, root_pid, parent_pid, numbers, processes, sample_popen=subprocess.Popen,
+                    gap_seconds=SAMPLE_GAP_SECONDS, sampler_timeout=SAMPLER_TIMEOUT_SECONDS):
+    receipt = {"outcome": "observing", "samples": [], "reserved_numbers": numbers}
+    try:
+        root = processes.identity(root_pid, parent_pid)
+        if os.getpgid(root_pid) != root_pid or os.getsid(root_pid) != root_pid:
+            raise RuntimeError("focused command lost its owned session")
+        second = startup_target(root, processes)
+        receipt["root"] = asdict(root)
+        receipt["second_ancestry"] = None if second is None else [asdict(item) for item in second]
+        receipt["second_target"] = "ambiguous" if second is None else "root" if len(second) == 1 else "leaf"
+        save_startup(evidence, receipt)
+        for index, number in enumerate(numbers):
+            chain = (root,) if index == 0 else second
+            if chain is None:
+                break
+            if index:
+                time.sleep(gap_seconds)  # Owned collector only; never the deadline supervisor.
+            revalidate(chain, processes)
+            if os.getpgid(root_pid) != root_pid or os.getsid(root_pid) != root_pid:
+                raise RuntimeError("focused command lost its owned session")
+            report = evidence / f"sample-{number}.txt"
+            command_log = evidence / f"sample-{number}-command.log"
+            item = {"number": number, "pid": chain[-1].pid, "duration_seconds": SAMPLE_SECONDS}
+            receipt["samples"].append(item)
+            receipt["outcome"] = "sampling"
+            save_startup(evidence, receipt)
+            sampler = None
+            try:
+                with command_log.open("wb") as log:
+                    sampler = sample_popen(
+                        ["/usr/bin/sample", str(chain[-1].pid), str(SAMPLE_SECONDS), "10",
+                         "-mayDie", "-file", str(report)], stdout=log,
+                        stderr=subprocess.STDOUT, preexec_fn=sample_file_limit,
+                    )
+                    try:
+                        item["exit_status"] = sampler.wait(timeout=sampler_timeout)
+                    except subprocess.TimeoutExpired:
+                        item["timed_out"] = True
+                        stop_sampler(sampler)
+                        item["exit_status"] = sampler.returncode
+                revalidate(chain, processes)
+                item["identity_revalidated"] = True
+                item["report_at_file_limit"] = report.exists() and report.stat().st_size >= SAMPLE_LIMIT
+            except Exception:
+                # Only generated reports from this attempt; never publish invalid identity data.
+                report.unlink(missing_ok=True)
+                command_log.unlink(missing_ok=True)
+                item["identity_revalidated"] = False
+                raise
+            finally:
+                stop_sampler(sampler)
+            save_startup(evidence, receipt)
+        receipt["outcome"] = "finished" if second is not None else "partial-ambiguous"
+    except Exception as error:
+        receipt["outcome"] = "diagnostic-unavailable"
+        receipt["limitation"] = str(error) if isinstance(error, RuntimeError) else type(error).__name__
+    save_startup(evidence, receipt)
+    return receipt
+
+
+class FocusedStartup:
+    """Isolate kernel lookups/sampling from the focused command's hard timer."""
+    def __init__(self, evidence, quota, launch=subprocess.Popen):
+        self.evidence, self.quota, self.launch = evidence, quota, launch
+        self.worker = None
+        self.attempted = False
+        self.cancel_at = None
+        self.killed = False
+        self.disabled = False
+        self.receipt = {"outcome": "waiting", "checkpoint_seconds": STARTUP_SECONDS,
+                        "collector_budget_seconds": STARTUP_BUDGET, "reserved_numbers": []}
+
+    def cancel(self, reason, now):
+        if self.disabled:
+            return
+        self.attempted = True
+        self.receipt.setdefault("stop_reason", reason)
+        self.receipt["outcome"] = reason
+        if self.worker is not None and self.cancel_at is None:
+            if os.getpgid(self.worker.pid) != self.worker.pid:
+                raise RuntimeError("startup collector lost its owned process group")
+            os.killpg(self.worker.pid, signal.SIGTERM)
+            self.cancel_at = now
+
+    def tick(self, child, progress, started, now, deadline):
+        if self.worker is not None:
+            done = unreaped_exit(self.worker)
+            if done is not None or self.cancel_at is not None and now - self.cancel_at >= 2:
+                # Still unreaped: its group cannot be confused with a reused PID.
+                if os.getpgid(self.worker.pid) != self.worker.pid:
+                    raise RuntimeError("startup collector lost its owned process group")
+                if not self.killed:
+                    os.killpg(self.worker.pid, signal.SIGKILL)
+                    self.killed = True
+                if done is not None:
+                    self.receipt["collector_exit_status"] = self.worker.wait()
+                    self.worker = None
+                    self.settle()
+            elif self.cancel_at is None and now - self.launched_at >= STARTUP_BUDGET:
+                self.cancel("collector-timeout", now)
+            return
+        if self.attempted:
+            return
+        if progress.last_event is not None:
+            self.cancel("test-event-observed", now)
+            return
+        if now - started < STARTUP_SECONDS:
+            return
+        self.attempted = True
+        if deadline - now < STARTUP_BUDGET + 4:
+            self.receipt["outcome"] = "insufficient-budget"
+            return
+        numbers = []
+        while (number := self.quota.take()) is not None:
+            numbers.append(number)
+        self.receipt["reserved_numbers"] = numbers
+        if not numbers:
+            self.receipt["outcome"] = "sample-quota-exhausted"
+            return
+        # Child status uses WNOWAIT; all potentially slow kernel discovery is in this collector.
+        self.worker = self.launch(
+            [sys.executable, str(Path(__file__).resolve()), "--focused-startup",
+             str(child.pid), str(os.getpid()), *map(str, numbers)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True,
+            preexec_fn=sample_file_limit,
+        )
+        self.launched_at = time.monotonic()
+        self.receipt["outcome"] = "observing"
+
+    def settle(self):
+        numbers = self.receipt["reserved_numbers"]
+        if not numbers:
+            return
+        try:
+            path = self.evidence / "focused-startup-receipt.json"
+            if path.is_symlink():
+                raise RuntimeError("startup receipt is a symlink")
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            with os.fdopen(fd, "rb") as source:
+                data = source.read(PROGRESS_LIMIT + 1)
+            if len(data) > PROGRESS_LIMIT:
+                raise RuntimeError("startup metadata exceeds bound")
+            result = json.loads(data)
+            samples = result["samples"]
+            attempted = [item["number"] for item in samples]
+            if result["reserved_numbers"] != numbers or attempted != numbers[:len(attempted)]:
+                raise RuntimeError("startup quota receipt mismatch")
+            validated = {item["number"] for item in samples if item.get("identity_revalidated") is True}
+            for number in numbers:
+                if number not in validated:
+                    for suffix in (".txt", "-command.log"):
+                        (self.evidence / f"sample-{number}{suffix}").unlink(missing_ok=True)
+            if result["outcome"] != "diagnostic-unavailable":
+                self.quota.settle(numbers, len(attempted))
+            self.receipt["collection_outcome"] = result["outcome"]
+            self.receipt["attempted_numbers"] = attempted
+            if "limitation" in result:
+                self.receipt["limitation"] = result["limitation"]
+        except Exception as error:
+            # Unknown attempts retain reservations; do not retry or publish unchecked files.
+            self.receipt["collection_outcome"] = "diagnostic-unavailable"
+            self.receipt["limitation"] = type(error).__name__
+            for number in numbers:
+                for suffix in (".txt", "-command.log"):
+                    (self.evidence / f"sample-{number}{suffix}").unlink(missing_ok=True)
+
+    def disable(self, error):
+        self.close()
+        self.disabled = self.attempted = True
+        self.receipt.update(outcome="diagnostic-unavailable", limitation=type(error).__name__)
+        print(f"::warning::Focused startup diagnostic unavailable ({type(error).__name__}).", flush=True)
+
+    def close(self):
+        if self.worker is not None:
+            if os.getpgid(self.worker.pid) != self.worker.pid:
+                raise RuntimeError("startup collector lost its owned process group")
+            if not self.killed:
+                os.killpg(self.worker.pid, signal.SIGKILL)
+                self.killed = True
+            self.worker.wait(timeout=2)
+            self.worker = None
+            self.settle()
+
+
 class Progress:
     def __init__(self, marker=MARKER, stop_markers=()):
         self.partial = b""
@@ -152,7 +393,7 @@ def stop_sampler(sampler):
             sampler.wait(timeout=2)
 
 
-def run_focused_phase(command, seconds, output):
+def run_focused_phase(command, seconds, output, startup=None):
     """Bound only a fresh, owned command session; never the full Verify gate."""
     progress = Progress(marker=FOCUSED_SUITE + b" started.")
     child = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
@@ -161,8 +402,9 @@ def run_focused_phase(command, seconds, output):
     started = time.monotonic()
     exited_at = None
     timed_out = False
+    exited = False
     try:
-        while selector.get_map() or child.poll() is None:
+        while selector.get_map() or not exited:
             for key, _ in selector.select(timeout=0.1):
                 data = os.read(key.fd, 8192)
                 if not data:
@@ -172,8 +414,18 @@ def run_focused_phase(command, seconds, output):
                 output.flush()
                 progress.feed(data, time.monotonic())
             now = time.monotonic()
-            if child.poll() is not None:
+            if startup is not None and not startup.disabled:
+                try:
+                    exited = unreaped_exit(child) is not None
+                except Exception as error:
+                    startup.disable(error)
+                    exited = child.poll() is not None
+            else:
+                exited = child.poll() is not None
+            if exited:
                 exited_at = exited_at or now
+                if startup is not None:
+                    startup.cancel("focused-exit", now)
                 if now - exited_at >= 1:
                     break
             elif not timed_out and now - started >= seconds:
@@ -183,17 +435,38 @@ def run_focused_phase(command, seconds, output):
                 if os.getpgid(child.pid) != child.pid:
                     raise RuntimeError("focused command lost its owned process group")
                 os.killpg(child.pid, signal.SIGTERM)
+                if startup is not None:
+                    try:
+                        startup.cancel("focused-timeout", now)
+                        startup.close()
+                    except Exception as error:
+                        startup.receipt.update(cleanup_limitation=type(error).__name__)
+                        # Collector cleanup cannot bypass the command's existing TERM/KILL grace.
                 try:
-                    child.wait(timeout=5)
+                    remaining = 5 if startup is None else max(0, 5 - (time.monotonic() - now))
+                    child.wait(timeout=remaining)
                 except subprocess.TimeoutExpired:
                     os.killpg(child.pid, signal.SIGKILL)
                     child.wait(timeout=5)
+                exited = True
+            if startup is not None and not startup.disabled and not timed_out:
+                try:
+                    if progress.last_event is not None:
+                        startup.cancel("test-event-observed", now)
+                    startup.tick(child, progress, started, now, started + seconds)
+                except Exception as error:
+                    startup.disable(error)
+        if startup is not None:
+            startup.close()
         status = child.wait()
         return (124 if timed_out else status if status >= 0 else 128 - status), progress, {
             "budget_seconds": seconds, "timed_out": timed_out,
             "elapsed_seconds": round(time.monotonic() - started, 3), "command_exit_status": status,
+            **({"startup_diagnostic": startup.receipt} if startup is not None else {}),
         }
     finally:
+        if startup is not None:
+            startup.close()
         child.stdout.close()
         selector.close()
 
@@ -205,7 +478,8 @@ def focused_passed(progress):
             and all(marker in progress.tail for marker in FOCUSED_PARAMETERS))
 
 
-def run_focused(evidence, output):
+def run_focused(evidence, output, quota=None):
+    quota = quota if quota is not None else SampleQuota()
     receipt = {"expected_test_functions": FOCUSED_COUNT, "expected_cases": FOCUSED_CASES,
                "phases": [], "outcome": "running"}
     phases = (
@@ -215,7 +489,8 @@ def run_focused(evidence, output):
     )
     for name, command, seconds in phases:
         print(f"==> PR142 focused {name} ({seconds}s bound)", flush=True)
-        status, progress, phase = run_focused_phase(command, seconds, output)
+        startup = FocusedStartup(evidence, quota) if name == "test" else None
+        status, progress, phase = run_focused_phase(command, seconds, output, startup=startup)
         phase.update(phase=name, exit_status=status)
         if name == "test":
             phase["all_expected_tests_passed"] = focused_passed(progress)
@@ -234,7 +509,8 @@ def run_focused(evidence, output):
 
 def run_verify(command, evidence, processes, output, sample_popen=subprocess.Popen,
                stall_seconds=STALL_SECONDS, gap_seconds=SAMPLE_GAP_SECONDS,
-               sampler_timeout=SAMPLER_TIMEOUT_SECONDS, marker=MARKER, stop_markers=()):
+                sampler_timeout=SAMPLER_TIMEOUT_SECONDS, marker=MARKER, stop_markers=(), quota=None):
+    quota = quota if quota is not None else SampleQuota()
     progress = Progress(marker, stop_markers)
     receipt = {"outcome": "watching", "samples": [], "sample_file_limit_bytes": SAMPLE_LIMIT,
                "progress_limit_bytes": PROGRESS_LIMIT, "sample_gap_seconds": gap_seconds,
@@ -297,6 +573,10 @@ def run_verify(command, evidence, processes, output, sample_popen=subprocess.Pop
                     save()
                 if not attempted and progress.stalled(now, stall_seconds):
                     attempted = True
+                    if quota.used == 2:
+                        receipt["outcome"] = "sample-quota-exhausted"
+                        save()
+                        continue
                     receipt["stall_seconds"] = round(now - progress.last_event, 3)
                     # This still-owned, unreaped child reserves its PID. Snapshot
                     # after launcher execs have settled, then pin the whole chain.
@@ -312,7 +592,7 @@ def run_verify(command, evidence, processes, output, sample_popen=subprocess.Pop
                         receipt["samples"][-1]["timed_out"] = True
                     if code is not None:
                         receipt["samples"][-1]["exit_status"] = code
-                        report = evidence / f"sample-{len(receipt['samples'])}.txt"
+                        report = evidence / f"sample-{receipt['samples'][-1]['number']}.txt"
                         receipt["samples"][-1]["report_at_file_limit"] = (
                             report.exists() and report.stat().st_size >= SAMPLE_LIMIT
                         )
@@ -323,7 +603,12 @@ def run_verify(command, evidence, processes, output, sample_popen=subprocess.Pop
                         save()
                 if due is not None and now >= due:
                     revalidate(chain, processes)
-                    number = len(receipt["samples"]) + 1
+                    number = quota.take()
+                    if number is None:
+                        due = None
+                        receipt["outcome"] = "sample-quota-exhausted"
+                        save()
+                        continue
                     report = evidence / f"sample-{number}.txt"
                     sample_log = (evidence / f"sample-{number}-command.log").open("wb")
                     try:
@@ -336,7 +621,8 @@ def run_verify(command, evidence, processes, output, sample_popen=subprocess.Pop
                         sample_log.close()
                         raise
                     sample_started = time.monotonic()
-                    receipt["samples"].append({"pid": chain[-1].pid, "duration_seconds": SAMPLE_SECONDS})
+                    receipt["samples"].append({"number": number, "pid": chain[-1].pid,
+                                               "duration_seconds": SAMPLE_SECONDS})
                     receipt["outcome"] = "sampling"
                     due = None
                     save()
@@ -359,7 +645,7 @@ def run_verify(command, evidence, processes, output, sample_popen=subprocess.Pop
         selector.close()
 
 
-def main():
+def context():
     root = Path(__file__).resolve().parent.parent
     environment = os.environ
     if not (sys.platform == "darwin" and environment.get("CI") == "true"
@@ -376,9 +662,30 @@ def main():
     temporary = Path(environment.get("RUNNER_TEMP", ""))
     if not (run.isdigit() and attempt.isdigit() and temporary.is_absolute() and temporary.is_dir()):
         raise SystemExit("Expected CI run identity and an existing runner temporary directory.")
+    return root, temporary / f"sigil-swift-diagnostics-{run}-{attempt}", focused
+
+
+def startup_main(arguments):
+    _, evidence, focused = context()
+    if not focused or len(arguments) not in (3, 4) or any(not value.isdigit() for value in arguments):
+        raise SystemExit("Expected an owned PR142 startup collector request.")
+    root_pid, parent_pid, *numbers = map(int, arguments)
+    if root_pid <= 0 or parent_pid != os.getppid() or root_pid == parent_pid or numbers not in ([1], [2], [1, 2]):
+        raise SystemExit("Invalid startup collector ownership or quota.")
+    try:
+        receipt = collect_startup(evidence, root_pid, parent_pid, numbers, OwnedProcesses())
+        return 1 if receipt["outcome"] == "diagnostic-unavailable" else 0
+    except Exception as error:
+        save_startup(evidence, {"outcome": "diagnostic-unavailable", "samples": [],
+                               "reserved_numbers": numbers, "limitation": type(error).__name__})
+        return 1
+
+
+def main():
+    root, evidence, focused = context()
+    quota = SampleQuota()
     command = [str(root / "Scripts/verify.sh")]
     try:
-        evidence = temporary / f"sigil-swift-diagnostics-{run}-{attempt}"
         evidence.mkdir(mode=0o700)
     except Exception as error:
         if focused:
@@ -387,7 +694,7 @@ def main():
         status = subprocess.call(command)
         return status if status >= 0 else 128 - status
     if focused:
-        status = run_focused(evidence, sys.stdout.buffer)
+        status = run_focused(evidence, sys.stdout.buffer, quota)
         if status:
             return status
     try:
@@ -398,8 +705,8 @@ def main():
         return status if status >= 0 else 128 - status
     return run_verify(command, evidence, processes, sys.stdout.buffer,
                       marker=WATCHER_MARKER if focused else MARKER,
-                      stop_markers=WATCHER_DONE if focused else ())
+                       stop_markers=WATCHER_DONE if focused else (), quota=quota)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(startup_main(sys.argv[2:]) if sys.argv[1:2] == ["--focused-startup"] else main())
