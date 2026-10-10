@@ -19,7 +19,7 @@ jobs:
     name: Native watcher stack diagnostic
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/fix/rea-1216-verified-codex-binding'
     runs-on: [self-hosted, sigil-vm]
-    timeout-minutes: 8
+    timeout-minutes: 14
     permissions:
       contents: read
     steps:
@@ -28,7 +28,7 @@ jobs:
         timeout-minutes: 5
         run: swift build --build-tests
       - name: Capture the owned synthetic watcher process
-        timeout-minutes: 2
+        timeout-minutes: 7
         run: |
           bin_dir="$(swift build --show-bin-path)"
           python3 Scripts/diagnose-native-watcher.py "$bin_dir/SigilPackageTests.xctest/Contents/MacOS/SigilPackageTests"
