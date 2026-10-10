@@ -24,7 +24,7 @@ class Graph:
         self.identities = {
             10: diagnostic.Identity(10, 1, (1, 0), "/owned/verify"),
             11: diagnostic.Identity(11, 10, (2, 0), "/owned/swift"),
-            12: diagnostic.Identity(12, 11, (3, 0), "/owned/swiftpm-testing"),
+            12: diagnostic.Identity(12, 11, (3, 0), "/owned/swiftpm-testing-helper"),
         }
 
     def identity(self, pid, ppid):
@@ -63,21 +63,38 @@ class DiagnosticsTests(unittest.TestCase):
         graph = Graph()
         chain = diagnostic.find_test(graph.identities[10], graph)
         self.assertEqual([item.pid for item in chain], [10, 11, 12])
-        graph.identities[12] = diagnostic.Identity(12, 11, (99, 0), "/owned/swiftpm-testing")
+        graph.identities[12] = diagnostic.Identity(12, 11, (99, 0), "/owned/swiftpm-testing-helper")
         with self.assertRaisesRegex(RuntimeError, "birth"):
             diagnostic.revalidate(chain, graph)
 
     def test_foreign_pid_and_ambiguous_owned_targets_are_refused(self):
         graph = Graph()
         original_children = graph.children
-        graph.identities[99] = diagnostic.Identity(99, 88, (1, 0), "/foreign/swiftpm-testing")
+        graph.identities[99] = diagnostic.Identity(99, 88, (1, 0), "/foreign/swiftpm-testing-helper")
         graph.children = lambda parent: [99] if parent == 10 else original_children(parent)
         with self.assertRaisesRegex(RuntimeError, "parent"):
             diagnostic.find_test(graph.identities[10], graph)
         graph.children = original_children
-        graph.identities[13] = diagnostic.Identity(13, 10, (4, 0), "/owned/swiftpm-testing")
-        with self.assertRaisesRegex(RuntimeError, "exactly one"):
+        graph.identities[13] = diagnostic.Identity(13, 10, (4, 0), "/owned/swiftpm-testing-helper")
+        with self.assertRaisesRegex(RuntimeError, "exactly one owned swiftpm-testing-helper process; found 2$"):
             diagnostic.find_test(graph.identities[10], graph)
+
+    def test_absent_short_name_and_xctest_targets_are_refused(self):
+        for basename in (None, "swiftpm-testing", "swiftpm-xctest-helper"):
+            with self.subTest(basename=basename):
+                graph = Graph()
+                if basename is None:
+                    del graph.identities[12]
+                else:
+                    graph.identities[12] = diagnostic.Identity(12, 11, (3, 0), f"/owned/{basename}")
+                with self.assertRaisesRegex(RuntimeError, "exactly one owned swiftpm-testing-helper process; found 0$"):
+                    diagnostic.find_test(graph.identities[10], graph)
+
+    def test_xctest_helper_does_not_make_owned_test_ambiguous(self):
+        graph = Graph()
+        graph.identities[13] = diagnostic.Identity(13, 10, (4, 0), "/owned/swiftpm-xctest-helper")
+        chain = diagnostic.find_test(graph.identities[10], graph)
+        self.assertEqual([item.pid for item in chain], [10, 11, 12])
 
     def test_outside_ci_cannot_launch_verification(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(subprocess, "Popen") as launch:
@@ -123,7 +140,7 @@ class DiagnosticsTests(unittest.TestCase):
     def test_owned_pair_preserves_failure_even_when_sampler_fails_or_times_out(self):
         with tempfile.TemporaryDirectory(prefix="sigil-ci-diagnostic-test-") as directory:
             fixture = Path(directory)
-            worker = fixture / "swiftpm-testing"
+            worker = fixture / "swiftpm-testing-helper"
             source = fixture / "synthetic-worker.c"
             source.write_text("#include <unistd.h>\nint main(void) { usleep(700000); return 0; }\n")
             subprocess.run(["/usr/bin/xcrun", "clang", str(source), "-o", str(worker)],

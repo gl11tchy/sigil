@@ -89,12 +89,12 @@ def find_test(root, processes):
         for pid in processes.children(parent.pid):
             child = processes.identity(pid, parent.pid)
             descendant = chain + (child,)
-            if Path(child.executable).name == "swiftpm-testing":
+            if Path(child.executable).name == "swiftpm-testing-helper":
                 matches.append(descendant)
             else:
                 pending.append(descendant)
     if len(matches) != 1:
-        raise RuntimeError("expected exactly one owned swiftpm-testing process")
+        raise RuntimeError(f"expected exactly one owned swiftpm-testing-helper process; found {len(matches)}")
     revalidate(matches[0], processes)
     return matches[0]
 
