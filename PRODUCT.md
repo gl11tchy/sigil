@@ -27,6 +27,13 @@ which owns layout, navigation and states. Dense and keyboard-first. The real
 provider terminal stays the conversation. No replacement chat interface, web
 wrapper or extra provider.
 
+New Session and ⌘T open an empty terminal with monochrome provider impressions
+in its own background, with restrained depth and clearer hover/focus edges. One
+click starts the chosen CLI in the current project using its existing defaults;
+Options is a secondary action for folder, worktree and model overrides. Grok's
+saved model and effort, the saved worktree preference and each CLI's own defaults
+remain authoritative. Required availability checks gate only that provider.
+
 ## Continuity and safety
 
 History, search and restoration follow [provider capabilities](docs/provider-capabilities.md).

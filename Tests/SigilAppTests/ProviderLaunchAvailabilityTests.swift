@@ -8,6 +8,189 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct ProviderLaunchAvailabilityTests {
+    @Test func routineRequestsReuseFreshSuccessAndCoalescePendingChecks() async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .claudeCode)
+        defer { fixture.cleanup() }
+        let gate = HeldProviderProbe()
+        let model = fixture.makeModel(probe: { provider, _ in await gate.probe(provider) })
+        let first = Task { await model.refreshProviderInstallations(force: false) }
+        await gate.waitForCalls(6)
+        await model.refreshProviderInstallations(force: false)
+        #expect(await gate.totalCalls == 6)
+        await gate.release(round: 1, results: fixtureProviderInstallations(fixture.shell))
+        await first.value
+        model.requestNewSession(in: fixture.root)
+        await model.refreshProviderInstallations(force: false)
+        #expect(await gate.totalCalls == 6)
+        #expect(model.checkingProviders.isEmpty)
+        #expect(model.providerLaunchProblem(.claudeCode) == nil)
+    }
+
+    @Test func expiryGatesLaunchWhileFreshProvidersStayAvailable() async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .claudeCode)
+        defer { fixture.cleanup() }
+        let clock = ProviderCheckClock()
+        let gate = HeldProviderProbe()
+        let model = fixture.makeModel(
+            installations: fixtureProviderInstallations(fixture.shell),
+            probe: { provider, _ in await gate.probe(provider) }, clock: { clock.now })
+        defer { model.closeAllTabsAndWait() }
+        model.open(fixture.session)
+        let tab = try #require(model.selectedTab)
+        clock.advance(299)
+        await model.refreshProviderInstallations(force: false)
+        #expect(await gate.totalCalls == 0)
+        #expect(model.providerLaunchProblem(.claudeCode) == nil)
+        clock.advance(1)
+        #expect(model.providerLaunchProblem(.claudeCode) != nil)
+        let refresh = Task { await model.refreshProviderInstallations(force: false) }
+        await gate.waitForCalls(6)
+        #expect(model.newTab(in: fixture.root, provider: .claudeCode) == nil)
+        model.restartTab(id: tab.id)
+        #expect(model.selectedTab === tab)
+        #expect(tab.controller.isRunning)
+        await gate.release(round: 1, results: [:])
+        await refresh.value
+        #expect(model.providerLaunchProblem(.claudeCode) == "Fixture CLI is missing.")
+    }
+
+    @Test func unavailableResultIsRetriedWithoutRecheckingFreshProviders() async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .codex)
+        defer { fixture.cleanup() }
+        let gate = HeldProviderProbe()
+        var results = fixtureProviderInstallations(fixture.shell)
+        results[.codex] = .init(executable: nil, version: nil, problem: "Codex did not answer its version check.")
+        let model = fixture.makeModel(installations: results, probe: { provider, _ in await gate.probe(provider) })
+        let refresh = Task { await model.refreshProviderInstallations(force: false) }
+        await gate.waitForCalls(1)
+        #expect(model.checkingProviders == [.codex])
+        #expect(model.providerLaunchProblem(.codex) != nil)
+        #expect(model.providerLaunchProblem(.claudeCode) == nil)
+        await gate.release(round: 1, results: fixtureProviderInstallations(fixture.shell))
+        await refresh.value
+        #expect(await gate.totalCalls == 1)
+        #expect(model.providerLaunchProblem(.codex) == nil)
+    }
+
+    @Test func entryLeftOpenPastExpiryChecksBeforeTheSameClickLaunches() async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .claudeCode)
+        defer { fixture.cleanup() }
+        let clock = ProviderCheckClock()
+        let gate = HeldProviderProbe()
+        let results = fixtureProviderInstallations(fixture.shell)
+        let model = fixture.makeModel(
+            installations: results, probe: { provider, _ in await gate.probe(provider) }, clock: { clock.now })
+        defer { model.closeAllTabsAndWait() }
+        model.requestNewSession(in: fixture.root)
+        clock.advance(300)
+        let start = Task { await model.startDefaultSession(.claudeCode) }
+        await gate.waitForCalls(6)
+        #expect(model.tabs.isEmpty)
+        #expect(model.isStartingNewSession)
+        #expect(model.providerLaunchProblem(.claudeCode) != nil)
+        await gate.release(round: 1, results: results)
+        await start.value
+        #expect(model.tabs.count == 1)
+        #expect(model.selectedTab?.workingDirectory == fixture.root)
+        #expect(!model.isStartingNewSession)
+        #expect(!model.isShowingNewSessionSurface)
+    }
+
+    @Test func removedExecutableRequiresOnlyItsOwnReplacementCheck() async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .codex)
+        defer { fixture.cleanup() }
+        let executable = fixture.root.appendingPathComponent("codex")
+        try FileManager.default.copyItem(at: fixture.shell, to: executable)
+        var results = fixtureProviderInstallations(fixture.shell)
+        results[.codex] = .init(executable: executable, version: "fixture", problem: nil)
+        let gate = HeldProviderProbe()
+        let model = fixture.makeModel(installations: results, probe: { provider, _ in await gate.probe(provider) })
+        try FileManager.default.moveItem(at: executable, to: fixture.root.appendingPathComponent("removed-codex"))
+        #expect(model.providerLaunchProblem(.codex) != nil)
+        let replacement = Task { await model.refreshProviderInstallations(force: false) }
+        await gate.waitForCalls(1)
+        #expect(model.checkingProviders == [.codex])
+        #expect(model.providerLaunchProblem(.claudeCode) == nil)
+        #expect(model.newTab(in: fixture.root, provider: .codex) == nil)
+        await gate.release(round: 1, results: [:])
+        await replacement.value
+        #expect(await gate.totalCalls == 1)
+        #expect(model.providerLaunchProblem(.codex) == "Fixture CLI is missing.")
+    }
+
+    @Test func executableChangesImmediatelyInvalidateGrokAndFenceOldCallbacks() async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .grokBuild)
+        defer { fixture.cleanup() }
+        let gate = HeldProviderProbe()
+        let model = fixture.makeModel(
+            installations: fixtureProviderInstallations(fixture.shell),
+            probe: { provider, _ in await gate.probe(provider) })
+        let first = Task { await model.refreshProviderInstallations() }
+        await gate.waitForCalls(6)
+        fixture.settings.executablePath = fixture.root.appendingPathComponent("missing").path
+        fixture.settings.executablePath = fixture.shell.path
+        #expect(model.providerInstallations[.grokBuild] == nil)
+        #expect(model.providerLaunchProblem(.grokBuild) != nil)
+        await gate.release(round: 1, results: fixtureProviderInstallations(fixture.shell))
+        await first.value
+        #expect(model.providerInstallations[.grokBuild] == nil)
+        #expect(model.providerLaunchProblem(.claudeCode) == nil)
+        let replacement = Task { await model.refreshProviderInstallations(force: false) }
+        await gate.waitForCalls(7)
+        #expect(model.checkingProviders == [.grokBuild])
+        await gate.release(round: 2, results: fixtureProviderInstallations(fixture.shell))
+        await replacement.value
+        #expect(model.providerLaunchProblem(.grokBuild) == nil)
+    }
+
+    @Test func inlineEntryStartsOnceWithSavedDefaultsAndReturnsToExistingTerminal() async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .grokBuild)
+        defer { fixture.cleanup() }
+        fixture.settings.model = "saved-custom-model"
+        fixture.settings.effort = "high"
+        fixture.settings.defaultProvider = .codex
+        let model = fixture.makeModel(installations: fixtureProviderInstallations(fixture.shell))
+        defer { model.closeAllTabsAndWait() }
+        model.requestNewSession(in: fixture.root)
+        #expect(model.isShowingNewSessionSurface)
+        #expect(!model.isShowingNewSessionSheet)
+        await model.startDefaultSession(.grokBuild)
+        let tab = try #require(model.selectedTab)
+        #expect(tab.workingDirectory == fixture.root)
+        #expect(tab.spec.model == "saved-custom-model")
+        #expect(tab.spec.reasoningEffort == "high")
+        #expect(!model.isShowingNewSessionSurface)
+        #expect(fixture.settings.defaultProvider == .codex)
+        #expect(!fixture.settings.startsInWorktree)
+        model.requestNewSession()
+        model.cancelNewSession()
+        #expect(!model.isShowingNewSessionSurface)
+        #expect(model.selectedTab === tab)
+        #expect(tab.controller.isRunning)
+        model.requestNewSession()
+        model.select(tab.id)
+        #expect(!model.isShowingNewSessionSurface)
+        #expect(model.tabs.count == 1)
+    }
+
+    @Test func inlineUnavailableAndCancelledFirstEntryNeverLaunch() async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .claudeCode)
+        defer { fixture.cleanup() }
+        let model = fixture.makeModel()
+        model.requestNewSession(in: fixture.root)
+        await model.startDefaultSession(.claudeCode)
+        #expect(model.tabs.isEmpty)
+        #expect(model.isShowingNewSessionSurface)
+        model.showNewSessionOptions()
+        #expect(model.isShowingNewSessionSheet)
+        model.isShowingNewSessionSheet = false
+        model.newSessionSheetDidClose()
+        #expect(model.isShowingNewSessionSurface)
+        model.cancelNewSession()
+        #expect(model.tabs.isEmpty)
+        #expect(fixture.settings.openTabs.tabs.isEmpty)
+    }
+
     @Test(arguments: CLIProvider.allCases)
     func unprobedProviderCannotStartLocallyOrRemotely(provider: CLIProvider) async throws {
         let fixture = try LaunchAvailabilityFixture(provider: provider)
@@ -127,7 +310,8 @@ struct ProviderLaunchAvailabilityTests {
         #expect(fixture.settings.openTabs == saved)
     }
 
-    @Test func reversedProbeCompletionCannotReorderSavedTabs() async throws {
+    @Test(arguments: [false, true])
+    func reversedProbeCompletionCannotReorderSavedTabs(withFreshLaterProvider: Bool) async throws {
         let fixture = try LaunchAvailabilityFixture(provider: .claudeCode)
         defer { fixture.cleanup() }
         let second = GrokSession(
@@ -147,16 +331,21 @@ struct ProviderLaunchAvailabilityTests {
             tabs: entries, selectedSessionID: entries[0].sessionID, selectedCWD: entries[0].cwd,
             selectedProvider: entries[0].provider)
         let gate = HeldProviderProbe()
-        let model = fixture.makeModel(store: store, probe: { provider, _ in await gate.probe(provider) })
+        var initial = withFreshLaterProvider ? fixtureProviderInstallations(fixture.shell) : [:]
+        initial[.claudeCode] = nil
+        let model = fixture.makeModel(
+            installations: initial, store: store, probe: { provider, _ in await gate.probe(provider) })
         defer { model.closeAllTabsAndWait() }
         model.restoreOpenTabs()
-        let refresh = Task { await model.refreshProviderInstallations() }
-        await gate.waitForCalls(CLIProvider.allCases.count)
+        #expect(model.tabs.isEmpty)
+        let refresh = Task { await model.refreshProviderInstallations(force: false) }
+        await gate.waitForCalls(withFreshLaterProvider ? 1 : CLIProvider.allCases.count)
         let results = fixtureProviderInstallations(fixture.shell)
-        await gate.release(round: 1, provider: .codex, results: results)
+        if !withFreshLaterProvider { await gate.release(round: 1, provider: .codex, results: results) }
         // Drain runnable work while every other provider remains explicitly suspended.
         for _ in 0..<100 where model.providerInstallations[.codex] == nil { await Task.yield() }
-        #expect(model.providerInstallations.isEmpty)
+        #expect(model.providerInstallations[.claudeCode] == nil)
+        #expect((model.providerInstallations[.codex] != nil) == withFreshLaterProvider)
         #expect(model.tabs.isEmpty)
         // A history scan can call restoration during the same partial batch.
         model.restoreOpenTabs()
@@ -165,6 +354,28 @@ struct ProviderLaunchAvailabilityTests {
         await refresh.value
         #expect(model.tabs.map(\.spec.provider) == [.claudeCode, .codex])
         #expect(model.selectedTab?.sessionReference == fixture.session.reference)
+    }
+
+    @Test(arguments: CLIProvider.allCases)
+    func firstUseInlineLaunchKeepsCLIDefaults(provider: CLIProvider) async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: provider, startsInWorktree: nil)
+        defer { fixture.cleanup() }
+        #expect(fixture.settings.startsInWorktree)
+        #expect(fixture.settings.defaultProvider == .grokBuild)
+        let model = fixture.makeModel(installations: fixtureProviderInstallations(fixture.shell))
+        defer { model.closeAllTabsAndWait() }
+        model.requestNewSession(in: fixture.root)
+        await model.startDefaultSession(provider)
+        let tab = try #require(model.selectedTab)
+        #expect(tab.spec.provider == provider)
+        #expect(tab.spec.model == nil)
+        #expect(tab.spec.reasoningEffort == nil)
+        #expect(!tab.spec.fastMode)
+        #expect(tab.workingDirectory == fixture.root)
+        #expect(model.tabs.count == 1)
+        #expect(!model.isShowingNewSessionSheet)
+        #expect(!model.isShowingNewSessionSurface)
+        #expect(fixture.settings.startsInWorktree)
     }
 
     @Test(arguments: [true, false])
@@ -251,6 +462,7 @@ private actor HeldProviderProbe {
     private var rounds: [CLIProvider: Int] = [:]
     private var pending: [(CLIProvider, Int, CheckedContinuation<ProviderInstallation, Never>)] = []
     private var callCount = 0
+    var totalCalls: Int { callCount }
     private var waiters: [(Int, CheckedContinuation<Void, Never>)] = []
 
     func probe(_ provider: CLIProvider) async -> ProviderInstallation {
@@ -309,7 +521,7 @@ private final class LaunchAvailabilityFixture {
     var alerts = 0
     private let oldShell: String?
 
-    init(provider: CLIProvider) throws {
+    init(provider: CLIProvider, startsInWorktree: Bool? = false) throws {
         _ = NSApplication.shared
         root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -337,17 +549,17 @@ private final class LaunchAvailabilityFixture {
         settings.executablePath = shell.path
         settings.defaultDirectory = root.path
         settings.isTabMessagingEnabled = false
-        settings.startsInWorktree = false
+        if let startsInWorktree { settings.startsInWorktree = startsInWorktree }
     }
 
     func makeModel(
         installations: [CLIProvider: ProviderInstallation] = [:], store: SessionStore? = nil,
-        probe: AppModel.ProviderProbe? = nil
+        probe: AppModel.ProviderProbe? = nil, clock: (@Sendable () -> TimeInterval)? = nil
     ) -> AppModel {
         AppModel(
             settings: settings, store: store ?? self.store, presentError: { [weak self] _ in self?.alerts += 1 },
             panel: RightPanel(defaults: defaults), pairingStore: InMemoryRemotePairingStore(),
-            providerInstallations: installations, providerProbe: probe)
+            providerInstallations: installations, providerProbe: probe, providerCheckClock: clock)
     }
 
     func saveOpenTab() {
@@ -364,4 +576,11 @@ private final class LaunchAvailabilityFixture {
         defaults.removePersistentDomain(forName: suite)
         try? FileManager.default.removeItem(at: root)
     }
+}
+
+private final class ProviderCheckClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: TimeInterval = 0
+    var now: TimeInterval { lock.withLock { value } }
+    func advance(_ seconds: TimeInterval) { lock.withLock { value += seconds } }
 }

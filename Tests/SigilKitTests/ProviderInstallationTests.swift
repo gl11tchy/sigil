@@ -4,6 +4,25 @@ import Testing
 @testable import SigilKit
 
 struct ProviderInstallationTests {
+    @Test func asynchronousDetectionPreservesSuccessAndFailureWithoutModelCalls() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let binary = root.appendingPathComponent("fake cli")
+        try "#!/bin/sh\n[ \"$1\" = --version ] || exit 99\nprintf 'synthetic-cli 1.0\\n'\n"
+            .write(to: binary, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: binary.path)
+        let environment = ["SHELL": "/bin/sh", "PATH": "/usr/bin:/bin"]
+        let success = await ProviderInstallation.detectAsync(
+            provider: .codex, configuredExecutable: binary, environment: environment)
+        #expect(success.isAvailable)
+        #expect(success.executable == binary)
+        #expect(success.version == "synthetic-cli 1.0")
+        let missing = await ProviderInstallation.detectAsync(
+            provider: .codex, configuredExecutable: root.appendingPathComponent("missing"), environment: environment)
+        #expect(!missing.isAvailable)
+        #expect(missing.problem != nil)
+    }
     @Test func detectsAnExecutableAndVersionWithoutStartingAConversation() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

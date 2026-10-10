@@ -37,7 +37,7 @@ enum NewSessionLaunch: Equatable {
     }
 }
 
-/// Chooses a provider and starts its CLI in the requested folder.
+/// Optional launch overrides, opened from the inline terminal surface.
 struct NewSessionSheet: View {
     @Bindable var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -101,10 +101,10 @@ struct NewSessionSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("New session")
+                Text("Session options")
                     .ui(15, .semibold)
                     .foregroundStyle(palette.ink)
-                Text("Pick a CLI and a folder. Press a CLI twice to start it.")
+                Text("Adjust the folder, worktree or model for this session.")
                     .ui(13)
                     .foregroundStyle(palette.ink2)
             }

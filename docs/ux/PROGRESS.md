@@ -300,3 +300,19 @@ Scripts/workbench/matrix.sh docs/ux/slice
 `ax.sh <pid> press <label>` read and press controls; `snap.sh <out.png>`
 captures the window; `kill <pid>` quits. The scripts refuse to act on any
 process that is not the renamed bundle.
+
+## REA-1223 — inline launch and bounded provider checks
+
+New Session / ⌘T now opens the empty terminal's inline provider surface. One
+click starts with existing defaults; Options remains secondary. The owner's
+October 10 clarification is reflected in monochrome glyphs impressed into the
+actual terminal ground, with restrained inset depth and clearer focus/hover.
+Successful checks are reused for five minutes; required replacement checks
+still gate their provider, and restoration retains saved order. Blocking
+version detection runs on dispatch threads.
+
+Native synthetic receipts, screenshots, validation and limits are recorded in
+[REA-1223 evidence](rea-1223/EVIDENCE.md). AppTests run only in ordinary PR CI.
+The earlier modal-entry audit above is retained as historical evidence.
+REA-1250, REA-1261 and REA-1225 retain the independent work listed in that receipt.
+Parent reviews final code and native screenshots before merge.

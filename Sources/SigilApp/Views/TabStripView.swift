@@ -74,7 +74,7 @@ struct TabStripView: View {
                                     label: model.title(for: tab),
                                     color: model.tabColor(for: tab),
                                     hasCustomName: model.hasCustomTabName(tab),
-                                    isSelected: tab.id == model.selectedTab?.id,
+                                    isSelected: !model.showsNewSessionSurface && tab.id == model.selectedTab?.id,
                                     select: { model.select(tab.id) },
                                     close: { model.requestCloseTab(tab.id) },
                                     rename: { model.renameTab(tab, to: $0) },

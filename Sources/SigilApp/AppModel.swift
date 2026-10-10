@@ -34,6 +34,10 @@ final class AppModel {
     }
     var searchText: String = ""
     var isShowingNewSessionSheet = false
+    private(set) var isShowingNewSessionSurface = false
+    private(set) var isStartingNewSession = false
+    private(set) var newSessionFocusToken = 0
+    var showsNewSessionSurface: Bool { isShowingNewSessionSurface || tabs.isEmpty }
     var isShowingTabList = false
     private(set) var pendingSessionDirectory: URL?
     /// Find-in-terminal bar for the selected tab.
@@ -106,11 +110,11 @@ final class AppModel {
     /// Shared-list entries another running copy added, with the store's scan
     /// count when this copy first read them. See `awaitsScan`.
     @ObservationIgnored private var sharedArrivals: [String: Int] = [:]
-    private(set) var providerInstallations: [CLIProvider: ProviderInstallation] = [:]
-    private(set) var checkingProviders: Set<CLIProvider> = []
-    typealias ProviderProbe = @Sendable (CLIProvider, URL?) async -> ProviderInstallation
-    @ObservationIgnored private let providerProbe: ProviderProbe
-    @ObservationIgnored private var providerCheckGeneration = UUID()
+    var providerInstallations: [CLIProvider: ProviderInstallation] { providerChecks.installations }
+    var checkingProviders: Set<CLIProvider> { providerChecks.checking }
+    typealias ProviderProbe = ProviderChecks.Probe
+    @ObservationIgnored private let providerChecks: ProviderChecks
+    @ObservationIgnored private let hasInjectedProviderProbe: Bool
 
     init(
         settings: AppSettings = AppSettings(),
@@ -131,18 +135,16 @@ final class AppModel {
         pairingStore: (any RemotePairingStore)? = nil,
         kimiKeyStore: (any KimiKeyStore)? = nil,
         providerInstallations: [CLIProvider: ProviderInstallation] = [:],
-        providerProbe: ProviderProbe? = nil
+        providerProbe: ProviderProbe? = nil,
+        providerCheckClock: (@Sendable () -> TimeInterval)? = nil
     ) {
         self.settings = settings
         self.store = store
         self.panel = panel ?? RightPanel()
-        self.providerInstallations = providerInstallations
-        self.providerProbe =
-            providerProbe ?? { provider, executable in
-                await Task.detached(priority: .utility) {
-                    ProviderInstallation.detect(provider: provider, configuredExecutable: executable)
-                }.value
-            }
+        self.providerChecks = ProviderChecks(
+            settings: settings, installations: providerInstallations,
+            probe: providerProbe, clock: providerCheckClock)
+        self.hasInjectedProviderProbe = providerProbe != nil
         if let pairingStore {
             self.remoteControl = RemoteControl(store: pairingStore)
         } else if Self.isRunningAutomatedTests {
@@ -207,7 +209,7 @@ final class AppModel {
         observeStoreForHousekeeping()
         store.start()
         if !Self.isRunningAutomatedTests {
-            Task { [weak self] in await self?.refreshProviderInstallations() }
+            Task { [weak self] in await self?.refreshProviderInstallations(force: false) }
         }
         // Bind the local socket before restoring tabs so they inherit it.
         // Registration is add-or-update and can take seconds; do not wait on it.
@@ -1880,66 +1882,87 @@ final class AppModel {
     // MARK: - Tabs
 
     func requestNewSession(in directory: URL? = nil) {
+        guard !isStartingNewSession else { return }
         pendingSessionDirectory = directory ?? newSessionDirectory
-        isShowingNewSessionSheet = true
+        isShowingNewSessionSurface = true
+        if isFindBarVisible { dismissFindBar() }
+        newSessionFocusToken += 1
         if !Self.isRunningAutomatedTests {
-            Task { [weak self] in await self?.refreshProviderInstallations() }
+            Task { [weak self] in await self?.refreshProviderInstallations(force: false) }
         }
     }
 
-    /// CLI lookup and version checks never block window drawing or input.
-    func refreshProviderInstallations() async {
-        let generation = UUID()
-        providerCheckGeneration = generation
-        let executable = settings.executableURL
-        let probe = providerProbe
-        // A prior result does not authorize launches while its replacement is pending.
-        checkingProviders = Set(CLIProvider.allCases)
-        providerInstallations.removeAll()
-        defer {
-            if providerCheckGeneration == generation { checkingProviders.removeAll() }
-        }
-        let found = await withTaskGroup(of: (CLIProvider, ProviderInstallation).self) { group in
-            for provider in CLIProvider.allCases {
-                group.addTask {
-                    let result = await probe(provider, provider == .grokBuild ? executable : nil)
-                    return (provider, result)
-                }
+    func showNewSessionOptions() {
+        guard !isStartingNewSession else { return }
+        pendingSessionDirectory = pendingSessionDirectory ?? newSessionDirectory
+        isShowingNewSessionSheet = true
+    }
+
+    func cancelNewSession() {
+        guard !isStartingNewSession else { return }
+        isShowingNewSessionSurface = false
+        pendingSessionDirectory = nil
+        focusSelectedTerminal()
+    }
+
+    /// One click uses the same launch defaults as an ordinary new tab. The
+    /// optional sheet is the only place that overrides them for this launch.
+    func startDefaultSession(_ provider: CLIProvider) async {
+        guard showsNewSessionSurface, !isStartingNewSession else { return }
+        let project = pendingSessionDirectory ?? newSessionDirectory
+        isStartingNewSession = true
+        defer { isStartingNewSession = false }
+        // A surface left open beyond the cache lifetime can still display
+        // the earlier availability. This click checks before it launches.
+        if providerLaunchProblem(provider) != nil {
+            if !Self.isRunningAutomatedTests || hasInjectedProviderProbe {
+                await refreshProviderInstallations(force: false)
             }
-            var result: [CLIProvider: ProviderInstallation] = [:]
-            for await (provider, installation) in group { result[provider] = installation }
-            return result
+            guard providerLaunchProblem(provider) == nil else { return }
         }
-        guard providerCheckGeneration == generation, !Task.isCancelled else { return }
-        // Publish together: restoration must keep saved order, not probe completion
-        // order, including when a history scan finishes while checks are in flight.
-        providerInstallations = found
-        checkingProviders.removeAll()
-        if !deferredOpenTabs.isEmpty { restoreOpenTabs() }
+        guard showsNewSessionSurface, canSignIn(provider) else { return }
+        guard Self.isUsableDirectory(project) else {
+            showError(title: "Folder is unavailable", message: "Choose another folder in Options.")
+            return
+        }
+        var folder = project
+        if settings.startsInWorktree, SigilWorktree.isInRepository(project) {
+            do {
+                folder = try await SigilWorktree.create(for: project) ?? project
+            } catch {
+                showError(title: "Could not create a worktree", message: error.localizedDescription)
+                return
+            }
+        }
+        guard showsNewSessionSurface else { return }
+        if newTab(in: folder, provider: provider) != nil { focusSelectedTerminal() }
     }
 
-    /// Shared by desktop, phone, and restoration. An absent result is unknown,
-    /// never permission to launch. Existing open tabs remain usable during checks.
+    /// Explicit refresh replaces all results; routine entry reuses bounded successes.
+    func refreshProviderInstallations(force: Bool = true) async {
+        await providerChecks.refresh(force: force)
+        if !Task.isCancelled, checkingProviders.isEmpty, !deferredOpenTabs.isEmpty { restoreOpenTabs() }
+    }
+
+    /// Shared by desktop, phone and restoration. Unknown never permits launch.
     func providerLaunchProblem(_ provider: CLIProvider) -> String? {
-        if provider == .grokBuild, !settings.executableExists {
-            return "Restore the Grok CLI on your Mac, then try again."
-        }
-        guard !checkingProviders.contains(provider), let installation = providerInstallations[provider] else {
-            return "Checking \(provider.name)… Try again shortly."
-        }
-        guard installation.isAvailable else {
-            return installation.problem ?? "\(provider.name) is unavailable."
-        }
-        return nil
+        providerChecks.problem(provider)
+    }
+
+    func providerRequiresCheck(_ provider: CLIProvider) -> Bool {
+        providerChecks.requiresCheck(provider)
     }
 
     private func canLaunchProvider(_ provider: CLIProvider) -> Bool {
         guard let problem = providerLaunchProblem(provider) else { return true }
+        if !Self.isRunningAutomatedTests {
+            Task { [weak self] in await self?.refreshProviderInstallations(force: false) }
+        }
         showError(title: "\(provider.name) is unavailable", message: problem)
         return false
     }
 
-    /// ⇧⌘N: choose the folder first, then open the new-session sheet on it.
+    /// ⇧⌘N: choose the folder first, then show the inline launch surface.
     func requestNewSessionInFolder(choose: () -> URL?) {
         guard let folder = choose() else { return }
         requestNewSession(in: folder)
@@ -2018,6 +2041,10 @@ final class AppModel {
         // Only a chat this tab creates; opening an existing chat does not make it Sigil's.
         if case .new = spec.mode, let sessionID = tab.sessionID { settings.recordSigilConversations([sessionID]) }
         tabs.append(tab)
+        if !isRestoringTabs {
+            isShowingNewSessionSurface = false
+            pendingSessionDirectory = nil
+        }
         selectedTabID = tab.id
         if !isRestoringTabs { clearDeferredSelection() }
         if !isRestoringTabs { rememberDefaultDirectory(spec.workingDirectory) }
@@ -2034,7 +2061,7 @@ final class AppModel {
         }
         let id = tab.id
         tab.start(isSelected: { [weak self] in
-            self?.selectedTabID == id && NSApp.isActive
+            self?.selectedTabID == id && self?.showsNewSessionSurface == false && NSApp.isActive
         })
         attachBridge(to: tab)
         if !isRestoringTabs { persistOpenTabs() }
@@ -2166,6 +2193,9 @@ final class AppModel {
     }
 
     func select(_ id: TerminalTab.ID) {
+        guard !isStartingNewSession else { return }
+        isShowingNewSessionSurface = false
+        pendingSessionDirectory = nil
         selectedTabID = id
         clearDeferredSelection()
         tabs.first { $0.id == id }?.clearUnseenActivity()
@@ -2178,7 +2208,7 @@ final class AppModel {
         guard let tab = selectedTab else { return }
         DispatchQueue.main.async { [weak self, weak tab] in
             guard let self, let tab, self.selectedTab?.id == tab.id else { return }
-            guard !self.isFindBarVisible, !self.isShowingNewSessionSheet else { return }
+            guard !self.isFindBarVisible, !self.isShowingNewSessionSheet, !self.showsNewSessionSurface else { return }
             guard let window = tab.controller.view.window, window.isKeyWindow,
                 window.attachedSheet == nil
             else {
@@ -2490,6 +2520,10 @@ final class AppModel {
 
     /// A panel shell opened while the sheet was up takes focus once it closes.
     func newSessionSheetDidClose() {
+        if showsNewSessionSurface {
+            newSessionFocusToken += 1
+            return
+        }
         if needsPanelShellFocus { focusPanelShell() } else { focusSelectedTerminal() }
     }
 
@@ -2503,6 +2537,7 @@ final class AppModel {
     }
 
     func executableConfigurationChanged() async {
+        if !Self.isRunningAutomatedTests { await refreshProviderInstallations(force: false) }
         guard settings.executableExists else { return }
         restoreOpenTabs()
         if settings.isTabMessagingEnabled {
@@ -2564,7 +2599,7 @@ final class AppModel {
     func focusPanelShell() {
         guard needsPanelShellFocus else { return }
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.needsPanelShellFocus, !self.isShowingNewSessionSheet,
+            guard let self, self.needsPanelShellFocus, !self.isShowingNewSessionSheet, !self.isShowingNewSessionSurface,
                 self.panel.isVisible, self.panel.mode == .shell, let shell = self.panel.shell,
                 let window = shell.view.window, window.attachedSheet == nil
             else { return }
@@ -3056,6 +3091,11 @@ final class AppModel {
                 deferredLegacySelectedSessionID = snapshot.selectedSessionID
             }
         }
+        // Retained fresh results must not restore a later saved entry ahead
+        // of one whose required replacement check is still pending.
+        guard checkingProviders.isEmpty,
+            !deferredOpenTabs.contains(where: { providerChecks.requiresCheck($0.provider) })
+        else { return }
         // Native paths come from the initial history scan. Starting Grok first
         // would reorder a mixed saved snapshot before those paths can be known.
         // A completed (even failed) scan lets genuinely missing entries defer

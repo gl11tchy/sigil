@@ -339,11 +339,16 @@ struct NewSessionSheetTests {
             presentError: { _ in }
         )
         model.requestNewSession(in: FileManager.default.homeDirectoryForCurrentUser)
+        #expect(!model.isShowingNewSessionSheet)
+        model.showNewSessionOptions()
+        #expect(model.isShowingNewSessionSheet)
 
+        let inline = try png(of: NewSessionSurface(model: model).frame(width: 650, height: 450))
         let grok = try png(of: NewSessionSheet(model: model))
         let cursor = try png(of: NewSessionSheet(model: model, provider: .cursor))
         #expect(grok.count > 1000)
         #expect(cursor.count > 1000)
+        #expect(inline.count > 1000)
     }
 
     @Test func providerLogosUseTheInstalledApps() {

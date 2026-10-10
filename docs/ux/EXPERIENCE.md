@@ -118,8 +118,11 @@ one from fixtures (see [Reference slice](#reference-slice)).
   decorative or dead controls.
 - Fixture-only surfaces compile only in debug builds (`#if DEBUG`) and never
   appear in release UI.
-- Reuse before adding: New task maps to the existing New Session sheet and
-  provider checks; Restart and Close to the existing tab actions; review's
+- Reuse before adding: New task maps to the inline empty terminal with monochrome
+  provider glyphs impressed into its own ground, with shallow inset shadows and
+  highlights. One click starts with saved/default settings, and Options
+  opens the existing configuration sheet. Reuse provider checks; Restart and
+  Close map to the existing tab actions; review's
   scratch shell to the existing right-panel shell; Find to the existing
   terminal find bar; rename, pin and archive to the existing ledger. A second
   persistent control for the same action is a defect. An empty state may

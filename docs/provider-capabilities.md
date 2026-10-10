@@ -44,8 +44,16 @@ This optional local gate requires installed CLIs; ordinary CI does not.
 - Codex uses `resume ID`, or `resume --last` only for an explicitly requested
   continue-latest launch. See [official CLI documentation](https://developers.openai.com/codex/cli/features).
 - Installed-version detection runs login-shell executable lookup and `--version`
-  off the UI thread. It bounds time and output. Availability does not establish
-  authentication or model entitlement.
+  on dispatch threads, outside Swift's cooperative executor. It bounds time and
+  output. Routine New Session entry reuses successful results for five minutes,
+  keyed by provider and executable configuration. Missing, unavailable, expired
+  or explicitly refreshed results require a current check; an in-flight
+  replacement never permits launch from its old result. Grok path changes
+  invalidate immediately. Existing terminals keep running, and saved restoration
+  waits for the current batch to retain order. Availability does not establish
+  authentication or model entitlement; a cached result cannot prove an executable
+  or authentication will remain usable at launch. Automatic timeout retries and
+  the Settings CLI inventory remain separate work (REA-1250 and REA-1261).
 
 ## History format boundaries
 

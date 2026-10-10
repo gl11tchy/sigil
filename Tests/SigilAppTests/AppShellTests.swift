@@ -335,6 +335,29 @@ struct AppShellTests {
         #expect(window.firstResponder === shell.view)
     }
 
+    @Test func inlineEntryKeepsTerminalMountedAndReturnsKeyboardFocusOnCancel() async throws {
+        let home = try TemporaryShellHome()
+        defer { home.restore() }
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.model()
+        let tab = try #require(model.newTab(in: try fixture.directory("project")))
+        defer { model.closeAllTabsAndWait() }
+        let window = makeClosableWindow()
+        try #require(window.contentView).addSubview(tab.controller.view)
+        defer { tab.controller.view.removeFromSuperview() }
+        model.requestNewSession()
+        window.makeFirstResponder(nil)
+        model.focusSelectedTerminal()
+        await flushMainAsync()
+        #expect(window.firstResponder !== tab.controller.view)
+        #expect(tab.controller.view.window === window)
+        #expect(tab.controller.isRunning)
+        model.cancelNewSession()
+        await flushMainAsync()
+        #expect(window.firstResponder === tab.controller.view)
+    }
+
     @Test func switchingFromThePanelShellToNotesGivesFocusBackToTheTerminal() async throws {
         let home = try TemporaryShellHome()
         defer { home.restore() }

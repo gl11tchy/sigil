@@ -210,79 +210,77 @@ struct WindowContent: View {
 
     @ViewBuilder
     private var content: some View {
-        if model.tabs.isEmpty {
-            EmptyDetailView { model.requestNewSession() }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            VStack(spacing: 0) {
-                ZStack(alignment: .top) {
-                    ForEach(model.tabs) { tab in
-                        let isSelected = tab.id == model.selectedTab?.id
-                        TerminalScreen(
-                            tab: tab, theme: model.settings.theme,
-                            onWindowAttachment: { model.terminalViewDidAttach(tabID: tab.id) }
-                        )
-                        .opacity(isSelected ? 1 : 0)
-                        .allowsHitTesting(isSelected)
-                        .accessibilityHidden(!isSelected)
-                    }
-                    if model.isFindBarVisible, model.selectedTab != nil {
-                        HStack {
-                            Spacer(minLength: 0)
-                            TerminalFindBar(
-                                query: Bindable(model).findQuery,
-                                matchIndex: model.findMatchIndex,
-                                matchCount: model.findMatchCount,
-                                focusToken: model.findFocusToken,
-                                findNext: { model.findNextInTerminal() },
-                                findPrevious: { model.findPreviousInTerminal() },
-                                dismiss: { model.dismissFindBar() }
-                            )
-                        }
-                        .padding(10)
-                        .transition(
-                            reduceMotion
-                                ? .opacity
-                                : .opacity.combined(with: .offset(y: -6))
-                        )
-                        .zIndex(1)
-                    }
-                }
-                // Docked below the terminal, never over it: the CLI's input
-                // line and an exit reason sit at the bottom of the screen.
-                if let tab = model.selectedTab, let item = tab.bridgeInbox.first {
-                    BridgeInboxCard(
-                        prompt: item.prompt,
-                        pendingCount: tab.bridgeInbox.count,
-                        canDeliver: tab.canDeliverBridgePrompt,
-                        deliver: {
-                            tab.deliverNextBridgePrompt()
-                            tab.controller.focus()
-                        },
-                        dismiss: { tab.dismissNextBridgePrompt() }
+        VStack(spacing: 0) {
+            ZStack(alignment: .top) {
+                ForEach(model.tabs) { tab in
+                    let isSelected = !model.showsNewSessionSurface && tab.id == model.selectedTab?.id
+                    TerminalScreen(
+                        tab: tab, theme: model.settings.theme,
+                        onWindowAttachment: { model.terminalViewDidAttach(tabID: tab.id) }
                     )
-                    .padding(10)
-                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 8)))
+                    .opacity(isSelected ? 1 : 0)
+                    .allowsHitTesting(isSelected)
+                    .accessibilityHidden(!isSelected)
                 }
-                if let tab = model.selectedTab, case .exited = tab.activity {
-                    ExitedCapsule(
-                        activity: tab.activity,
-                        close: { model.closeTab(tab.id) },
-                        restart: { model.restartTab(id: tab.id) }
-                    )
+                if model.showsNewSessionSurface {
+                    NewSessionSurface(model: model)
+                }
+                if !model.showsNewSessionSurface, model.isFindBarVisible, model.selectedTab != nil {
+                    HStack {
+                        Spacer(minLength: 0)
+                        TerminalFindBar(
+                            query: Bindable(model).findQuery,
+                            matchIndex: model.findMatchIndex,
+                            matchCount: model.findMatchCount,
+                            focusToken: model.findFocusToken,
+                            findNext: { model.findNextInTerminal() },
+                            findPrevious: { model.findPreviousInTerminal() },
+                            dismiss: { model.dismissFindBar() }
+                        )
+                    }
                     .padding(10)
-                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 8)))
+                    .transition(
+                        reduceMotion
+                            ? .opacity
+                            : .opacity.combined(with: .offset(y: -6))
+                    )
+                    .zIndex(1)
                 }
             }
-            .animation(
-                reduceMotion ? .easeOut(duration: 0.1) : Motion.slide,
-                value: model.isFindBarVisible
-            )
-            .animation(reduceMotion ? nil : Motion.slide, value: model.selectedTab?.bridgeInbox.count)
-            .onChange(of: model.findQuery) { _, query in
-                model.applyFindQuery()
-                announce(ScreenAnnouncement.findMatches(query: query, count: model.findMatchCount))
+            // Docked below the terminal, never over it: the CLI's input
+            // line and an exit reason sit at the bottom of the screen.
+            if !model.showsNewSessionSurface, let tab = model.selectedTab, let item = tab.bridgeInbox.first {
+                BridgeInboxCard(
+                    prompt: item.prompt,
+                    pendingCount: tab.bridgeInbox.count,
+                    canDeliver: tab.canDeliverBridgePrompt,
+                    deliver: {
+                        tab.deliverNextBridgePrompt()
+                        tab.controller.focus()
+                    },
+                    dismiss: { tab.dismissNextBridgePrompt() }
+                )
+                .padding(10)
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 8)))
             }
+            if !model.showsNewSessionSurface, let tab = model.selectedTab, case .exited = tab.activity {
+                ExitedCapsule(
+                    activity: tab.activity,
+                    close: { model.closeTab(tab.id) },
+                    restart: { model.restartTab(id: tab.id) }
+                )
+                .padding(10)
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 8)))
+            }
+        }
+        .animation(
+            reduceMotion ? .easeOut(duration: 0.1) : Motion.slide,
+            value: model.isFindBarVisible
+        )
+        .animation(reduceMotion ? nil : Motion.slide, value: model.selectedTab?.bridgeInbox.count)
+        .onChange(of: model.findQuery) { _, query in
+            model.applyFindQuery()
+            announce(ScreenAnnouncement.findMatches(query: query, count: model.findMatchCount))
         }
     }
 }
@@ -364,7 +362,14 @@ private struct TopBar: View {
                 TabStripView(model: model)
             }
 
-            if let tab = model.selectedTab {
+            if model.showsNewSessionSurface {
+                Text(SelectedSessionFolder.breadcrumb(of: model.pendingSessionDirectory ?? model.newSessionDirectory))
+                    .mono(12)
+                    .foregroundStyle(palette.ink2)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                    .padding(.horizontal, 6)
+            } else if let tab = model.selectedTab {
                 if tab.activity == .working {
                     WorkingLabel(since: tab.workingSince)
                         .padding(.horizontal, 6)
@@ -630,37 +635,6 @@ struct WindowChrome: NSViewRepresentable {
             window.isMovableByWindowBackground = true
             window.backgroundColor = color
             window.styleMask.insert(.fullSizeContentView)
-        }
-    }
-}
-
-/// No tab open: Beautiful UI's empty state, which teaches the next step.
-private struct EmptyDetailView: View {
-    let newSession: () -> Void
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "terminal")
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(palette.ink3)
-                .frame(width: 40, height: 40)
-                .surface(palette.surface, radius: Radius.card, elevation: .card)
-            VStack(spacing: 4) {
-                Text("No open session")
-                    .ui(15, .semibold)
-                    .foregroundStyle(palette.ink)
-                HStack(spacing: 5) {
-                    Text("Press")
-                    KbdChip(label: "⌘T", palette: palette)
-                    Text("to start one, or pick a chat on the left.")
-                }
-                .ui(13)
-                .foregroundStyle(palette.ink2)
-            }
-            Button("New Session", action: newSession)
-                .buttonStyle(.primary)
-                .padding(.top, 4)
         }
     }
 }
