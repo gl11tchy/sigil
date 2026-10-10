@@ -24,7 +24,7 @@ source overrides, environment options, CLI requirements and manual image layout.
 
 ## Verification
 
-Focused editing gate: `node --test Site/test/deploy.test.mjs Site/test/revision.test.mjs`
+Initial focused editing gate: `node --test Site/test/deploy.test.mjs Site/test/revision.test.mjs`
 passed all 32 tests. Coverage includes:
 
 - Both real shell wrappers with a fake CLI in an isolated home and a local Git
@@ -47,7 +47,7 @@ Sidereal's focused revision gate passed all eight tests, including copied-bundle
 health, stale/invalid stamps, Dockerfile-only changes and the stamp entry point
 under a symlink with and without `--preserve-symlinks-main`.
 
-Final affected-service gate:
+Initial affected-service gate:
 
 | Command | Result |
 | --- | --- |
@@ -71,6 +71,53 @@ remained `be90c2544792a9538e279ada89672c0b3476224b`. Only this ticket's service,
 deployment, test and documentation files changed. Known parked branches were
 preserved. The ordinary exact-head PR CI gate is reported on the PR; local results
 do not substitute for it.
+
+## Parent review remediation
+
+Parent review of `0bed7546d36fd7870b71527a8eccd72f25946873` identified the two
+stale production commands in `docs/remote-control.md` and the staging race in
+[discussion_r4237436146](https://github.com/gl11tchy-team/sigil/pull/146#discussion_r4237436146).
+The commands now use their respective wrappers and documented health origins:
+`https://remote.sigilapp.dev/health` and `https://sigilapp.dev/health`. Existing
+project/environment/service IDs and historical deployment receipts are unchanged.
+These are runbook corrections; the commands were not executed.
+
+Six deterministic regression cases ran against the reviewed implementation: a
+tracked runtime edit, an untracked runtime edit, and an added untracked runtime
+file for each service. A test-only filesystem preload changes a generated input
+immediately after a staging copy and records an acknowledgement. All six initially
+failed because the old flow uploaded and exited zero. Both dirty booleans remained
+true; the tracked and existing-untracked cases also retained identical Git status
+text. No timer race or live provider was involved.
+
+The shared stager now records manifested file names and bytes before copying,
+compares each staged copy with those bytes, then re-enumerates and re-reads source
+inputs after stamping. Persistent changes refuse before upload, including changes
+to untracked public inputs. Existing HEAD/dirty guards and explicit overrides
+remain. Unchanged dirty tracked and untracked inputs still upload with the
+override, and the fake CLI captures their exact staged bytes.
+
+Latest review-fix checks:
+
+| Command | Result |
+| --- | --- |
+| `node --test --test-name-pattern='runtime input.*staging\|unchanged dirty' Site/test/deploy.test.mjs` | Eight passed, zero failed/skipped |
+| `npm --prefix Site test` | 58 passed, zero failed/skipped |
+| `npm --prefix Sidereal test` | 187 passed, zero failed/skipped |
+| `shellcheck Scripts/*.sh` | Passed |
+| Separate `bash -n` checks for both wrappers | Passed |
+| `node --check Scripts/deploy-service.mjs` | Passed |
+| `node --check Site/test/deploy.test.mjs` | Passed |
+| `git diff --check` | Passed |
+
+The comparison uses bounded filesystem reads, not a transaction or filesystem
+lock. Transient changes restored between reads and edits after the final
+comparison are outside this check. All race inputs, mutation acknowledgements,
+CLI homes, Git remotes and HTTP endpoints were generated fixtures. No actual
+deployment, authenticated Railway call, CI rerun or native application check ran.
+Fresh main remained `be90c2544792a9538e279ada89672c0b3476224b`; unrelated
+worktrees and the daily app were preserved. The same normal PR receives one
+complete follow-up push and stops for personal final review and ordinary CI.
 
 ## Limits and excluded work
 

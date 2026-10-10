@@ -336,3 +336,9 @@ source identity; it does not establish operational health.
 fixtures, the baseline failure, verification and limits. No production deploy or
 native application change ran. REA-1248 owns future CI deployment wiring. Parent
 reviews the final code and exact-head CI before any merge.
+
+The parent review follow-up corrects both existing production runbook commands
+and adds a bounded comparison of runtime file names and bytes across staging.
+Generated races now refuse upload while unchanged dirty inputs remain allowed.
+The evidence records the six baseline failures, eight focused passes, complete
+Node suites and the limits of these reads; no transactional snapshot is claimed.

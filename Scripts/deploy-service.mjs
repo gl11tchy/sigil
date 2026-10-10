@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { copyFile, lstat, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -22,22 +22,39 @@ async function command(program, args, { cwd = root, timeout = 60000 } = {}) {
   }
 }
 
-export async function stageBundle(service, directory, checkout = root) {
+async function runtimeInputs(service, checkout) {
   const source = join(checkout, services[service] || '');
   if (!services[service]) throw new Error('Unknown service bundle');
-  const target = pathToFileURL(`${directory}/`);
+  const inputs = [];
   const allowed = new Set((await command('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: checkout })).split('\0'));
   for (const file of await runtimeFiles(pathToFileURL(`${source}/`))) {
-    await mkdir(dirname(join(directory, file)), { recursive: true });
     // Both images receive the same loader. Site's checkout adapter is local only.
     const input = file === 'revision.mjs' ? join(checkout, 'Sidereal/revision.mjs') : join(source, file);
     const key = file === 'revision.mjs' ? 'Sidereal/revision.mjs' : `${services[service]}/${file}`;
     if (!allowed.has(key)) throw new Error('Ignored runtime input refused; no upload attempted');
     if (!(await lstat(input)).isFile()) throw new Error('Linked or special runtime input refused; no upload attempted');
-    await copyFile(input, join(directory, file));
+    inputs.push({ file, input, data: await readFile(input) });
+  }
+  return inputs;
+}
+
+export async function stageBundle(service, directory, checkout = root) {
+  const changed = () => new Error('Checkout runtime inputs changed during staging; no upload attempted');
+  const before = await runtimeInputs(service, checkout);
+  const target = pathToFileURL(`${directory}/`);
+  for (const { file, input, data } of before) {
+    const destination = join(directory, file);
+    await mkdir(dirname(destination), { recursive: true });
+    await copyFile(input, destination);
+    if (!data.equals(await readFile(destination))) throw changed();
   }
   const stamp = await stampRevision(target, pathToFileURL(`${checkout}/`));
   await loadRevision(target, { required: true });
+  // Re-enumerate untracked public inputs too. Byte comparisons catch persistent
+  // edits within an already-dirty checkout; these reads are not a transaction.
+  const after = await runtimeInputs(service, checkout);
+  if (before.length !== after.length || before.some((value, index) => value.file !== after[index].file
+    || !value.data.equals(after[index].data))) throw changed();
   return stamp;
 }
 

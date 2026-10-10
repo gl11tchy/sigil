@@ -60,6 +60,15 @@ Both bundles receive the canonical `Sidereal/revision.mjs` loader as
 describes these actual staged bytes. No Git metadata, dependency directories,
 tests or unrelated checkout files are included by the current manifests.
 
+Staging records manifested input names and bytes before copying, checks each
+copied file against those bytes, then re-reads and re-enumerates the inputs after
+stamping. Changed bytes or added/removed runtime inputs refuse upload even if the
+checkout was already dirty. This includes untracked public files and the shared
+revision loader. The dirty override permits unchanged dirty inputs; it does not
+bypass this comparison. These bounded reads are not a transactional filesystem
+snapshot: transient changes restored between reads, or edits after the final
+comparison, are outside this check.
+
 `revision.json` contains `revision`, `gitSHA`, `dirty`, and `sourceSHA256`. Dirty
 source adds `-dirty` to the revision; the hash distinguishes staged bytes even at
 the same commit. The stamp itself is excluded from its hash. Docker validates the

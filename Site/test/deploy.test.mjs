@@ -4,7 +4,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import { copyFile, cp, mkdir, mkdtemp, readFile, writeFile, rm, symlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { promisify } from 'node:util';
@@ -13,7 +13,7 @@ const repo = fileURLToPath(new URL('../../', import.meta.url));
 const run = promisify(execFile);
 const ids = { project: '11111111-1111-4111-8111-111111111111', environment: '22222222-2222-4222-8222-222222222222', service: '33333333-3333-4333-8333-333333333333' };
 
-async function fixture(t, { target = 'valid', health = 'match', fail } = {}) {
+async function fixture(t, { target = 'valid', health = 'match', fail, captureFiles = [] } = {}) {
   const scratch = await mkdtemp(join(tmpdir(), 'sigil-deploy-test-'));
   t.after(() => rm(scratch, { recursive: true, force: true }));
   const checkout = join(scratch, 'checkout');
@@ -57,14 +57,14 @@ async function fixture(t, { target = 'valid', health = 'match', fail } = {}) {
   await once(server, 'listening');
   t.after(() => { server.close(); server.closeAllConnections(); });
   const host = `127.0.0.1:${server.address().port}`;
-  const config = { ids, host, target, fail };
+  const config = { ids, host, target, fail, captureFiles };
   await writeFile(join(scratch, 'config.json'), JSON.stringify(config));
   await writeFile(join(bin, 'railway'), `#!/usr/bin/env node
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const root = process.env.SIGIL_TEST_ROOT;
-const { ids, host, target, fail } = JSON.parse(fs.readFileSync(path.join(root, 'config.json')));
+const { ids, host, target, fail, captureFiles } = JSON.parse(fs.readFileSync(path.join(root, 'config.json')));
 const args = process.argv.slice(2);
 fs.appendFileSync(path.join(root, 'calls.jsonl'), JSON.stringify(args) + '\\n');
 if (fail === args[0]) { console.error('SYNTHETIC_TOKEN_MUST_NOT_LEAK'); process.exit(7); }
@@ -86,7 +86,8 @@ if (args[0] === 'status') {
     const directory = pathToFileURL(args[1] + '/');
     const { loadRevision } = await import(new URL('revision.mjs', directory));
     const stamp = await loadRevision(directory, { required: true });
-    fs.writeFileSync(path.join(root, 'capture.json'), JSON.stringify({ args, files: fs.readdirSync(directory), stamp }));
+    const contents = Object.fromEntries(captureFiles.map(file => [file, fs.readFileSync(path.join(args[1], file), 'utf8')]));
+    fs.writeFileSync(path.join(root, 'capture.json'), JSON.stringify({ args, files: fs.readdirSync(directory), stamp, contents }));
     console.log(JSON.stringify({ deploymentId: 'synthetic' }));
   })().catch(() => process.exit(2));
 } else { process.exit(9); }
@@ -102,8 +103,67 @@ if (args[0] === 'status') {
     try { return (await readFile(join(scratch, 'calls.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse); }
     catch (error) { if (error.code === 'ENOENT') return []; throw error; }
   }
-  return { checkout, env, git, deploy, calls, server, args, requests: () => requests,
+  async function mutateDuringStaging(service, file, trigger = file) {
+    const hook = join(scratch, 'staging-mutation.mjs');
+    // An awaited filesystem boundary gives the regression a fixed ordering,
+    // without production hooks, timers, personal files or a real provider.
+    await writeFile(hook, `import fsp from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+const { service, file, trigger, checkout, scratch } = ${JSON.stringify({ service, file, trigger, checkout, scratch })};
+const originalCopy = fsp.copyFile, originalWrite = fsp.writeFile;
+let changed = false;
+async function afterWrite(destination) {
+  const path = destination instanceof URL ? fileURLToPath(destination) : String(destination);
+  if (changed || !path.includes('/sigil-' + service.toLowerCase() + '-deploy-') || !path.endsWith('/' + trigger)) return;
+  changed = true;
+  await originalWrite(join(checkout, service, file), 'synthetic changed during staging');
+  await originalWrite(join(scratch, 'mutation-observed'), 'observed');
+}
+fsp.copyFile = async (...args) => { const result = await originalCopy(...args); await afterWrite(args[1]); return result; };
+fsp.writeFile = async (...args) => { const result = await originalWrite(...args); await afterWrite(args[0]); return result; };
+syncBuiltinESMExports();
+`);
+    return { NODE_OPTIONS: `--import=${pathToFileURL(hook).href}` };
+  }
+  return { checkout, env, git, deploy, calls, server, args, mutateDuringStaging, requests: () => requests,
+    mutationObserved: () => readFile(join(scratch, 'mutation-observed'), 'utf8'),
     capture: async () => JSON.parse(await readFile(join(scratch, 'capture.json'))) };
+}
+
+for (const service of ['Site', 'Sidereal']) {
+  for (const kind of ['tracked', 'untracked', 'new untracked']) {
+    test(`${service}: changed ${kind} runtime input during staging refuses upload despite dirty override`, async t => {
+      const f = await fixture(t);
+      const file = kind === 'tracked' ? 'public/style.css' : 'public/synthetic-extra.txt';
+      const trigger = kind === 'new untracked' ? 'public/style.css' : file;
+      await writeFile(join(f.checkout, service, trigger), 'synthetic initial dirty runtime');
+      const before = f.git('status', '--porcelain', '--untracked-files=normal');
+      const mutation = await f.mutateDuringStaging(service, file, trigger);
+      const result = await f.deploy(service.toLowerCase(), { SIGIL_ALLOW_DIRTY: '1', ...mutation });
+      assert.equal(await f.mutationObserved(), 'observed');
+      const after = f.git('status', '--porcelain', '--untracked-files=normal');
+      assert.ok(before !== '' && after !== '');
+      if (kind !== 'new untracked') assert.equal(after, before, 'status text also stays unchanged');
+      assert.notEqual(result.code, 0, 'changing source must refuse, not successfully upload');
+      assert.match(result.stderr, /runtime inputs changed during staging/);
+      assert.ok(!(await f.calls()).some(args => args[0] === 'up'));
+      assert.equal(f.requests(), 0);
+    });
+  }
+
+  test(`${service}: unchanged dirty tracked and untracked runtime inputs still upload with explicit override`, async t => {
+    const files = ['public/style.css', 'public/synthetic-extra.txt'];
+    const f = await fixture(t, { captureFiles: files });
+    for (const file of files) await writeFile(join(f.checkout, service, file), `synthetic unchanged ${file}`);
+    const result = await f.deploy(service.toLowerCase(), { SIGIL_ALLOW_DIRTY: '1' });
+    assert.equal(result.code, 0, result.stderr);
+    const uploaded = await f.capture();
+    assert.equal(uploaded.stamp.dirty, true);
+    assert.deepEqual(uploaded.contents, Object.fromEntries(files.map(file => [file, `synthetic unchanged ${file}`])));
+    assert.equal((await f.calls()).filter(args => args[0] === 'up').length, 1);
+  });
 }
 
 for (const service of ['site', 'sidereal']) {
