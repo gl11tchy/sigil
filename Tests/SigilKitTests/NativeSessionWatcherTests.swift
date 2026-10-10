@@ -37,27 +37,41 @@ struct NativeSessionWatcherTests {
     }
 
     @Test func codexAdjacentIndexUpdatesAnUnchangedTranscriptWithoutReload() async throws {
+        traceNativeWatcherStage("adjacent index: before fixture creation")
         let fixture = try NativeWatcherFixture(provider: .codex)
+        traceNativeWatcherStage("adjacent index: after fixture creation")
         defer { fixture.cleanup() }
         let id = UUID().uuidString.lowercased()
+        traceNativeWatcherStage("adjacent index: before transcript setup")
         let transcript = try fixture.writeSession(id: id)
         try fixture.appendMessage(to: transcript, text: "Original transcript title")
         let originalData = try Data(contentsOf: transcript)
+        traceNativeWatcherStage("adjacent index: after transcript setup; before store.start")
         fixture.store.start()
+        traceNativeWatcherStage("adjacent index: after store.start; before initial title wait")
         try await fixture.waitUntil("initial title") {
             fixture.store.sessions.first?.summary == "Original transcript title"
         }
+        traceNativeWatcherStage("adjacent index: after initial title wait; before settling initial events")
         try await fixture.settleInitialEvents()
+        traceNativeWatcherStage("adjacent index: after settling initial events")
 
         let index = fixture.nativeRoot.deletingLastPathComponent().appendingPathComponent("session_index.jsonl")
+        traceNativeWatcherStage("adjacent index: before creating index")
         try fixture.append(["id": id, "thread_name": "Native renamed conversation"], to: index)
+        traceNativeWatcherStage("adjacent index: after creating index; before created index wait")
         try await fixture.waitUntil("created index") {
             fixture.store.sessions.first?.summary == "Native renamed conversation"
         }
+        traceNativeWatcherStage("adjacent index: after created index wait; before search assertion")
         #expect(fixture.store.search("Native renamed conversation").map(\.nativeSessionID) == [id])
+        traceNativeWatcherStage("adjacent index: after search assertion; before appending index")
         try fixture.append(["id": id, "thread_name": "Renamed again"], to: index)
+        traceNativeWatcherStage("adjacent index: after appending index; before appended index wait")
         try await fixture.waitUntil("appended index") { fixture.store.sessions.first?.summary == "Renamed again" }
+        traceNativeWatcherStage("adjacent index: after appended index wait; before transcript assertion")
         #expect(try Data(contentsOf: transcript) == originalData)
+        traceNativeWatcherStage("adjacent index: after transcript assertion")
     }
 }
 
@@ -85,8 +99,11 @@ private struct NativeWatcherFixture {
     }
 
     func cleanup() {
+        traceNativeWatcherStage("\(provider.rawValue) cleanup: before store.stop")
         store.stop()
+        traceNativeWatcherStage("\(provider.rawValue) cleanup: after store.stop; before removing fixture")
         try? FileManager.default.removeItem(at: root)
+        traceNativeWatcherStage("\(provider.rawValue) cleanup: after fixture removal attempt")
     }
 
     func writeSession(id: String) throws -> URL {
@@ -131,4 +148,10 @@ private struct NativeWatcherFixture {
         }
         try #require(condition(), "Native history did not update through its filesystem watcher: \(stage)")
     }
+}
+
+// Temporary CI stage tracing for the adjacent-index stall; write directly to stderr.
+private func traceNativeWatcherStage(_ stage: String) {
+    let line = "[NativeSessionWatcherTests \(Date().timeIntervalSince1970)] \(stage)\n"
+    try? FileHandle.standardError.write(contentsOf: Data(line.utf8))
 }
