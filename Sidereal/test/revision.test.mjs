@@ -7,13 +7,14 @@ import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { loadRevision, sourceHash } from '../revision.mjs';
 import { stampRevision } from '../stamp-revision.mjs';
+import { stageBundle } from '../../Scripts/deploy-service.mjs';
 
 const root = new URL('../', import.meta.url);
 async function bundle(t) {
   const path = await mkdtemp(`${tmpdir()}/sidereal-revision-`);
   t.after(() => rm(path, { recursive: true, force: true }));
   const target = pathToFileURL(`${path}/`);
-  for (const file of ['Dockerfile', 'package.json', 'package-lock.json', 'server.mjs', 'apns.mjs', 'revision.mjs']) {
+  for (const file of ['Dockerfile', 'package.json', 'package-lock.json', 'server.mjs', 'apns.mjs', 'revision.mjs', 'runtime-manifest.json']) {
     await copyFile(new URL(file, root), new URL(file, target));
   }
   await cp(new URL('public/', root), new URL('public/', target), { recursive: true });
@@ -74,29 +75,14 @@ test('a copied bundle with no Git metadata exposes its exact stamp on health', a
   assert.deepEqual(JSON.parse(await readFile(new URL('revision.json', target))), stamped);
 });
 
-test('the deploy wrapper uploads only a freshly stamped bundle and cleans its own staging directory', async t => {
+test('the shared stager copies only a freshly stamped runtime bundle', async t => {
   const path = await mkdtemp(`${tmpdir()}/sidereal-deploy-test-`);
   t.after(() => rm(path, { recursive: true, force: true }));
-  const capture = `${path}/capture.json`;
-  // Substitute only Railway, so this exercises the real packaging command without deploying.
-  await writeFile(`${path}/railway`, `#!/usr/bin/env node
-const { writeFileSync, readdirSync } = require('node:fs');
-const { pathToFileURL } = require('node:url');
-(async () => {
-  const args = process.argv.slice(2), directory = pathToFileURL(args[1] + '/');
-  const { loadRevision } = await import(new URL('revision.mjs', directory));
-  const stamp = await loadRevision(directory, { required: true });
-  writeFileSync(process.env.SIGIL_TEST_CAPTURE, JSON.stringify({ args, files: readdirSync(directory), stamp }));
-})().catch(() => process.exit(1));
-`, { mode: 0o700 });
-  execFileSync('bash', [new URL('../../Scripts/deploy-sidereal.sh', import.meta.url).pathname,
-    '--project', 'test-project', '--environment', 'test-environment', '--service', 'test-service', '--detach'],
-  { env: { ...process.env, PATH: `${path}:${process.env.PATH}`, SIGIL_TEST_CAPTURE: capture } });
-  const result = JSON.parse(await readFile(capture));
-  assert.deepEqual(result.files.sort(), ['Dockerfile', 'apns.mjs', 'package-lock.json', 'package.json', 'public', 'revision.json', 'revision.mjs', 'server.mjs']);
-  assert.deepEqual(result.args.slice(2), ['--path-as-root', '--project', 'test-project', '--environment', 'test-environment', '--service', 'test-service', '--detach']);
-  assert.equal(result.stamp.sourceSHA256, await sourceHash(root));
-  await assert.rejects(readFile(`${result.args[1]}/revision.json`), { code: 'ENOENT' });
+  const stamped = await stageBundle('sidereal', path);
+  const { readdir } = await import('node:fs/promises');
+  assert.deepEqual((await readdir(path)).sort(), ['Dockerfile', 'apns.mjs', 'package-lock.json', 'package.json', 'public', 'revision.json', 'revision.mjs', 'runtime-manifest.json', 'server.mjs']);
+  assert.deepEqual(await loadRevision(pathToFileURL(`${path}/`), { required: true }), stamped);
+  assert.equal(stamped.sourceSHA256, await sourceHash(root));
 });
 
 
@@ -125,7 +111,7 @@ test('the stamp runs when the script is named through a symlink, as macOS names 
   symlinkSync(join(here, '..'), link);
   const target = join(scratch, 'bundle');
   execFileSync('mkdir', ['-p', target]);
-  for (const file of ['Dockerfile', 'package.json', 'package-lock.json', 'server.mjs', 'apns.mjs', 'revision.mjs']) {
+  for (const file of ['Dockerfile', 'package.json', 'package-lock.json', 'server.mjs', 'apns.mjs', 'revision.mjs', 'runtime-manifest.json']) {
     execFileSync('cp', [join(here, '..', file), join(target, file)]);
   }
   execFileSync('cp', ['-R', join(here, '..', 'public'), join(target, 'public')]);

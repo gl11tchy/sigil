@@ -175,9 +175,9 @@ verify this revision, which has not been deployed. See [current verification](qa
   `199cc86f60d88aa6962251eaf647c455400c5fcd`, source hash
   `b6e2254d668e02992cd992fa30d5f65df0fbfbcff8e8514199da2297a254df72`, confirmed by `/health`
   and a paired phone session against the live host).
-- Re-deploy Sidereal with `Scripts/deploy-sidereal.sh --project 26f52bc8-daae-4371-aa70-4cebb2d0f222 --environment 1a3850e2-c49f-45c4-bb54-627dd102c646 --service d7e3c251-0ae2-45f9-b4b1-c819d3fa9ece --detach`.
+- Re-deploy Sidereal with `Scripts/deploy-sidereal.sh --project 26f52bc8-daae-4371-aa70-4cebb2d0f222 --environment 1a3850e2-c49f-45c4-bb54-627dd102c646 --service d7e3c251-0ae2-45f9-b4b1-c819d3fa9ece --health-url https://remote.sigilapp.dev/health`.
 - Verify the new Sidereal `/health` JSON against the revision and source hash printed by the upload script. Release the matching Mac build and relay/PWA together after merge.
-- Re-deploy the site with `railway up ./Site --path-as-root --project 26f52bc8-daae-4371-aa70-4cebb2d0f222 --environment 1a3850e2-c49f-45c4-bb54-627dd102c646 --service 060788b3-4ab1-45fb-8623-68027835cbc0 --detach`.
+- Re-deploy the site with `Scripts/deploy-site.sh --project 26f52bc8-daae-4371-aa70-4cebb2d0f222 --environment 1a3850e2-c49f-45c4-bb54-627dd102c646 --service 060788b3-4ab1-45fb-8623-68027835cbc0 --health-url https://sigilapp.dev/health`.
 - Rollback: remove/revert the active Railway deployment. This only ends remote
   sessions; it does not alter Mac sessions or files. Restarting the relay drops
   live sockets; a stored ticket reconnects when Sigil is running.
