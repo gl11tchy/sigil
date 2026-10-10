@@ -229,7 +229,7 @@ class FocusedTests(unittest.TestCase):
             program = (
                 "import time; "
                 f"print({diagnostic.WATCHER_MARKER.decode()!r},flush=True); time.sleep(.3); "
-                "print('Suite NativeSessionWatcherTests passed after .3 seconds.',flush=True); "
+                "print('Test brokenNewVersionMetadataStillReportsAReadProblem() passed after .3 seconds.',flush=True); "
                 "print('Test later() started.',flush=True); time.sleep(.25); raise SystemExit(23)"
             )
             calls = []
