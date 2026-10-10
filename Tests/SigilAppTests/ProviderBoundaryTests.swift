@@ -16,14 +16,27 @@ struct ProviderBoundaryTests {
         defer { fixture.cleanup() }
         let tab = try #require(fixture.model.newTab(in: fixture.root, provider: provider))
         #expect(tab.shouldWarnBeforeStopping)
-        tab.noteTurnStarted()
+        tab.controller.onUserSubmit?()
         try await Task.sleep(for: .milliseconds(1550))
-        #expect(tab.activity == .working)
+        #expect(tab.activity == .unknown)
+        #expect(tab.workingSince == nil)
+        #expect(tab.lastSubmittedAt != nil)
+        #expect(!tab.capabilities.lifecycle)
+        #expect(!tab.isWatchingForCompletion)
         #expect(tab.shouldWarnBeforeStopping)
         #expect(!tab.hasUnseenActivity)
+        let project = SidebarProject(
+            id: fixture.root.path, name: "project", displayPath: fixture.root.path,
+            cwd: fixture.root.path, sessions: [], updatedAt: .now)
+        #expect(!fixture.model.isWorking(project))
+        #expect(RemoteCommands.snapshot(fixture.model, terminal: false).tabs.first?.status == "unknown")
+        #expect(
+            StopWorkingPrompt(action: .quit, stopping: [tab])?.messageText
+                == "\(provider.name) is still running. Quit anyway?")
         var warnings = 0
-        fixture.model.confirmStopWorking = { _ in
+        fixture.model.confirmStopWorking = { prompt in
             warnings += 1
+            #expect(prompt.messageText == "\(provider.name) is still running.")
             return false
         }
         fixture.model.requestCloseTab(tab.id)

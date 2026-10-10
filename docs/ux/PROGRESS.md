@@ -4,6 +4,29 @@ The resumable record for the [experience contract](EXPERIENCE.md). Each entry
 says what was built, how it was checked, what the check showed, and what is
 still open. Nothing here is a timing; counts are counted actions.
 
+## REA-1211: unknown state after unobservable input
+
+Started from main `c2a24a5`, without parked PRs #140 or #142. Before production
+changes, CI run [38025826427](https://github.com/gl11tchy-team/sigil/actions/runs/38025826427)
+at `805eaa6` executed one synthetic regression with five provider cases. Claude
+Code, new Codex, Devin, Cursor and Kimi each incorrectly remained Working with a
+non-nil timer: ten expected assertion failures in 0.085 seconds.
+
+The implementation gates Working on observable lifecycle evidence, records a
+neutral last-input tooltip and keeps unknown marks grey. Unsupported providers
+and missing/rejected Codex transcripts have no completion watch. Codex writer
+identity invalidation ends its watch. Running-process close/quit warnings and
+validated Grok/Codex turn completion remain covered by synthetic tests. The phone
+receives unknown rather than working; its existing Live Activity start rule
+requires working or a verified prompt. No iPhone lifecycle code changes.
+
+Final CI run links and results are recorded in
+[PR #143](https://github.com/gl11tchy-team/sigil/pull/143).
+Local application tests remain CI-only. Earlier local Swift compilation and
+access denials were respected; no renamed native bundle/AX/window-ID screenshot
+was produced. Native UI acceptance remains unverified. No personal provider
+histories, paid inference, daily app replacement or other ticket implementations.
+
 ## REA-1195: outside note edits
 
 Built from `2c99cda` in a separate worktree; blocked PR #140 remains untouched.

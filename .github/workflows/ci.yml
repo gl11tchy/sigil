@@ -66,8 +66,7 @@ jobs:
         run: xcrun --sdk macosx metal --version
 
       - name: Verify
-        # REA-1211 reproduction before production changes; restored for final gate.
-        run: swift test --no-parallel --filter TerminalTabTests.unobservableProviderSubmissionRemainsUnknown
+        run: Scripts/verify.sh
 
       - name: iPhone app, shipping extensions, and native relay tests
         env:

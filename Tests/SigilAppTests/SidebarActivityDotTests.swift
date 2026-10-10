@@ -59,4 +59,9 @@ struct SidebarActivityDotTests {
             )
         )
     }
+
+    @Test(arguments: [true, false])
+    func unknownChatKeepsANeutralMark(isActive: Bool) {
+        #expect(SidebarActivityDot.isVisible(activity: .unknown, hasUnseenActivity: false, isActive: isActive))
+    }
 }

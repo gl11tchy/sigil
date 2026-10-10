@@ -20,7 +20,7 @@ The host sends those contextual capabilities to the phone clients.
 | CLI transcript export | Yes | No | No | No |
 | Delete provider history from Sigil | Yes | No | No | No |
 | Tab messaging | Yes | No | No | No |
-| Observed successful turn completion | Matched journal event | Unavailable | Known transcript only | Unavailable |
+| Observed successful turn completion | Matched journal event | Unavailable | Validated known transcript only | Unavailable |
 | Verified structured remote approval | No | No | No | No |
 
 Codex allocates its own native ID. Sigil does not turn a tab UUID, a recent file,
@@ -74,6 +74,16 @@ use the same captured roots, including canonical paths for symlinked locations.
 The internal states are starting, working, waiting for approval, confirmed idle,
 interrupted, exited, failed, disconnected, and unknown. A live CLI initially has
 unknown turn state. User submission means input was sent, not accepted.
+
+After submission, Claude Code, Devin, Cursor, Kimi and new Codex tabs keep an
+unknown state, with a neutral last-input tooltip and no Working loader or elapsed
+timer. They do not count as working on the Mac or in phone snapshots. A running
+CLI still requires confirmation before close or quit. No completion-watch task
+runs for these tabs, including Claude history tabs. A known Codex transcript
+enables observation only after its session metadata passes the existing scanner's
+shape, version and native identity checks. Missing or rejected metadata stays
+unknown. Codex writer identity invalidation ends its watch and disables lifecycle
+observation; Grok can still observe a journal created after submission.
 
 Neither terminal title symbols nor output silence can complete a turn. The
 bounded journal reader checks native session/turn identity and a submission-time

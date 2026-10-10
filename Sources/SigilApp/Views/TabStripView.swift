@@ -215,7 +215,8 @@ private struct TabChip: View {
                         if showsMark {
                             ActivityMark(
                                 activity: tab.activity,
-                                hasUnseenActivity: tab.hasUnseenActivity && !isSelected)
+                                hasUnseenActivity: tab.hasUnseenActivity && !isSelected,
+                                lastSubmittedAt: tab.lastSubmittedAt)
                         }
                         Text(label)
                             .ui(12.5, .medium)

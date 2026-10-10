@@ -355,6 +355,7 @@ struct PixelLoader: View {
 struct ActivityMark: View {
     let activity: TerminalTab.Activity
     var hasUnseenActivity: Bool = false
+    var lastSubmittedAt: Date?
 
     @Environment(\.palette) private var palette
 
@@ -380,6 +381,12 @@ struct ActivityMark: View {
         .frame(width: 10, height: 10)
         .accessibilityElement()
         .accessibilityLabel(label)
+        .help(Self.helpText(activity: activity, lastSubmittedAt: lastSubmittedAt, now: Date()) ?? "")
+    }
+
+    static func helpText(activity: TerminalTab.Activity, lastSubmittedAt: Date?, now: Date) -> String? {
+        guard activity == .unknown, let lastSubmittedAt else { return nil }
+        return "Input sent \(lastSubmittedAt.longRelative(to: now))"
     }
 
     private func dot(_ color: Color) -> some View {
