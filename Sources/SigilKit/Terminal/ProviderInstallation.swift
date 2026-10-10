@@ -7,6 +7,23 @@ public struct ProviderInstallation: Sendable, Equatable {
     public let problem: String?
     public var isAvailable: Bool { executable != nil && problem == nil }
 
+    /// The blocking process wait belongs on dispatch threads, not Swift's
+    /// cooperative executor. Cancellation is fenced by the caller's generation.
+    public static func detectAsync(
+        provider: CLIProvider, configuredExecutable: URL? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        timeout: TimeInterval = 2
+    ) async -> ProviderInstallation {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                continuation.resume(
+                    returning: detect(
+                        provider: provider, configuredExecutable: configuredExecutable,
+                        environment: environment, timeout: timeout))
+            }
+        }
+    }
+
     /// Run off the main actor. This invokes only --version, never a model call.
     /// Login-shell lookup matches terminal launch, including user PATH settings.
     public static func detect(

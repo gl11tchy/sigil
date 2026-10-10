@@ -17,10 +17,11 @@ struct AppModelTests {
         let model = fixture.model()
         let folder = try fixture.directory("chosen folder")
         model.requestNewSession(in: folder)
-        #expect(model.isShowingNewSessionSheet)
+        #expect(model.isShowingNewSessionSurface)
+        #expect(!model.isShowingNewSessionSheet)
         #expect(model.pendingSessionDirectory == folder)
         #expect(model.tabs.isEmpty)
-        model.isShowingNewSessionSheet = false
+        model.cancelNewSession()
         #expect(model.tabs.isEmpty)
         #expect(fixture.settings.openTabs.tabs.isEmpty)
     }
@@ -3398,10 +3399,13 @@ struct AppModelTests {
                 == projectA.resolvingSymlinksInPath().path)
 
         model.requestNewSessionInProject(api)
-        #expect(model.isShowingNewSessionSheet)
+        #expect(model.isShowingNewSessionSurface)
+        #expect(!model.isShowingNewSessionSheet)
         #expect(model.tabs.isEmpty)
         let directory = try #require(model.pendingSessionDirectory)
-        let tab = try #require(model.newTab(in: directory))
+        #expect(directory.resolvingSymlinksInPath().path == projectA.resolvingSymlinksInPath().path)
+        await model.startDefaultSession(.grokBuild)
+        let tab = try #require(model.selectedTab)
         #expect(
             tab.workingDirectory.resolvingSymlinksInPath().path
                 == projectA.resolvingSymlinksInPath().path)
@@ -3594,10 +3598,11 @@ struct AppModelTests {
         defer { model.closeAllTabsAndWait() }
 
         model.requestNewSessionInFolder { nil }
-        #expect(!model.isShowingNewSessionSheet)
+        #expect(!model.isShowingNewSessionSurface)
 
         model.requestNewSessionInFolder { chosen }
-        #expect(model.isShowingNewSessionSheet)
+        #expect(model.isShowingNewSessionSurface)
+        #expect(!model.isShowingNewSessionSheet)
         #expect(model.pendingSessionDirectory == chosen)
     }
 

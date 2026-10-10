@@ -184,7 +184,7 @@ final class AppSettings {
         didSet { defaults.set(optionAsMetaKey, forKey: Key.optionAsMeta) }
     }
 
-    /// The CLI the New Session sheet selects first.
+    /// The CLI focused first in New Session and its optional configuration sheet.
     var defaultProvider: CLIProvider {
         didSet { defaults.set(defaultProvider.rawValue, forKey: Key.defaultProvider) }
     }
