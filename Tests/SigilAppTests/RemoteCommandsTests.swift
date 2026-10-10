@@ -382,7 +382,10 @@ struct RemoteCommandsTests {
         fixture.settings.executablePath = fixture.root.appendingPathComponent("missing-grok").path
         let noCLI = await fixture.command("open", text: kept.path, name: "kept-session")
         #expect(!noCLI.ok)
-        #expect(noCLI.error == "Restore the Grok CLI on your Mac, then try again.")
+        #expect(
+            noCLI.error
+                == "The selected Grok executable is unavailable. Choose another path or Use Installed Grok in Settings."
+        )
 
         #expect(fixture.model.tabs.isEmpty)
         #expect(fixture.alerts.count == 0)

@@ -278,10 +278,12 @@ struct NewSessionSheet: View {
         }
         .task(
             id: NewSessionLaunch.modelListPath(
-                provider: provider, executablePath: model.settings.executablePath)
+                provider: provider, executablePath: model.grokExecutableURL.path)
         ) {
             guard provider == .grokBuild else { return }
-            if let found = await GrokModelCatalog.menuModels(executable: model.settings.executableURL) {
+            await model.refreshProviderInstallationsForEntry()
+            guard model.providerLaunchProblem(.grokBuild) == nil else { return }
+            if let found = await GrokModelCatalog.menuModels(executable: model.grokExecutableURL) {
                 grokModels = found
             }
         }

@@ -57,12 +57,32 @@ final class AppSettings {
     var themeName: String {
         didSet { defaults.set(themeName, forKey: Key.themeName) }
     }
-    var executablePath: String {
+    private(set) var grokExecutableSelection: GrokExecutableSelection {
         didSet {
-            defaults.set(executablePath, forKey: Key.executablePath)
-            defaults.set(true, forKey: Key.executablePathChosen)
+            switch grokExecutableSelection {
+            case .installed:
+                defaults.removeObject(forKey: Key.executablePath)
+                defaults.set(false, forKey: Key.executablePathChosen)
+            case .custom(let path):
+                defaults.set(path, forKey: Key.executablePath)
+                defaults.set(true, forKey: Key.executablePathChosen)
+            }
         }
     }
+
+    var usesInstalledGrok: Bool { grokExecutableSelection == .installed }
+
+    /// For automatic selection this is the installer fallback, not a discovery
+    /// result. AppModel uses the current checked host path for Grok operations.
+    var executablePath: String {
+        get {
+            if case .custom(let path) = grokExecutableSelection { return path }
+            return GrokPaths.defaultExecutable.path
+        }
+        set { grokExecutableSelection = .custom(newValue) }
+    }
+
+    func useInstalledGrok() { grokExecutableSelection = .installed }
     /// Sessions the CLI created but never got a real conversation are hidden by default;
     /// hook-triggered one-shot runs otherwise drown the sidebar.
     var showEmptySessions: Bool {
@@ -208,20 +228,10 @@ final class AppSettings {
             ? 13
             : Self.normalizedFontSize(CGFloat(defaults.double(forKey: Key.fontSize)))
         themeName = defaults.string(forKey: Key.themeName) ?? TerminalTheme.sigilDark.name
-        // A stored path is the user's choice and stays — except when it is the
-        // installer's own binary and the themed build is now there. That path
-        // was never chosen; it is what the default resolved to before the
-        // themed build existed, and keeping it would leave the window themed
-        // and the program inside it not. A path set in Settings always stays.
-        let stored = defaults.string(forKey: Key.executablePath)
-        if let stored,
-            stored != GrokPaths.installerExecutable.path
-                || defaults.bool(forKey: Key.executablePathChosen)
-        {
-            executablePath = stored
-        } else {
-            executablePath = GrokPaths.defaultExecutable.path
-        }
+        grokExecutableSelection = .restoring(
+            storedPath: defaults.string(forKey: Key.executablePath),
+            wasChosen: defaults.bool(forKey: Key.executablePathChosen),
+            installer: GrokPaths.installerExecutable, themed: GrokPaths.themedExecutable)
         showEmptySessions = defaults.bool(forKey: Key.showEmptySessions)
         showWorktreeSessions = defaults.bool(forKey: Key.showWorktreeSessions)
         showSubagentSessions = defaults.bool(forKey: Key.showSubagentSessions)

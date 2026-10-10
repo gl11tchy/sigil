@@ -29,13 +29,17 @@ public struct ProviderInstallation: Sendable, Equatable {
     public static func detect(
         provider: CLIProvider, configuredExecutable: URL? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        timeout: TimeInterval = 2
+        timeout: TimeInterval = 2,
+        fallbackPath: String? = nil
     ) -> ProviderInstallation {
         let requested = environment["SHELL"] ?? "/bin/zsh"
         let supported = ["zsh", "bash", "sh", "fish"].contains(URL(fileURLWithPath: requested).lastPathComponent)
         let shell = supported && FileManager.default.isExecutableFile(atPath: requested) ? requested : "/bin/zsh"
-        let command =
-            configuredExecutable?.path ?? (provider == .grokBuild ? GrokPaths.defaultExecutable.path : provider.command)
+        let command = configuredExecutable?.path ?? provider.command
+        let fallbackPath =
+            fallbackPath
+            ?? (CLIProvider.fallbackPath
+                + (provider == .grokBuild ? ":" + GrokPaths.installerBin(environment: environment) : ""))
         let marker = "__SIGIL_EXECUTABLE__="
         let process = Process()
         process.executableURL = URL(fileURLWithPath: shell)
@@ -43,13 +47,13 @@ public struct ProviderInstallation: Sendable, Equatable {
             process.arguments = [
                 "-lic",
                 "set -gx PATH $PATH (string split : -- $argv[1]); set executable (command -s -- $argv[2]); or exit 127; printf '\\n%s%s\\n' $argv[3] $executable; exec $executable --version",
-                CLIProvider.fallbackPath, command, marker,
+                fallbackPath, command, marker,
             ]
         } else {
             process.arguments = [
                 "-lic",
                 "export PATH=\"$PATH:$1\"; executable=$(command -v -- \"$2\") || exit 127; test -x \"$executable\" || exit 126; printf '\\n%s%s\\n' \"$3\" \"$executable\"; exec \"$executable\" --version",
-                "sigil-provider-check", CLIProvider.fallbackPath, command, marker,
+                "sigil-provider-check", fallbackPath, command, marker,
             ]
         }
         process.environment = environment

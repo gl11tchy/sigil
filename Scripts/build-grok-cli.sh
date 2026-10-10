@@ -4,11 +4,12 @@
 # The app draws a frame around a program someone else wrote. Theming only the
 # frame leaves two designs in one window, so the app ships a build of the
 # open-source CLI that carries a matching `sigil-neon` theme and honours
-# GROK_THEME. The result is installed as ~/.grok/bin/grok-sigil, which the app
-# prefers over the installer's ~/.grok/bin/grok when it is there.
+# GROK_THEME. The result is installed as ~/.grok/bin/grok-sigil. Select it
+# explicitly with Choose… in Settings > General > Grok CLI; automatic
+# discovery keeps using the normal installed grok.
 #
 # Requirements: rust (1.94+), protoc, git. Nothing here touches the installed
-# `grok`: remove grok-sigil and the app falls back to it.
+# `grok`. Use Installed Grok in Settings returns to automatic discovery.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

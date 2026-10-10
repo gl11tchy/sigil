@@ -8,6 +8,85 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct ProviderLaunchAvailabilityTests {
+    @Test func installedGrokDiscoveryAndAllLaunchesUseTheCheckedHostPath() async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .grokBuild)
+        defer { fixture.cleanup() }
+        fixture.settings.useInstalledGrok()
+        let results = fixtureProviderInstallations(fixture.shell)
+        let model = fixture.makeModel(probe: { provider, configured in
+            #expect(configured == nil)
+            return results[provider]!
+        })
+        defer { model.closeAllTabsAndWait() }
+        await model.refreshProviderInstallations(force: false)
+        #expect(model.providerLaunchProblem(.grokBuild) == nil)
+        #expect(model.grokExecutableURL == fixture.shell)
+        let fresh = try #require(model.newTab(in: fixture.root, provider: .grokBuild))
+        #expect(fresh.spec.executable == fixture.shell)
+        model.restartTab(id: fresh.id)
+        #expect(model.selectedTab?.spec.executable == fixture.shell)
+        model.closeAllTabsAndWait()
+        model.open(fixture.session)
+        #expect(model.selectedTab?.spec.executable == fixture.shell)
+        #expect(fixture.settings.usesInstalledGrok)
+    }
+
+    @Test func switchingFromCustomToInstalledInvalidatesTheOldResult() async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .grokBuild)
+        defer { fixture.cleanup() }
+        let results = fixtureProviderInstallations(fixture.shell)
+        let model = fixture.makeModel(
+            installations: results,
+            probe: { provider, configured in
+                #expect(configured == nil)
+                return results[provider]!
+            })
+        fixture.settings.useInstalledGrok()
+        #expect(model.providerLaunchProblem(.grokBuild) != nil)
+        #expect(model.providerInstallations[.grokBuild] == nil)
+        await model.refreshProviderInstallations(force: false)
+        #expect(model.providerLaunchProblem(.grokBuild) == nil)
+        #expect(model.grokExecutableURL == fixture.shell)
+    }
+
+    @Test func returningToInstalledModeCannotReviveAnEarlierAutomaticCheck() async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .grokBuild)
+        defer { fixture.cleanup() }
+        fixture.settings.useInstalledGrok()
+        let gate = HeldProviderProbe()
+        let model = fixture.makeModel(probe: { provider, _ in await gate.probe(provider) })
+        let first = Task { await model.refreshProviderInstallations(force: false) }
+        await gate.waitForCalls(6)
+        fixture.settings.executablePath = fixture.shell.path
+        fixture.settings.useInstalledGrok()
+        await gate.release(round: 1, results: fixtureProviderInstallations(fixture.shell))
+        await first.value
+        #expect(model.providerInstallations[.grokBuild] == nil)
+        #expect(model.providerLaunchProblem(.grokBuild) != nil)
+        let replacement = Task { await model.refreshProviderInstallations(force: false) }
+        await gate.waitForCalls(7)
+        #expect(model.checkingProviders == [.grokBuild])
+        await gate.release(round: 2, results: fixtureProviderInstallations(fixture.shell))
+        await replacement.value
+        #expect(model.providerLaunchProblem(.grokBuild) == nil)
+    }
+
+    @Test func aGrokRecoveryCheckKeepsOtherFreshProvidersAvailable() async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .grokBuild)
+        defer { fixture.cleanup() }
+        let results = fixtureProviderInstallations(fixture.shell)
+        let model = fixture.makeModel(
+            installations: results,
+            probe: { provider, _ in
+                #expect(provider == .grokBuild)
+                return results[provider]!
+            })
+        await model.refreshProviderInstallations(force: true, only: [.grokBuild])
+        #expect(model.providerLaunchProblem(.grokBuild) == nil)
+        #expect(model.providerLaunchProblem(.claudeCode) == nil)
+        #expect(model.providerInstallations[.claudeCode] == results[.claudeCode])
+    }
+
     @Test func routineRequestsReuseFreshSuccessAndCoalescePendingChecks() async throws {
         let fixture = try LaunchAvailabilityFixture(provider: .claudeCode)
         defer { fixture.cleanup() }

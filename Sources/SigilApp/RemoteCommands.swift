@@ -429,15 +429,17 @@ enum RemoteCommands {
     static var listedModels: (executable: String, models: [String])?
 
     static func refreshModels(model: AppModel) async {
-        let path = model.settings.executablePath
-        guard let found = await GrokModelCatalog.menuModels(executable: model.settings.executableURL) else { return }
+        await model.refreshProviderInstallationsForEntry()
+        guard model.providerLaunchProblem(.grokBuild) == nil else { return }
+        let path = model.grokExecutableURL.path
+        guard let found = await GrokModelCatalog.menuModels(executable: model.grokExecutableURL) else { return }
         listedModels = (path, found)
     }
 
     static func newSessionOptions(_ model: AppModel) -> RemoteNewSessionOptions {
         let settings = model.settings
         let listed =
-            listedModels.flatMap { $0.executable == settings.executablePath ? $0.models : nil }
+            listedModels.flatMap { $0.executable == model.grokExecutableURL.path ? $0.models : nil }
             ?? GrokModelCatalog.fallback
         let saved = GrokModelCatalog.normalized(settings.model)
         return RemoteNewSessionOptions(

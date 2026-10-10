@@ -71,7 +71,7 @@ public struct GrokLaunchSpec: Sendable, Hashable {
         sessionFile: URL? = nil
     ) {
         self.provider = provider
-        self.searchesPATH = executable == nil && provider != .grokBuild
+        self.searchesPATH = executable == nil
         self.executable =
             executable
             ?? (provider == .grokBuild
@@ -190,10 +190,28 @@ public struct GrokLaunchSpec: Sendable, Hashable {
             )
         }
         if shell.lastPathComponent == "fish" {
+            if searchesPATH {
+                return HostCommand(
+                    executable: shell,
+                    arguments: [
+                        "-lic", "set -gx PATH $PATH (string split : -- $argv[1]); exec $argv[2..-1]",
+                        CLIProvider.fallbackPath + ":" + GrokPaths.installerBin(environment: processEnvironment),
+                        provider.command,
+                    ] + arguments())
+            }
             return HostCommand(
                 executable: shell,
                 arguments: ["-lic", "exec $argv", executable.path] + arguments()
             )
+        }
+        if searchesPATH {
+            return HostCommand(
+                executable: shell,
+                arguments: [
+                    "-lic", "export PATH=\"$PATH:$1\"; shift; exec \"$@\"", "sigil-grok",
+                    CLIProvider.fallbackPath + ":" + GrokPaths.installerBin(environment: processEnvironment),
+                    provider.command,
+                ] + arguments())
         }
         return HostCommand(
             executable: shell,
@@ -239,12 +257,13 @@ public struct GrokLaunchSpec: Sendable, Hashable {
             env[key] = value
         }
         // The app bundle inherits a bare or duplicated PATH. Keep one copy of
-        // each entry and put both the selected CLI directory and Grok bin first.
+        // each entry. Only explicit paths prepend the selected directory and
+        // Grok bin; automatic lookup preserves the host's order.
         let grokBin = GrokPaths.home.appendingPathComponent("bin").path
         let existing = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
         var seen = Set<String>()
         let preferred =
-            [executable.deletingLastPathComponent().path, grokBin]
+            (searchesPATH ? [] : [executable.deletingLastPathComponent().path, grokBin])
             + existing.split(separator: ":").map(String.init)
         let entries = preferred.filter { !$0.isEmpty && seen.insert($0).inserted }
         if !entries.isEmpty {
