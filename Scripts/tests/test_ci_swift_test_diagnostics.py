@@ -279,7 +279,7 @@ class FocusedTests(unittest.TestCase):
             self.assertEqual(run.call_args_list[0].args[:2],
                              (["swift", "build", "--build-tests", "--jobs", "2"], 300))
             self.assertEqual(run.call_args_list[1].args[:2],
-                             (["swift", "test", "--skip-build", "--no-parallel", "--filter",
+                             (["swift", "test", "--skip-build", "--verbose", "--no-parallel", "--filter",
                                r"^SigilKitTests\.ProcessOpenFilesTests/"], 90))
             receipt = json.loads((Path(directory) / "focused-receipt.json").read_text())
             self.assertEqual(receipt["outcome"], "passed")

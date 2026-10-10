@@ -210,7 +210,7 @@ def run_focused(evidence, output):
                "phases": [], "outcome": "running"}
     phases = (
         ("compile", ["swift", "build", "--build-tests", "--jobs", "2"], 300),
-        ("test", ["swift", "test", "--skip-build", "--no-parallel", "--filter",
+        ("test", ["swift", "test", "--skip-build", "--verbose", "--no-parallel", "--filter",
                   r"^SigilKitTests\.ProcessOpenFilesTests/"], 90),
     )
     for name, command, seconds in phases:
