@@ -43,6 +43,14 @@ struct AddedProject: Codable, Equatable, Sendable {
     var addedAt: Date
 }
 
+/// Menu commands use a sidebar selection only while its list owns the keys.
+struct SidebarCommandContext: Equatable, Sendable {
+    var listFocused = false
+    var keyboardRowID: String?
+    var selection: Set<String> = []
+    var rowIDs: [String] = []
+}
+
 /// Saved records (pins, archives, names) grouped by chat id, in stored order,
 /// built once per list pass. A lookup hashes the chat's id and compares
 /// folders only for records with that id: the records an
@@ -244,6 +252,29 @@ enum SidebarOrganization {
         if !selection.isEmpty { return rowIDs.filter(selection.contains) }
         guard let keyboardRowID, rowIDs.contains(keyboardRowID) else { return [] }
         return [keyboardRowID]
+    }
+
+    static func commandTargets(
+        listFocused: Bool, keyboardRowID: String?, selection: Set<String>,
+        rowIDs: [String], selectedTabSessionKey: String?
+    ) -> [String] {
+        guard listFocused else { return selectedTabSessionKey.map { [$0] } ?? [] }
+        return trashTargets(keyboardRowID: keyboardRowID, selection: selection, in: rowIDs)
+            .filter { !isSentinel($0) }
+    }
+
+    /// Keep a surviving highlight. If its row left, take the next survivor
+    /// in the old order, then the previous one; a removed range never skips
+    /// ahead by its old index in the shorter list.
+    static func keyboardRow(afterRemoving current: String?, from oldRows: [String], in rows: [String])
+        -> String?
+    {
+        guard let current, !rows.contains(current) else { return current }
+        guard let index = oldRows.firstIndex(of: current) else { return nil }
+        let visible = Set(rows)
+        return oldRows.dropFirst(index + 1).first(where: visible.contains)
+            ?? oldRows.prefix(index).reversed().first(where: visible.contains)
+            ?? rows.first
     }
 
     /// Recents and Archived are destinations, not folders.

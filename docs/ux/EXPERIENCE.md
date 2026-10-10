@@ -130,6 +130,13 @@ one from fixtures (see [Reference slice](#reference-slice)).
 - Keyboard first: ↑/↓ move through the rail, Return opens, ⌘1…⌘9 go to the
   first nine tasks in rail order, and a Next Needing Attention command walks
   the filter.
+- File → Archive Conversation (⌃⌘A) and Pin Conversation (⌃⌘P) use the
+  focused sidebar's multi-selection, then its keyboard row; otherwise they
+  use the selected tab's known conversation. All-archived or all-pinned
+  targets reverse the command; mixed selections archive or pin every target.
+  Project rows reuse project archive/removal and pinning. Unsupported
+  providers and text editing disable the commands. A canceled stop prompt
+  keeps the selection; a removed range leaves the highlight on the next row.
 
 ## Truth and attention
 

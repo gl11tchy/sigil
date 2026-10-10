@@ -5,6 +5,57 @@ import Testing
 @testable import SigilApp
 
 struct SidebarOrganizationTests {
+    @Test func organizationCommandsUseTheFocusedSelectionInVisibleOrder() {
+        #expect(
+            SidebarOrganization.commandTargets(
+                listFocused: true, keyboardRowID: "a", selection: ["c", "b", "gone"],
+                rowIDs: ["a", "b", "c"], selectedTabSessionKey: "tab") == ["b", "c"])
+    }
+
+    @Test func organizationCommandsUseTheKeyboardRowOnlyWhileTheListIsFocused() {
+        #expect(
+            SidebarOrganization.commandTargets(
+                listFocused: true, keyboardRowID: "project", selection: [],
+                rowIDs: ["project"], selectedTabSessionKey: "tab") == ["project"])
+        #expect(
+            SidebarOrganization.commandTargets(
+                listFocused: false, keyboardRowID: "project", selection: ["other"],
+                rowIDs: ["project", "other"], selectedTabSessionKey: "tab") == ["tab"])
+    }
+
+    @Test func organizationCommandsDoNotFallThroughFromAnInvalidFocusedTarget() {
+        for row in [nil, "gone", SidebarOrganization.recentsID, SidebarOrganization.archivedID] {
+            #expect(
+                SidebarOrganization.commandTargets(
+                    listFocused: true, keyboardRowID: row, selection: [],
+                    rowIDs: [SidebarOrganization.recentsID, SidebarOrganization.archivedID, "a"],
+                    selectedTabSessionKey: "tab"
+                ).isEmpty)
+        }
+        #expect(
+            SidebarOrganization.commandTargets(
+                listFocused: true, keyboardRowID: "a", selection: ["gone"],
+                rowIDs: ["a"], selectedTabSessionKey: "tab"
+            ).isEmpty)
+        #expect(
+            SidebarOrganization.commandTargets(
+                listFocused: false, keyboardRowID: "a", selection: ["a"],
+                rowIDs: ["a"], selectedTabSessionKey: nil
+            ).isEmpty)
+    }
+
+    @Test func removingABulkRangeHighlightsTheNextSurvivingRow() {
+        let old = ["a", "b", "c", "d", "e", "f"]
+        #expect(
+            SidebarOrganization.keyboardRow(afterRemoving: "c", from: old, in: ["d", "e", "f"]) == "d")
+        #expect(
+            SidebarOrganization.keyboardRow(afterRemoving: "a", from: old, in: ["d", "e", "f"]) == "d")
+        #expect(SidebarOrganization.keyboardRow(afterRemoving: "f", from: old, in: ["a", "b"]) == "b")
+        #expect(SidebarOrganization.keyboardRow(afterRemoving: "c", from: old, in: ["a", "c"]) == "c")
+        #expect(SidebarOrganization.keyboardRow(afterRemoving: "c", from: old, in: []) == nil)
+        #expect(SidebarOrganization.keyboardRow(afterRemoving: nil, from: old, in: ["d"]) == nil)
+    }
+
     @Test func activationKeyPrefersTheCurrentSelection() {
         let keys = ["a", "b", "c"]
         #expect(SidebarOrganization.activationKey(preferred: "b", in: keys) == "b")

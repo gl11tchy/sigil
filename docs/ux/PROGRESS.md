@@ -323,3 +323,18 @@ Options, preserving cancellation, current generations and existing terminals.
 It also addresses the first PR CI run's cancel/startup focus failures without
 changing the glyph treatment. Updated coverage and remaining CI/native limits
 are recorded in the same evidence file; parent code re-review is pending.
+
+## REA-1249 — Archive and Pin keyboard commands
+
+File-menu ⌃⌘A/⌃⌘P now resolve the focused sidebar selection or row, otherwise
+the selected tab's known conversation. Directional bulk actions reuse existing
+archive/pin and working-session confirmation. A removed range keeps the next
+surviving highlight, and a list archive keeps focus when closing the open tab.
+Focused regression coverage compiles; AppTests execute only in PR CI.
+
+**Blocked native acceptance:** the isolated renamed app's AX window tree did
+not expose usable sidebar controls, and both window-ID screenshot methods
+failed. Bounded alternatives stopped without claiming keyboard bulk archive
+or final-head native success. Details, local checks and remaining acceptance
+are in [REA-1249 evidence](rea-1249/EVIDENCE.md). Parent code review and native
+evidence are required before merge; no app replacement occurred.

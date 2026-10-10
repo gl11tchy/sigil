@@ -169,6 +169,16 @@ struct GrokCommands: Commands {
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])
             .disabled(model?.sessionForSelectedTab() == nil)
+            Button(model?.archiveCommandTitle ?? "Archive Conversation") {
+                launch.whenReady { $0.performArchiveCommand() }
+            }
+            .keyboardShortcut("a", modifiers: [.command, .control])
+            .disabled(!(model?.canArchiveCommand ?? false))
+            Button(model?.pinCommandTitle ?? "Pin Conversation") {
+                launch.whenReady { $0.performPinCommand() }
+            }
+            .keyboardShortcut("p", modifiers: [.command, .control])
+            .disabled(!(model?.canPinCommand ?? false))
             Divider()
             Button("Deliver Tab Message") { launch.whenReady { $0.deliverSelectedTabMessage() } }
                 .keyboardShortcut(.return, modifiers: .command)
