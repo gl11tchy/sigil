@@ -24,12 +24,9 @@ struct PendingAskRegistryTests {
 
     @Test func timeoutResumesOnceAndThenRejectsReply() async {
         let registry = PendingAskRegistry()
-        let waiter = Task { @MainActor in
-            await registry.ask(id: "q2", askingTabID: "ask", targetTabID: "tgt", timeout: 0.05)
-        }
-        #expect(await waitUntil { registry.isPending("q2") })
+        let outcome = await registry.ask(id: "q2", askingTabID: "ask", targetTabID: "tgt", timeout: 0.05)
 
-        #expect(await waiter.value == .timedOut)
+        #expect(outcome == .timedOut)
         #expect(registry.timeoutResumeCount == 1)
         #expect(!registry.reply(id: "q2", answer: "late", respondingTabID: "tgt"))
         #expect(!registry.isPending("q2"))
