@@ -342,3 +342,37 @@ and adds a bounded comparison of runtime file names and bytes across staging.
 Generated races now refuse upload while unchanged dirty inputs remain allowed.
 The evidence records the six baseline failures, eight focused passes, complete
 Node suites and the limits of these reads; no transactional snapshot is claimed.
+
+## REA-1249 — Archive and Pin keyboard commands
+
+File-menu ⌃⌘A/⌃⌘P now resolve the focused sidebar selection or row, otherwise
+the selected tab's known conversation. Directional bulk actions reuse existing
+archive/pin and working-session confirmation. A removed range keeps the next
+surviving highlight, and a list archive keeps focus when closing the open tab.
+Focused regression coverage compiles; AppTests execute only in PR CI.
+
+**Blocked native acceptance:** the isolated renamed app's AX window tree did
+not expose usable sidebar controls, and both window-ID screenshot methods
+failed. Bounded alternatives stopped without claiming keyboard bulk archive
+or final-head native success. Details, local checks and remaining acceptance
+are in [REA-1249 evidence](rea-1249/EVIDENCE.md). Parent code review and native
+evidence are required before merge; no app replacement occurred.
+
+The continued renamed fixture evidence is now accepted by the parent, with
+external OS keyboard delivery and a complete physical IME workflow retained
+as limits. Two exact-head CI attempts stopped at the same buffered Settings
+start and exceeded the existing 45-minute deadline; no root cause is proven.
+The only current-main merge conflict was this ledger's appended entries, both
+preserved above. At that review checkpoint, the PR145-only diagnostic wrapper
+was staged locally, uncommitted and unpushed. It preserves Verify, samples one verified
+owned test PID twice after three minutes without progress, bounds artifacts,
+and records unavailable sampling without changing the test result. No further
+CI run, local AppTests, merge or daily-app action occurred at that checkpoint.
+
+The parent personally approved the complete diagnostic/conflict patch in
+review package v3. The follow-up commit records that resolution and includes
+the existing, reviewed synthetic three-row selection and Archive-survivor
+screenshots, linked from the evidence above. One ordinary PR145 run from one
+push is authorized after confirming Sigil CI is idle. Final parent review and
+required exact-head CI remain prerequisites to a PR merge; no local AppTests
+or daily-app replacement was performed.

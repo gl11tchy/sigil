@@ -66,6 +66,8 @@ final class AppModel {
     /// Set by the sidebar and its divider from their SwiftUI focus, so hiding
     /// the sidebar moves focus only when it leaves with the column.
     @ObservationIgnored var isSidebarFocused = false
+    var sidebarCommandContext = SidebarCommandContext()
+    @ObservationIgnored private var sidebarArchiveFocusTabID: TerminalTab.ID?
     @ObservationIgnored var isSidebarDividerFocused = false
     /// Bumped by Find Conversations so the search field takes focus even when
     /// the sidebar just became visible, or already had it.
@@ -521,6 +523,127 @@ final class AppModel {
 
     func toggleArchive(_ session: GrokSession) {
         if isArchived(session) { unarchive(session) } else { archive(session) }
+    }
+
+    private enum OrganizationTarget {
+        case conversations([GrokSession])
+        case project(SidebarProject)
+        case none
+    }
+
+    private var organizationTarget: OrganizationTarget {
+        let keys = SidebarOrganization.commandTargets(
+            listFocused: isSidebarVisible && sidebarCommandContext.listFocused,
+            keyboardRowID: sidebarCommandContext.keyboardRowID,
+            selection: sidebarCommandContext.selection, rowIDs: sidebarCommandContext.rowIDs,
+            selectedTabSessionKey: sessionForSelectedTab().map(sessionKey))
+        guard !keys.isEmpty else { return .none }
+        if keys.count == 1, let project = sidebarProjects.first(where: { $0.id == keys[0] }) {
+            return .project(project)
+        }
+        let sessions = keys.compactMap { key -> GrokSession? in
+            if let tabID = SidebarOrganization.openTabID(fromRowID: key),
+                let tab = tabs.first(where: { $0.id == tabID })
+            {
+                return session(for: tab)
+            }
+            return store.sessions.first { sessionKey($0) == key }
+        }
+        // An unknown row or tab must not turn a bulk command into a partial action.
+        return sessions.count == keys.count ? .conversations(sessions) : .none
+    }
+
+    static func canOrganizeConversation(renaming: Bool, responder: NSResponder?, hasSheet: Bool) -> Bool {
+        guard !renaming, !hasSheet, !(responder is NSTextView) else { return false }
+        return (responder as? any NSTextInputClient)?.hasMarkedText() != true
+    }
+
+    private var acceptsOrganizationCommand: Bool {
+        !isAskingToStop
+            && Self.canOrganizeConversation(
+                renaming: renamingSessionKey != nil, responder: NSApp.keyWindow?.firstResponder,
+                hasSheet: NSApp.keyWindow?.attachedSheet != nil)
+    }
+
+    var archiveCommandTitle: String {
+        switch organizationTarget {
+        case .conversations(let sessions):
+            let action = sessions.allSatisfy(isArchived) ? "Unarchive" : "Archive"
+            return sessions.count == 1 ? "\(action) Conversation" : "\(action) \(sessions.count) Conversations"
+        case .project(let project):
+            if isRemovableOnly(project) { return "Remove Project" }
+            return project.sessions.allSatisfy(isArchived) ? "Unarchive Project" : "Archive Project"
+        case .none:
+            return "Archive Conversation"
+        }
+    }
+
+    var pinCommandTitle: String {
+        switch organizationTarget {
+        case .conversations(let sessions):
+            let action = sessions.allSatisfy(isPinned) ? "Unpin" : "Pin"
+            return sessions.count == 1 ? "\(action) Conversation" : "\(action) \(sessions.count) Conversations"
+        case .project(let project):
+            return isPinned(project) ? "Unpin Project" : "Pin Project"
+        case .none:
+            return "Pin Conversation"
+        }
+    }
+
+    var canArchiveCommand: Bool {
+        guard acceptsOrganizationCommand else { return false }
+        switch organizationTarget {
+        case .conversations(let sessions): return sessions.allSatisfy { $0.provider.capabilities.archive }
+        case .project(let project):
+            return isRemovableOnly(project)
+                || (!project.sessions.isEmpty && project.sessions.allSatisfy { $0.provider.capabilities.archive })
+        case .none: return false
+        }
+    }
+
+    var canPinCommand: Bool {
+        guard acceptsOrganizationCommand else { return false }
+        switch organizationTarget {
+        case .conversations(let sessions): return sessions.allSatisfy { $0.provider.capabilities.archive }
+        case .project: return true
+        case .none: return false
+        }
+    }
+
+    func performArchiveCommand() {
+        guard canArchiveCommand else { return }
+        let keepsListFocus = isSidebarVisible && sidebarCommandContext.listFocused
+        let previousTabID = selectedTabID
+        switch organizationTarget {
+        case .conversations(let sessions):
+            if sessions.allSatisfy(isArchived) { unarchive(sessions) } else { archive(sessions) }
+        case .project(let project):
+            if !isRemovableOnly(project), project.sessions.allSatisfy(isArchived) {
+                unarchive(project)
+            } else {
+                archiveOrRemove(project)
+            }
+        case .none: break
+        }
+        if keepsListFocus, selectedTabID != previousTabID {
+            // Closing the selected tab selects its neighbor. Preserve the list
+            // through both that queued focus request and RootView's selection task.
+            sidebarArchiveFocusTabID = selectedTabID
+            needsTerminalFocus = false
+        }
+    }
+
+    func performPinCommand() {
+        guard canPinCommand else { return }
+        switch organizationTarget {
+        case .conversations(let sessions):
+            let unpinAll = sessions.allSatisfy(isPinned)
+            for session in sessions {
+                if unpinAll { unpin(session) } else if !isPinned(session) { pin(session) }
+            }
+        case .project(let project): togglePin(project)
+        case .none: break
+        }
     }
 
     /// Archives a multi-selection with at most one working-session prompt.
@@ -2204,6 +2327,7 @@ final class AppModel {
 
     func select(_ id: TerminalTab.ID) {
         guard !isStartingNewSession else { return }
+        sidebarArchiveFocusTabID = nil
         isShowingNewSessionSurface = false
         pendingSessionDirectory = nil
         selectedTabID = id
@@ -2218,6 +2342,10 @@ final class AppModel {
         guard let tab = selectedTab else { return }
         DispatchQueue.main.async { [weak self, weak tab] in
             guard let self, let tab, self.selectedTab?.id == tab.id else { return }
+            guard
+                self.sidebarArchiveFocusTabID != tab.id
+                    || !self.isSidebarVisible || !self.sidebarCommandContext.listFocused
+            else { return }
             guard !self.isFindBarVisible, !self.isShowingNewSessionSheet, !self.showsNewSessionSurface else { return }
             guard let window = tab.controller.view.window, window.isKeyWindow,
                 window.attachedSheet == nil

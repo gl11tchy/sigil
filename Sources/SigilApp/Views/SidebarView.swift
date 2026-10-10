@@ -87,8 +87,16 @@ struct SidebarView: View {
         }
         .background(palette.canvas)
         .environment(\.sidebarGlide, glide)
-        .onChange(of: focus) { _, focus in model.isSidebarFocused = focus != nil }
-        .onDisappear { model.isSidebarFocused = false }
+        .onChange(of: focus) { _, focus in
+            model.isSidebarFocused = focus != nil
+            publishCommandContext()
+        }
+        .onChange(of: keyboardSelectionID) { publishCommandContext() }
+        .onChange(of: multiSelection) { publishCommandContext() }
+        .onDisappear {
+            model.isSidebarFocused = false
+            model.sidebarCommandContext = SidebarCommandContext()
+        }
         .alert(
             deleteConfirmationTitle,
             isPresented: Binding(
@@ -130,10 +138,14 @@ struct SidebarView: View {
             await prepareRename(
                 forceReconfigure: model.renamingSessionKey != model.preparedRenameKey)
         }
-        .task(id: snapshot.rowIDs) {
-            clampKeyboardSelection()
+        .onChange(of: snapshot.rowIDs, initial: true) { oldRows, rows in
+            keyboardSelectionID = SidebarOrganization.keyboardRow(
+                afterRemoving: keyboardSelectionID, from: oldRows, in: rows)
             showKeyboardRowIfListFocused()
             pruneMultiSelection()
+            publishCommandContext()
+        }
+        .task(id: snapshot.rowIDs) {
             await prepareRename(forceReconfigure: false)
         }
         .onChange(of: model.searchText) { _, query in
@@ -1175,11 +1187,10 @@ struct SidebarView: View {
         model.sidebarProjects.first { $0.id == id }
     }
 
-    private func clampKeyboardSelection() {
-        guard let id = keyboardSelectionID else { return }
-        if !visibleRowIDs().contains(id) {
-            keyboardSelectionID = nil
-        }
+    private func publishCommandContext() {
+        model.sidebarCommandContext = SidebarCommandContext(
+            listFocused: focus == .list, keyboardRowID: keyboardSelectionID,
+            selection: multiSelection, rowIDs: visibleRowIDs())
     }
 
     /// The list hides its focus ring, so while it has focus the arrow-key
