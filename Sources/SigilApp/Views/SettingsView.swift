@@ -33,7 +33,7 @@ struct SettingsView: View {
             SettingsSection(
                 title: "Theme",
                 footer:
-                    "Sigil Dark and Sigil Light match the window. Changing the theme restarts idle Grok tabs so the TUI matches."
+                    "Terminal themes apply to the window. Installed Grok keeps its own CLI appearance; an optional themed Grok build also receives the window palette."
             ) {
                 VStack(spacing: 10) {
                     ForEach(ThemeGrid.rows(TerminalTheme.all)) { row in
@@ -103,33 +103,74 @@ struct SettingsView: View {
 
             SettingsSection(title: "Grok CLI") {
                 VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(model.settings.usesInstalledGrok ? "Installed Grok" : "Custom executable")
+                            .ui(12, .medium)
+                            .foregroundStyle(palette.ink)
+                        Spacer()
+                        if !model.settings.usesInstalledGrok {
+                            Button("Use Installed Grok") {
+                                model.settings.useInstalledGrok()
+                                Task { await model.executableConfigurationChanged() }
+                            }
+                            .buttonStyle(SigilButtonStyle(kind: .secondary, height: 28))
+                        }
+                    }
                     HStack(spacing: 8) {
-                        FieldFrame(isFocused: isExecutablePathFocused, height: 28) {
-                            TextField("", text: $pathDraft.text, prompt: Text("Path").foregroundStyle(palette.ink2))
-                                .textFieldStyle(.plain)
-                                .mono(12)
-                                .foregroundStyle(palette.ink)
-                                .focused($isExecutablePathFocused)
-                                // Commit on Return or focus loss only — never on each keystroke.
-                                .onSubmit { applyExecutablePath() }
-                                .onChange(of: isExecutablePathFocused) { _, focused in
-                                    if !focused { applyExecutablePath() }
-                                }
-                                .accessibilityLabel("Grok CLI path")
+                        if model.settings.usesInstalledGrok {
+                            Text(
+                                model.providerInstallations[.grokBuild]?.executable?.path
+                                    ?? (model.checkingProviders.contains(.grokBuild)
+                                        ? "Checking installed Grok…" : "Path unavailable")
+                            )
+                            .mono(12)
+                            .foregroundStyle(palette.ink2)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            FieldFrame(isFocused: isExecutablePathFocused, height: 28) {
+                                TextField("", text: $pathDraft.text, prompt: Text("Path").foregroundStyle(palette.ink2))
+                                    .textFieldStyle(.plain)
+                                    .mono(12)
+                                    .foregroundStyle(palette.ink)
+                                    .focused($isExecutablePathFocused)
+                                    // Commit on Return or focus loss only — never on each keystroke.
+                                    .onSubmit { applyExecutablePath() }
+                                    .onChange(of: isExecutablePathFocused) { _, focused in
+                                        if !focused { applyExecutablePath() }
+                                    }
+                                    .accessibilityLabel("Grok CLI path")
+                            }
                         }
                         Button("Choose…") { pickExecutable() }
                             .buttonStyle(SigilButtonStyle(kind: .secondary, height: 28))
                     }
                     HStack(spacing: 6) {
                         Image(
-                            systemName: draftExecutableExists
+                            systemName: model.providerLaunchProblem(.grokBuild) == nil
                                 ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
                         )
                         .font(.system(size: 11))
-                        Text(draftExecutableExists ? "Found" : "Not found")
-                            .ui(12, .medium)
+                        Text(
+                            model.providerLaunchProblem(.grokBuild)
+                                ?? model.providerInstallations[.grokBuild]?.version ?? "Found"
+                        )
+                        .ui(12, .medium)
+                        Spacer()
+                        Button("Check Again") {
+                            Task { await model.refreshProviderInstallations(force: true, only: [.grokBuild]) }
+                        }
+                        .buttonStyle(SigilButtonStyle(kind: .secondary, height: 28))
+                        .disabled(model.checkingProviders.contains(.grokBuild))
                     }
-                    .foregroundStyle(draftExecutableExists ? palette.greenInk : palette.redInk)
+                    .foregroundStyle(model.providerLaunchProblem(.grokBuild) == nil ? palette.greenInk : palette.ink2)
+                    Text(
+                        model.settings.usesInstalledGrok
+                            ? "Uses grok from your login shell. Choose… selects a custom executable, including an optional themed build."
+                            : "This choice stays until you change it. Use Installed Grok returns to your login shell's grok."
+                    )
+                    .ui(12)
+                    .foregroundStyle(palette.ink2)
                 }
                 .padding(12)
                 SettingsDivider()
@@ -214,8 +255,11 @@ struct SettingsView: View {
             }
         }
         .onAppear { normalizeStoredModel() }
-        .task(id: model.settings.executablePath) {
-            if let found = await GrokModelCatalog.menuModels(executable: model.settings.executableURL) {
+        .onChange(of: model.settings.executablePath) { _, path in pathDraft.text = path }
+        .task(id: model.grokExecutableURL) {
+            await model.refreshProviderInstallationsForEntry()
+            guard model.providerLaunchProblem(.grokBuild) == nil else { return }
+            if let found = await GrokModelCatalog.menuModels(executable: model.grokExecutableURL) {
                 listedModels = found
             }
         }
@@ -272,12 +316,8 @@ struct SettingsView: View {
         if model.settings.model != clean { model.settings.model = clean }
     }
 
-    private var draftExecutableExists: Bool {
-        AppSettings.isExecutableFile(
-            at: URL(fileURLWithPath: AppSettings.normalizedExecutablePath(pathDraft.text)))
-    }
-
     private func applyExecutablePath() {
+        guard !model.settings.usesInstalledGrok else { return }
         apply(pathDraft.commit(stored: model.settings.executablePath))
     }
 
@@ -298,7 +338,8 @@ struct SettingsView: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.directoryURL = URL(fileURLWithPath: pathDraft.text)
+        panel.directoryURL =
+            (model.settings.usesInstalledGrok ? model.grokExecutableURL : URL(fileURLWithPath: pathDraft.text))
             .deletingLastPathComponent()
         panel.prompt = "Choose"
         if panel.runModal() == .OK, let url = panel.url {

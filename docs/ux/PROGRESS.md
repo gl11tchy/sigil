@@ -442,3 +442,20 @@ screenshots, linked from the evidence above. One ordinary PR145 run from one
 push is authorized after confirming Sigil CI is idle. Final parent review and
 required exact-head CI remain prerequisites to a PR merge; no local AppTests
 or daily-app replacement was performed.
+
+## REA-1329 — use installed Grok by default
+
+Generated executables reproduced main selecting a stale separate themed copy
+ahead of current host Grok. Automatic discovery now follows login-shell `grok`
+and launches its checked path; themed/custom executables are explicit choices.
+Known unchosen legacy defaults migrate, while explicit and other custom choices
+survive. Grok Settings shows the selection/path/version/problem and offers
+Use Installed Grok and Check Again recovery. Cache generations and the ordinary
+one-click New Session entry remain in force.
+
+The native production-source probe passed 16 checks. The isolated Kit SwiftPM
+attempt was denied at manifest startup, with no tests run or permission bypass.
+App tests are CI-only; native Settings AX/screenshots remain unavailable through
+the blocked local build route. See [REA-1329 evidence](rea-1329/EVIDENCE.md) for
+the migration/recovery journey and evidence limits. Ordinary exact-head CI and
+parent personal review precede merge; no worker merge or app installation.

@@ -87,6 +87,28 @@ This optional local gate requires installed CLIs; ordinary CI does not.
   navigation and the list viewport at small window sizes. A version notice does
   not prevent starting the installed CLI.
 
+## Grok executable selection
+
+Installed Grok is the default. Its bounded availability check discovers `grok`
+through the user's login shell, with standard install directories appended after
+the shell's PATH. The ordinary Grok installer directory is a fallback; the
+separately pinned `grok-sigil` build never becomes an automatic default. New,
+resume, restart and restoration launch the checked absolute path. Model lookup,
+transcript export and tab-message registration use that same selection.
+
+Settings shows Installed Grok or Custom executable, the checked path/version or
+current problem, and **Check Again** for Grok. **Choose…** makes a custom or themed
+path an explicit choice. That choice survives relaunch, including a missing file,
+and does not silently fall back. **Use Installed Grok** clears the override and
+rechecks discovery. Known old installer/themed paths without an explicit-choice
+marker migrate to installed discovery; marked choices and other legacy custom
+paths remain custom. Selection changes invalidate the cached result and pending
+generation immediately, including switching back to automatic mode. Existing
+terminals keep running until restarted.
+
+This is Grok selection and recovery (REA-1329). The full six-provider Settings
+inventory (REA-1261) and automatic timeout retry policy (REA-1250) remain separate.
+
 ## History format boundaries
 
 Claude history is read from `CLAUDE_CONFIG_DIR/projects` or `~/.claude/projects`.

@@ -45,7 +45,7 @@ final class ProviderChecks {
     }
 
     private func configuredExecutable(for provider: CLIProvider) -> URL? {
-        provider == .grokBuild ? settings.executableURL : nil
+        provider == .grokBuild && !settings.usesInstalledGrok ? settings.executableURL : nil
     }
 
     private func hasFreshProviderCheck(_ provider: CLIProvider) -> Bool {
@@ -89,9 +89,10 @@ final class ProviderChecks {
     /// CLI lookup and version checks never block window drawing or input.
     /// Explicit refresh replaces all results; routine entry reuses successful
     /// checks for five minutes and coalesces checks already in progress.
-    func refresh(force: Bool) async {
+    func refresh(force: Bool, only requested: Set<CLIProvider>? = nil) async {
         let providers = CLIProvider.allCases.filter {
-            force || (!checking.contains($0) && !hasFreshProviderCheck($0))
+            (requested?.contains($0) ?? true)
+                && (force || (!checking.contains($0) && !hasFreshProviderCheck($0)))
         }
         guard !providers.isEmpty else { return }
         let generations = Dictionary(uniqueKeysWithValues: providers.map { ($0, UUID()) })
@@ -174,8 +175,8 @@ final class ProviderChecks {
     /// Shared by desktop, phone, and restoration. An absent result is unknown,
     /// never permission to launch. Existing open tabs remain usable during checks.
     func problem(_ provider: CLIProvider) -> String? {
-        if provider == .grokBuild, !settings.executableExists {
-            return "Restore the Grok CLI on your Mac, then try again."
+        if provider == .grokBuild, !settings.usesInstalledGrok, !settings.executableExists {
+            return "The selected Grok executable is unavailable. Choose another path or Use Installed Grok in Settings."
         }
         if checking.contains(provider) { return "Checking \(provider.name)… Try again shortly." }
         guard let installation = installations[provider] else { return "Check \(provider.name) before starting." }

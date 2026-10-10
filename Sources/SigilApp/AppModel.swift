@@ -113,6 +113,15 @@ final class AppModel {
     /// count when this copy first read them. See `awaitsScan`.
     @ObservationIgnored private var sharedArrivals: [String: Int] = [:]
     var providerInstallations: [CLIProvider: ProviderInstallation] { providerChecks.installations }
+
+    /// Automatic Grok operations use the path answered by the same login-shell
+    /// check that gates launches. Custom paths keep the user's exact choice.
+    var grokExecutableURL: URL {
+        if settings.usesInstalledGrok, let executable = providerInstallations[.grokBuild]?.executable {
+            return executable
+        }
+        return settings.executableURL
+    }
     var checkingProviders: Set<CLIProvider> { providerChecks.checking }
     typealias ProviderProbe = ProviderChecks.Probe
     @ObservationIgnored private let providerChecks: ProviderChecks
@@ -2136,8 +2145,10 @@ final class AppModel {
     }
 
     /// Explicit refresh replaces all results; routine entry reuses bounded successes.
-    func refreshProviderInstallations(force: Bool = true, waitForPending: Bool = false) async {
-        await providerChecks.refresh(force: force)
+    func refreshProviderInstallations(
+        force: Bool = true, waitForPending: Bool = false, only providers: Set<CLIProvider>? = nil
+    ) async {
+        await providerChecks.refresh(force: force, only: providers)
         if waitForPending { await providerChecks.waitForPendingChecks() }
         if !Task.isCancelled, checkingProviders.isEmpty, !deferredOpenTabs.isEmpty { restoreOpenTabs() }
     }
@@ -2196,7 +2207,7 @@ final class AppModel {
         // Settings holds Grok's defaults. Another CLI keeps its own unless the caller names one.
         let isGrok = provider == .grokBuild
         let spec = GrokLaunchSpec(
-            executable: isGrok ? settings.executableURL : nil,
+            executable: isGrok ? grokExecutableURL : nil,
             workingDirectory: directory,
             mode: .new(sessionID: UUID()),
             model: (model ?? (isGrok ? settings.model : "")).nilIfEmpty,
@@ -2228,7 +2239,7 @@ final class AppModel {
             return
         }
         let spec = GrokLaunchSpec(
-            executable: session.provider == .grokBuild ? settings.executableURL : nil,
+            executable: session.provider == .grokBuild ? grokExecutableURL : nil,
             workingDirectory: workingDirectory,
             mode: .resume(sessionID: session.nativeSessionID),
             model: session.provider == .grokBuild ? settings.model.nilIfEmpty : nil,
@@ -2315,7 +2326,7 @@ final class AppModel {
     private func replacementTab(for old: TerminalTab, sessionID: String?) -> TerminalTab {
         var spec = old.spec
         if spec.provider == .grokBuild, let sessionID {
-            spec.executable = settings.executableURL
+            spec.executable = grokExecutableURL
             if case .new = old.spec.mode,
                 let directory = old.spec.sessionDirectory,
                 !Self.isUsableDirectory(directory)
@@ -2582,7 +2593,7 @@ final class AppModel {
     /// the app moves rewrites the registered helper path. Do not skip merely
     /// because a server named `sigil` already exists.
     private func installTabMessagingRegistration() async throws {
-        let executable = settings.executableURL
+        let executable = try await grokExecutableForOperation()
         let runner = registrationRunner
         guard let helper = mcpBinaryOverride ?? BridgeRegistration.bundledMCPBinary else {
             throw TabMessagingChangeError.helperMissing
@@ -2594,7 +2605,7 @@ final class AppModel {
     }
 
     private func removeTabMessagingRegistration() async throws {
-        let executable = settings.executableURL
+        let executable = try await grokExecutableForOperation()
         let runner = registrationRunner
         try await Self.runOffCooperativePool {
             let registration = BridgeRegistration(executable: executable, runner: runner)
@@ -2612,6 +2623,16 @@ final class AppModel {
                 continuation.resume(with: Result { try work() })
             }
         }
+    }
+
+    private func grokExecutableForOperation() async throws -> URL {
+        if settings.usesInstalledGrok {
+            await refreshProviderInstallationsForEntry()
+            if let problem = providerLaunchProblem(.grokBuild) {
+                throw AppActionError(title: "Grok Build is unavailable", message: problem)
+            }
+        }
+        return grokExecutableURL
     }
 
     private func stopTabMessaging() {
@@ -2757,7 +2778,7 @@ final class AppModel {
 
     func executableConfigurationChanged() async {
         if !Self.isRunningAutomatedTests { await refreshProviderInstallations(force: false) }
-        guard settings.executableExists else { return }
+        guard providerLaunchProblem(.grokBuild) == nil else { return }
         restoreOpenTabs()
         if settings.isTabMessagingEnabled {
             if isTabMessagingChangeInProgress {
@@ -3140,12 +3161,12 @@ final class AppModel {
     }
 
     func startTranscriptExport(sessionID: String, output url: URL, workingDirectory: URL) {
-        let executable = settings.executableURL
         let exports = transcriptExports
         let id = UUID()
         Task {
             defer { exports.remove(id) }
             do {
+                let executable = try await grokExecutableForOperation()
                 try await Self.runTranscriptExport(
                     executable: executable,
                     sessionID: sessionID,
@@ -3352,7 +3373,7 @@ final class AppModel {
                 continue
             }
             let spec = GrokLaunchSpec(
-                executable: entry.provider == .grokBuild ? settings.executableURL : nil,
+                executable: entry.provider == .grokBuild ? grokExecutableURL : nil,
                 workingDirectory: workingDirectory,
                 mode: .resume(sessionID: entry.sessionID),
                 model: entry.model.map(\.nilIfEmpty)

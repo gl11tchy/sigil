@@ -260,11 +260,22 @@ brew install protobuf   # once; the build also needs Rust
 Scripts/build-grok-cli.sh
 ```
 
-The app prefers `grok-sigil` when it is there and starts each tab with
-`GROK_THEME` set to the window's theme. Sigil Dark, Sigil Light, and the
+The app uses the normal `grok` discovered by your login shell by default. A
+themed build is an explicit choice: select `grok-sigil` with **Choose…** in
+**Settings → General → Grok CLI**. The separate themed build stays at its
+pinned upstream revision until you rebuild it; updating your normal Grok does
+not update this copy. **Use Installed Grok** returns to automatic discovery,
+and **Check Again** refreshes the path and version shown in Settings.
+
+Unchosen paths saved by older defaults migrate to installed discovery. Explicit
+choices and other custom paths stay selected, including when their file is
+missing. New, resumed and restarted tabs use the executable from the current
+availability check; existing running tabs keep their process.
+
+Each Grok tab receives `GROK_THEME` set to the window's theme. Sigil Dark, Sigil Light, and the
 app palettes without a named CLI theme send `sigil-host` plus `GROK_THEME_*`
-colour keys so the TUI matches the window. Delete the binary and the app falls back to the installed
-`grok`, which ignores those variables and runs as before.
+colour keys so the themed TUI matches the window. Normal installed `grok`
+ignores unsupported theme variables and runs with its own appearance.
 The patches are `Scripts/grok-cli/sigil-neon.patch` and
 `Scripts/grok-cli/sigil-host.patch`.
 

@@ -143,7 +143,7 @@ struct NewSessionSurface: View {
 
     private func canRequestCheck(_ provider: CLIProvider) -> Bool {
         model.providerRequiresCheck(provider) && !model.checkingProviders.contains(provider)
-            && (provider != .grokBuild || model.settings.executableExists)
+            && (provider != .grokBuild || model.settings.usesInstalledGrok || model.settings.executableExists)
     }
 
     private func availabilityDescription(_ provider: CLIProvider) -> String? {

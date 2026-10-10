@@ -128,7 +128,10 @@ struct ProviderBoundaryTests {
         }
         let grok = await new(.grokBuild)
         #expect(!grok.ok)
-        #expect(grok.error == "Restore the Grok CLI on your Mac, then try again.")
+        #expect(
+            grok.error
+                == "The selected Grok executable is unavailable. Choose another path or Use Installed Grok in Settings."
+        )
         #expect(await new(provider).ok)
         let chosen = try #require(fixture.model.selectedTab)
         #expect(chosen.spec.provider == provider)

@@ -64,13 +64,42 @@ struct AppSettingsTests {
         let stock = bin.appendingPathComponent("grok").path
         let themed = bin.appendingPathComponent("grok-sigil").path
 
-        // The stock path an older default stored still moves to the themed build.
+        // Both old unchosen defaults now use installed discovery.
         defaults.value.set(stock, forKey: "grok.executablePath")
-        #expect(AppSettings(defaults: defaults.value).executablePath == themed)
+        #expect(AppSettings(defaults: defaults.value).usesInstalledGrok)
+        defaults.value.set(themed, forKey: "grok.executablePath")
+        #expect(AppSettings(defaults: defaults.value).usesInstalledGrok)
 
         // Once the user picks the stock CLI, a relaunch keeps it.
         AppSettings(defaults: defaults.value).executablePath = stock
         #expect(AppSettings(defaults: defaults.value).executablePath == stock)
+        #expect(!AppSettings(defaults: defaults.value).usesInstalledGrok)
+
+        // A deliberate themed choice stays too; returning to installed mode
+        // clears the override and survives the next launch.
+        let selected = AppSettings(defaults: defaults.value)
+        selected.executablePath = themed
+        #expect(AppSettings(defaults: defaults.value).executablePath == themed)
+        #expect(!AppSettings(defaults: defaults.value).usesInstalledGrok)
+        selected.useInstalledGrok()
+        #expect(defaults.value.string(forKey: "grok.executablePath") == nil)
+        #expect(!defaults.value.bool(forKey: "grok.executablePath.chosen"))
+        #expect(AppSettings(defaults: defaults.value).usesInstalledGrok)
+    }
+
+    @Test @MainActor
+    func legacyCustomAndMissingExplicitPathsDoNotMigrate() {
+        let defaults = isolatedDefaults()
+        defer { defaults.reset() }
+        defaults.value.set("/custom/missing-grok", forKey: "grok.executablePath")
+        let legacy = AppSettings(defaults: defaults.value)
+        #expect(!legacy.usesInstalledGrok)
+        #expect(legacy.executablePath == "/custom/missing-grok")
+        #expect(!legacy.executableExists)
+        defaults.value.set(true, forKey: "grok.executablePath.chosen")
+        let explicit = AppSettings(defaults: defaults.value)
+        #expect(!explicit.usesInstalledGrok)
+        #expect(explicit.executablePath == "/custom/missing-grok")
     }
 
     @Test @MainActor
