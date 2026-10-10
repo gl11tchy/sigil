@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "files": ["Dockerfile", "package.json", "package-lock.json", "server.mjs", "revision.mjs"],
+  "directories": ["public"]
+}

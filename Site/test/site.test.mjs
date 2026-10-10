@@ -74,11 +74,13 @@ test('a missing or unparsable PUBLIC_ORIGIN names the variable', () => {
   assert.throws(() => createSite({ publicOrigin: 'sigilapp.dev' }), /PUBLIC_ORIGIN must be an HTTPS origin/);
 });
 
-test('GET /health returns ok', async t => {
+test('GET /health reports development source identity without caching', async t => {
   const { base } = await setup(t);
   const { res, body } = await text(base, '/health');
   assert.equal(res.status, 200);
-  assert.equal(body, 'ok');
+  assert.deepEqual(JSON.parse(body), { status: 'ok', revision: 'development', gitSHA: null, dirty: null, sourceSHA256: null });
+  assert.match(res.headers.get('content-type'), /application\/json/);
+  assert.equal(res.headers.get('cache-control'), 'no-store');
   assertSecurityHeaders(res);
 });
 

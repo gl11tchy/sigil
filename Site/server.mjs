@@ -4,6 +4,9 @@ import { readFile, stat } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { brotliCompress, gzip } from 'node:zlib';
+import { loadRevision } from './revision.mjs';
+
+const revision = await loadRevision(undefined, { required: process.env.SIGIL_REQUIRE_REVISION === '1' });
 
 const assets = new Map([
   ['/', ['index.html', 'text/html']],
@@ -80,7 +83,11 @@ export function createSite({ publicOrigin } = {}) {
     // Shared links gain tracking queries, and uptime checks send HEAD; Node omits HEAD bodies.
     const path = req.url.split('?')[0];
     const read = req.method === 'GET' || req.method === 'HEAD';
-    if (path === '/health' && read) { res.end('ok'); return; }
+    if (path === '/health' && read) {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(JSON.stringify({ status: 'ok', ...revision }));
+      return;
+    }
     const asset = read && assets.get(path);
     if (!asset) { res.writeHead(404).end(); return; }
     try {
