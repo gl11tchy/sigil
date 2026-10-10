@@ -10,7 +10,7 @@ const source = new URL('./', import.meta.url);
 export async function stampRevision(directory = source, checkout = source) {
   const git = args => execFileSync('git', args, { cwd: checkout, encoding: 'utf8' }).trim();
   const gitSHA = git(['rev-parse', 'HEAD']);
-  if (!/^[a-f0-9]{40}$/.test(gitSHA)) throw new Error('Cannot stamp Sidereal without a Git revision');
+  if (!/^[a-f0-9]{40}$/.test(gitSHA)) throw new Error('Cannot stamp a service without a Git revision');
   const dirty = git(['status', '--porcelain', '--untracked-files=normal']) !== '';
   const stamp = { revision: `${gitSHA}${dirty ? '-dirty' : ''}`, gitSHA, dirty,
     sourceSHA256: await sourceHash(directory) };

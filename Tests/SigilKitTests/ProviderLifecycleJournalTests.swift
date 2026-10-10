@@ -7,6 +7,26 @@ struct ProviderLifecycleJournalTests {
     let session = "11111111-1111-4111-8111-111111111111"
     let now = Date(timeIntervalSince1970: 1_800_000_000)
 
+    @Test(arguments: [CLIProvider.claudeCode, .devin, .cursor, .kimi])
+    func unsupportedProviderCannotObserveEvenWithAJournal(provider: CLIProvider) throws {
+        let fixture = try JournalFixture()
+        defer { fixture.cleanup() }
+        var reader = ProviderLifecycleJournal(url: fixture.file, provider: provider, sessionID: session, notBefore: now)
+        try fixture.append(
+            try grok(type: "agent_message_chunk", turn: "one") + grok(type: "turn_completed", turn: "one"))
+        #expect(!reader.canObserve)
+        #expect(reader.poll().isEmpty)
+    }
+
+    @Test func grokCanObserveAJournalThatHasNotBeenCreatedYet() throws {
+        let fixture = try JournalFixture()
+        defer { fixture.cleanup() }
+        let missing = fixture.root.appendingPathComponent("later.jsonl")
+        let reader = ProviderLifecycleJournal(url: missing, provider: .grokBuild, sessionID: session, notBefore: now)
+        #expect(reader.canObserve)
+        #expect(!ProviderLifecycleJournal(url: missing, provider: .codex, sessionID: session).canObserve)
+    }
+
     @Test func completeRequiresMatchingSessionTurnAndPostSubmissionTime() throws {
         let fixture = try JournalFixture()
         defer { fixture.cleanup() }
@@ -93,6 +113,8 @@ struct ProviderLifecycleJournalTests {
         var reader = ProviderLifecycleJournal(url: fixture.file, provider: .codex, sessionID: session, notBefore: now)
         var wrong = ProviderLifecycleJournal(
             url: fixture.file, provider: .codex, sessionID: UUID().uuidString, notBefore: now)
+        #expect(reader.canObserve)
+        #expect(!wrong.canObserve)
         try fixture.append(try codex(type: "task_started", turn: "one"))
         try fixture.append(try codex(type: "task_complete", turn: "different"))
         #expect(reader.poll() == [.working])
@@ -163,6 +185,7 @@ struct ProviderLifecycleJournalTests {
         try fixture.append(meta)
         try fixture.append(try codex(type: "task_complete", turn: "one"))
         #expect(reader.poll() == [.unknown])
+        #expect(!reader.canObserve)
     }
 
     @Test func mixedNativeMetadataCannotValidateALifecycleReader() throws {
@@ -173,6 +196,7 @@ struct ProviderLifecycleJournalTests {
         let fixture = try JournalFixture(initial: Data(metadata.utf8))
         defer { fixture.cleanup() }
         var reader = ProviderLifecycleJournal(url: fixture.file, provider: .codex, sessionID: other, notBefore: now)
+        #expect(!reader.canObserve)
         try fixture.append(try codex(type: "task_started", turn: "one"))
         try fixture.append(try codex(type: "task_complete", turn: "one"))
         #expect(reader.poll().isEmpty)

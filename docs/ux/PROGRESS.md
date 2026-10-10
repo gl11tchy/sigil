@@ -25,6 +25,74 @@ evidence remains; no product accessibility repair or exposure is
 claimed. The local AX and screenshot attempt did not produce usable visual
 evidence. No UX mission or new-tab identity-binding change is claimed by this ticket.
 
+October 10 resumption: corrected-head CI did execute and failed five ordinary
+control/notice assertions. The candidate is reconciled with main `d4337d4`,
+preserving both progress histories and existing gates. A matched isolated native
+diagnostic kept ordinary controls absent without clients through 15 seconds;
+a bounded public own-process AX request exposed both identifiers through the
+existing getters before an external client ran. The CI-only fixture now requests
+its own hierarchy before observing it, preserving every original assertion.
+The 30 focused non-UI tests passed. Hosted runtime and the full integrated gate
+remain unverified for this local candidate; parent review is required before push.
+
+## REA-1211: unknown state after unobservable input
+
+Started from main `c2a24a5`, without parked PRs #140 or #142. Before production
+changes, CI run [38025826427](https://github.com/gl11tchy-team/sigil/actions/runs/38025826427)
+at `805eaa6` executed one synthetic regression with five provider cases. Claude
+Code, new Codex, Devin, Cursor and Kimi each incorrectly remained Working with a
+non-nil timer: ten expected assertion failures in 0.085 seconds.
+
+The implementation gates Working on observable lifecycle evidence, records a
+neutral last-input tooltip and keeps unknown marks grey. Unsupported providers
+and missing/rejected Codex transcripts have no completion watch. Codex writer
+identity invalidation ends its watch. Running-process close/quit warnings and
+validated Grok/Codex turn completion remain covered by synthetic tests. The phone
+receives unknown rather than working; its existing Live Activity start rule
+requires working or a verified prompt. No iPhone lifecycle code changes.
+
+Final CI run links and results are recorded in
+[PR #143](https://github.com/gl11tchy-team/sigil/pull/143).
+The first implementation gate at `179763c` ran 1,010 Swift tests in 95 suites:
+the lifecycle cases passed, but an existing unread-dot test reported two failures.
+The neutral history-row mark was then limited to tabs with recorded input, keeping
+the existing unread marker behavior before any submission.
+Local application tests remain CI-only. The supported build approval path later
+built an isolated renamed debug app through `Scripts/workbench/`. AX actions sent
+synthetic prompt/Return bytes through the real terminal controller to fake Claude,
+Devin, Cursor, Kimi and new Codex processes. All five remained unknown with grey
+tab/sidebar marks, no project working mark, loader or top-bar timer. All retained
+their running-process close warning; Claude also retained its quit warning.
+[Native screenshots and fixture limits](rea-1211-native/README.md) record the
+window IDs and the separate, uncommitted debug fixture used by this check.
+No personal provider histories, paid inference, daily app replacement or other
+ticket implementations. The fixture app and synthetic tabs exited normally.
+
+## REA-1195: outside note edits
+
+Built from `2c99cda` in a separate worktree; blocked PR #140 remains untouched.
+Temporary Markdown fixtures reproduced two failures before the fix: idle atomic
+replacement stayed stale, and a queued local save overwrote outside text without
+a conflict file. The first run had 15 passing tests and those two failures.
+
+Notes now observe directory/replace events, compare identity plus bytes, preserve
+the current outside revision before saving dirty local text, and expose concise
+saved/unsaved conflict notices in the panel. The 300ms debounce remains; cached
+reads and keystrokes do not add disk reads. Failed preservation keeps disk and
+both drafts safe; Retry uses the same preservation path.
+
+Verification: 37 focused notes/watcher tests passed, then 524 SigilKit tests
+passed in 27.995 seconds. An inverted conflict condition made the preservation
+regression fail; the source was restored. Strict Swift formatting and diff checks
+passed. CI results are recorded in the PR. Tests use a throwaway home and temporary notes. SigilAppTests and hosted UI run only in CI;
+no local UI smoke, daily-app replacement, personal notes or provider transcripts.
+The first CI run executed 1,001 Swift tests and caught one regression: deleting
+an unread note adopted a shared flat note. The panel binding test passed. Two
+new SigilKit fixtures reproduced deletion/edit adoption before the repair;
+adoption now remains read-only, as before. The repaired 526 SigilKit tests passed
+in 29.098 seconds. The next exact-head CI result is recorded in the PR.
+The notes contract and limits are in [provider capabilities](../provider-capabilities.md#conversation-notes).
+
 ## Mission status
 
 | ID | State | Evidence or boundary |
@@ -263,3 +331,79 @@ Scripts/workbench/matrix.sh docs/ux/slice
 `ax.sh <pid> press <label>` read and press controls; `snap.sh <out.png>`
 captures the window; `kill <pid>` quits. The scripts refuse to act on any
 process that is not the renamed bundle.
+
+## REA-1223 — inline launch and bounded provider checks
+
+New Session / ⌘T now opens the empty terminal's inline provider surface. One
+click starts with existing defaults; Options remains secondary. The owner's
+October 10 clarification is reflected in monochrome glyphs impressed into the
+actual terminal ground, with restrained inset depth and clearer focus/hover.
+Successful checks are reused for five minutes; required replacement checks
+still gate their provider, and restoration retains saved order. Blocking
+version detection runs on dispatch threads.
+
+Native synthetic receipts, screenshots, validation and limits are recorded in
+[REA-1223 evidence](rea-1223/EVIDENCE.md). AppTests run only in ordinary PR CI.
+The earlier modal-entry audit above is retained as historical evidence.
+REA-1250, REA-1261 and REA-1225 retain the independent work listed in that receipt.
+Parent reviews final code and native screenshots before merge.
+
+Parent review approved the initial dark/light provider impressions. The
+follow-up remediation starts or joins required checks from remote launches and
+Options, preserving cancellation, current generations and existing terminals.
+It also addresses the first PR CI run's cancel/startup focus failures without
+changing the glyph treatment. Updated coverage and remaining CI/native limits
+are recorded in the same evidence file; parent code re-review is pending.
+
+## REA-1246 — stamped Site and Sidereal uploads
+
+Site health now exposes the shared source revision contract. Both deployment
+wrappers require verified source, explicit target identities and an existing
+health destination, stage from a common manifest contract, upload once, then wait
+up to five minutes for the exact commit and source hash. A matching stamp proves
+source identity; it does not establish operational health.
+
+[REA-1246 evidence](rea-1246/EVIDENCE.md) records generated fake-CLI and loopback
+fixtures, the baseline failure, verification and limits. No production deploy or
+native application change ran. REA-1248 owns future CI deployment wiring. Parent
+reviews the final code and exact-head CI before any merge.
+
+The parent review follow-up corrects both existing production runbook commands
+and adds a bounded comparison of runtime file names and bytes across staging.
+Generated races now refuse upload while unchanged dirty inputs remain allowed.
+The evidence records the six baseline failures, eight focused passes, complete
+Node suites and the limits of these reads; no transactional snapshot is claimed.
+
+## REA-1249 — Archive and Pin keyboard commands
+
+File-menu ⌃⌘A/⌃⌘P now resolve the focused sidebar selection or row, otherwise
+the selected tab's known conversation. Directional bulk actions reuse existing
+archive/pin and working-session confirmation. A removed range keeps the next
+surviving highlight, and a list archive keeps focus when closing the open tab.
+Focused regression coverage compiles; AppTests execute only in PR CI.
+
+**Blocked native acceptance:** the isolated renamed app's AX window tree did
+not expose usable sidebar controls, and both window-ID screenshot methods
+failed. Bounded alternatives stopped without claiming keyboard bulk archive
+or final-head native success. Details, local checks and remaining acceptance
+are in [REA-1249 evidence](rea-1249/EVIDENCE.md). Parent code review and native
+evidence are required before merge; no app replacement occurred.
+
+The continued renamed fixture evidence is now accepted by the parent, with
+external OS keyboard delivery and a complete physical IME workflow retained
+as limits. Two exact-head CI attempts stopped at the same buffered Settings
+start and exceeded the existing 45-minute deadline; no root cause is proven.
+The only current-main merge conflict was this ledger's appended entries, both
+preserved above. At that review checkpoint, the PR145-only diagnostic wrapper
+was staged locally, uncommitted and unpushed. It preserves Verify, samples one verified
+owned test PID twice after three minutes without progress, bounds artifacts,
+and records unavailable sampling without changing the test result. No further
+CI run, local AppTests, merge or daily-app action occurred at that checkpoint.
+
+The parent personally approved the complete diagnostic/conflict patch in
+review package v3. The follow-up commit records that resolution and includes
+the existing, reviewed synthetic three-row selection and Archive-survivor
+screenshots, linked from the evidence above. One ordinary PR145 run from one
+push is authorized after confirming Sigil CI is idle. Final parent review and
+required exact-head CI remain prerequisites to a PR merge; no local AppTests
+or daily-app replacement was performed.

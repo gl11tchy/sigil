@@ -20,7 +20,7 @@ The host sends those contextual capabilities to the phone clients.
 | CLI transcript export | Yes | No | No | No |
 | Delete provider history from Sigil | Yes | No | No | No |
 | Tab messaging | Yes | No | No | No |
-| Observed successful turn completion | Matched journal event | Unavailable | Known transcript only | Unavailable |
+| Observed successful turn completion | Matched journal event | Unavailable | Validated known transcript only | Unavailable |
 | Verified structured remote approval | No | No | No | No |
 
 Codex allocates its own native ID. Sigil does not turn a tab UUID, a recent file,
@@ -44,8 +44,18 @@ This optional local gate requires installed CLIs; ordinary CI does not.
 - Codex uses `resume ID`, or `resume --last` only for an explicitly requested
   continue-latest launch. See [official CLI documentation](https://developers.openai.com/codex/cli/features).
 - Installed-version detection runs login-shell executable lookup and `--version`
-  off the UI thread. It bounds time and output. Availability does not establish
-  authentication or model entitlement.
+  on dispatch threads, outside Swift's cooperative executor. It bounds time and
+  output. Routine New Session entry reuses successful results for five minutes,
+  keyed by provider and executable configuration. Missing, unavailable, expired
+  or explicitly refreshed results require a current check; an in-flight
+  replacement never permits launch from its old result. Grok path changes
+  invalidate immediately. Existing terminals keep running, and saved restoration
+  waits for the current batch to retain order. Remote launch actions and Options
+  start or join a required check and revalidate after it finishes; cancelling a
+  waiter does not cancel another request's check. Availability does not establish
+  authentication or model entitlement; a cached result cannot prove an executable
+  or authentication will remain usable at launch. Automatic timeout retries and
+  the Settings CLI inventory remain separate work (REA-1250 and REA-1261).
 - `CLIProvider.checkedVersion` records these checked contracts. When an available
   CLI reports a newer semantic version, the sidebar and selected provider in New
   Session name both versions in a quiet compatibility notice. Compatible versions
@@ -90,6 +100,16 @@ The internal states are starting, working, waiting for approval, confirmed idle,
 interrupted, exited, failed, disconnected, and unknown. A live CLI initially has
 unknown turn state. User submission means input was sent, not accepted.
 
+After submission, Claude Code, Devin, Cursor, Kimi and new Codex tabs keep an
+unknown state, with a neutral last-input tooltip and no Working loader or elapsed
+timer. They do not count as working on the Mac or in phone snapshots. A running
+CLI still requires confirmation before close or quit. No completion-watch task
+runs for these tabs, including Claude history tabs. A known Codex transcript
+enables observation only after its session metadata passes the existing scanner's
+shape, version and native identity checks. Missing or rejected metadata stays
+unknown. Codex writer identity invalidation ends its watch and disables lifecycle
+observation; Grok can still observe a journal created after submission.
+
 Neither terminal title symbols nor output silence can complete a turn. The
 bounded journal reader checks native session/turn identity and a submission-time
 boundary. It rejects duplicate events and old completions. Replacement or
@@ -115,6 +135,25 @@ See [Claude hooks](https://code.claude.com/docs/en/hooks) and
 A finished alert means the observed provider turn ended. It does not prove that
 its requested programming work passed tests or achieved its goal. Failed process
 exits and normal process stops are distinct from finished turns.
+
+## Conversation notes
+
+Notes remain plain Markdown in Sigil's existing provider/session/folder paths.
+Directory events refresh cached idle notes, including atomic editor saves and
+deletion. A local draft stays in memory during the existing 300ms write debounce.
+The save compares file identity and bytes, so equal timestamps do not hide edits.
+If both versions changed, the latest outside bytes are preserved beside the note
+as `<id>.conflict-<milliseconds>-<suffix>.md` before saving the local draft.
+Existing conflict files are never overwritten. Outside deletion keeps a dirty
+local draft and shows a notice; idle deletion clears the pad.
+
+Failed preservation leaves the canonical file untouched, retains both versions
+in memory, and shows an unsaved conflict with Retry. Successfully preserved files
+survive relaunch. Unsaved local text remains memory-only if disk writes keep failing.
+File coordination serializes other Sigil instances and cooperating editors. A
+fresh read after preservation checks independent outside edits; an uncoordinated
+writer racing the final check and atomic replacement is not a filesystem transaction.
+Synthetic tests prove the recorded cases, not every external editor's save protocol.
 
 ## Verification limits
 

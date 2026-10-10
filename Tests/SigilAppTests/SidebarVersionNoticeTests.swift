@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import SwiftUI
 import Testing
 
@@ -54,6 +55,16 @@ struct SidebarVersionNoticeTests {
         defer { baseline.window.close() }
         let notices = host(newer)
         defer { notices.window.close() }
+        // Request the generated host's AX hierarchy before reading SwiftUI's public getters.
+        // Query only this generated host, off its main event loop; no trust or environment override.
+        let ownedRequest = await Task.detached {
+            let application = AXUIElementCreateApplication(ProcessInfo.processInfo.processIdentifier)
+            let timeout = AXUIElementSetMessagingTimeout(application, 2)
+            guard timeout == .success else { return timeout.rawValue }
+            var windows: CFTypeRef?
+            return AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &windows).rawValue
+        }.value
+        try #require(ownedRequest == AXError.success.rawValue, "The hosted app must serve its own AX request")
         // Let SwiftUI build its exported accessibility tree after the window becomes visible.
         let deadline = ContinuousClock.now + .seconds(2)
         while notices.view.accessibilityChildren()?.isEmpty != false, ContinuousClock.now < deadline {
@@ -97,7 +108,7 @@ struct SidebarVersionNoticeTests {
         let nativeIdentifiers = accessibilityIdentifiers(
             in: nativeControl.window, visited: &nativeVisited, tree: &nativeTree)
         let hostState = """
-            running=\(NSApp.isRunning), active=\(NSApp.isActive), hidden=\(NSApp.isHidden), \
+            ownedAXRequest=\(ownedRequest), running=\(NSApp.isRunning), active=\(NSApp.isActive), hidden=\(NSApp.isHidden), \
             activationPolicy=\(NSApp.activationPolicy().rawValue), voiceOver=\(NSWorkspace.shared.isVoiceOverEnabled), \
             plainSwiftUIAccessibilityEnabled=\(controlAccessibilityEnabled.map(String.init) ?? "unobserved"), \
             noticeWindowVisible=\(notices.window.isVisible), noticeWindowKey=\(notices.window.isKeyWindow), \
