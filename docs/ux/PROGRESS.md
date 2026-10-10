@@ -22,6 +22,10 @@ requires working or a verified prompt. No iPhone lifecycle code changes.
 
 Final CI run links and results are recorded in
 [PR #143](https://github.com/gl11tchy-team/sigil/pull/143).
+The first implementation gate at `179763c` ran 1,010 Swift tests in 95 suites:
+the lifecycle cases passed, but an existing unread-dot test reported two failures.
+The neutral history-row mark was then limited to tabs with recorded input, keeping
+the existing unread marker behavior before any submission.
 Local application tests remain CI-only. Earlier local Swift compilation and
 access denials were respected; no renamed native bundle/AX/window-ID screenshot
 was produced. Native UI acceptance remains unverified. No personal provider

@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import SigilApp
@@ -61,7 +62,10 @@ struct SidebarActivityDotTests {
     }
 
     @Test(arguments: [true, false])
-    func unknownChatKeepsANeutralMark(isActive: Bool) {
-        #expect(SidebarActivityDot.isVisible(activity: .unknown, hasUnseenActivity: false, isActive: isActive))
+    func unknownChatKeepsANeutralMarkAfterInput(isActive: Bool) {
+        #expect(
+            SidebarActivityDot.isVisible(
+                activity: .unknown, hasUnseenActivity: false, isActive: isActive,
+                lastSubmittedAt: Date(timeIntervalSince1970: 0)))
     }
 }

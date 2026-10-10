@@ -8,15 +8,16 @@ private enum SidebarFocus: Hashable {
     case rename
 }
 
-/// Sidebar row mark: work in flight, unknown state, or an unread finished turn.
+/// Sidebar row mark: work in flight, unknown submitted input, or an unread finish.
 enum SidebarActivityDot {
     static func isVisible(
         activity: TerminalTab.Activity?,
         hasUnseenActivity: Bool,
-        isActive: Bool
+        isActive: Bool,
+        lastSubmittedAt: Date? = nil
     ) -> Bool {
         guard let activity else { return false }
-        if activity == .working || activity == .unknown { return true }
+        if activity == .working || (activity == .unknown && lastSubmittedAt != nil) { return true }
         return hasUnseenActivity && !isActive
     }
 }
@@ -2044,7 +2045,8 @@ private struct SessionRow: View {
             SidebarActivityDot.isVisible(
                 activity: activity,
                 hasUnseenActivity: hasUnseenActivity,
-                isActive: state == .active
+                isActive: state == .active,
+                lastSubmittedAt: lastSubmittedAt
             )
         {
             ActivityMark(
