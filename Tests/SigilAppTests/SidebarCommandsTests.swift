@@ -149,7 +149,16 @@ struct SidebarCommandsTests {
         model.sidebarCommandContext = .init(listFocused: true, keyboardRowID: row, rowIDs: [row])
         model.needsTerminalFocus = false
 
+        archivedTab.noteTurnStarted()
+        #expect(archivedTab.activity == .working)
+        var prompts: [StopWorkingPrompt] = []
+        model.confirmStopWorking = {
+            prompts.append($0)
+            return true
+        }
+
         model.performArchiveCommand()
+        #expect(prompts == [StopWorkingPrompt(action: .archive, working: 1, running: [])])
         // RootView also requests focus after selectedTabID changes.
         model.focusSelectedTerminal()
         await flushFocusRequests()
