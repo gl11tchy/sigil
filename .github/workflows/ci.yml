@@ -6,6 +6,15 @@ on:
       - main
   pull_request:
   workflow_dispatch:
+    inputs:
+      diagnostic_mode:
+        description: Temporary REA-1216 diagnostic mode
+        type: choice
+        required: true
+        default: path-preflight
+        options:
+          - path-preflight
+          - native-watcher-stacks
 
 permissions:
   contents: write
@@ -15,9 +24,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  path_preflight:
+    name: Foundation path preflight only
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/fix/rea-1216-verified-codex-binding' && inputs.diagnostic_mode == 'path-preflight'
+    runs-on: [self-hosted, sigil-vm]
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run only the path preflight
+        timeout-minutes: 1
+        run: python3 Scripts/diagnose-native-watcher.py --preflight-only
+      - name: Preserve preflight evidence
+        if: always()
+        timeout-minutes: 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-path-preflight-diagnostic
+          path: ${{ runner.temp }}/sigil-native-watcher-${{ github.run_id }}-${{ github.run_attempt }}/
+          retention-days: 1
+          if-no-files-found: warn
+
   native_watcher_stacks:
     name: Native watcher stack diagnostic
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/fix/rea-1216-verified-codex-binding'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/fix/rea-1216-verified-codex-binding' && inputs.diagnostic_mode == 'native-watcher-stacks'
     runs-on: [self-hosted, sigil-vm]
     timeout-minutes: 14
     permissions:

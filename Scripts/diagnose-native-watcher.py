@@ -34,10 +34,13 @@ def main():
         and os.environ.get("GITHUB_REF_NAME") == "fix/rea-1216-verified-codex-binding"
     ):
         raise SystemExit("This diagnostic is restricted to PR142's manual CI job.")
-    binary = Path(sys.argv[1]).resolve()
-    binary.relative_to(Path(os.environ["GITHUB_WORKSPACE"]).resolve() / ".build")
-    if binary.name != "SigilPackageTests" or not binary.is_file():
-        raise SystemExit("Expected the CI-built SigilPackageTests executable.")
+    preflight_only = sys.argv[1:] == ["--preflight-only"]
+    binary = None
+    if not preflight_only:
+        binary = Path(sys.argv[1]).resolve()
+        binary.relative_to(Path(os.environ["GITHUB_WORKSPACE"]).resolve() / ".build")
+        if binary.name != "SigilPackageTests" or not binary.is_file():
+            raise SystemExit("Expected the CI-built SigilPackageTests executable.")
     run_temp = Path(os.environ["RUNNER_TEMP"])
     evidence = run_temp / (
         "sigil-native-watcher-" + os.environ["GITHUB_RUN_ID"]
@@ -50,11 +53,16 @@ def main():
     boundary = threading.Event()
     advanced = threading.Event()
     receipt = {"head": os.environ["GITHUB_SHA"], "outcome": "starting"}
+    if preflight_only:
+        receipt["mode"] = "preflight-only"
     progress_lock = threading.Lock()
     progress_at = time.monotonic()
     home = tempfile.TemporaryDirectory(prefix="sigil-stack-home-", dir=run_temp)
     try:
         temporary = Path(home.name).resolve()
+        if preflight_only:
+            # String-only argument shape check; no bundle is built, read or launched.
+            binary = temporary / "SigilPackageTests.xctest/Contents/MacOS/SigilPackageTests"
         homes = {
             "HOME": temporary, "CFFIXED_USER_HOME": temporary,
             "TMPDIR": temporary / "tmp", "ZDOTDIR": temporary,
@@ -89,7 +97,7 @@ def main():
             ["/usr/bin/xcrun", "--find", "swift"], text=True, timeout=5, env=environment,
         ).strip()).resolve()
         helper = swift.parents[1] / "libexec/swift/pm/swiftpm-testing-helper"
-        if not helper.is_file() or not os.access(helper, os.X_OK):
+        if not preflight_only and (not helper.is_file() or not os.access(helper, os.X_OK)):
             receipt["outcome"] = "missing-test-host"
             raise SystemExit("Expected the selected toolchain's Swift Testing helper.")
         platform = Path(subprocess.check_output(
@@ -131,6 +139,9 @@ def main():
                 receipt["outcome"] = "preflight-refused"
                 return 2
         receipt["preflight"] = "passed"
+        if preflight_only:
+            receipt["outcome"] = "preflight-only-passed"
+            return 0
         child = subprocess.Popen(
             [str(helper), "--test-bundle-path", str(binary),
              "--testing-library", "swift-testing", "--no-parallel",
