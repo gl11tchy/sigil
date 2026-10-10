@@ -55,8 +55,31 @@ def main():
         temporary = Path(home.name)
         (temporary / "tmp").mkdir()
         environment = dict(os.environ, HOME=home.name, TMPDIR=str(temporary / "tmp"))
+        # SwiftPM's macOS Swift Testing host loads this bundle in its own PID.
+        swift = Path(subprocess.check_output(
+            ["/usr/bin/xcrun", "--find", "swift"], text=True, timeout=5,
+        ).strip()).resolve()
+        helper = swift.parents[1] / "libexec/swift/pm/swiftpm-testing-helper"
+        if not helper.is_file() or not os.access(helper, os.X_OK):
+            receipt["outcome"] = "missing-test-host"
+            raise SystemExit("Expected the selected toolchain's Swift Testing helper.")
+        platform = Path(subprocess.check_output(
+            ["/usr/bin/xcrun", "--sdk", "macosx", "--show-sdk-platform-path"],
+            text=True, timeout=5,
+        ).strip())
+        libraries = [platform / "Developer/usr/lib"]
+        testing_override = swift.parents[1] / "lib/swift/macosx/testing"
+        if testing_override.is_dir():
+            libraries.insert(0, testing_override)
+        for key, paths in (
+            ("DYLD_FRAMEWORK_PATH", [platform / "Developer/Library/Frameworks",
+                                     platform / "Developer/Library/PrivateFrameworks"]),
+            ("DYLD_LIBRARY_PATH", libraries),
+        ):
+            environment[key] = ":".join(filter(None, [environment.get(key)] + list(map(str, paths))))
         child = subprocess.Popen(
-            [str(binary), "--testing-library", "swift-testing", "--no-parallel",
+            [str(helper), "--test-bundle-path", str(binary),
+             "--testing-library", "swift-testing", "--no-parallel",
              "--filter", "NativeSessionWatcherTests"],
             env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         )
@@ -111,6 +134,10 @@ def main():
             time.sleep(0.1)
         receipt["outcome"] = "outside-boundary-deadline" if advanced.is_set() else "process-deadline"
         return 124
+    except (OSError, subprocess.SubprocessError) as error:
+        receipt["outcome"] = "launcher-failed" if child is None else "diagnostic-error"
+        receipt["error"] = str(error)
+        return 2
     except KeyboardInterrupt:
         receipt["outcome"] = "interrupted"
         return 130
