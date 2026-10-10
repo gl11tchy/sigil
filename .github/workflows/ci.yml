@@ -68,7 +68,7 @@ jobs:
       - name: Verify
         env:
           SIGIL_SIDEBAR_ARTIFACTS: ${{ runner.temp }}/sigil-sidebar-${{ github.run_id }}-${{ github.run_attempt }}
-          SIGIL_SWIFT_DIAGNOSTICS: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 145 && '1' || '' }}
+          SIGIL_SWIFT_DIAGNOSTICS: ${{ github.event_name == 'pull_request' && (github.event.pull_request.number == 142 || github.event.pull_request.number == 145) && '1' || '' }}
         run: |
           if [[ "$SIGIL_SWIFT_DIAGNOSTICS" == "1" ]]; then
             python3 Scripts/ci-swift-test-diagnostics.py
@@ -76,12 +76,12 @@ jobs:
             Scripts/verify.sh
           fi
 
-      - name: Upload PR145 Swift stall diagnostics
-        if: always() && github.event_name == 'pull_request' && github.event.pull_request.number == 145
+      - name: Upload scoped Swift verification diagnostics
+        if: always() && github.event_name == 'pull_request' && (github.event.pull_request.number == 142 || github.event.pull_request.number == 145)
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: PR145-Swift-stall-diagnostics
+          name: PR${{ github.event.pull_request.number }}-Swift-stall-diagnostics
           retention-days: 7
           path: ${{ runner.temp }}/sigil-swift-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}/*
           if-no-files-found: warn

@@ -28,6 +28,8 @@ public final class SessionStore {
     public private(set) var loadError: String?
 
     public let root: URL
+    /// The captured root shared by history scans, watchers and identity proof.
+    public var codexHistoryRoot: URL? { nativeRoots.first { $0.0 == .codex }?.1 }
     @ObservationIgnored private var cache: [String: SessionCacheEntry] = [:]
     /// Folded search fields, one per entry of `sessions`, in the same order.
     @ObservationIgnored private var searchKeys: [SessionScanner.SearchKey] = []

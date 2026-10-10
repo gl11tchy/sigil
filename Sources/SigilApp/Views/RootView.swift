@@ -393,6 +393,23 @@ private struct TopBar: View {
 
             Menu {
                 Button("New Session in Folder…") { model.requestNewSessionInFolder { model.pickDirectory() } }
+                if let tab = model.selectedTab, tab.spec.provider == .codex, tab.sessionReference == nil {
+                    Menu("Link Conversation…") {
+                        let candidates = model.codexLinkCandidates(for: tab)
+                        if candidates.isEmpty {
+                            Text("No Codex history in this folder")
+                        }
+                        ForEach(candidates) { session in
+                            Button(
+                                "Link this tab to \(model.title(for: session))? (\(session.nativeSessionID.prefix(8)))"
+                            ) {
+                                Task { await model.linkCodexSession(session, to: tab.id) }
+                            }
+                            .help("Link this tab to \(session.nativeSessionID) in \(session.cwd)")
+                        }
+                    }
+                    .accessibilityIdentifier("codex-link-conversation")
+                }
                 Divider()
                 SettingsLink { Text("Settings…") }
             } label: {
