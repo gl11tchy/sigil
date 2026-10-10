@@ -80,7 +80,7 @@ def main():
         child = subprocess.Popen(
             [str(helper), "--test-bundle-path", str(binary),
              "--testing-library", "swift-testing", "--no-parallel",
-             "--filter", r"^SigilKitTests\.(MacFindTerminalControllerTests/anEmptyQueryClearsWithoutReadingTheRows\(\)/|NativeSessionWatcherTests/)"],
+             "--filter", r"^(SigilAppTests\.CodexTabBindingTests/|SigilKitTests\.NativeSessionWatcherTests/)"],
             env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         )
         receipt["test_pid"] = child.pid
