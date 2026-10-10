@@ -93,3 +93,30 @@ Remediation validation: app and test targets compiled, three bounded Kit tests
 passed, and strict format/diff checks passed locally. These new AppTests have
 not run locally. No additional native UI replay was performed for remediation;
 the parent will re-review and verify ordinary CI on the new exact head.
+
+## CI assertion correction and bounded native attempt
+
+CI `38036421159` at `6790ecb` ran 1,027 tests and reported four assertions in
+the remote expiry/disappearance test. These were test assumptions: an open
+returned the same filesystem directory with a directory-URL trailing slash,
+and restarting a background tab retained the selected live Grok tab, as the
+existing restart contract requires. The test now checks the reply's actual
+replacement ID, provider, session identity, position, unchanged background
+selection and canonical working path. Pending/failure probe counts, no-launch
+assertions and existing-live-process coverage remain intact. Production launch
+code and the glyph treatment were unchanged for this correction.
+
+The upload-evidence step found no `*.xcresult` because Verify failed before the
+iPhone/native-relay step ran. That step was confirmed skipped; the unconditional
+upload then had no generated files. No workflow or storage change was made.
+
+A requested inexpensive Options native check built a renamed debug bundle
+with a fresh generated home, fake CLIs and an opt-in controllable five-minute
+clock. Temporary fixture source was removed after build. Startup version
+checks reached all six fake CLIs, but the owned window was off-screen, AX exposed
+no usable controls, and a window-ID capture could not create an image. A single
+bounded relaunch reproduced that state; its cause was not established. The
+fixture was stopped. Options Start was not exercised and no native success or
+new screenshot is claimed. The daily app was untouched; AppTests remain CI-only.
+After the assertion correction and fixture removal, app/test targets compiled,
+three bounded Kit tests passed, and strict format/diff checks passed locally.

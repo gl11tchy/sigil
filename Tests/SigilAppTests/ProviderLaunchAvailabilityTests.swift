@@ -235,6 +235,7 @@ struct ProviderLaunchAvailabilityTests {
         if removed { result[.claudeCode] = nil }
         await gate.release(round: 1, results: result)
         let reply = await launch.value
+        var successfulReply = reply
         #expect(reply.ok == !removed)
         #expect(await gate.totalCalls == firstCalls)
         #expect(live.controller.isRunning)
@@ -245,13 +246,26 @@ struct ProviderLaunchAvailabilityTests {
             let retry = Task { await RemoteCommands.execute(request, model: model) }
             await gate.waitForCalls(2)
             await gate.release(round: 2, results: available)
-            #expect(await retry.value.ok)
+            successfulReply = await retry.value
+            #expect(successfulReply.ok)
             #expect(await gate.totalCalls == 2)
         }
-        let selected = try #require(model.selectedTab)
-        #expect(selected.spec.provider == .claudeCode)
-        #expect(selected.workingDirectory == fixture.root)
-        if let ended { #expect(selected.id != ended.id) }
+        let started: TerminalTab
+        if let ended {
+            let replacementID = try #require(successfulReply.restartedTabID)
+            started = try #require(model.tabs.first { $0.id.uuidString == replacementID })
+            #expect(started.id != ended.id)
+            #expect(!model.tabs.contains { $0.id == ended.id })
+            #expect(model.tabs.first === started)
+            #expect(model.tabs.count == before.count)
+            #expect(successfulReply.restartedSession == ended.sessionReference)
+            #expect(model.selectedTab === live)
+        } else {
+            started = try #require(model.selectedTab)
+            #expect(model.tabs.count == before.count + 1)
+        }
+        #expect(started.spec.provider == .claudeCode)
+        #expect(GrokPaths.canonicalPath(started.workingDirectory.path) == GrokPaths.canonicalPath(fixture.root.path))
     }
 
     @Test func remoteRequestsJoinPendingChecksAndCancelledWaitersNeverLaunch() async throws {
