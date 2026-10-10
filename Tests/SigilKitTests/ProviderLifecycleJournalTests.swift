@@ -103,9 +103,10 @@ struct ProviderLifecycleJournalTests {
         #expect(reader.poll() == [.interrupted])
     }
 
-    @Test func codexMatchesNativeFileAndTurnBeforeCompleting() throws {
+    @Test(arguments: ["0.157.1", "0.158.0", "0.158.0-alpha.2"])
+    func codexMatchesNativeFileAndTurnBeforeCompleting(version: String) throws {
         let meta = Data(
-            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"\(session)\",\"cwd\":\"/tmp\",\"cli_version\":\"0.157.1\"}}\n"
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"\(session)\",\"cwd\":\"/tmp\",\"cli_version\":\"\(version)\"}}\n"
                 .utf8)
         let fixture = try JournalFixture(initial: meta)
         defer { fixture.cleanup() }
@@ -120,6 +121,56 @@ struct ProviderLifecycleJournalTests {
         #expect(wrong.poll().isEmpty)
         try fixture.append(try codex(type: "task_complete", turn: "one"))
         #expect(reader.poll() == [.idle])
+    }
+
+    @Test func newerHistoryDoesNotCertifyUnsupportedOrMalformedLifecycleEvents() throws {
+        let meta = try line([
+            "type": "session_meta", "payload": ["id": session, "cwd": "/tmp", "cli_version": "0.158.0"],
+        ])
+        let fixture = try JournalFixture(initial: meta)
+        defer { fixture.cleanup() }
+        var reader = ProviderLifecycleJournal(url: fixture.file, provider: .codex, sessionID: session, notBefore: now)
+        // A supported history envelope alone cannot prove a start or completion.
+        try fixture.append(try codex(type: "task_complete", turn: "missing-start"))
+        try fixture.append(try codex(type: "future_task_started", turn: "future"))
+        try fixture.append(try codex(type: "task_complete", turn: "future"))
+        try fixture.append(
+            try line([
+                "timestamp": timestamp(now), "type": "event_msg", "payload": ["type": "task_started", "turn_id": 1],
+            ]))
+        #expect(reader.poll().isEmpty)
+        try fixture.append(try codex(type: "task_started", turn: "active"))
+        #expect(reader.poll() == [.working])
+        try fixture.append(try codex(type: "future_task_complete", turn: "active"))
+        try fixture.append(
+            try line([
+                "timestamp": timestamp(now), "type": "response_item",
+                "payload": ["type": "task_complete", "turn_id": "active"],
+            ]))
+        try fixture.append(
+            try line([
+                "timestamp": timestamp(now), "type": "event_msg", "payload": ["type": "task_complete"],
+            ]))
+        try fixture.append(
+            try line([
+                "timestamp": "bad", "type": "event_msg", "payload": ["type": "task_complete", "turn_id": "active"],
+            ]))
+        #expect(reader.poll().isEmpty)
+        try fixture.append(try codex(type: "task_complete", turn: "active"))
+        #expect(reader.poll() == [.idle])
+    }
+
+    @Test(arguments: ["1.0.0", "malformed"])
+    func unsupportedOrBrokenMetadataCannotValidateLifecycle(version: String) throws {
+        let meta = try line([
+            "type": "session_meta", "payload": ["id": session, "cwd": "/tmp", "cli_version": version],
+        ])
+        let fixture = try JournalFixture(initial: meta)
+        defer { fixture.cleanup() }
+        var reader = ProviderLifecycleJournal(url: fixture.file, provider: .codex, sessionID: session, notBefore: now)
+        try fixture.append(try codex(type: "task_started", turn: "one"))
+        try fixture.append(try codex(type: "task_complete", turn: "one"))
+        #expect(reader.poll().isEmpty)
     }
 
     @Test func appendedNativeMetadataInvalidatesExistingWriterEvidence() throws {

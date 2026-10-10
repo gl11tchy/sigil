@@ -41,6 +41,28 @@ public struct ProviderCapabilities: Codable, Equatable, Sendable {
 }
 
 extension CLIProvider {
+    /// Reader/launch contracts checked locally; this is a reporting baseline,
+    /// not a cap on compatible Codex minor releases.
+    public var checkedVersion: String? {
+        switch self {
+        case .claudeCode: "2.1.283"
+        case .codex: "0.157.1"
+        case .grokBuild: "1.0.40"
+        default: nil
+        }
+    }
+
+    public func versionNotice(for installation: ProviderInstallation?) -> String? {
+        guard let installation, installation.isAvailable, let output = installation.version,
+            let installed = CLIVersion.reported(in: output), let checkedVersion,
+            let checked = CLIVersion(checkedVersion), installed > checked
+        else { return nil }
+        let effect =
+            (self == .codex || self == .claudeCode) && installed.major != checked.major
+            ? "History format is not supported." : "History and turn state are best effort."
+        return "\(name) \(installed.text) is newer than Sigil checked (\(checkedVersion)). \(effect)"
+    }
+
     public var capabilities: ProviderCapabilities {
         let history = self == .grokBuild || self == .claudeCode || self == .codex
         return ProviderCapabilities(

@@ -25,6 +25,79 @@ struct NativeSessionScannerTests {
         #expect(codex?.provider == .codex)
     }
 
+    @Test(arguments: ["0.158.0", "0.158.0-alpha.2", "0.160.0"])
+    func newerCodexWithSupportedMetadataEntersHistory(version: String) throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let rollout = root.appendingPathComponent("rollout.jsonl")
+        let data = codexFixture(version: version)
+        try data.write(to: rollout)
+        let result = NativeSessionScanner.scan(provider: .codex, root: root, cache: [:], ignoringCache: false)
+        #expect(result.sessions.first?.nativeSessionID == id)
+        #expect(result.sessions.first?.title == "Check the API")
+        #expect(result.loadError == nil)
+        #expect(try Data(contentsOf: rollout) == data)
+    }
+
+    @Test(arguments: ["0.158.0", "0.158.0-alpha.2", "0.160.0"])
+    func aNewerResumeHeaderKeepsTheExistingCodexConversation(version: String) throws {
+        let original = "2026-09-27T10:00:00Z"
+        let resumed = "2026-10-09T08:00:00Z"
+        let modified = try #require(SessionTimestamp.parse(resumed))
+        let data =
+            codexFixture(timestamp: original) + Data([0x0A])
+            + codexFixture(version: version, timestamp: resumed)
+        let session = NativeSessionScanner.parse(provider: .codex, data: data, file: file, modified: modified)
+        #expect(session?.nativeSessionID == id)
+        #expect(session?.cwd == "/tmp/project")
+        #expect(session?.createdAt == SessionTimestamp.parse(original))
+        #expect(session?.updatedAt == modified)
+    }
+
+    @Test(arguments: ["0.1", "0.157.1", "0.158", "0.158.0+build.3"])
+    func compatibleLegacyAndNewCodexVersionsKeepTheirIdentity(version: String) {
+        #expect(
+            NativeSessionScanner.parse(
+                provider: .codex, data: codexFixture(version: version), file: file, modified: Date())?.nativeSessionID
+                == id)
+    }
+
+    @Test(arguments: [
+        "0.0", "0.0.0", "0.0.99", "1.0.0", "9.0", "", "0.bad", "0.-1.0", "0.158.0.1", "0.158.0-", "0.158.0+",
+    ])
+    func unsupportedAndMalformedVersionsStayRejected(version: String) {
+        #expect(
+            NativeSessionScanner.parse(
+                provider: .codex, data: codexFixture(version: version), file: file, modified: Date()) == nil)
+    }
+
+    @Test(arguments: [
+        #"null"#,
+        #"[]"#,
+        #"{"id":"made-up","cwd":"/tmp","cli_version":"0.158.0"}"#,
+        #"{"id":"11111111-1111-4111-8111-111111111111","cli_version":"0.158.0"}"#,
+        #"{"id":"11111111-1111-4111-8111-111111111111","cwd":"relative","cli_version":"0.158.0"}"#,
+        #"{"id":"11111111-1111-4111-8111-111111111111","cwd":"/tmp\u0000","cli_version":"0.158.0"}"#,
+        #"{"id":"11111111-1111-4111-8111-111111111111","cwd":"/tmp","cli_version":158}"#,
+    ])
+    func malformedMetadataCannotSupplyOrReplaceACodexIdentity(payload: String) {
+        let broken = Data("{\"type\":\"session_meta\",\"payload\":\(payload)}".utf8)
+        #expect(NativeSessionScanner.parse(provider: .codex, data: broken, file: file, modified: Date()) == nil)
+        let appended = codexFixture() + Data([0x0A]) + broken
+        #expect(NativeSessionScanner.parse(provider: .codex, data: appended, file: file, modified: Date()) == nil)
+    }
+
+    @Test func brokenNewVersionMetadataStillReportsAReadProblem() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try codexFixture(version: "0.158.0", nativeID: "broken").write(to: root.appendingPathComponent("rollout.jsonl"))
+        let result = NativeSessionScanner.scan(provider: .codex, root: root, cache: [:], ignoringCache: false)
+        #expect(result.sessions.isEmpty)
+        #expect(result.loadError == "Some Codex history could not be read. Saved sessions are kept.")
+    }
+
     @Test func modernCodexUserItemsAndNativeRenamesAreSearchable() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let sessions = root.appendingPathComponent("sessions")
@@ -77,10 +150,11 @@ struct NativeSessionScannerTests {
         #expect(parsed.messageCount == 0)
     }
 
-    @Test func mixedCodexMetadataCannotRenameOrRetargetAnotherConversation() {
+    @Test(arguments: ["0.157.1", "0.158.0"])
+    func mixedCodexMetadataCannotRenameOrRetargetAnotherConversation(version: String) {
         let other = "22222222-2222-4222-8222-222222222222"
-        let first = codexFixture()
-        let mixedID = first + Data([0x0A]) + codexFixture(nativeID: other)
+        let first = codexFixture(version: version)
+        let mixedID = first + Data([0x0A]) + codexFixture(version: version, nativeID: other)
         #expect(NativeSessionScanner.parse(provider: .codex, data: mixedID, file: file, modified: Date()) == nil)
         let changedFolder = String(decoding: first, as: UTF8.self).replacingOccurrences(
             of: "/tmp/project", with: "/tmp/other")
@@ -160,10 +234,12 @@ struct NativeSessionScannerTests {
         print("Native history 900 sessions: cold=\(coldDuration), cached=\(warmDuration), search=\(searchDuration)")
     }
 
-    private func codexFixture(version: String = "0.157.1", nativeID: String? = nil) -> Data {
+    private func codexFixture(
+        version: String = "0.157.1", nativeID: String? = nil, timestamp: String = "2026-09-27T10:00:00Z"
+    ) -> Data {
         Data(
             """
-            {"timestamp":"2026-09-27T10:00:00Z","type":"session_meta","payload":{"id":"\(nativeID ?? id)","cwd":"/tmp/project","cli_version":"\(version)","source":"cli"}}
+            {"timestamp":"\(timestamp)","type":"session_meta","payload":{"id":"\(nativeID ?? id)","cwd":"/tmp/project","cli_version":"\(version)","source":"cli"}}
             {"type":"event_msg","payload":{"type":"user_message","message":"Check the API"}}
             """.utf8)
     }

@@ -335,6 +335,17 @@ struct SidebarView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    // Wrapped notices scroll with history so navigation keeps its space at small window sizes.
+                    ForEach(CLIProvider.allCases) { provider in
+                        if let notice = provider.versionNotice(for: model.providerInstallations[provider]) {
+                            Text(notice).ui(12).foregroundStyle(palette.ink2)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 12)
+                                .padding(.bottom, 8)
+                                .accessibilityIdentifier("sidebar-\(provider.rawValue)-version-notice")
+                        }
+                    }
                     if listKind == .projectList, !model.tabs.isEmpty {
                         section("Open", count: model.tabs.count, isFirst: true) {
                             ForEach(model.tabs) { tab in

@@ -4,6 +4,37 @@ The resumable record for the [experience contract](EXPERIENCE.md). Each entry
 says what was built, how it was checked, what the check showed, and what is
 still open. Nothing here is a timing; counts are counted actions.
 
+## REA-1214: Codex version compatibility
+
+The Codex minor-version cap and installed-versus-checked notices are recorded in
+[the ticket verification record](../qa/rea-1214.md). Synthetic history and lifecycle
+checks passed. Version notices now share the history scroll area. New Session
+rendering and the 200pt × 460pt sidebar regression are covered by CI-only app
+tests. CI proved the fixture's data, viewport and scrolling checks after its filter
+correction. The exported-tree walker reached only the window and empty hosting
+group in CI; all three notice assertions failed. The independent diagnostic
+controls also failed in the command-line host, which reported no running app
+loop. A dedicated CI-only SwiftUI app host now owns startup and event processing.
+All data, viewport, scrolling, control and notice assertions remain. The native
+control identifier moved to its exported NSButtonCell. Compile-only host and
+configuration checks passed, as did all 28 focused non-UI tests. CI then passed
+all 997 SwiftPM tests but rejected the explicit single-iteration option before
+the hosted fixture executed. A command-only correction removes that option;
+the normal single run and every assertion remain required. Corrected-head CI
+evidence remains; no product accessibility repair or exposure is
+claimed. The local AX and screenshot attempt did not produce usable visual
+evidence. No UX mission or new-tab identity-binding change is claimed by this ticket.
+
+October 10 resumption: corrected-head CI did execute and failed five ordinary
+control/notice assertions. The candidate is reconciled with main `d4337d4`,
+preserving both progress histories and existing gates. A matched isolated native
+diagnostic kept ordinary controls absent without clients through 15 seconds;
+a bounded public own-process AX request exposed both identifiers through the
+existing getters before an external client ran. The CI-only fixture now requests
+its own hierarchy before observing it, preserving every original assertion.
+The 30 focused non-UI tests passed. Hosted runtime and the full integrated gate
+remain unverified for this local candidate; parent review is required before push.
+
 ## REA-1211: unknown state after unobservable input
 
 Started from main `c2a24a5`, without parked PRs #140 or #142. Before production

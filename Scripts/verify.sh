@@ -68,6 +68,9 @@ echo "==> swift test --no-parallel"
 # avoids starving the older Swift concurrency runtime on GitHub's macOS runner.
 swift test --no-parallel || fail "swift test"
 
+echo "==> CI-only SwiftUI app-hosted sidebar fixture"
+"$SCRIPT_DIR/sidebar-host-test.sh" || fail "sidebar app-hosted test"
+
 echo "==> bash -n"
 # bash -n reads only its first file and treats the rest as arguments.
 for script in "$SCRIPT_DIR"/*.sh; do

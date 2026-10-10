@@ -67,6 +67,7 @@ jobs:
 
       - name: Verify
         env:
+          SIGIL_SIDEBAR_ARTIFACTS: ${{ runner.temp }}/sigil-sidebar-${{ github.run_id }}-${{ github.run_attempt }}
           SIGIL_SWIFT_DIAGNOSTICS: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 145 && '1' || '' }}
         run: |
           if [[ "$SIGIL_SWIFT_DIAGNOSTICS" == "1" ]]; then
@@ -83,6 +84,15 @@ jobs:
           name: PR145-Swift-stall-diagnostics
           retention-days: 7
           path: ${{ runner.temp }}/sigil-swift-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}/*
+          if-no-files-found: warn
+
+      - name: Upload sidebar app-hosted verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidebar-app-hosted-verification
+          retention-days: 7
+          path: ${{ runner.temp }}/sigil-sidebar-${{ github.run_id }}-${{ github.run_attempt }}/*.xcresult
           if-no-files-found: warn
 
       - name: iPhone app, shipping extensions, and native relay tests

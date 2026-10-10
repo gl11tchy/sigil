@@ -1,10 +1,10 @@
 import AppKit
 import Foundation
-import SigilKit
 import SwiftUI
 import Testing
 
 @testable import SigilApp
+@testable import SigilKit
 
 struct NewSessionSheetTests {
     private let cliList = """
@@ -314,6 +314,32 @@ struct NewSessionSheetTests {
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(kill(pid, 0) != 0)
+    }
+
+    @Test @MainActor
+    func newerInstalledCodexShowsBothVersionsWithoutBlockingStart() throws {
+        _ = NSApplication.shared
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+        let name = "SigilNewSessionVersion.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = AppModel(
+            settings: AppSettings(defaults: defaults),
+            store: SessionStore(root: root.appendingPathComponent("sessions")),
+            trashConversation: { _ in }, presentError: { _ in },
+            providerInstallations: [
+                .codex: .init(executable: URL(fileURLWithPath: "/bin/sh"), version: "codex-cli 0.160.0", problem: nil)
+            ])
+        let sheet = NewSessionSheet(model: model, provider: .codex)
+        #expect(
+            sheet.providerVersionNotice
+                == "Codex 0.160.0 is newer than Sigil checked (0.157.1). History and turn state are best effort.")
+        #expect(model.providerLaunchProblem(.codex) == nil)
+        #expect(NewSessionSheet(model: model, provider: .claudeCode).providerVersionNotice == nil)
+        #expect(try png(of: sheet).count > 1000)
     }
 
     @Test @MainActor
