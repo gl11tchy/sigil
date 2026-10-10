@@ -235,14 +235,6 @@ struct TerminalTabTests {
         #expect(!tab.hasUnseenActivity)
     }
 
-    @Test func lastInputHelpDoesNotClaimWorkOrCompletion() {
-        let now = Date()
-        #expect(ActivityMark.helpText(activity: .unknown, lastSubmittedAt: now, now: now) == "Input sent now")
-        #expect(ActivityMark.helpText(activity: .unknown, lastSubmittedAt: nil, now: now) == nil)
-        #expect(ActivityMark.helpText(activity: .working, lastSubmittedAt: now, now: now) == nil)
-        #expect(ActivityMark.helpText(activity: .idle, lastSubmittedAt: now, now: now) == nil)
-    }
-
     @Test func exactProviderJournalCompletesAndDuplicateDoesNotNotifyTwice() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

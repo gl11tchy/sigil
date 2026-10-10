@@ -381,12 +381,13 @@ struct ActivityMark: View {
         .frame(width: 10, height: 10)
         .accessibilityElement()
         .accessibilityLabel(label)
-        .help(Self.helpText(activity: activity, lastSubmittedAt: lastSubmittedAt, now: Date()) ?? "")
+        .help(inputHelp)
     }
 
-    static func helpText(activity: TerminalTab.Activity, lastSubmittedAt: Date?, now: Date) -> String? {
-        guard activity == .unknown, let lastSubmittedAt else { return nil }
-        return "Input sent \(lastSubmittedAt.longRelative(to: now))"
+    private var inputHelp: String {
+        guard activity == .unknown, let lastSubmittedAt else { return "" }
+        // A fixed timestamp stays truthful without a timer refreshing the mark.
+        return "Input sent \(lastSubmittedAt.formatted(date: .abbreviated, time: .shortened))"
     }
 
     private func dot(_ color: Color) -> some View {
