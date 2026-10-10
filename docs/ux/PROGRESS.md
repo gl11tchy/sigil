@@ -26,10 +26,16 @@ The first implementation gate at `179763c` ran 1,010 Swift tests in 95 suites:
 the lifecycle cases passed, but an existing unread-dot test reported two failures.
 The neutral history-row mark was then limited to tabs with recorded input, keeping
 the existing unread marker behavior before any submission.
-Local application tests remain CI-only. Earlier local Swift compilation and
-access denials were respected; no renamed native bundle/AX/window-ID screenshot
-was produced. Native UI acceptance remains unverified. No personal provider
-histories, paid inference, daily app replacement or other ticket implementations.
+Local application tests remain CI-only. The supported build approval path later
+built an isolated renamed debug app through `Scripts/workbench/`. AX actions sent
+synthetic prompt/Return bytes through the real terminal controller to fake Claude,
+Devin, Cursor, Kimi and new Codex processes. All five remained unknown with grey
+tab/sidebar marks, no project working mark, loader or top-bar timer. All retained
+their running-process close warning; Claude also retained its quit warning.
+[Native screenshots and fixture limits](rea-1211-native/README.md) record the
+window IDs and the separate, uncommitted debug fixture used by this check.
+No personal provider histories, paid inference, daily app replacement or other
+ticket implementations. The fixture app and synthetic tabs exited normally.
 
 ## REA-1195: outside note edits
 
