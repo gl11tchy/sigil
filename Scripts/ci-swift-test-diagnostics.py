@@ -239,6 +239,21 @@ class FocusedStartup:
         self.receipt = {"outcome": "waiting", "checkpoint_seconds": STARTUP_SECONDS,
                         "collector_budget_seconds": STARTUP_BUDGET, "reserved_numbers": []}
 
+    def signal_worker(self, sig):
+        # Popen created this session/group; WNOWAIT reserves its exact PID even
+        # when macOS no longer lets getpgid query the exited group leader.
+        try:
+            if os.getpgid(self.worker.pid) != self.worker.pid:
+                raise RuntimeError("startup collector lost its owned process group")
+        except ProcessLookupError:
+            if unreaped_exit(self.worker) is None:
+                raise
+        try:
+            os.killpg(self.worker.pid, sig)
+        except ProcessLookupError:
+            if unreaped_exit(self.worker) is None:
+                raise
+
     def cancel(self, reason, now):
         if self.disabled:
             return
@@ -246,9 +261,7 @@ class FocusedStartup:
         self.receipt.setdefault("stop_reason", reason)
         self.receipt["outcome"] = reason
         if self.worker is not None and self.cancel_at is None:
-            if os.getpgid(self.worker.pid) != self.worker.pid:
-                raise RuntimeError("startup collector lost its owned process group")
-            os.killpg(self.worker.pid, signal.SIGTERM)
+            self.signal_worker(signal.SIGTERM)
             self.cancel_at = now
 
     def tick(self, child, progress, started, now, deadline):
@@ -256,10 +269,8 @@ class FocusedStartup:
             done = unreaped_exit(self.worker)
             if done is not None or self.cancel_at is not None and now - self.cancel_at >= 2:
                 # Still unreaped: its group cannot be confused with a reused PID.
-                if os.getpgid(self.worker.pid) != self.worker.pid:
-                    raise RuntimeError("startup collector lost its owned process group")
                 if not self.killed:
-                    os.killpg(self.worker.pid, signal.SIGKILL)
+                    self.signal_worker(signal.SIGKILL)
                     self.killed = True
                 if done is not None:
                     self.receipt["collector_exit_status"] = self.worker.wait()
@@ -341,10 +352,8 @@ class FocusedStartup:
 
     def close(self):
         if self.worker is not None:
-            if os.getpgid(self.worker.pid) != self.worker.pid:
-                raise RuntimeError("startup collector lost its owned process group")
             if not self.killed:
-                os.killpg(self.worker.pid, signal.SIGKILL)
+                self.signal_worker(signal.SIGKILL)
                 self.killed = True
             self.worker.wait(timeout=2)
             self.worker = None

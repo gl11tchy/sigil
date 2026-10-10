@@ -236,16 +236,22 @@ struct ProcessOpenFilesTests {
 private final class HeldChild {
     let process: Process
     let input: Pipe
+    private let termination = DispatchGroup()
     init(process: Process, input: Pipe) {
         self.process = process
         self.input = input
+        termination.enter()
+        process.terminationHandler = { [termination] _ in termination.leave() }
     }
     func stop() {
         try? input.fileHandleForWriting.close()
-        let deadline = ContinuousClock.now + .seconds(2)
-        while process.isRunning, ContinuousClock.now < deadline { usleep(10_000) }
+        if termination.wait(timeout: .now() + .seconds(2)) == .success { return }
         if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-        process.waitUntilExit()
+        // Foundation owns reaping; do not enter an unbounded run-loop wait on
+        // the Swift Testing worker. The group remains complete on repeat stops.
+        #expect(
+            termination.wait(timeout: .now() + .seconds(2)) == .success,
+            "The test-owned process did not report termination within its shutdown bounds")
     }
 }
 
@@ -317,8 +323,9 @@ private final class HeldRolloutFixture {
         process.standardInput = input
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
+        let child = HeldChild(process: process, input: input)
         try process.run()
-        return HeldChild(process: process, input: input)
+        return child
     }
     func awaitReady(_ name: String, suffix: String = ".ready") async throws {
         let marker = root.appendingPathComponent("\(name)\(suffix)")

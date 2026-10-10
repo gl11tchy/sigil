@@ -213,6 +213,99 @@ class DiagnosticsTests(unittest.TestCase):
 
 
 class StartupTests(unittest.TestCase):
+    def test_exited_collector_with_vanished_group_reaps_and_settles(self):
+        with tempfile.TemporaryDirectory(prefix="sigil-startup-unit-") as directory:
+            quota = diagnostic.SampleQuota()
+            capture = diagnostic.FocusedStartup(Path(directory), quota)
+            capture.receipt["reserved_numbers"] = [quota.take(), quota.take()]
+            diagnostic.save_startup(Path(directory), {"outcome": "finished", "reserved_numbers": [1, 2],
+                "samples": [{"number": 1, "identity_revalidated": True}, {"number": 2, "identity_revalidated": True}]})
+            worker = Mock(pid=50)
+            worker.wait.return_value = 0
+            capture.worker = worker
+            with patch.object(diagnostic, "unreaped_exit", return_value=object()), \
+                    patch.object(os, "getpgid", side_effect=ProcessLookupError(3, "synthetic exited leader")), \
+                    patch.object(os, "killpg", side_effect=ProcessLookupError(3, "synthetic absent group")) as kill:
+                capture.tick(Mock(pid=10), diagnostic.Progress(), 0, 72, 90)
+                capture.close()
+            self.assertIsNone(capture.worker)
+            self.assertEqual(capture.receipt["collector_exit_status"], 0)
+            self.assertEqual(capture.receipt["collection_outcome"], "finished")
+            self.assertEqual(capture.receipt["attempted_numbers"], [1, 2])
+            self.assertIsNone(quota.take())
+            kill.assert_called_once_with(50, diagnostic.signal.SIGKILL)
+
+    def test_exited_collector_still_cleans_its_reserved_group(self):
+        with tempfile.TemporaryDirectory(prefix="sigil-startup-unit-") as directory:
+            capture = diagnostic.FocusedStartup(Path(directory), diagnostic.SampleQuota())
+            capture.worker = Mock(pid=50)
+            capture.worker.wait.return_value = 0
+            with patch.object(diagnostic, "unreaped_exit", return_value=object()), \
+                    patch.object(os, "getpgid", side_effect=ProcessLookupError(3, "synthetic exited leader")), \
+                    patch.object(os, "killpg") as kill:
+                capture.close()
+            kill.assert_called_once_with(50, diagnostic.signal.SIGKILL)
+            self.assertIsNone(capture.worker)
+
+    def test_missing_collector_group_without_verified_exit_is_not_ignored(self):
+        for boundary in ("lookup", "signal", "changed-group"):
+            with self.subTest(boundary=boundary), tempfile.TemporaryDirectory(prefix="sigil-startup-unit-") as directory:
+                capture = diagnostic.FocusedStartup(Path(directory), diagnostic.SampleQuota())
+                capture.worker = Mock(pid=50)
+                group = Mock(return_value=99 if boundary == "changed-group" else 50)
+                if boundary == "lookup":
+                    group.side_effect = ProcessLookupError(3, "synthetic missing leader")
+                with patch.object(diagnostic, "unreaped_exit", return_value=None), \
+                        patch.object(os, "getpgid", group), \
+                        patch.object(os, "killpg", side_effect=ProcessLookupError(3, "synthetic missing group")) as kill:
+                    with self.assertRaises(RuntimeError if boundary == "changed-group" else ProcessLookupError):
+                        capture.close()
+                if boundary == "signal":
+                    kill.assert_called_once_with(50, diagnostic.signal.SIGKILL)
+                else:
+                    kill.assert_not_called()
+                capture.worker.wait.assert_not_called()
+
+    def test_exited_collector_does_not_replace_focused_result_or_deadline(self):
+        for target_exits in (True, False):
+            with self.subTest(target_exits=target_exits), tempfile.TemporaryDirectory(prefix="sigil-startup-unit-") as directory:
+                clock, turns, signals = [0], [0], []
+                root, worker = Mock(pid=10), Mock(pid=50)
+                root.wait.return_value = 23 if target_exits else -15
+                root.poll.side_effect = AssertionError("root must remain unreaped")
+                worker.wait.return_value = 0
+                selector = Mock()
+                selector.get_map.return_value = {}
+                def select(**_):
+                    clock[0] = (45, 72, 80 if target_exits else 90)[min(turns[0], 2)]
+                    turns[0] += 1
+                    return []
+                selector.select.side_effect = select
+                def exited(child):
+                    return object() if child is worker or target_exits and turns[0] >= 3 else None
+                def group(pid):
+                    if pid == 50:
+                        raise ProcessLookupError(3, "synthetic exited collector")
+                    return pid
+                def signal(pid, sig):
+                    signals.append((pid, sig, clock[0]))
+                    if pid == 50:
+                        raise ProcessLookupError(3, "synthetic absent collector group")
+                capture = diagnostic.FocusedStartup(Path(directory), diagnostic.SampleQuota(), Mock(return_value=worker))
+                diagnostic.save_startup(Path(directory), {"outcome": "finished", "reserved_numbers": [1, 2],
+                    "samples": [{"number": 1, "identity_revalidated": True}, {"number": 2, "identity_revalidated": True}]})
+                with patch.object(subprocess, "Popen", return_value=root), \
+                        patch.object(diagnostic.selectors, "DefaultSelector", return_value=selector), \
+                        patch.object(diagnostic, "unreaped_exit", side_effect=exited), \
+                        patch.object(diagnostic.time, "monotonic", side_effect=lambda: clock[0]), \
+                        patch.object(os, "getpgid", side_effect=group), patch.object(os, "killpg", side_effect=signal):
+                    status, _, receipt = diagnostic.run_focused_phase(["synthetic"], 90, io.BytesIO(), capture)
+                self.assertEqual(status, 23 if target_exits else 124)
+                self.assertEqual(receipt["timed_out"], not target_exits)
+                self.assertEqual(receipt["startup_diagnostic"]["collection_outcome"], "finished")
+                self.assertEqual([x for x in signals if x[0] == 10],
+                                 [] if target_exits else [(10, diagnostic.signal.SIGTERM, 90)])
+
     def test_complete_root_only_unique_leaf_and_ambiguous_tree(self):
         graph = Graph()
         self.assertEqual([x.pid for x in diagnostic.startup_target(graph.identities[10], graph)], [10, 11, 12])
