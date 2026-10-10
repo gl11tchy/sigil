@@ -154,8 +154,8 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
         } else if !isForwardingBracketedPaste,
             data.contains(0x0A) || data.contains(0x0D) || Self.isEnhancedReturnPress(data)
         {
-            // Capture the journal offset before Return reaches the child. A fast
-            // response can otherwise append its completion event first.
+            // Report input before Return reaches the child. The tab decides
+            // whether a validated lifecycle journal can observe work.
             onUserSubmit?()
         }
         super.send(source: source, data: data)

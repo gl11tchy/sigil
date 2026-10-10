@@ -4,6 +4,39 @@ The resumable record for the [experience contract](EXPERIENCE.md). Each entry
 says what was built, how it was checked, what the check showed, and what is
 still open. Nothing here is a timing; counts are counted actions.
 
+## REA-1211: unknown state after unobservable input
+
+Started from main `c2a24a5`, without parked PRs #140 or #142. Before production
+changes, CI run [38025826427](https://github.com/gl11tchy-team/sigil/actions/runs/38025826427)
+at `805eaa6` executed one synthetic regression with five provider cases. Claude
+Code, new Codex, Devin, Cursor and Kimi each incorrectly remained Working with a
+non-nil timer: ten expected assertion failures in 0.085 seconds.
+
+The implementation gates Working on observable lifecycle evidence, records a
+neutral last-input tooltip and keeps unknown marks grey. Unsupported providers
+and missing/rejected Codex transcripts have no completion watch. Codex writer
+identity invalidation ends its watch. Running-process close/quit warnings and
+validated Grok/Codex turn completion remain covered by synthetic tests. The phone
+receives unknown rather than working; its existing Live Activity start rule
+requires working or a verified prompt. No iPhone lifecycle code changes.
+
+Final CI run links and results are recorded in
+[PR #143](https://github.com/gl11tchy-team/sigil/pull/143).
+The first implementation gate at `179763c` ran 1,010 Swift tests in 95 suites:
+the lifecycle cases passed, but an existing unread-dot test reported two failures.
+The neutral history-row mark was then limited to tabs with recorded input, keeping
+the existing unread marker behavior before any submission.
+Local application tests remain CI-only. The supported build approval path later
+built an isolated renamed debug app through `Scripts/workbench/`. AX actions sent
+synthetic prompt/Return bytes through the real terminal controller to fake Claude,
+Devin, Cursor, Kimi and new Codex processes. All five remained unknown with grey
+tab/sidebar marks, no project working mark, loader or top-bar timer. All retained
+their running-process close warning; Claude also retained its quit warning.
+[Native screenshots and fixture limits](rea-1211-native/README.md) record the
+window IDs and the separate, uncommitted debug fixture used by this check.
+No personal provider histories, paid inference, daily app replacement or other
+ticket implementations. The fixture app and synthetic tabs exited normally.
+
 ## REA-1195: outside note edits
 
 Built from `2c99cda` in a separate worktree; blocked PR #140 remains untouched.

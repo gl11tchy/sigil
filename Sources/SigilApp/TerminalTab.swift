@@ -35,6 +35,8 @@ final class TerminalTab: Identifiable {
     var onActivityChange: (() -> Void)?
     /// When the turn in flight started, for the elapsed time beside "Working".
     private(set) var workingSince: Date?
+    /// Input delivery is a neutral hint, not evidence of accepted work.
+    private(set) var lastSubmittedAt: Date?
     /// Set when a turn finishes while this tab is in the background.
     private(set) var hasUnseenActivity = false
     private(set) var bridgeInbox: [BridgeInboxItem] = []
@@ -54,6 +56,8 @@ final class TerminalTab: Identifiable {
     private var isSelected: () -> Bool = { false }
     private let completionEventsURL: URL?
     private var completionWatchTask: Task<Void, Never>?
+    private var hasObservableLifecycle = false
+    var isWatchingForCompletion: Bool { completionWatchTask != nil }
 
     init(
         id: UUID = UUID(),
@@ -69,6 +73,7 @@ final class TerminalTab: Identifiable {
             completionEventsURL
             ?? (spec.provider == .grokBuild
                 ? spec.sessionDirectory?.appendingPathComponent("updates.jsonl") : spec.sessionFile)
+        hasObservableLifecycle = makeLifecycleJournal()?.canObserve == true
     }
 
     /// A new Codex chat's id, once its history file is found. Codex picks the
@@ -93,7 +98,7 @@ final class TerminalTab: Identifiable {
     var capabilities: ProviderCapabilities {
         spec.provider.capabilities.forSession(
             hasIdentity: sessionReference != nil,
-            hasLifecycleJournal: completionEventsURL != nil && sessionReference != nil)
+            hasLifecycleJournal: hasObservableLifecycle)
     }
 
     var workingDirectory: URL { spec.workingDirectory }
@@ -154,8 +159,15 @@ final class TerminalTab: Identifiable {
     func noteTurnStarted() {
         if case .exited = activity { return }
         stopTurnTracking()
+        lastSubmittedAt = Date()
+        let journal = makeLifecycleJournal()
+        hasObservableLifecycle = journal?.canObserve == true
+        guard capabilities.lifecycle, let journal else {
+            activity = .unknown
+            return
+        }
         activity = .working
-        watchForTurnCompletion()
+        watchForTurnCompletion(journal)
     }
 
     func noteTerminalOutput() {
@@ -214,10 +226,14 @@ final class TerminalTab: Identifiable {
         }
     }
 
-    private func watchForTurnCompletion() {
-        guard completionWatchTask == nil, let completionEventsURL, let nativeSessionID else { return }
-        var journal = ProviderLifecycleJournal(
-            url: completionEventsURL, provider: spec.provider, sessionID: nativeSessionID)
+    private func makeLifecycleJournal() -> ProviderLifecycleJournal? {
+        guard spec.provider.capabilities.lifecycle, let completionEventsURL, let nativeSessionID else { return nil }
+        return ProviderLifecycleJournal(url: completionEventsURL, provider: spec.provider, sessionID: nativeSessionID)
+    }
+
+    private func watchForTurnCompletion(_ initialJournal: ProviderLifecycleJournal) {
+        guard completionWatchTask == nil, capabilities.lifecycle else { return }
+        var journal = initialJournal
         completionWatchTask = Task { [weak self] in
             while !Task.isCancelled {
                 let snapshot = journal
@@ -231,6 +247,11 @@ final class TerminalTab: Identifiable {
                 guard let self else { return }
                 for state in result.1 {
                     if state == .idle { self.noteTurnCompleted() } else { self.activity = state }
+                }
+                if !journal.canObserve {
+                    self.hasObservableLifecycle = false
+                    self.completionWatchTask = nil
+                    return
                 }
                 try? await Task.sleep(for: .milliseconds(250))
             }

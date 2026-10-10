@@ -46,6 +46,12 @@ public struct ProviderLifecycleJournal: Sendable {
     private var seenEvents = Set<String>()
     private var seenOrder: [String] = []
 
+    /// A journal path alone does not establish an observable provider lifecycle.
+    /// Grok may create its journal later; Codex must already have validated metadata.
+    public var canObserve: Bool {
+        provider == .grokBuild || (provider == .codex && validatedCodexIdentity)
+    }
+
     public init(url: URL, provider: CLIProvider, sessionID: String, notBefore: Date = Date()) {
         self.url = url
         self.provider = provider
@@ -72,6 +78,7 @@ public struct ProviderLifecycleJournal: Sendable {
     }
 
     public mutating func poll() -> [SessionLifecycleState] {
+        guard canObserve else { return [] }
         guard let handle = try? FileHandle(forReadingFrom: url) else { return [] }
         defer { try? handle.close() }
         // Inspect the opened file, not path metadata that could race replacement.

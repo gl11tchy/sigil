@@ -400,6 +400,10 @@ final class AppModel {
         tabs.first { tabMatches($0, sessionID: session.id, cwd: session.cwd) }?.activity
     }
 
+    func lastSubmittedAt(of session: GrokSession) -> Date? {
+        tabs.first { tabMatches($0, sessionID: session.id, cwd: session.cwd) }?.lastSubmittedAt
+    }
+
     func hasUnseenActivity(of session: GrokSession) -> Bool {
         tabs.first { tabMatches($0, sessionID: session.id, cwd: session.cwd) }?.hasUnseenActivity
             ?? false

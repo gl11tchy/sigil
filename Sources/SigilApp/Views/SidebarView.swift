@@ -8,15 +8,16 @@ private enum SidebarFocus: Hashable {
     case rename
 }
 
-/// Sidebar row light: work in flight, or a finished turn that has not been read.
+/// Sidebar row mark: work in flight, unknown submitted input, or an unread finish.
 enum SidebarActivityDot {
     static func isVisible(
         activity: TerminalTab.Activity?,
         hasUnseenActivity: Bool,
-        isActive: Bool
+        isActive: Bool,
+        lastSubmittedAt: Date? = nil
     ) -> Bool {
         guard let activity else { return false }
-        if activity == .working { return true }
+        if activity == .working || (activity == .unknown && lastSubmittedAt != nil) { return true }
         return hasUnseenActivity && !isActive
     }
 }
@@ -595,6 +596,7 @@ struct SidebarView: View {
             folder: tab.workingDirectory.folderName,
             path: tab.workingDirectory.abbreviatedPath,
             activity: tab.activity,
+            lastSubmittedAt: tab.lastSubmittedAt,
             hasUnseenActivity: tab.hasUnseenActivity,
             isSelected: tab.id == model.selectedTab?.id,
             isKeyboardSelected: rowID == keyboardSelectionID,
@@ -676,6 +678,7 @@ struct SidebarView: View {
             searchQuery: model.searchText,
             state: state(of: session),
             activity: model.activity(of: session),
+            lastSubmittedAt: model.lastSubmittedAt(of: session),
             hasUnseenActivity: model.hasUnseenActivity(of: session),
             isPinned: isPinned,
             isArchived: isArchived,
@@ -1581,6 +1584,7 @@ private struct OpenTabRow: View {
     let folder: String
     let path: String
     let activity: TerminalTab.Activity
+    let lastSubmittedAt: Date?
     let hasUnseenActivity: Bool
     let isSelected: Bool
     let isKeyboardSelected: Bool
@@ -1593,7 +1597,9 @@ private struct OpenTabRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            ActivityMark(activity: activity, hasUnseenActivity: hasUnseenActivity && !isSelected)
+            ActivityMark(
+                activity: activity, hasUnseenActivity: hasUnseenActivity && !isSelected,
+                lastSubmittedAt: lastSubmittedAt)
             Text(title)
                 .ui(14, isSelected ? .medium : .regular)
                 .foregroundStyle(palette.ink)
@@ -1851,6 +1857,7 @@ private struct SessionRow: View {
     let searchQuery: String
     let state: State
     let activity: TerminalTab.Activity?
+    let lastSubmittedAt: Date?
     let hasUnseenActivity: Bool
     let isPinned: Bool
     let isArchived: Bool
@@ -2038,10 +2045,12 @@ private struct SessionRow: View {
             SidebarActivityDot.isVisible(
                 activity: activity,
                 hasUnseenActivity: hasUnseenActivity,
-                isActive: state == .active
+                isActive: state == .active,
+                lastSubmittedAt: lastSubmittedAt
             )
         {
-            ActivityMark(activity: activity, hasUnseenActivity: hasUnseenActivity)
+            ActivityMark(
+                activity: activity, hasUnseenActivity: hasUnseenActivity, lastSubmittedAt: lastSubmittedAt)
         }
     }
 
