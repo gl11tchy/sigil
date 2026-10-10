@@ -8,7 +8,10 @@ struct NativeSessionWatcherTests {
     @Test(arguments: [CLIProvider.claudeCode, .codex])
     func existingNativeFoldersDiscoverAppendsAndNewTranscripts(provider: CLIProvider) async throws {
         let fixture = try NativeWatcherFixture(provider: provider)
-        defer { fixture.cleanup() }
+        defer {
+            fixture.cleanup()
+            traceNativeWatcherStage("test defer: cleanup returned")
+        }
         let firstID = UUID().uuidString.lowercased()
         let file = try fixture.writeSession(id: firstID)
         fixture.store.start()
@@ -40,7 +43,10 @@ struct NativeSessionWatcherTests {
         traceNativeWatcherStage("adjacent index: before fixture creation")
         let fixture = try NativeWatcherFixture(provider: .codex)
         traceNativeWatcherStage("adjacent index: after fixture creation")
-        defer { fixture.cleanup() }
+        defer {
+            fixture.cleanup()
+            traceNativeWatcherStage("test defer: cleanup returned")
+        }
         let id = UUID().uuidString.lowercased()
         traceNativeWatcherStage("adjacent index: before transcript setup")
         let transcript = try fixture.writeSession(id: id)
