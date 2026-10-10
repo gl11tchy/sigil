@@ -15,7 +15,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  native_watcher_stacks:
+    name: Native watcher stack diagnostic
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/fix/rea-1216-verified-codex-binding'
+    runs-on: [self-hosted, sigil-vm]
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the test executable without running tests
+        timeout-minutes: 5
+        run: swift build --build-tests
+      - name: Capture the owned synthetic watcher process
+        timeout-minutes: 2
+        run: |
+          bin_dir="$(swift build --show-bin-path)"
+          python3 Scripts/diagnose-native-watcher.py "$bin_dir/SigilPackageTests.xctest/Contents/MacOS/SigilPackageTests"
+      - name: Preserve diagnostic evidence
+        if: always()
+        timeout-minutes: 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-watcher-stack-diagnostic
+          path: ${{ runner.temp }}/sigil-native-watcher-${{ github.run_id }}-${{ github.run_attempt }}/
+          retention-days: 1
+          if-no-files-found: warn
+
   verify:
+    if: github.event_name != 'workflow_dispatch' || github.ref != 'refs/heads/fix/rea-1216-verified-codex-binding'
     name: Build, test, and smoke check
     # Requires a fresh Tart VM with Xcode 26+ and an iOS 26+ runtime on the owner's Mac
     # (gl11tchy/gh-runner-broker mac/macos-supervisor.sh). Jobs wait while the Mac is off.
