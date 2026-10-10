@@ -176,10 +176,13 @@ struct SidebarCommandsTests {
         defer { fixture.cleanup() }
         let cwd = try fixture.directory("project")
         try fixture.writeListedSession(id: "a", cwd: cwd.path)
+        // The listed session lives in the fixture's temporary folder.
+        fixture.settings.showWorktreeSessions = true
         await fixture.store.reload()
         let model = fixture.model()
         defer { model.closeAllTabsAndWait() }
         let project = try #require(model.sidebarProjects.first)
+        #expect(project.sessions.map(\.id) == ["a"])
         model.sidebarCommandContext = .init(listFocused: true, keyboardRowID: project.id, rowIDs: [project.id])
         #expect(model.pinCommandTitle == "Pin Project")
         model.performPinCommand()
