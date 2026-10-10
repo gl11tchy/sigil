@@ -5,7 +5,15 @@ public struct ProviderInstallation: Sendable, Equatable {
     public let executable: URL?
     public let version: String?
     public let problem: String?
-    public var isAvailable: Bool { executable != nil && problem == nil }
+    public let timedOut: Bool
+    public var isAvailable: Bool { executable != nil && problem == nil && !timedOut }
+
+    public init(executable: URL?, version: String?, problem: String?, timedOut: Bool = false) {
+        self.executable = executable
+        self.version = version
+        self.problem = problem
+        self.timedOut = timedOut
+    }
 
     /// The blocking process wait belongs on dispatch threads, not Swift's
     /// cooperative executor. Cancellation is fenced by the caller's generation.
@@ -90,7 +98,8 @@ public struct ProviderInstallation: Sendable, Equatable {
             if DispatchTime.now() >= deadline {
                 kill(process.processIdentifier, SIGKILL)
                 return ProviderInstallation(
-                    executable: nil, version: nil, problem: "\(provider.name) did not answer its version check.")
+                    executable: nil, version: nil, problem: "\(provider.name) did not answer its version check.",
+                    timedOut: true)
             }
         }
         drain()

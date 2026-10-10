@@ -459,3 +459,19 @@ App tests are CI-only; native Settings AX/screenshots remain unavailable through
 the blocked local build route. See [REA-1329 evidence](rea-1329/EVIDENCE.md) for
 the migration/recovery journey and evidence limits. Ordinary exact-head CI and
 parent personal review precede merge; no worker merge or app installation.
+
+## REA-1250 — recover timed-out provider checks
+
+The shared ProviderChecks engine now distinguishes deadline timeouts from
+missing/invalid CLIs and uses one timer for three retries with 5/15/45-second
+delays. One activation can advance an attempt without resetting the budget.
+Exhaustion says Version check timed out and offers Check Again. Current results
+restore the saved prefix in order, retain deferred positions/selection, and
+support manual recovery after exhaustion without duplicate tabs.
+
+[Evidence](../qa/rea-1250.md) records the source-base synthetic reproduction
+(two assertions), eight changed-source Kit assertions, local syntax/strict
+format/whitespace checks, injected scheduler/probe CI regressions, and limits.
+SigilAppTests remain CI-only; the local SwiftPM denial was not retried or
+bypassed. No personal histories/prompts, local native UI smoke or app installation.
+Ordinary exact-head CI evidence is recorded in the ticket PR for parent review.

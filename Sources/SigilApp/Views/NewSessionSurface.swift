@@ -99,7 +99,7 @@ struct NewSessionSurface: View {
     private func providerButton(_ provider: CLIProvider) -> some View {
         let problem = availabilityDescription(provider)
         let needsCheck = canRequestCheck(provider)
-        let isChecking = model.checkingProviders.contains(provider)
+        let isChecking = model.checkingProviders.contains(provider) || model.providerIsRecovering(provider)
         let focused = focusedProvider == provider || (isProviderRowFocused && keyboardProvider == provider)
         let emphasized = focused || hoveredProvider == provider
         let shape = RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
@@ -119,7 +119,11 @@ struct NewSessionSurface: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
                 Text(
-                    isChecking ? "Checking…" : needsCheck ? "Check required" : problem == nil ? "" : "Unavailable"
+                    isChecking
+                        ? "Checking…"
+                        : needsCheck
+                            ? (model.providerVersionCheckTimedOut(provider) ? "Check Again" : "Check required")
+                            : problem == nil ? "" : "Unavailable"
                 )
                 .ui(11)
                 .foregroundStyle(palette.ink2)
@@ -147,7 +151,8 @@ struct NewSessionSurface: View {
     }
 
     private func availabilityDescription(_ provider: CLIProvider) -> String? {
-        canRequestCheck(provider) ? "Check \(provider.name) before starting." : model.providerLaunchProblem(provider)
+        canRequestCheck(provider) && !model.providerVersionCheckTimedOut(provider)
+            ? "Check \(provider.name) before starting." : model.providerLaunchProblem(provider)
     }
 
     private func moveFocus(_ offset: Int) -> KeyPress.Result {

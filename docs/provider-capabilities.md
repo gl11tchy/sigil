@@ -76,8 +76,16 @@ This optional local gate requires installed CLIs; ordinary CI does not.
   start or join a required check and revalidate after it finishes; cancelling a
   waiter does not cancel another request's check. Availability does not establish
   authentication or model entitlement; a cached result cannot prove an executable
-  or authentication will remain usable at launch. Automatic timeout retries and
-  the Settings CLI inventory remain separate work (REA-1250 and REA-1261).
+  or authentication will remain usable at launch. Version-check timeouts are
+  separate from missing/invalid installations. One shared timer retries only
+  timeouts, with delays of 5, 15 and 45 seconds between attempts; the next app
+  activation can advance one of those attempts without replenishing the budget.
+  Pending recovery says the CLI is still being checked. After three retries,
+  it says **Version check timed out** and offers **Check Again**. Explicit
+  refresh and Grok configuration changes fence canceled timers and old probe
+  results. Saved restoration keeps the ready prefix in order and retains
+  deferred positions/selection, including recovery after exhaustion. The full
+  Settings CLI inventory remains separate work (REA-1261).
 - `CLIProvider.checkedVersion` records these checked contracts. When an available
   CLI reports a newer semantic version, the sidebar and selected provider in New
   Session name both versions in a quiet compatibility notice. Compatible versions
@@ -106,8 +114,8 @@ paths remain custom. Selection changes invalidate the cached result and pending
 generation immediately, including switching back to automatic mode. Existing
 terminals keep running until restarted.
 
-This is Grok selection and recovery (REA-1329). The full six-provider Settings
-inventory (REA-1261) and automatic timeout retry policy (REA-1250) remain separate.
+Grok selection (REA-1329) uses the shared bounded timeout recovery above
+(REA-1250). The full six-provider Settings inventory remains separate (REA-1261).
 
 ## History format boundaries
 

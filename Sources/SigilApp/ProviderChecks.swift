@@ -8,7 +8,9 @@ import SigilKit
 @Observable
 final class ProviderChecks {
     typealias Probe = @Sendable (CLIProvider, URL?) async -> ProviderInstallation
+    typealias Sleep = @Sendable (TimeInterval) async throws -> Void
     static let lifetime: TimeInterval = 5 * 60
+    static let retryDelays: [TimeInterval] = [5, 15, 45]
     private(set) var installations: [CLIProvider: ProviderInstallation]
     private(set) var checking: Set<CLIProvider> = []
     private struct Receipt {
@@ -26,14 +28,27 @@ final class ProviderChecks {
     @ObservationIgnored private let settings: AppSettings
     @ObservationIgnored private let probe: Probe
     @ObservationIgnored private let clock: @Sendable () -> TimeInterval
+    @ObservationIgnored private let sleep: Sleep
+    private struct Recovery {
+        let generation: UUID
+        let executable: URL?
+        let attempts: Int
+        var nextAttemptAt: TimeInterval?
+        var usedActivation: Bool
+    }
+    private var recoveries: [CLIProvider: Recovery] = [:]
+    @ObservationIgnored private var retryTask: Task<Void, Never>?
+    @ObservationIgnored private var schedulerGeneration = UUID()
+    @ObservationIgnored var didFinishChecks: (() -> Void)?
 
     init(
         settings: AppSettings, installations: [CLIProvider: ProviderInstallation],
-        probe: Probe?, clock: (@Sendable () -> TimeInterval)?
+        probe: Probe?, clock: (@Sendable () -> TimeInterval)?, sleep: Sleep? = nil
     ) {
         self.settings = settings
         self.installations = installations
         self.clock = clock ?? { ProcessInfo.processInfo.systemUptime }
+        self.sleep = sleep ?? { delay in try await Task.sleep(for: .seconds(delay)) }
         self.probe =
             probe ?? { provider, executable in
                 await ProviderInstallation.detectAsync(provider: provider, configuredExecutable: executable)
@@ -43,6 +58,8 @@ final class ProviderChecks {
         }
         observeExecutableConfiguration()
     }
+
+    deinit { retryTask?.cancel() }
 
     private func configuredExecutable(for provider: CLIProvider) -> URL? {
         provider == .grokBuild && !settings.usesInstalledGrok ? settings.executableURL : nil
@@ -64,6 +81,17 @@ final class ProviderChecks {
     func requiresCheck(_ provider: CLIProvider) -> Bool {
         installations[provider] == nil
             || (installations[provider]?.isAvailable == true && !hasFreshProviderCheck(provider))
+            || (installations[provider]?.timedOut == true && !isRecovering(provider))
+    }
+
+    func isRecovering(_ provider: CLIProvider) -> Bool {
+        recoveries[provider]?.nextAttemptAt != nil
+    }
+
+    /// An exhausted timeout may defer individually. It still offers a manual
+    /// Check Again, whereas unknown/stale results must hold restoration.
+    func requiresRestorationCheck(_ provider: CLIProvider) -> Bool {
+        requiresCheck(provider) && installations[provider]?.timedOut != true
     }
 
     /// Observation fires before the setting changes. Invalidate synchronously
@@ -81,6 +109,8 @@ final class ProviderChecks {
                 self.receipts[.grokBuild] = nil
                 self.installations[.grokBuild] = nil
                 self.checking.remove(.grokBuild)
+                self.recoveries[.grokBuild] = nil
+                self.scheduleNextRetry()
             }
             Task { @MainActor [weak self] in self?.observeExecutableConfiguration() }
         }
@@ -92,19 +122,34 @@ final class ProviderChecks {
     func refresh(force: Bool, only requested: Set<CLIProvider>? = nil) async {
         let providers = CLIProvider.allCases.filter {
             (requested?.contains($0) ?? true)
-                && (force || (!checking.contains($0) && !hasFreshProviderCheck($0)))
+                && (force || (!checking.contains($0) && !isRecovering($0) && !hasFreshProviderCheck($0)))
         }
+        await check(providers, retry: false)
+    }
+
+    private func check(_ providers: [CLIProvider], retry: Bool) async {
         guard !providers.isEmpty else { return }
         let generations = Dictionary(uniqueKeysWithValues: providers.map { ($0, UUID()) })
         let executables = Dictionary(uniqueKeysWithValues: providers.map { ($0, configuredExecutable(for: $0)) })
         let probe = self.probe
         // A prior result does not authorize launches while its replacement is pending.
         for provider in providers {
+            if let previous = generationsByProvider[provider] {
+                finishWaiters(provider: provider, generation: previous)
+            }
             generationsByProvider[provider] = generations[provider]
+            if retry, let previous = recoveries[provider], let generation = generations[provider] {
+                recoveries[provider] = .init(
+                    generation: generation, executable: executables[provider] ?? nil,
+                    attempts: previous.attempts + 1, nextAttemptAt: nil, usedActivation: previous.usedActivation)
+            } else {
+                recoveries[provider] = nil
+            }
             checking.insert(provider)
             installations[provider] = nil
             receipts[provider] = nil
         }
+        scheduleNextRetry()
         defer {
             for provider in providers {
                 if generationsByProvider[provider] == generations[provider] { checking.remove(provider) }
@@ -112,6 +157,8 @@ final class ProviderChecks {
                     finishWaiters(provider: provider, generation: generation)
                 }
             }
+            scheduleNextRetry()
+            didFinishChecks?()
         }
         let found = await withTaskGroup(of: (CLIProvider, ProviderInstallation).self) { group in
             for provider in providers {
@@ -137,8 +184,63 @@ final class ProviderChecks {
                 receipts[provider] = .init(
                     executable: executables[provider] ?? nil, checkedAt: clock())
             }
+            if found[provider]?.timedOut == true, let generation = generations[provider] {
+                let previous = recoveries[provider]
+                let attempts = previous?.attempts ?? 0
+                recoveries[provider] = .init(
+                    generation: generation, executable: executables[provider] ?? nil, attempts: attempts,
+                    nextAttemptAt: attempts < Self.retryDelays.count ? clock() + Self.retryDelays[attempts] : nil,
+                    usedActivation: previous?.usedActivation ?? false)
+            } else {
+                recoveries[provider] = nil
+            }
             checking.remove(provider)
         }
+    }
+
+    /// One cancellable wake-up serves all providers. Probes use the same batch
+    /// path and generation fences as entry/Settings checks. Cancellation of a
+    /// timer never cancels a probe already owned by a different generation.
+    private func scheduleNextRetry() {
+        retryTask?.cancel()
+        retryTask = nil
+        schedulerGeneration = UUID()
+        guard let deadline = recoveries.values.compactMap(\.nextAttemptAt).min() else { return }
+        let token = schedulerGeneration
+        let delay = max(0, deadline - clock())
+        let sleep = self.sleep
+        retryTask = Task { @MainActor [weak self] in
+            do { try await sleep(delay) } catch { return }
+            guard let self, !Task.isCancelled, self.schedulerGeneration == token else { return }
+            self.retryTask = nil
+            let providers = CLIProvider.allCases.filter { provider in
+                guard let recovery = self.recoveries[provider], let due = recovery.nextAttemptAt else { return false }
+                return due <= self.clock() && recovery.generation == self.generationsByProvider[provider]
+                    && recovery.executable == self.configuredExecutable(for: provider)
+                    && !self.checking.contains(provider)
+            }
+            if providers.isEmpty {
+                self.scheduleNextRetry()
+            } else {
+                await self.check(providers, retry: true)
+            }
+        }
+    }
+
+    /// The next activation may expedite one pending retry in each bounded
+    /// sequence. Bursts never replenish the budget or retry missing/exhausted CLIs.
+    func applicationDidBecomeActive() {
+        var changed = false
+        for provider in CLIProvider.allCases {
+            guard var recovery = recoveries[provider], recovery.nextAttemptAt != nil,
+                !recovery.usedActivation, !checking.contains(provider)
+            else { continue }
+            recovery.usedActivation = true
+            recovery.nextAttemptAt = clock()
+            recoveries[provider] = recovery
+            changed = true
+        }
+        if changed { scheduleNextRetry() }
     }
 
     /// Join only the generations already pending when this call begins. A
@@ -179,7 +281,9 @@ final class ProviderChecks {
             return "The selected Grok executable is unavailable. Choose another path or Use Installed Grok in Settings."
         }
         if checking.contains(provider) { return "Checking \(provider.name)… Try again shortly." }
+        if isRecovering(provider) { return "\(provider.name) is still being checked. Try again shortly." }
         guard let installation = installations[provider] else { return "Check \(provider.name) before starting." }
+        if installation.timedOut { return "Version check timed out for \(provider.name). Check Again." }
         guard installation.isAvailable else {
             return installation.problem ?? "\(provider.name) is unavailable."
         }
