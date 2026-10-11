@@ -1,9 +1,11 @@
+Completed historical bundle; retained because `.grok/workflows/ship-product-site.rhai` names this path. See [the dated disposition and delivery evidence](../docs/history/README.md). The original record below is preserved.
+
 # Phone remote
 
 - [x] Readable output strips Grok 4.6 composer and TUI padding
 - [x] Encrypted chunked file upload pastes a Mac path
 - [x] Phone attach, chips, Stop, 44px targets
-- [x] Tests and browser (`tasks/verify.md`)
+- [x] Tests and browser (`docs/history/verify.md`)
 - [x] Deploy: confirm the running Sidereal revision carries all of this. Blocked on the
   previous uploads having no readable revision. Stamped uploads are implemented;
   a live coordinated release and matching `/health` response remain Task 7.
@@ -13,7 +15,7 @@
 
 - [x] A: Adversarial protocol paths; full verification passed.
 - [x] B: Sealed ticket routing and no-query logging; full verification passed.
-- [x] C: Git revision stamp and health proof; full verification passed (`tasks/remote-hardening-verify.md`).
+- [x] C: Git revision stamp and health proof; full verification passed (`docs/history/remote-hardening-verify.md`).
 
 ## Product correctness and continuity — 2026-09-27
 

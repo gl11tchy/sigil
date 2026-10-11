@@ -1,6 +1,8 @@
+Verified in [#44](https://github.com/gl11tchy-team/sigil/pull/44), delivered in [#53](https://github.com/gl11tchy-team/sigil/pull/53); kept for history. Pending statements below describe the original checkpoint.
+
 # Phone-remote verification
 
-Spec: `tasks/spec.md`. Plan: `tasks/plan.md`. Closes Task 6. The deploy half of
+Spec: `docs/history/spec.md`. Plan: `tasks/plan.md`. Closes Task 6. The deploy half of
 the old `tasks/todo.md` line stays open as Task 7.
 
 Swift and WebKit are macOS-only, so those two ran on the CI runner, not here.

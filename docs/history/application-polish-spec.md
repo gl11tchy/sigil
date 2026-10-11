@@ -1,3 +1,5 @@
+Shipped in [#52](https://github.com/gl11tchy-team/sigil/pull/52); kept for history.
+
 # Sigil application quality pass
 
 ## Objective
