@@ -10,6 +10,8 @@ final class SessionDirectoryWatcher: Sendable {
         case nativeHistory(root: URL, titleIndex: URL?)
         /// Markdown notes, including atomic replacements and deleted parents.
         case notes(root: URL)
+        /// Only project identity and Git markers affect the sidebar's grouping/filter.
+        case sidebarPaths(Set<String>)
     }
 
     /// `FSEventStreamRef` is not Sendable; keep the handle as a bit pattern under the lock.
@@ -28,6 +30,14 @@ final class SessionDirectoryWatcher: Sendable {
         contents: Contents = .grokSummaries,
         handler: @escaping @Sendable (_ requiresRestart: Bool) -> Void
     ) -> Bool {
+        start(paths: [path], latency: latency, contents: contents, handler: handler)
+    }
+
+    @discardableResult
+    func start(
+        paths: [String], latency: CFTimeInterval,
+        contents: Contents, handler: @escaping @Sendable (Bool) -> Void
+    ) -> Bool {
         let replacement = state.withLock { current -> (UInt64, UInt, EventSink?) in
             current.generation &+= 1
             let old = (current.generation, current.streamBits, current.sink)
@@ -37,12 +47,15 @@ final class SessionDirectoryWatcher: Sendable {
         }
         dispose(streamBits: replacement.1, sink: replacement.2)
 
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
-            isDirectory.boolValue
-        else {
-            return false
-        }
+        let roots = Set(
+            paths.compactMap { path -> String? in
+                var isDirectory: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+                    isDirectory.boolValue
+                else { return nil }
+                return Self.canonicalURL(URL(fileURLWithPath: path)).path
+            })
+        guard !roots.isEmpty else { return false }
 
         let sink = EventSink(contents: contents, handler: handler)
         var context = FSEventStreamContext(
@@ -70,7 +83,7 @@ final class SessionDirectoryWatcher: Sendable {
                 nil,
                 sessionFSEventCallback,
                 &context,
-                [Self.canonicalURL(URL(fileURLWithPath: path)).path] as CFArray,
+                Array(roots) as CFArray,
                 FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
                 latency,
                 flags
@@ -140,6 +153,10 @@ final class SessionDirectoryWatcher: Sendable {
             & FSEventStreamEventFlags(
                 kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagItemIsDir) != 0
         switch contents {
+        case .sidebarPaths(let paths):
+            let event = URL(fileURLWithPath: path).path
+            return paths.contains(event)
+                || (directoryEvent && paths.contains { $0.hasPrefix(event + "/") })
         case .notes(let root):
             let event = canonicalURL(URL(fileURLWithPath: path)).path
             let root = canonicalURL(root).path

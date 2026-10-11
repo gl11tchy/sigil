@@ -23,6 +23,12 @@ public func isEphemeral(path: String) -> Bool {
     return value
 }
 
+/// A sidebar freshness boundary also rechecks ancestor Git markers, whose
+/// contents can change without modifying the chat directory itself.
+public func invalidateEphemeralPathCache() {
+    ephemeralPathCache.withLock { $0.removeAll(keepingCapacity: true) }
+}
+
 private struct EphemeralCacheEntry {
     var value: Bool
     var device: UInt64?

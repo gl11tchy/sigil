@@ -1,12 +1,197 @@
 import Foundation
+import Observation
 import SigilKit
 import Testing
+import os
 
 @testable import SigilApp
 
 @Suite(.serialized)
 @MainActor
 struct SidebarSnapshotTests {
+    @Test func rendersAndEventsReuseOneSnapshotUntilTheInjectedDeadline() async throws {
+        let fixture = try ModelFixture()
+        defer {
+            fixture.store.stop()
+            fixture.cleanup()
+        }
+        fixture.settings.showWorktreeSessions = true
+        let folder = try fixture.directory("reuse")
+        try fixture.writeListedSession(id: "one", cwd: folder.path)
+        await fixture.store.reload()
+        let clock = SnapshotClock()
+        let model = snapshotModel(fixture, clock: clock)
+        defer { model.closeAllTabsAndWait() }
+        let rows = model.sidebarSnapshot().rowIDs
+        #expect(model.sidebarSnapshot().rowIDs == rows)
+        #expect(model.eventSidebarSnapshot().rowIDs == rows)
+        #expect(model.sidebarSnapshotBuildCount == 1)
+        clock.advance(0.999)
+        _ = model.sidebarSnapshot()
+        #expect(model.sidebarSnapshotBuildCount == 1)
+        clock.advance(0.001)
+        _ = model.eventSidebarSnapshot()
+        #expect(model.sidebarSnapshotBuildCount == 2)
+        _ = model.sidebarSnapshot()
+        #expect(model.sidebarSnapshotBuildCount == 2)
+    }
+
+    @Test func everyVisibilityInputRebuildsImmediately() async throws {
+        let fixture = try ModelFixture()
+        defer {
+            fixture.store.stop()
+            fixture.cleanup()
+        }
+        fixture.settings.showWorktreeSessions = true
+        let folder = try fixture.directory("keys")
+        try fixture.writeListedSession(id: "one", cwd: folder.path, summary: "Quartz")
+        await fixture.store.reload()
+        let model = snapshotModel(fixture, clock: SnapshotClock())
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(fixture.store.sessions.first)
+        _ = model.sidebarSnapshot()
+        func change(_ mutation: () -> Void) {
+            let before = model.sidebarSnapshotBuildCount
+            mutation()
+            expectMatchesModelLists(model.eventSidebarSnapshot(), model)
+            _ = model.sidebarSnapshot()
+            #expect(model.sidebarSnapshotBuildCount == before + 1)
+        }
+        change { model.searchText = "Quartz" }
+        change { model.searchText = "" }
+        change { model.openRecents() }
+        change { model.pin(session) }
+        change { model.archive(session) }
+        change { model.settings.showEmptySessions.toggle() }
+        change { model.settings.showSubagentSessions.toggle() }
+        change { model.settings.showWorktreeSessions.toggle() }
+        change { model.settings.showWorktreeSessions.toggle() }
+        change { model.settings.showOtherAppSessions = false }
+        change { model.settings.recordSigilConversations([session.id]) }
+        change { model.rename(session, to: "Named") }
+        change { model.openArchived() }
+        let project = try #require(model.sidebarProjects.first)
+        change { model.pin(project) }
+        let added = try fixture.directory("added-key")
+        change { model.addProject(added) }
+        try fixture.writeListedSession(id: "two", cwd: folder.path)
+        let count = model.sidebarSnapshotBuildCount
+        await fixture.store.reload()
+        _ = model.sidebarSnapshot()
+        #expect(model.sidebarSnapshotBuildCount == count + 1)
+    }
+
+    @Test func learnedTabIdentityChangesVisibilityWithoutAnActivityCacheKey() async throws {
+        let fixture = try ModelFixture()
+        defer {
+            fixture.store.stop()
+            fixture.cleanup()
+        }
+        fixture.settings.showWorktreeSessions = true
+        fixture.settings.showOtherAppSessions = false
+        let folder = try fixture.directory("binding")
+        try fixture.writeListedSession(id: "one", cwd: folder.path)
+        await fixture.store.reload()
+        let session = try #require(fixture.store.sessions.first)
+        let model = snapshotModel(fixture, clock: SnapshotClock())
+        defer { model.closeAllTabsAndWait() }
+        model.openRecents()
+        let tab = TerminalTab(
+            spec: .init(
+                executable: fixture.executable, workingDirectory: folder,
+                mode: .continueLatest), settings: fixture.settings)
+        model.tabs.append(tab)
+        #expect(model.sidebarSnapshot().listed.isEmpty)
+        let count = model.sidebarSnapshotBuildCount
+        tab.learnedSessionReference = .init(provider: .grokBuild, sessionID: session.id, cwd: folder.path)
+        #expect(model.eventSidebarSnapshot().listed.map(\.id) == [session.id])
+        #expect(model.sidebarSnapshotBuildCount == count + 1)
+        tab.noteTurnStarted()
+        #expect(model.activity(of: session) == .unknown)
+        _ = model.sidebarSnapshot()
+        #expect(model.sidebarSnapshotBuildCount == count + 1)
+        tab.noteInterrupted()
+        #expect(model.activity(of: session) == .interrupted)
+        _ = model.sidebarSnapshot()
+        #expect(model.sidebarSnapshotBuildCount == count + 1)
+        tab.learnedSessionReference = nil
+        #expect(model.sidebarSnapshot().listed.isEmpty)
+        #expect(model.sidebarSnapshotBuildCount == count + 2)
+    }
+
+    @Test func expiryRechecksSymlinkGroupingWithUnchangedSessionCount() async throws {
+        let fixture = try ModelFixture()
+        defer {
+            fixture.store.stop()
+            fixture.cleanup()
+        }
+        fixture.settings.showWorktreeSessions = true
+        let first = try fixture.directory("first")
+        let second = try fixture.directory("second")
+        let alias = fixture.root.appendingPathComponent("alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: first)
+        try fixture.writeListedSession(id: "one", cwd: alias.path)
+        await fixture.store.reload()
+        let clock = SnapshotClock()
+        let model = snapshotModel(fixture, clock: clock)
+        defer { model.closeAllTabsAndWait() }
+        #expect(model.sidebarSnapshot().projects.first?.id == first.path)
+        try FileManager.default.removeItem(at: alias)
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: second)
+        clock.advance(1)
+        #expect(model.sidebarSnapshot().projects.first?.id == second.path)
+        #expect(model.eventSidebarSnapshot().projects.first?.id == second.path)
+        #expect(model.sidebarSnapshotBuildCount == 2)
+    }
+
+    @Test func filesystemEventsInvalidateAQuietObservedSnapshotAndStopWithTheView() async throws {
+        let fixture = try ModelFixture()
+        defer {
+            fixture.store.stop()
+            fixture.cleanup()
+        }
+        fixture.settings.showWorktreeSessions = true
+        let first = try fixture.directory("quiet-first")
+        let second = try fixture.directory("quiet-second")
+        let alias = fixture.root.appendingPathComponent("quiet-alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: first)
+        try fixture.writeListedSession(id: "one", cwd: alias.path)
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let observed = OSAllocatedUnfairLock(initialState: false)
+        withObservationTracking {
+            _ = model.sidebarSnapshot()
+        } onChange: {
+            observed.withLock { $0 = true }
+        }
+        let task = Task { await model.observeSidebarFilesystem() }
+        defer { task.cancel() }
+        try await Task.sleep(for: .milliseconds(100))
+        // No one-second full-list timer on an unchanged, visible sidebar.
+        try await Task.sleep(for: .milliseconds(1_200))
+        #expect(!observed.withLock { $0 })
+        #expect(model.sidebarSnapshotBuildCount == 1)
+        try FileManager.default.removeItem(at: alias)
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: second)
+        let deadline = ContinuousClock.now + .seconds(4)
+        while !observed.withLock({ $0 }), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(observed.withLock { $0 }, "FSEvents must invalidate without hover or input")
+        #expect(model.sidebarSnapshot().projects.first?.id == second.path)
+        task.cancel()
+        await task.value
+        let stopped = OSAllocatedUnfairLock(initialState: false)
+        withObservationTracking {
+            _ = model.sidebarSnapshot()
+        } onChange: {
+            stopped.withLock { $0 = true }
+        }
+        try FileManager.default.removeItem(at: alias)
+        try await Task.sleep(for: .milliseconds(1_200))
+        #expect(!stopped.withLock { $0 })
+    }
 
     @Test func snapshotEqualsTheComputedListsOnEverySurface() async throws {
         let fixture = try ModelFixture()
@@ -189,6 +374,23 @@ struct SidebarSnapshotTests {
         expectMatchesModelLists(snapshot, model)
         #expect(!snapshot.projects.contains { $0.id == addedProject.id })
     }
+}
+
+private final class SnapshotClock: Sendable {
+    private let value = OSAllocatedUnfairLock(initialState: TimeInterval(100))
+    func now() -> TimeInterval { value.withLock { $0 } }
+    func advance(_ seconds: TimeInterval) { value.withLock { $0 += seconds } }
+}
+
+@MainActor
+private func snapshotModel(_ fixture: ModelFixture, clock: SnapshotClock) -> AppModel {
+    AppModel(
+        settings: fixture.settings, store: fixture.store, trashConversation: { _ in },
+        presentError: { _ in },
+        panel: RightPanel(
+            defaults: fixture.defaults,
+            notesStore: ConversationNotesStore(root: fixture.notesRoot)),
+        pairingStore: InMemoryRemotePairingStore(), sidebarClock: { clock.now() })
 }
 
 /// The lists SidebarView used to read one at a time from the model during a render.

@@ -617,3 +617,19 @@ sequencing and app deletion tests await ordinary exact-head CI at PR creation.
 Existing local build/process denials remain respected. No personal history,
 additional worker/ticket, local AppTests, daily-app replacement or customer timing
 claim. Parent personal review precedes merge.
+
+## REA-1255: reuse sidebar snapshots during hover and navigation
+
+Equal visibility inputs now share a one-second snapshot across renders and
+keyboard events. All filter/membership and mutable tab-identity keys are included;
+tab activity remains independently observed by rows. A view-owned passive
+filesystem stream schedules quiet invalidation and stops with the sidebar.
+Unchanged watched views do no periodic full-list rebuild; unsupported streams
+retain bounded fallback refresh. Saved history and project authority are preserved.
+
+[The verification record](../qa/rea-1255.md) defines the generated 1,000-session,
+20-row callback sweep and its limits. Baseline app-host CI began before changing
+production behavior; final measurements and integrated CI remain pending. Local
+pure watcher type-check/ASan policy checks pass; local stream delivery is unavailable.
+No customer history, local AppTests, daily-app replacement or merge. One ticket
+and worker remain active, with parent personal review before merge.

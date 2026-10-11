@@ -94,6 +94,9 @@ struct SidebarView: View {
         }
         .background(palette.canvas)
         .environment(\.sidebarGlide, glide)
+        .task(id: model.sidebarFilesystemPaths) {
+            await model.observeSidebarFilesystem()
+        }
         .onChange(of: focus) { _, focus in
             model.isSidebarFocused = focus != nil
             publishCommandContext()

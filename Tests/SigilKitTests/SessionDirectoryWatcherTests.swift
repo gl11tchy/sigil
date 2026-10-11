@@ -5,6 +5,41 @@ import Testing
 @testable import SigilKit
 
 struct SessionDirectoryWatcherTests {
+    @Test func sidebarPolicyWatchesIdentityAndGitMarkersWithoutSourceFileChurn() {
+        let contents = SessionDirectoryWatcher.Contents.sidebarPaths([
+            "/generated/project", "/generated/project/.git", "/generated/link",
+        ])
+        let file = FSEventStreamEventFlags(kFSEventStreamEventFlagItemIsFile)
+        let directory = FSEventStreamEventFlags(kFSEventStreamEventFlagItemIsDir)
+        #expect(SessionDirectoryWatcher.shouldScan(path: "/generated/link", flags: file, contents: contents))
+        #expect(SessionDirectoryWatcher.shouldScan(path: "/generated/project/.git", flags: file, contents: contents))
+        #expect(SessionDirectoryWatcher.shouldScan(path: "/generated", flags: directory, contents: contents))
+        for path in ["/generated/project/code.swift", "/generated/project/.git/index", "/generated/unrelated"] {
+            #expect(!SessionDirectoryWatcher.shouldScan(path: path, flags: file, contents: contents))
+        }
+    }
+
+    @Test func sidebarWatchPlanIncludesMissingRootsAndAliasParents() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            .resolvingSymlinksInPath()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let actual = root.appendingPathComponent("actual")
+        try FileManager.default.createDirectory(at: actual, withIntermediateDirectories: true)
+        let alias = root.appendingPathComponent("alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: actual)
+        let plan = SidebarPathWatcher.plan(paths: [alias.appendingPathComponent("missing/child").path])
+        #expect(plan.roots.contains(root.path))
+        #expect(plan.roots.contains(actual.path))
+        #expect(plan.identities.contains(alias.path))
+        #expect(plan.identities.contains(actual.appendingPathComponent("missing/child").path))
+        #expect(!plan.roots.contains("/"))
+        let admin = root.appendingPathComponent("repo/.git/worktrees/generated")
+        try FileManager.default.createDirectory(at: admin, withIntermediateDirectories: true)
+        try Data("gitdir: \(admin.path)\n".utf8).write(to: actual.appendingPathComponent(".git"))
+        let worktreePlan = SidebarPathWatcher.plan(paths: [actual.path])
+        #expect(worktreePlan.identities.contains(admin.appendingPathComponent("commondir").path))
+        #expect(worktreePlan.roots.contains(admin.deletingLastPathComponent().path))
+    }
     @Test func notesPolicyIncludesMarkdownAndParentReplacementEventsOnly() {
         let contents = SessionDirectoryWatcher.Contents.notes(root: URL(fileURLWithPath: "/sigil/notes"))
         let file = FSEventStreamEventFlags(kFSEventStreamEventFlagItemIsFile)

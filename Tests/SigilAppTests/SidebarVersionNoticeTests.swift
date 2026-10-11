@@ -55,7 +55,7 @@ struct SidebarVersionNoticeTests {
         print(
             "REA-1255 hover fixture: sessions=1000 rows=20 elapsed=\(elapsed) snapshotBuilds=\(builds); DEBUG, reduceMotion=true, actual onHover callback, 200x460 app-host window; excludes seeding/initial layout"
         )
-        #expect(builds >= 20, "Baseline reproduces one snapshot build per hover render")
+        #expect(builds < 20, "The hover sweep must reuse snapshots within the freshness window")
     }
 
     /// CI only: this hosts SwiftUI in a window, using generated history and fake installations.
