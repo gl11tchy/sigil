@@ -866,7 +866,7 @@ struct SidebarView: View {
         if let error = model.store.loadError {
             VStack(alignment: .leading, spacing: 6) {
                 Text(error)
-                Button("Retry") { Task { await model.store.reload() } }
+                Button("Retry") { Task { await model.store.rebuildHistory() } }
                     .buttonStyle(SigilButtonStyle(kind: .secondary, height: 26))
             }
         } else if model.store.isLoading {

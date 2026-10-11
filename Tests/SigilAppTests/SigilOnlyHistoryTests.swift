@@ -87,8 +87,9 @@ struct SigilOnlyHistoryTests {
             root: root, timing: SessionStoreTiming(),
             scanOperation: { _, _, forced in
                 .init(
-                    sessions: forced ? [known, recovered] : [known], cache: [:], loadError: nil,
-                    coverage: .init(notices: forced ? [:] : [root.path: "Generated incomplete history"]))
+                    sessions: forced.ignoresGrokCache ? [known, recovered] : [known], cache: [:], loadError: nil,
+                    coverage: .init(
+                        notices: forced.ignoresGrokCache ? [:] : [root.path: "Generated incomplete history"]))
             })
         defer { store.stop() }
         await store.scan(ignoringCache: false)

@@ -3180,7 +3180,7 @@ final class AppModel {
             }
             refreshDockIndicator()
             persistOpenTabs()
-            if reload { Task { await store.reload() } }
+            if reload { Task { await store.refresh() } }
             return true
         } catch {
             var replacementForSelection: TerminalTab.ID?
@@ -3214,7 +3214,7 @@ final class AppModel {
             }
             if deleteConversation(validated, reload: false) { deleted += 1 }
         }
-        if deleted > 0 { await store.reload() }
+        if deleted > 0 { await store.refresh() }
         return deleted
     }
 
@@ -3229,7 +3229,7 @@ final class AppModel {
         var deleted = 0
         for session in sessions where deleteConversation(session, reload: false) { deleted += 1 }
         // One rescan for the whole selection, not one per chat.
-        if deleted > 0 { Task { await store.reload() } }
+        if deleted > 0 { Task { await store.refresh() } }
         return deleted
     }
 

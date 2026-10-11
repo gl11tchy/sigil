@@ -8,7 +8,7 @@ import os
 struct NativeSessionIndexStoreTests {
     /// Uses the real initializer and detached scan, not a replacement ScanOperation.
     /// Observation-backed execution belongs to ordinary CI.
-    @Test func productionStoreReusesIndexAndForceReloadRebuildsIt() async throws {
+    @Test func productionStoreReloadReusesIndexAndExplicitRecoveryRebuildsIt() async throws {
         let fixture = try HistoryCompatibilityFixture()
         defer { fixture.remove() }
         let id = HistoryCompatibilityFixture.firstID
@@ -31,7 +31,10 @@ struct NativeSessionIndexStoreTests {
         await store.scan(ignoringCache: false)
         #expect(store.sessions == original)
         #expect(indexDecodes.withLock { $0 } == 1)
-        await store.scan(ignoringCache: true)
+        await store.reload()
+        #expect(store.sessions == original)
+        #expect(indexDecodes.withLock { $0 } == 1)
+        await store.rebuildHistory()
         #expect(store.sessions == original)
         #expect(indexDecodes.withLock { $0 } == 2)
         try FileManager.default.removeItem(at: index)

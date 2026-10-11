@@ -542,8 +542,8 @@ struct SessionStoreTests {
             root: URL(fileURLWithPath: "/unused"),
             timing: SessionStoreTiming(),
             scanOperation: { _, cache, ignoringCache in
-                await recorder.record(forced: ignoringCache)
-                if ignoringCache {
+                await recorder.record(forced: ignoringCache.ignoresGrokCache)
+                if ignoringCache.ignoresGrokCache {
                     try? await Task.sleep(for: .milliseconds(180))
                     return SessionScanner.Result(
                         sessions: [fresh],
@@ -806,7 +806,7 @@ struct SessionStoreTests {
         let store = SessionStore(
             root: root, timing: SessionStoreTiming(),
             scanOperation: { _, _, forced in
-                if !forced {
+                if !forced.ignoresGrokCache {
                     await gate.hold()
                     return .init(
                         sessions: [], cache: [:], loadError: "Superseded fixture error",
@@ -994,7 +994,7 @@ extension SessionStoreTests {
             root: fixture.grok, timing: SessionStoreTiming(indexWriteDelay: .milliseconds(5)),
             nativeRoots: fixture.nativeRoots, indexFile: fixture.file,
             scanOperation: { _, cache, forced in
-                if forced { return .init(sessions: [], cache: [:], loadError: nil) }
+                if forced.ignoresGrokCache { return .init(sessions: [], cache: [:], loadError: nil) }
                 await gate.hold()
                 return .init(sessions: cache.values.map(\.session), cache: cache, loadError: nil)
             })
@@ -1048,8 +1048,9 @@ extension SessionStoreTests {
             root: fixture.grok, timing: SessionStoreTiming(historyValidationDelay: .seconds(30)),
             nativeRoots: fixture.nativeRoots, indexFile: fixture.file,
             scanOperation: { _, cache, forced in
-                if forced { await gate.hold() }
-                return fixture.scan(cache: cache, ignoringCache: forced)
+                if forced.ignoresGrokCache { await gate.hold() }
+                return SessionHistoryScanner(nativeRoots: fixture.nativeRoots).scan(
+                    root: fixture.grok, cache: cache, policy: forced)
             })
         defer { store.stop() }
         store.start()
@@ -1066,6 +1067,62 @@ extension SessionStoreTests {
         #expect(ready.count == 3 && ready.allSatisfy(\.isHistoryValidated))
         #expect(store.scanSequence == 2 && store.appliedScanSequence == 2)
         #expect(!store.hasUnvalidatedHistory && store.canPruneMissingProjects)
+    }
+
+    @Test func reloadValidatesSavedNativeRowsRatherThanTrustingMetadataHits() async throws {
+        let fixture = try HistoryIndexFixture()
+        defer { fixture.cleanup() }
+        let titles = CodexTitleIndexCache()
+        #expect(fixture.file.save(fixture.snapshot(fixture.scan(titles: titles).cache, titles: titles)))
+        let native = HistoryIndexMeter()
+        let store = SessionStore(
+            root: fixture.grok, timing: .init(historyValidationDelay: .seconds(30)),
+            nativeRoots: fixture.nativeRoots, nativeContentReader: native.native, indexFile: fixture.file)
+        defer { store.stop() }
+        store.start()
+        try await waitUntil { store.appliedScanSequence == 1 && !store.isLoading }
+        #expect(store.sessions.count == 3 && store.hasUnvalidatedHistory)
+        #expect(native.count == 0 && !store.canPruneMissingProjects)
+        await store.reload()
+        #expect(native.count > 0 && store.sessions.allSatisfy(\.isHistoryValidated))
+        #expect(!store.hasUnvalidatedHistory && store.canPruneMissingProjects)
+        let reads = native.count
+        await store.reload()
+        #expect(native.count == reads)
+    }
+
+    @Test func twoDeletesAndWatcherCoalesceBehindExplicitRecovery() async throws {
+        let fixture = try HistoryIndexFixture()
+        defer { fixture.cleanup() }
+        let secondID = "22222222-2222-4222-8222-222222222222"
+        let secondDirectory = fixture.grokDirectory.deletingLastPathComponent().appendingPathComponent(secondID)
+        try FileManager.default.createDirectory(at: secondDirectory, withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: [
+            "info": ["id": secondID, "cwd": fixture.project.path], "session_summary": "Generated second Grok",
+        ]).write(to: secondDirectory.appendingPathComponent("summary.json"))
+        let gate = DetachedHistoryReadGate()
+        defer { gate.release() }
+        let store = SessionStore(
+            root: fixture.grok, timing: .init(), nativeRoots: fixture.nativeRoots, nativeContentReader: gate.reader)
+        defer { store.stop() }
+        await store.reload()
+        #expect(store.sessions.count == 4)
+        gate.arm()
+        let recovery = Task { await store.rebuildHistory() }
+        try await waitUntil { gate.isWaiting }
+        try FileManager.default.removeItem(at: fixture.grokDirectory)
+        await store.refresh()
+        try FileManager.default.removeItem(at: secondDirectory)
+        await store.refresh()
+        // The watcher uses this same cached scan entry point. Every pending request shares one follow-up.
+        await store.scan(ignoringCache: false)
+        #expect(store.scanSequence == 2)
+        gate.release()
+        await recovery.value
+        try await waitUntil { store.appliedScanSequence == 3 && !store.isLoading }
+        #expect(store.scanSequence == 3)
+        #expect(store.sessions.count == 2 && store.sessions.allSatisfy { $0.provider != .grokBuild })
+        #expect(!gate.timedOut && store.loadError == nil)
     }
 
     @Test func stoppingActiveSavedValidationCancelsItsReadAndQueuedWatcherScan() async throws {
