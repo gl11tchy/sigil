@@ -248,6 +248,11 @@ struct GrokCommands: Commands {
                 launch.whenReady { model in Task { await model.store.reload() } }
             }
             .keyboardShortcut("r", modifiers: .command)
+            Button("Rebuild Conversation History") {
+                launch.whenReady { model in Task { await model.store.rebuildHistory() } }
+            }
+            .keyboardShortcut("r", modifiers: [.command, .option])
+            .help("Reread all provider history to recover a stale conversation list.")
         }
 
         CommandGroup(after: .windowList) {

@@ -4005,8 +4005,8 @@ struct AppModelTests {
                 atPath: noteDir.appendingPathComponent("s-a.md").path))
     }
 
-    @Test @MainActor
-    func deletingASelectionRescansTheSessionsOnce() async throws {
+    @Test(arguments: [false, true]) @MainActor
+    func deletingUsesOneCachedRefresh(bulk: Bool) async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
         let cwd = try fixture.directory("project")
@@ -4016,7 +4016,8 @@ struct AppModelTests {
             timing: SessionStoreTiming(),
             scanOperation: { root, cache, ignoringCache in
                 scans.increment()
-                return SessionScanner.scan(root: root, cache: cache, ignoringCache: ignoringCache)
+                #expect(ignoringCache == .cached)
+                return SessionScanner.scan(root: root, cache: cache, ignoringCache: ignoringCache.ignoresGrokCache)
             }
         )
         let model = AppModel(
@@ -4033,7 +4034,11 @@ struct AppModelTests {
         defer { model.closeAllTabsAndWait() }
 
         let selection = (1...5).map { makeSession(id: "s-\($0)", cwd: cwd) }
-        #expect(model.deleteConversations(selection) == 5)
+        if bulk {
+            #expect(model.deleteConversations(selection) == 5)
+        } else {
+            #expect(model.deleteConversation(selection[0]))
+        }
         #expect(await waitUntil { scans.value > 0 })
         try await Task.sleep(for: .milliseconds(200))
 

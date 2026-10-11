@@ -213,9 +213,21 @@ mismatches rebuild the current window. Moving windows evict earlier names and re
 the transcript's title when an index override disappears. Reads use 64 KiB chunks;
 index records must remain below 16 KiB, with bounded partial UTF-8/JSON carry and
 legacy complete-EOF projection. A symlink is never followed, and read races or
-cancellation cannot replace validated index state. Forced reloads rebuild it.
+cancellation cannot replace validated index state. Explicit Retry/recovery rebuilds it.
 Changed-index validation deliberately rereads old bytes; this is incremental parsing,
 not append-only byte I/O. Watcher behavior remains scoped to the captured history roots.
+
+Reload Conversations (Cmd-R) rereads Grok `summary.json` files but retains unchanged
+native transcripts and Codex title-index entries after checking their file identities.
+Changed native files still parse normally. Delete uses an immediate cached refresh,
+with one refresh for a selection; requests during a forced pass share its queued
+cached follow-up, including watcher events. Saved display rows are parsed on Reload
+even when their metadata matches, so cache reuse cannot grant source authority.
+The sidebar's Retry and View > Rebuild Conversation History (Option-Cmd-R) explicitly
+rebuild all provider history and the Codex title index, including unchanged failed
+paths whose previous rows were retained. The same `rebuildHistory()` entry point
+provides deliberate recovery from stale metadata or filesystem timestamp limitations;
+ordinary Reload is not a byte-level integrity proof.
 
 At launch the default store loads `~/Library/Application Support/Sigil/history-index.json`
 into the list and title/path search before its first background scan. The versioned

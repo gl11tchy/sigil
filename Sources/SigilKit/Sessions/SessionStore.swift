@@ -19,7 +19,7 @@ public final class SessionStore {
         @Sendable (
             _ root: URL,
             _ cache: [String: SessionCacheEntry],
-            _ ignoringCache: Bool
+            _ policy: SessionHistoryScanner.Policy
         ) async -> SessionScanner.Result
 
     /// Every known session, newest activity first.
@@ -110,35 +110,19 @@ public final class SessionStore {
         let availableRoots = SessionScanner.RootAvailability()
         // Scoped to this store's captured roots, never shared across CLI homes.
         let titleIndexCache = CodexTitleIndexCache()
+        let scanner = SessionHistoryScanner(
+            nativeRoots: nativeRoots, availableRoots: availableRoots, titleIndexCache: titleIndexCache,
+            contentReader: contentReader, nativeContentReader: nativeContentReader,
+            nativeRecordDecoder: nativeRecordDecoder)
         self.init(
             root: root,
             timing: timing,
             nativeRoots: nativeRoots,
             indexFile: indexFile,
             titleIndexCache: titleIndexCache,
-            scanOperation: { root, cache, ignoringCache in
+            scanOperation: { root, cache, policy in
                 let scan = Task.detached(priority: .userInitiated) {
-                    var result = SessionScanner.scan(
-                        root: root,
-                        cache: cache.filter { $0.value.session.provider == .grokBuild },
-                        ignoringCache: ignoringCache,
-                        contentReader: contentReader,
-                        rootAvailability: availableRoots
-                    )
-                    for (provider, nativeRoot) in nativeRoots {
-                        let native = NativeSessionScanner.scan(
-                            provider: provider, root: nativeRoot, cache: cache, ignoringCache: ignoringCache,
-                            rootAvailability: availableRoots, contentReader: nativeContentReader,
-                            recordDecoder: nativeRecordDecoder, titleIndexCache: titleIndexCache)
-                        result.sessions += native.sessions
-                        result.cache.merge(native.cache) { _, new in new }
-                        result.loadError =
-                            [result.loadError, native.loadError].compactMap { $0 }.joined(separator: "\n")
-                            .nilIfBlank
-                        result.coverage.merge(native.coverage)
-                    }
-                    if !nativeRoots.isEmpty { result.sessions.sort(by: SessionScanner.isNewer) }
-                    return result
+                    scanner.scan(root: root, cache: cache, policy: policy)
                 }
                 return await withTaskCancellationHandler {
                     await scan.value
@@ -252,17 +236,41 @@ public final class SessionStore {
         isStarted = false
     }
 
-    /// Forces a rescan, ignoring any caches.
+    /// Rereads Grok summaries and checks native file identities, parsing changed or unvalidated sources.
     public func reload() async {
+        await reload(rebuildingNativeHistory: false)
+    }
+
+    /// Explicit Retry/diagnostic recovery, including unchanged failed sources and stale native cache entries.
+    public func rebuildHistory() async {
+        await reload(rebuildingNativeHistory: true)
+    }
+
+    /// Refreshes the list immediately after a deletion, retaining unchanged provider caches.
+    public func refresh() async {
+        guard !Task.isCancelled else { return }
+        debounceTask?.cancel()
+        debounceTask = nil
+        firstPendingEvent = nil
+        refreshWatcher()
+        await scan(ignoringCache: false)
+        guard !Task.isCancelled else { return }
+        refreshWatcher()
+    }
+
+    private func reload(rebuildingNativeHistory: Bool) async {
         guard !Task.isCancelled else { return }
         cancelHistoryValidation()
-        // The forced pass itself retries every source. Do not immediately retry its unchanged failures again.
+        // Read saved display rows even when their metadata matches. Cache reuse never grants source authority.
+        // This pass retries them once; do not immediately repeat unchanged failures in background validation.
         historyValidationAttempts = cache.filter { !$0.value.session.isHistoryValidated }
         debounceTask?.cancel()
         debounceTask = nil
         firstPendingEvent = nil
         refreshWatcher()
-        await scan(ignoringCache: true)
+        await scan(
+            ignoringCache: true, refreshing: Set(historyValidationAttempts.keys),
+            rebuildingNativeHistory: rebuildingNativeHistory)
         guard !Task.isCancelled else { return }
         refreshWatcher()
     }
@@ -379,7 +387,9 @@ public final class SessionStore {
     }
 
     /// Walks `root` off the main actor. Cache hits skip JSON decoding.
-    func scan(ignoringCache: Bool, refreshing keys: Set<String> = []) async {
+    func scan(
+        ignoringCache: Bool, refreshing keys: Set<String> = [], rebuildingNativeHistory: Bool = false
+    ) async {
         guard !Task.isCancelled else { return }
         if !ignoringCache, forcedScansInFlight > 0 || (keys.isEmpty && historyValidationScanInFlight) {
             cachedScanPending = true
@@ -422,7 +432,9 @@ public final class SessionStore {
             entry.inode = nil
             snapshot[key] = entry
         }
-        var result = await scanOperation(root, snapshot, ignoringCache)
+        let policy: SessionHistoryScanner.Policy =
+            rebuildingNativeHistory ? .rebuild : (ignoringCache ? .reload : .cached)
+        var result = await scanOperation(root, snapshot, policy)
 
         // Invalidating an inode is a read request, never a new source identity. Preserve failed saved metadata
         // so the eventual pass cannot schedule itself again merely because its own cache marker changed.

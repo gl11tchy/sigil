@@ -602,3 +602,18 @@ existence-dependent Foundation path standardization; generated /tmp and /var cas
 reproduced it and now pass with stable expansion of only OS aliases. The automatic
 launch fixture now calls the real onAppear lifecycle to install its housekeeping
 observer. All original success/count/identity assertions remain intact.
+
+## REA-1267: cached history refresh and deliberate recovery
+
+Reload now reuses unchanged native transcript/title-index metadata while retaining
+Grok Cmd-R summary rereads. All Trash paths request cached refresh, preserving the
+existing queued scan sequencing. Saved display rows still require source parsing;
+Retry and View > Rebuild Conversation History retain deliberate full recovery,
+including unchanged retained failures and stale cache rows.
+
+[The verification record](../qa/rea-1267.md) records the generated main five-read
+reproduction and eight passing permitted direct Swift/ASan scanner checks. Store
+sequencing and app deletion tests await ordinary exact-head CI at PR creation.
+Existing local build/process denials remain respected. No personal history,
+additional worker/ticket, local AppTests, daily-app replacement or customer timing
+claim. Parent personal review precedes merge.
