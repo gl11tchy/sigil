@@ -15,6 +15,8 @@ struct SidebarSnapshotTests {
             fixture.store.stop()
             fixture.cleanup()
         }
+        // Temporary test directories are hidden by the default worktree filter.
+        fixture.settings.showWorktreeSessions = true
         let folder = try fixture.directory("held-note-publication")
         try fixture.writeListedSession(id: "note", cwd: folder.path, summary: "Weekly")
         await fixture.store.reload()

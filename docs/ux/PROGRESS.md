@@ -24,7 +24,11 @@ publication with a quiet sidebar and complete, event-free filesystem coverage.
 This does not establish why the earlier runs failed. The trace is removed and
 a controlled held-read publication test adds timing-specific evidence while
 preserving the original assertions. A generated benchmark also prompted
-off-main matching and independent initial overlays. The clean final-head CI
+off-main matching and independent initial overlays. Clean-head CI then passed
+the original filesystem regression and the controlled publication/Observation
+assertions, but failed the new test's visible-row assertion because the
+temporary directory was hidden by its default worktree filter. The fixture now
+explicitly enables those rows, retaining every assertion. A new exact-head CI
 gate remains required. Existing local build/process denials remain binding;
 no local UI, daily app install or personal data inspection. Parent personal
 final-diff review remains required before merge.
