@@ -1067,6 +1067,40 @@ extension SessionStoreTests {
         #expect(store.scanSequence == 2 && store.appliedScanSequence == 2)
         #expect(!store.hasUnvalidatedHistory && store.canPruneMissingProjects)
     }
+
+    @Test func stoppingActiveSavedValidationCancelsItsReadAndQueuedWatcherScan() async throws {
+        let fixture = try HistoryIndexFixture()
+        defer { fixture.cleanup() }
+        let titles = CodexTitleIndexCache()
+        #expect(fixture.file.save(fixture.snapshot(fixture.scan(titles: titles).cache, titles: titles)))
+        let gate = DetachedHistoryReadGate()
+        gate.arm()
+        defer { gate.release() }
+        let store = SessionStore(
+            root: fixture.grok, timing: SessionStoreTiming(historyValidationDelay: .milliseconds(100)),
+            nativeRoots: fixture.nativeRoots, nativeContentReader: gate.reader, indexFile: fixture.file)
+        defer { store.stop() }
+        store.start()
+        try await waitUntil { store.appliedScanSequence == 1 && !store.isLoading }
+        let displayed = store.sessions
+        try await waitUntil { gate.isWaiting }
+        #expect(store.scanSequence == 2)
+        await store.scan(ignoringCache: false)
+        #expect(store.scanSequence == 2)  // A watcher cannot supersede the active validation with saved rows.
+        var entered = false
+        let action = Task {
+            entered = true
+            return await store.validatedSessions(for: displayed)
+        }
+        try await waitUntil { entered }
+        store.stop()
+        gate.release()
+        #expect(await action.value.isEmpty)
+        #expect(gate.observedCancellation && !gate.timedOut)
+        #expect(store.appliedScanSequence == 1 && store.sessions.allSatisfy { !$0.isHistoryValidated })
+        #expect(!store.hasPendingHistoryValidation)
+        #expect(await store.validatedSessions(for: displayed).isEmpty && store.scanSequence == 2)
+    }
 }
 
 private final class DetachedHistoryReadGate: Sendable {

@@ -37,7 +37,8 @@ public final class SessionStore {
 
     /// One shared source pass serves startup, restoration and actions. Failed unchanged sources are not retried in a loop.
     public var hasPendingHistoryValidation: Bool {
-        historyValidationTask != nil
+        guard isStarted else { return false }
+        return historyValidationTask != nil
             || cache.contains {
                 !$0.value.session.isHistoryValidated && historyValidationAttempts[$0.key] != $0.value
             }
@@ -312,7 +313,8 @@ public final class SessionStore {
     }
 
     private func scheduleHistoryValidation(delay: Duration) {
-        guard indexFile != nil, appliedScanSequence > 0, historyValidationTask == nil, forcedScansInFlight == 0,
+        guard isStarted, indexFile != nil, appliedScanSequence > 0, historyValidationTask == nil,
+            forcedScansInFlight == 0,
             hasPendingHistoryValidation
         else { return }
         let generation = historyValidationGeneration

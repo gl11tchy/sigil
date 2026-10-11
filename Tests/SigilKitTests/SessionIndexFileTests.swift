@@ -79,7 +79,9 @@ import os
                 == ["history-index.json"])
     }
 
-    @Test(arguments: ["corrupt", "version", "roots", "escape", "count", "bytes", "permissions", "date", "authority"])
+    @Test(arguments: [
+        "corrupt", "version", "roots", "escape", "directory", "count", "bytes", "permissions", "date", "authority",
+    ])
     func untrustedEnvelopesAreBoundedAndNeverTouchSourceHistory(_ problem: String) throws {
         let fixture = try HistoryIndexFixture()
         defer { fixture.cleanup() }
@@ -112,6 +114,17 @@ import os
                 var entry = entries[key]!
                 var session = entry["session"] as! [String: Any]
                 session["updatedAt"] = 1e300
+                entry["session"] = session
+                entries[key] = entry
+                object["entries"] = entries
+            case "directory":
+                var entries = try #require(object["entries"] as? [String: [String: Any]])
+                let key = entries.keys.first!
+                var entry = entries[key]!
+                var session = entry["session"] as! [String: Any]
+                let source = URL(fileURLWithPath: key)
+                session["directory"] =
+                    source.deletingLastPathComponent().absoluteString + "./" + source.lastPathComponent
                 entry["session"] = session
                 entries[key] = entry
                 object["entries"] = entries

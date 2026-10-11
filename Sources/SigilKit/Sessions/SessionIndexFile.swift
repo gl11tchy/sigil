@@ -119,7 +119,7 @@ struct SessionIndexFile: Sendable {
                 safeSource(key, under: root.path, inspected: &inspected), session.directory.isFileURL,
                 session.directory.host?.isEmpty != false,
                 session.directory.query == nil, session.directory.fragment == nil,
-                session.directory.standardizedFileURL.path == key,
+                absolutePath(session.directory.path), session.directory.standardizedFileURL.path == key,
                 validIdentifier(session.nativeSessionID, provider: session.provider),
                 absolutePath(session.cwd), session.summary.utf8.count <= 4096,
                 [session.modelID, session.agentName, session.reasoningEffort, session.kind, entry.nativeSummary]
