@@ -912,13 +912,14 @@ final class AppModel {
 
     /// The last snapshot built and the inputs it was built from.
     @ObservationIgnored private var lastSidebarSnapshot:
-        (inputs: SidebarInputs, snapshot: SidebarSnapshot, builtAt: TimeInterval)?
+        (inputs: SidebarInputs, snapshot: SidebarSnapshot, builtAt: TimeInterval, filesystemPaths: [String])?
     @ObservationIgnored private let sidebarClock: @Sendable () -> TimeInterval
     static let sidebarFreshnessWindow: TimeInterval = 1
     /// Read by snapshot consumers so a filesystem event rerenders a quiet view.
     private var sidebarFilesystemGeneration = 0
     /// Snapshots built so far. Tests read it to prove events reuse one.
     @ObservationIgnored private(set) var sidebarSnapshotBuildCount = 0
+    @ObservationIgnored private(set) var sidebarFilesystemPathBuildCount = 0
 
     /// Events and renders share the same input and freshness rules.
     func eventSidebarSnapshot() -> SidebarSnapshot {
@@ -946,11 +947,18 @@ final class AppModel {
         }
         let snapshot = buildSidebarSnapshot()
         sidebarSnapshotBuildCount += 1
-        lastSidebarSnapshot = (inputs, snapshot, now)
+        lastSidebarSnapshot = (inputs, snapshot, now, buildSidebarFilesystemPaths())
         return snapshot
     }
 
     var sidebarFilesystemPaths: [String] {
+        // SidebarView reads this immediately after sidebarSnapshot(), so its
+        // task identity reuses the same input pass rather than scanning on hover.
+        lastSidebarSnapshot?.filesystemPaths ?? buildSidebarFilesystemPaths()
+    }
+
+    private func buildSidebarFilesystemPaths() -> [String] {
+        sidebarFilesystemPathBuildCount += 1
         var paths = Set(store.sessions.lazy.map(\.cwd))
         paths.formUnion(tabs.lazy.map { $0.workingDirectory.path })
         paths.formUnion(settings.addedProjects.lazy.map(\.path))
@@ -964,40 +972,49 @@ final class AppModel {
 
     /// SwiftUI owns this task's lifetime. Passive FSEvents schedule a refresh at
     /// the cache deadline; unchanged, idle sidebars do no periodic list work.
-    func observeSidebarFilesystem() async {
-        let paths = sidebarFilesystemPaths
+    func observeSidebarFilesystem(paths: [String]? = nil) async {
+        let paths = paths ?? sidebarFilesystemPaths
         guard !paths.isEmpty else { return }
         let watcher = SidebarPathWatcher()
-        let stream = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let stream = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        var fallback: Task<Void, Never>?
         defer {
+            fallback?.cancel()
             watcher.stop()
             stream.continuation.finish()
         }
-        func start() -> Bool {
-            watcher.start(paths: paths) { stream.continuation.yield(()) }
-        }
-        if start() {
-            // Cover changes between the first render and arming the stream.
-            // Subsequent invalidations rearm before SwiftUI can render again.
-            invalidateSidebarFilesystem()
-            for await _ in stream.stream {
-                let remaining = max(
-                    0,
-                    (lastSidebarSnapshot?.builtAt ?? sidebarClock())
-                        + Self.sidebarFreshnessWindow - sidebarClock())
-                do { try await Task.sleep(for: .seconds(remaining)) } catch { return }
-                guard !Task.isCancelled else { return }
-                invalidateSidebarFilesystem()
-                // Re-resolve aliases after root changes; never keep watching only
-                // the old symlink destination.
-                if !start() { break }
+        func start() {
+            let coverage = watcher.start(paths: paths) { stream.continuation.yield(true) }
+            if coverage == .complete {
+                fallback?.cancel()
+                fallback = nil
+            } else if fallback == nil {
+                // Keep bounded refresh alongside a partial stream, too. One
+                // working root cannot cover a root-level alias elsewhere.
+                fallback = Task {
+                    while !Task.isCancelled {
+                        do { try await Task.sleep(for: .seconds(Self.sidebarFreshnessWindow)) } catch { return }
+                        stream.continuation.yield(false)
+                    }
+                }
             }
         }
-        // Unsupported/unavailable watch roots still get bounded freshness.
-        // Saved references and SessionStore's authority remain untouched.
-        while !Task.isCancelled {
-            do { try await Task.sleep(for: .seconds(Self.sidebarFreshnessWindow)) } catch { return }
+        start()
+        // Reconcile the initial/remount gap before relying on future events.
+        invalidateSidebarFilesystem()
+        for await filesystemEvent in stream.stream {
+            let remaining =
+                filesystemEvent
+                ? max(
+                    0,
+                    (lastSidebarSnapshot?.builtAt ?? sidebarClock())
+                        + Self.sidebarFreshnessWindow - sidebarClock()) : 0
+            do { try await Task.sleep(for: .seconds(remaining)) } catch { return }
+            guard !Task.isCancelled else { return }
             invalidateSidebarFilesystem()
+            // Re-resolve aliases after root changes; never keep watching only
+            // the old symlink destination.
+            if filesystemEvent { start() }
         }
     }
 

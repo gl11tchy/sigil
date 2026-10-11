@@ -3,26 +3,36 @@ import Foundation
 /// One passive stream for the visible sidebar. Ordinary source-file changes
 /// do not invalidate its snapshot; folder identity, aliases and Git markers do.
 public final class SidebarPathWatcher: Sendable {
+    public enum Coverage: Equatable, Sendable {
+        case complete, partial, unavailable
+    }
     private let watcher = SessionDirectoryWatcher()
 
     public init() {}
 
     @discardableResult
-    public func start(paths: [String], changed: @escaping @Sendable () -> Void) -> Bool {
+    public func start(paths: [String], changed: @escaping @Sendable () -> Void) -> Coverage {
         let plan = Self.plan(paths: paths)
-        return watcher.start(
+        let started = watcher.start(
             paths: plan.roots, latency: 0.25, contents: .sidebarPaths(plan.identities)
         ) { _ in changed() }
+        guard started else { return .unavailable }
+        let allRootsAvailable = plan.roots.allSatisfy { path in
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+        }
+        return plan.needsFallback || !allRootsAvailable ? .partial : .complete
     }
 
     public func stop() { watcher.stop() }
 
     /// Observe missing roots through an existing ancestor without deleting any
     /// saved reference. Watch alias parents so retargeting a symlink is visible.
-    static func plan(paths: [String]) -> (roots: [String], identities: Set<String>) {
+    static func plan(paths: [String]) -> (roots: [String], identities: Set<String>, needsFallback: Bool) {
         var roots: Set<String> = []
         var identities: Set<String> = []
         var examined: Set<String> = []
+        var needsFallback = false
         for path in Set(paths) {
             // Foundation's standardizedFileURL may resolve an existing alias
             // when a descendant is missing. Preserve the alias spelling too.
@@ -33,7 +43,7 @@ public final class SidebarPathWatcher: Sendable {
                 while !FileManager.default.fileExists(atPath: existingParent.path), existingParent.path != "/" {
                     existingParent.deleteLastPathComponent()
                 }
-                if existingParent.path != "/" { roots.insert(existingParent.path) }
+                if existingParent.path != "/" { roots.insert(existingParent.path) } else { needsFallback = true }
                 while folder.path != "/" {
                     guard examined.insert(folder.path).inserted else { break }
                     identities.insert(folder.path)
@@ -56,7 +66,11 @@ public final class SidebarPathWatcher: Sendable {
                                 let marker = SessionDirectoryWatcher.canonicalURL(
                                     admin.appendingPathComponent("commondir"))
                                 identities.insert(marker.path)
-                                roots.insert(admin.deletingLastPathComponent().path)
+                                var parent = admin.deletingLastPathComponent()
+                                while !FileManager.default.fileExists(atPath: parent.path), parent.path != "/" {
+                                    parent.deleteLastPathComponent()
+                                }
+                                if parent.path != "/" { roots.insert(parent.path) } else { needsFallback = true }
                             }
                         }
                     }
@@ -64,6 +78,6 @@ public final class SidebarPathWatcher: Sendable {
                 }
             }
         }
-        return (roots.sorted(), identities)
+        return (roots.sorted(), identities, needsFallback)
     }
 }

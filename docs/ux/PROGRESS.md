@@ -629,7 +629,15 @@ retain bounded fallback refresh. Saved history and project authority are preserv
 
 [The verification record](../qa/rea-1255.md) defines the generated 1,000-session,
 20-row callback sweep and its limits. Baseline app-host CI began before changing
-production behavior; final measurements and integrated CI remain pending. Local
+production behavior; the PR carries measured timings and exact-head CI evidence. Local
 pure watcher type-check/ASan policy checks pass; local stream delivery is unavailable.
 No customer history, local AppTests, daily-app replacement or merge. One ticket
 and worker remain active, with parent personal review before merge.
+
+The first baseline run passed 1,172 Swift tests but exposed a read-only SwiftUI
+environment override in the new harness; the corrected fixture records the host's
+actual setting. Automatic review also identified the existing render-count
+regression, watch-path rebuilding on hover and partial-watch coverage. The focused
+repair reuses the watch-path set, reconciles startup/remount, preserves scheduled
+fallback for partial plans and updates the original assertion without weakening
+its row-order contract. No additional implementation worker or ticket was opened.

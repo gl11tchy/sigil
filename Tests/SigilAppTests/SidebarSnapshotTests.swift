@@ -25,7 +25,12 @@ struct SidebarSnapshotTests {
         let rows = model.sidebarSnapshot().rowIDs
         #expect(model.sidebarSnapshot().rowIDs == rows)
         #expect(model.eventSidebarSnapshot().rowIDs == rows)
+        for _ in 0..<20 {
+            _ = model.sidebarSnapshot()
+            _ = model.sidebarFilesystemPaths
+        }
         #expect(model.sidebarSnapshotBuildCount == 1)
+        #expect(model.sidebarFilesystemPathBuildCount == 1)
         clock.advance(0.999)
         _ = model.sidebarSnapshot()
         #expect(model.sidebarSnapshotBuildCount == 1)
@@ -192,6 +197,38 @@ struct SidebarSnapshotTests {
         try FileManager.default.removeItem(at: alias)
         try await Task.sleep(for: .milliseconds(1_200))
         #expect(!stopped.withLock { $0 })
+    }
+
+    @Test func partiallyUnwatchedPathsKeepQuietFallbackRefresh() async throws {
+        let fixture = try ModelFixture()
+        defer {
+            fixture.store.stop()
+            fixture.cleanup()
+        }
+        fixture.settings.showWorktreeSessions = true
+        let folder = try fixture.directory("partial-watch")
+        try fixture.writeListedSession(id: "watched", cwd: folder.path)
+        // Only a synthetic cwd string: never create or alter a root-level folder.
+        try fixture.writeListedSession(id: "unavailable", cwd: "/Sigil1255-Generated-\(UUID().uuidString)")
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let task = Task { await model.observeSidebarFilesystem() }
+        defer { task.cancel() }
+        try await Task.sleep(for: .milliseconds(100))
+        let changed = OSAllocatedUnfairLock(initialState: false)
+        withObservationTracking {
+            _ = model.sidebarSnapshot()
+        } onChange: {
+            changed.withLock { $0 = true }
+        }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !changed.withLock({ $0 }), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(changed.withLock { $0 }, "A working root must not disable freshness for an unwatched root")
+        task.cancel()
+        await task.value
     }
 
     @Test func snapshotEqualsTheComputedListsOnEverySurface() async throws {
