@@ -216,6 +216,9 @@ final class AppSettings {
     private(set) var hasExplicitDefaultProvider: Bool
     private var hasFinishedInitialProviderSelection = false
     private var isChoosingInitialProvider = false
+    var needsInitialProviderSelection: Bool {
+        !hasExplicitDefaultProvider && !hasFinishedInitialProviderSelection
+    }
 
     /// Interaction freezes the initial choice even if an inventory is pending.
     /// Only an explicit saved default is persisted across app launches.
@@ -224,7 +227,7 @@ final class AppSettings {
     }
 
     func chooseInitialInstalledProvider(_ installations: [CLIProvider: ProviderInstallation]) {
-        guard !hasExplicitDefaultProvider, !hasFinishedInitialProviderSelection else { return }
+        guard needsInitialProviderSelection else { return }
         // Decide once from a completed inventory, never from probe arrival order.
         finishInitialProviderSelection()
         guard let provider = CLIProvider.allCases.first(where: { installations[$0]?.isAvailable == true }) else {

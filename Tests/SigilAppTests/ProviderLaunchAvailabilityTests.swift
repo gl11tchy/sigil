@@ -1418,3 +1418,30 @@ extension ProviderLaunchAvailabilityTests {
         #expect(fixture.defaults.string(forKey: "session.defaultProvider") == CLIProvider.kimi.rawValue)
     }
 }
+
+extension ProviderLaunchAvailabilityTests {
+    @Test(arguments: [false, true])
+    func omittedRemoteProviderResolvesTheInitialInventoryAndKeepsStoredPreference(explicit: Bool) async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .codex)
+        defer { fixture.cleanup() }
+        if explicit { fixture.settings.defaultProvider = .cursor }
+        let gate = HeldProviderProbe()
+        let model = fixture.makeModel(probe: { provider, _ in await gate.probe(provider) })
+        defer { model.closeAllTabsAndWait() }
+        let request = RemoteRequest(challenge: "test", sequence: 1, action: "new", worktree: false)
+        let launch = Task { await RemoteCommands.execute(request, model: model) }
+        await gate.waitForCalls(CLIProvider.allCases.count)
+        #expect(model.tabs.isEmpty)
+        var results = fixtureProviderInstallations(fixture.shell)
+        for provider in [CLIProvider.claudeCode, .grokBuild] {
+            results[provider] = .init(
+                executable: nil, version: nil, problem: "Install \(provider.name)", failure: .notInstalled)
+        }
+        await gate.release(round: 1, results: results)
+        let reply = await launch.value
+        #expect(reply.ok)
+        #expect(model.tabs.count == 1)
+        #expect(model.selectedTab?.spec.provider == (explicit ? .cursor : .codex))
+        #expect(fixture.settings.defaultProvider == (explicit ? .cursor : .codex))
+    }
+}

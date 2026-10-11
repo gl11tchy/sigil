@@ -147,7 +147,14 @@ enum RemoteCommands {
                 }
                 provider = chosen
             } else {
+                // An omitted first-run default must be resolved after the
+                // complete inventory, rather than snapshotting provisional Grok.
+                if model.settings.needsInitialProviderSelection {
+                    await model.refreshProviderInstallationsForEntry()
+                }
+                guard !Task.isCancelled else { return failure(request, "Remote was turned off.") }
                 provider = model.settings.defaultProvider
+                model.settings.finishInitialProviderSelection()
             }
             // The phone lists Grok's models and efforts only.
             let takesModel = provider == .grokBuild
