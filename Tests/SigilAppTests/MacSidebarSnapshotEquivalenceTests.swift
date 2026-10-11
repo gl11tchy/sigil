@@ -113,7 +113,16 @@ private func expectMatchesTheScan(
         !$0.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || $0.messageCount > 2 || model.hasCustomName($0)
     }
-    var sessions = model.store.search(model.searchText) { model.title(for: $0) }.filter(passes)
+    let path = model.settings.focusedProjectPath
+    // Keep the reference's per-entry pin scans, now with the REA-1259 category
+    // contract, so the randomized equivalence test still checks every row.
+    let boost: (GrokSession) -> Int = {
+        if model.isOpen($0) { return 3 }
+        if model.isPinned($0) { return 2 }
+        if path.hasPrefix("/"), samePath($0.projectPath, path) { return 1 }
+        return 0
+    }
+    var sessions = model.store.search(model.searchText, boost: boost) { model.title(for: $0) }.filter(passes)
     if !searching {
         sessions = sessions.filter { model.isArchived($0) == (surface == .archived) }
     }
@@ -124,7 +133,6 @@ private func expectMatchesTheScan(
         projects = SidebarOrganization.merging(
             added: model.settings.addedProjects, into: projects, canonicalPath: canonical)
     }
-    let path = model.settings.focusedProjectPath
     let isFolder: (SidebarProject) -> Bool = { $0.id == canonical(path) || samePath($0.cwd, path) }
     let focused =
         surface == .project

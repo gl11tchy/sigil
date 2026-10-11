@@ -7,6 +7,106 @@ import Testing
 @MainActor
 struct SessionSearchRankTests {
 
+    @Test(arguments: [
+        ("Rate limiter", "lim", SessionScanner.SearchRank.titleWordStart),
+        ("Climbing", "lim", .titleContains),
+        ("Climbing / limiter", "lim", .titleWordStart),
+        ("Try—CAFÉ menu", "cafe", .titleWordStart),
+        ("Rate_limiter", "lim", .titleWordStart),
+        ("Rate v2limiter", "lim", .titleContains),
+        ("Правка—лимитер", "лим", .titleWordStart),
+        ("更新—登录流程", "登录", .titleWordStart),
+        ("更新登录流程", "登录", .titleContains),
+        ("Climbing 🛠limiter", "lim", .titleWordStart),
+        ("Rate-limiter", "lim rate", .titleWordStart),
+        ("Rate climbing", "rate lim", .titleContains),
+        ("Rate limiter", "rate lim", .titlePrefix),
+    ])
+    func foldedWordStarts(_ title: String, _ query: String, _ expected: SessionScanner.SearchRank) throws {
+        let parsed = try #require(SessionScanner.SearchQuery(query))
+        #expect(SessionScanner.searchRank(.init(rankedSession("row", title)), query: parsed) == expected)
+    }
+
+    @Test func rankThenBoostThenRecency() {
+        let rows = [
+            rankedSession("path", "Weekly", updated: 100, cwd: "/generated/lim", provider: .codex),
+            rankedSession("middle", "Climbing", updated: 90),
+            rankedSession("word", "Rate limiter", updated: 80),
+            rankedSession("prefix", "Limiter notes", updated: 70),
+            rankedSession("exact", "Lim", updated: 1),
+            rankedSession("open", "Rate limiter", updated: 2),
+            rankedSession("pin", "Rate limiter", updated: 3),
+            rankedSession("project", "Rate limiter", updated: 4),
+            rankedSession("newer-open", "Rate limiter", updated: 5),
+        ]
+        let boosts = ["open": 3, "newer-open": 3, "pin": 2, "project": 1, "middle": 3, "codex:path": 3]
+        var calls: [String: Int] = [:]
+        let found = SessionScanner.search(
+            "lim", sessions: rows, keys: SessionScanner.searchKeys(for: rows),
+            boost: {
+                calls[$0.id, default: 0] += 1
+                return boosts[$0.id] ?? 0
+            })
+        #expect(
+            found.map(\.id) == [
+                "exact", "prefix", "newer-open", "open", "pin", "project", "word", "middle", "codex:path",
+            ])
+        #expect(calls.count == rows.count)
+        #expect(calls.values.allSatisfy { $0 == 1 })
+    }
+
+    @Test func providerQualifiedTiesAreIndependentOfInputOrder() {
+        let rows = [
+            rankedSession("same", "Lim", cwd: "/generated/b", provider: .codex),
+            rankedSession("same", "Lim", cwd: "/generated/a", provider: .codex),
+            rankedSession("same", "Lim", provider: .claudeCode),
+            rankedSession("codex:same", "Lim"),
+        ]
+        let expected = [rows[2].reference, rows[1].reference, rows[0].reference, rows[3].reference]
+        for input in [rows, Array(rows.reversed()), [rows[1], rows[3], rows[2], rows[0]]] {
+            let found = SessionScanner.search("lim", sessions: input, keys: SessionScanner.searchKeys(for: input))
+            #expect(found.map(\.reference) == expected)
+        }
+    }
+
+    @Test(arguments: ["", " \n\t "])
+    func emptyQuerySkipsTitlesAndBoosts(_ query: String) {
+        let rows = [rankedSession("new", "Weekly", updated: 2), rankedSession("old", "Lim", updated: 1)]
+        let found = SessionScanner.search(
+            query, sessions: rows, keys: [],
+            boost: { _ in
+                Issue.record("Empty query evaluated boost")
+                return 99
+            },
+            displayedTitle: { _ in
+                Issue.record("Empty query evaluated title")
+                return "Lim"
+            })
+        #expect(found == rows)
+    }
+
+    @Test func wordStartBeatsANewerMiddleHitThroughTheStore() async throws {
+        let harness = try RankHarness()
+        defer { harness.tearDown() }
+        try harness.write(id: "word", cwd: "/work/notes", title: "Rate limiter", updated: "2026-01-01T00:00:00Z")
+        try harness.write(id: "middle", cwd: "/work/notes", title: "Climbing", updated: "2026-06-01T00:00:00Z")
+        await harness.store.scan(ignoringCache: false)
+        #expect(harness.store.search("lim").map(\.id) == ["word", "middle"])
+    }
+
+    @Test func storeBoostOutranksRecencyOnlyWithinAMatchRank() async throws {
+        let harness = try RankHarness()
+        defer { harness.tearDown() }
+        for (id, title, month) in [
+            ("exact", "Lim", "01"), ("closed", "Rate limiter", "06"), ("open", "Rate limiter", "02"),
+        ] {
+            try harness.write(id: id, cwd: "/work/notes", title: title, updated: "2026-\(month)-01T00:00:00Z")
+        }
+        await harness.store.scan(ignoringCache: false)
+        #expect(
+            harness.store.search("lim", boost: { $0.id == "open" ? 3 : 0 }).map(\.id) == ["exact", "open", "closed"])
+    }
+
     @Test func closerTitleBeatsANewerWeakerMatch() async throws {
         let harness = try RankHarness()
         defer { harness.tearDown() }
@@ -123,6 +223,16 @@ struct SessionSearchRankTests {
         #expect(harness.store.search("zephyr-token").isEmpty)
         #expect(harness.store.sessions.map(\.id) == ["quiet"])
     }
+}
+
+private func rankedSession(
+    _ id: String, _ title: String, updated: TimeInterval = 1,
+    cwd: String = "/generated/search", provider: CLIProvider = .grokBuild
+) -> GrokSession {
+    GrokSession(
+        id: id, cwd: cwd, summary: title, createdAt: Date(timeIntervalSince1970: 0),
+        updatedAt: Date(timeIntervalSince1970: updated), messageCount: 4, modelID: nil,
+        agentName: nil, reasoningEffort: nil, directory: URL(fileURLWithPath: cwd), provider: provider)
 }
 
 @MainActor

@@ -656,3 +656,26 @@ POSIX spelling to sidebar watch paths, restores history-root behavior and adds a
 assertion preserving the original canonical helper contract. A Git admin-root
 expectation now uses the consistently native watch plan. No history/root-loss
 assertions were changed or removed.
+
+## REA-1259: word starts and conversation categories in search
+
+A generated main fixture reproduced newer `Climbing` above `Rate limiter` for
+`lim`. Search now ranks every term at a folded Unicode word start above contains,
+then applies one category within a match rank: open, pinned, focused project,
+other. Recency and deterministic provider/native-ID/cwd ties follow. Empty-query
+recency, global project search, existing highlights and identity proof remain.
+The current snapshot key already includes every category input; app-host tests
+check immediate reordered rows after tab identity, pin and project changes.
+
+[The verification record](../qa/rea-1259.md) records passing direct Swift 6/ASan
+checks against 17 full production dependencies and the generated baseline.
+Store/app validation awaits ordinary exact-head CI at PR creation. No local
+AppTests, screenshot, personal histories, daily-app replacement or merge; existing
+build/process denials remain respected. REA-1256 receives the shared documented
+contract only. One worker and ticket remain active until parent personal review.
+
+The first CI failed at compile time because Swift's forward trailing-closure scan
+bound existing title closures to the defaulted boost parameter. The fix retains
+the original public search signature and adds a required-label boost overload;
+all original callers and assertions stay intact. Real Store/AppTests await the
+corrected exact-head run. No denied local build or extra worker was used.

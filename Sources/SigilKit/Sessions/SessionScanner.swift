@@ -348,14 +348,49 @@ enum SessionScanner: Sendable {
         }
     }
 
-    /// Closest title first. Exact beats a prefix, a prefix beats a title that
-    /// contains the query, and any title hit beats a folder or path hit.
+    /// Closest title first: exact, prefix, every term at a word start, contains,
+    /// then folder or path. Category boosts only break ties within a rank.
     /// Titles compare without case. Transcript text is not a field.
     enum SearchRank: Int, Sendable {
         case exactTitle = 0
         case titlePrefix = 1
-        case titleContains = 2
-        case folderOrPath = 3
+        case titleWordStart = 2
+        case titleContains = 3
+        case folderOrPath = 4
+    }
+
+    /// Shared search ordering for conversation lists. An empty query keeps the
+    /// published newest-first list without evaluating either caller closure.
+    static func search(
+        _ query: String,
+        sessions: [GrokSession],
+        keys: [SearchKey],
+        boost: ((GrokSession) -> Int)? = nil,
+        displayedTitle: ((GrokSession) -> String)? = nil
+    ) -> [GrokSession] {
+        guard let query = SearchQuery(query) else { return sessions }
+        return zip(sessions, keys)
+            .compactMap { session, key -> (session: GrokSession, rank: SearchRank, boost: Int)? in
+                guard let rank = searchRank(key, query: query, displayedTitle: displayedTitle?(session)) else {
+                    return nil
+                }
+                return (session, rank, boost?(session) ?? 0)
+            }
+            .sorted { lhs, rhs in
+                if lhs.rank != rhs.rank { return lhs.rank.rawValue < rhs.rank.rawValue }
+                if lhs.boost != rhs.boost { return lhs.boost > rhs.boost }
+                if lhs.session.updatedAt != rhs.session.updatedAt {
+                    return lhs.session.updatedAt > rhs.session.updatedAt
+                }
+                // Sidebar IDs preserve legacy Grok preferences, so compare the
+                // explicit provider too. Folder breaks duplicate native-ID ties.
+                let left = lhs.session.reference
+                let right = rhs.session.reference
+                if left.provider != right.provider { return left.provider.rawValue < right.provider.rawValue }
+                if left.sessionID != right.sessionID { return left.sessionID < right.sessionID }
+                return left.cwd < right.cwd
+            }
+            .map(\.session)
     }
 
     static func searchRank(
@@ -389,9 +424,24 @@ enum SessionScanner: Sendable {
         if title.isEmpty || query.folded.isEmpty { return nil }
         if title == query.folded { return .exactTitle }
         if title.hasPrefix(query.folded) { return .titlePrefix }
+        if query.terms.allSatisfy({ startsWord(in: title, term: $0) }) { return .titleWordStart }
         if title.contains(query.folded) { return .titleContains }
         if query.terms.allSatisfy({ holds(title, $0) }) { return .titleContains }
         return nil
+    }
+
+    /// A folded term starts a word at index zero or after a character that is
+    /// neither a Unicode letter nor a number. Check later occurrences too.
+    private static func startsWord(in title: String, term: String) -> Bool {
+        guard !term.isEmpty else { return false }
+        var start = title.startIndex
+        while let hit = title.range(of: term, range: start..<title.endIndex) {
+            if hit.lowerBound == title.startIndex { return true }
+            let previous = title[title.index(before: hit.lowerBound)]
+            if !previous.isLetter && !previous.isNumber { return true }
+            start = title.index(after: hit.lowerBound)
+        }
+        return false
     }
 
     private static func foldedTitle(_ title: String) -> String {

@@ -399,26 +399,33 @@ struct SessionStoreTests {
         #expect(harness.store.search("Users exec").count == 2)
     }
 
-    @Test func emptySearchDoesNotComputeDisplayedTitle() async throws {
+    @Test func emptySearchDoesNotComputeDisplayedTitleOrBoost() async throws {
         let harness = try FixtureHarness()
         defer { harness.tearDown() }
         try harness.installOrderingFixtures()
         await harness.store.scan(ignoringCache: false)
 
         var displayedTitleCalls = 0
+        var boostCalls = 0
+        let boost: (GrokSession) -> Int = { _ in
+            boostCalls += 1
+            return 99
+        }
         let displayedTitle: (GrokSession) -> String = { session in
             displayedTitleCalls += 1
             return session.title
         }
 
-        let empty = harness.store.search("", displayedTitle: displayedTitle)
+        let empty = harness.store.search("", boost: boost, displayedTitle: displayedTitle)
         #expect(empty.map(\.id) == harness.store.sessions.map(\.id))
         #expect(displayedTitleCalls == 0)
+        #expect(boostCalls == 0)
 
         displayedTitleCalls = 0
-        let whitespace = harness.store.search("  \n\t ", displayedTitle: displayedTitle)
+        let whitespace = harness.store.search("  \n\t ", boost: boost, displayedTitle: displayedTitle)
         #expect(whitespace.map(\.id) == harness.store.sessions.map(\.id))
         #expect(displayedTitleCalls == 0)
+        #expect(boostCalls == 0)
 
         displayedTitleCalls = 0
         _ = harness.store.search("alpha", displayedTitle: displayedTitle)
