@@ -6,8 +6,11 @@ import os
 @testable import SigilKit
 
 @Suite struct SessionIndexFileTests {
-    @Test func restartReusesAllProvidersAndCodexTitlesWithoutBodies() throws {
-        let fixture = try HistoryIndexFixture()
+    @Test(arguments: ["default", "system-alias", "grok-id"])
+    func restartReusesAllProvidersAndCodexTitlesWithoutBodies(_ variant: String) throws {
+        let fixture = try HistoryIndexFixture(
+            temporaryRoot: variant == "system-alias" ? URL(fileURLWithPath: "/tmp") : nil,
+            grokID: variant == "grok-id" ? "generated-grok-id" : nil)
         defer { fixture.cleanup() }
         let titles = CodexTitleIndexCache()
         let cold = fixture.scan(titles: titles)
@@ -219,29 +222,33 @@ struct HistoryIndexFixture: Sendable {
     let codex: URL
     let project: URL
     let id = "11111111-1111-4111-8111-111111111111"
+    let grokID: String
     var nativeRoots: [(CLIProvider, URL)] { [(.claudeCode, claude), (.codex, codex)] }
     var roots: [SessionIndexFile.Root] { SessionIndexFile.roots(grok: grok, native: nativeRoots) }
     var file: SessionIndexFile { SessionIndexFile(url: base.appendingPathComponent("private/history-index.json")) }
     var grokDirectory: URL {
         grok.appendingPathComponent(GrokPaths.sessionFolderName(forCanonicalPath: project.path)).appendingPathComponent(
-            id)
+            grokID)
     }
     var grokSummary: URL { grokDirectory.appendingPathComponent("summary.json") }
     var claudeFile: URL { claude.appendingPathComponent("generated.jsonl") }
     var titleFile: URL { codex.deletingLastPathComponent().appendingPathComponent("session_index.jsonl") }
 
-    init() throws {
-        base = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+    init(temporaryRoot: URL? = nil, grokID: String? = nil) throws {
+        self.grokID = grokID ?? id
+        base = (temporaryRoot ?? FileManager.default.temporaryDirectory.resolvingSymlinksInPath())
             .appendingPathComponent("Sigil-HistoryIndex-\(UUID().uuidString)")
         grok = base.appendingPathComponent("grok/sessions")
         claude = base.appendingPathComponent("claude/projects")
         codex = base.appendingPathComponent("codex/sessions")
-        project = base.appendingPathComponent("generated-project")
+        let projectPath = base.appendingPathComponent("generated-project")
+        try FileManager.default.createDirectory(at: projectPath, withIntermediateDirectories: true)
+        project = URL(fileURLWithPath: GrokPaths.canonicalPath(projectPath.path))
         for folder in [project, grokDirectory, claude, codex] {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         }
         try JSONSerialization.data(withJSONObject: [
-            "info": ["id": id, "cwd": project.path],
+            "info": ["id": self.grokID, "cwd": project.path],
             "session_summary": "Generated Grok title", "num_chat_messages": 1,
         ]).write(to: grokSummary)
         try Data(
@@ -257,13 +264,14 @@ struct HistoryIndexFixture: Sendable {
 
     func scan(
         cache: [String: SessionCacheEntry] = [:], titles: CodexTitleIndexCache = .init(),
-        meter: HistoryIndexMeter = .init()
+        meter: HistoryIndexMeter = .init(), ignoringCache: Bool = false
     ) -> SessionScanner.Result {
         var result = SessionScanner.scan(
-            root: grok, cache: cache.filter { $0.value.session.provider == .grokBuild }, contentReader: meter.grok)
+            root: grok, cache: cache.filter { $0.value.session.provider == .grokBuild },
+            ignoringCache: ignoringCache, contentReader: meter.grok)
         for (provider, root) in nativeRoots {
             let native = NativeSessionScanner.scan(
-                provider: provider, root: root, cache: cache, ignoringCache: false,
+                provider: provider, root: root, cache: cache, ignoringCache: ignoringCache,
                 contentReader: meter.native, titleIndexCache: titles)
             result.sessions += native.sessions
             result.cache.merge(native.cache) { _, new in new }

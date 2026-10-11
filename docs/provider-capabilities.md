@@ -228,13 +228,21 @@ Applied-scan sequencing advances only when an actual scan publishes its result.
 The saved index is untrusted display data. Decoding always clears source-validation
 authority, even if the file claims otherwise. Metadata cache hits and title overrides
 retain that distinction. Opening, saved-tab restoration, export and Trash validate
-the requested source envelope before using its identity. Housekeeping and legacy-note
-migration wait for a real scan and source-validated rows; a forced refresh validates
-the full list. Codex tab binding still requires its independent process/file proof,
+source envelopes before using their identities. After the first stat-only scan, a
+250 ms delayed shared pass parses the remaining saved rows once. Housekeeping and
+legacy-note migration resume when that pass publishes source-validated rows. Saved
+tabs and actions await the same pass, including an in-flight forced refresh. Failed
+unchanged sources remain display-only and do not trigger restoration retry loops;
+source changes or manual refresh can recover them. Stop/reload cancel the pending
+pass, publication uses scan sequencing, and watcher requests wait behind its source
+validation rather than superseding it. Codex tab binding still requires its independent process/file proof,
 with the existing exact identity and cwd rules.
 
 The private cache is limited to 8 MiB, 10,000 rows and bounded display fields. Version,
 captured-root or decoding failures discard it and a later applied scan rewrites it.
+Grok keeps its supported safe folder identifiers; native providers require UUIDs.
+Cache keys and file URLs use the same Foundation-standardized spelling. Only macOS
+system aliases (/var, /tmp and /etc) are expanded for no-follow filesystem checks.
 Absolute paths must remain inside the corresponding captured root; existing source
 symlink components, index symlinks and aliased index files are rejected. Index reads
 validate descriptor/path identity. Debounced writes run off the main actor and use

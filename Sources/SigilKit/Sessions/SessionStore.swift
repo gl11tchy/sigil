@@ -7,6 +7,7 @@ struct SessionStoreTiming: Sendable {
     var watcherRetryDelay: Duration = .seconds(2)
     var watcherLatency: CFTimeInterval = 1
     var indexWriteDelay: Duration = .seconds(1)
+    var historyValidationDelay: Duration = .milliseconds(250)
 }
 
 /// Reads the Grok Build session history off disk and keeps it current.
@@ -33,6 +34,14 @@ public final class SessionStore {
     public private(set) var canPruneMissingProjects = false
 
     public var hasUnvalidatedHistory: Bool { sessions.contains { !$0.isHistoryValidated } }
+
+    /// One shared source pass serves startup, restoration and actions. Failed unchanged sources are not retried in a loop.
+    public var hasPendingHistoryValidation: Bool {
+        historyValidationTask != nil
+            || cache.contains {
+                !$0.value.session.isHistoryValidated && historyValidationAttempts[$0.key] != $0.value
+            }
+    }
 
     public let root: URL
     /// The captured root shared by history scans, watchers and identity proof.
@@ -67,6 +76,11 @@ public final class SessionStore {
     @ObservationIgnored private var indexWriteTask: Task<Void, Never>?
     @ObservationIgnored private var startupTask: Task<Void, Never>?
     @ObservationIgnored private var startupGeneration = 0
+    @ObservationIgnored private var historyValidationTask: Task<Void, Never>?
+    @ObservationIgnored private var historyValidationGeneration = 0
+    @ObservationIgnored private var historyValidationScanInFlight = false
+    @ObservationIgnored private var historyValidationAttempts: [String: SessionCacheEntry] = [:]
+    @ObservationIgnored private var forcedScanWaiters: [CheckedContinuation<Void, Never>] = []
 
     public convenience init() {
         self.init(
@@ -170,6 +184,7 @@ public final class SessionStore {
 
     deinit {
         startupTask?.cancel()
+        historyValidationTask?.cancel()
         indexWriteTask?.cancel()
         eventContinuation.finish()
         eventPump?.cancel()
@@ -218,6 +233,8 @@ public final class SessionStore {
         startupGeneration += 1
         startupTask?.cancel()
         startupTask = nil
+        cancelHistoryValidation()
+        historyValidationAttempts.removeAll()
         indexWriteTask?.cancel()
         indexWriteTask = nil
         if inflight == 0 { isLoading = false }
@@ -237,6 +254,9 @@ public final class SessionStore {
     /// Forces a rescan, ignoring any caches.
     public func reload() async {
         guard !Task.isCancelled else { return }
+        cancelHistoryValidation()
+        // The forced pass itself retries every source. Do not immediately retry its unchanged failures again.
+        historyValidationAttempts = cache.filter { !$0.value.session.isHistoryValidated }
         debounceTask?.cancel()
         debounceTask = nil
         firstPendingEvent = nil
@@ -248,20 +268,77 @@ public final class SessionStore {
 
     /// A saved display row cannot launch a CLI or authorize removal. Read its source again first.
     public func validatedSession(for candidate: GrokSession) async -> GrokSession? {
-        guard !Task.isCancelled else { return nil }
-        func matches(_ session: GrokSession) -> Bool {
-            session.reference == candidate.reference && session.directory == candidate.directory
+        await validatedSessions(for: [candidate]).first
+    }
+
+    /// Validate a saved tab snapshot together, rather than traversing every history root once per tab.
+    public func validatedSessions(for candidates: [GrokSession]) async -> [GrokSession] {
+        guard !Task.isCancelled else { return [] }
+        let generation = startupGeneration
+        if candidates.contains(where: { !$0.isHistoryValidated }) {
+            if appliedScanSequence == 0 { await startupTask?.value }
+            repeat {
+                if forcedScansInFlight > 0 {
+                    await withCheckedContinuation { forcedScanWaiters.append($0) }
+                }
+                guard !Task.isCancelled, generation == startupGeneration else { return [] }
+                scheduleHistoryValidation(delay: .zero)
+                await historyValidationTask?.value
+                guard !Task.isCancelled, generation == startupGeneration else { return [] }
+            } while forcedScansInFlight > 0
         }
-        guard let current = sessions.first(where: matches) else { return nil }
-        if current.isHistoryValidated { return current }
-        let key = current.directory.standardizedFileURL.path
         let roots = SessionIndexFile.roots(grok: root, native: nativeRoots)
-        guard let indexFile, indexFile.permitsSource(key, roots: roots, provider: current.provider) else { return nil }
-        await scan(ignoringCache: false, refreshing: key)
-        guard !Task.isCancelled, indexFile.permitsSource(key, roots: roots, provider: current.provider) else {
-            return nil
+        return candidates.compactMap { candidate in
+            guard
+                let current = sessions.first(where: {
+                    $0.reference == candidate.reference && $0.directory == candidate.directory && $0.isHistoryValidated
+                })
+            else { return nil }
+            if !candidate.isHistoryValidated {
+                guard let indexFile,
+                    indexFile.permitsSource(
+                        current.directory.standardizedFileURL.path, roots: roots, provider: current.provider)
+                else { return nil }
+            }
+            return current
         }
-        return sessions.first { matches($0) && $0.isHistoryValidated }
+    }
+
+    private func cancelHistoryValidation() {
+        historyValidationGeneration += 1
+        historyValidationTask?.cancel()
+        historyValidationTask = nil
+        historyValidationScanInFlight = false
+    }
+
+    private func scheduleHistoryValidation(delay: Duration) {
+        guard indexFile != nil, appliedScanSequence > 0, historyValidationTask == nil, forcedScansInFlight == 0,
+            hasPendingHistoryValidation
+        else { return }
+        let generation = historyValidationGeneration
+        historyValidationTask = Task { [weak self] in
+            do { try await Task.sleep(for: delay) } catch { return }
+            guard let self, !Task.isCancelled, generation == self.historyValidationGeneration else { return }
+            defer {
+                if generation == self.historyValidationGeneration {
+                    self.historyValidationTask = nil
+                    self.historyValidationScanInFlight = false
+                    if self.cachedScanPending, self.forcedScansInFlight == 0 {
+                        self.cachedScanPending = false
+                        Task { await self.scan(ignoringCache: false) }
+                    }
+                }
+            }
+            // The envelope bounds this set to 10,000 sources. One pass, existing per-provider read bounds,
+            // and scanner cancellation checks keep validation finite; unchanged failures remain display-only.
+            let targets = self.cache.filter {
+                !$0.value.session.isHistoryValidated && self.historyValidationAttempts[$0.key] != $0.value
+            }
+            guard !targets.isEmpty else { return }
+            self.historyValidationAttempts.merge(targets) { _, new in new }
+            self.historyValidationScanInFlight = true
+            await self.scan(ignoringCache: false, refreshing: Set(targets.keys))
+        }
     }
 
     /// A present Grok folder without its summary is not proof that its saved metadata is stale.
@@ -300,9 +377,9 @@ public final class SessionStore {
     }
 
     /// Walks `root` off the main actor. Cache hits skip JSON decoding.
-    func scan(ignoringCache: Bool, refreshing key: String? = nil) async {
+    func scan(ignoringCache: Bool, refreshing keys: Set<String> = []) async {
         guard !Task.isCancelled else { return }
-        if !ignoringCache, forcedScansInFlight > 0 {
+        if !ignoringCache, forcedScansInFlight > 0 || (keys.isEmpty && historyValidationScanInFlight) {
             cachedScanPending = true
             return
         }
@@ -323,6 +400,11 @@ public final class SessionStore {
             if inflight == 0, isLoading { isLoading = false }
             if ignoringCache {
                 forcedScansInFlight -= 1
+                if forcedScansInFlight == 0 {
+                    let waiters = forcedScanWaiters
+                    forcedScanWaiters.removeAll()
+                    for waiter in waiters { waiter.resume() }
+                }
                 if forcedScansInFlight == 0, cachedScanPending {
                     cachedScanPending = false
                     Task { await self.scan(ignoringCache: false) }
@@ -332,12 +414,19 @@ public final class SessionStore {
 
         let root = self.root
         var snapshot = cache
-        if let key, var entry = snapshot[key] {
+        for key in keys {
+            guard var entry = snapshot[key] else { continue }
             // Keep uncertain rows for display while forcing this one source to be parsed.
             entry.inode = nil
             snapshot[key] = entry
         }
-        let result = await scanOperation(root, snapshot, ignoringCache)
+        var result = await scanOperation(root, snapshot, ignoringCache)
+
+        // Invalidating an inode is a read request, never a new source identity. Preserve failed saved metadata
+        // so the eventual pass cannot schedule itself again merely because its own cache marker changed.
+        for key in keys where result.cache[key]?.session.isHistoryValidated == false {
+            result.cache[key]?.inode = cache[key]?.inode
+        }
 
         guard !Task.isCancelled, capturedForceEpoch == forceEpoch else { return }
         if !ignoringCache {
@@ -375,6 +464,7 @@ public final class SessionStore {
         if canPruneMissingProjects != canPrune { canPruneMissingProjects = canPrune }
         scheduleIndexWrite(sequence: sequence)
         refreshWatcher()
+        if isStarted { scheduleHistoryValidation(delay: timing.historyValidationDelay) }
     }
 
     private func scheduleIndexWrite(sequence: Int) {

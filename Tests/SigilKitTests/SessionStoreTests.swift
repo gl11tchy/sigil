@@ -923,7 +923,8 @@ extension SessionStoreTests {
         let meter = HistoryIndexMeter()
         let restoredTitles = CodexTitleIndexCache()
         let store = SessionStore(
-            root: fixture.grok, timing: SessionStoreTiming(indexWriteDelay: .milliseconds(5)),
+            root: fixture.grok,
+            timing: SessionStoreTiming(indexWriteDelay: .milliseconds(5), historyValidationDelay: .milliseconds(200)),
             nativeRoots: fixture.nativeRoots, indexFile: fixture.file, titleIndexCache: restoredTitles,
             scanOperation: { _, cache, _ in
                 await gate.hold()
@@ -942,10 +943,13 @@ extension SessionStoreTests {
         #expect(store.sessions.count == 2)
         #expect(meter.count == 0)
         #expect(store.hasUnvalidatedHistory && !store.canPruneMissingProjects)
-        let candidate = try #require(store.sessions.first { $0.provider == .grokBuild })
-        let validated = try #require(await store.validatedSession(for: candidate))
-        #expect(validated.isHistoryValidated)
-        #expect(meter.count == 1)  // Only the requested Grok summary, no native bodies or title index.
+        let displayed = store.sessions
+        // Ordinary launch eventually validates every saved source without a click or manual reload.
+        try await waitUntil { !store.hasUnvalidatedHistory && !store.hasPendingHistoryValidation }
+        #expect(store.canPruneMissingProjects && store.appliedScanSequence == 2)
+        #expect(meter.count == 2)  // One Grok summary and one Codex sample; unchanged title index stays stat-only.
+        #expect(await store.validatedSessions(for: displayed).count == 2)
+        #expect(store.scanSequence == 2)  // Restoring multiple saved tabs shares the completed pass.
         try await waitUntil { fixture.file.load(roots: fixture.roots)?.entries.count == 2 }
     }
 
@@ -1033,6 +1037,35 @@ extension SessionStoreTests {
             store.sessions.contains {
                 $0.provider == .claudeCode && $0.nativeSessionID == fixture.id && $0.isHistoryValidated
             })
+    }
+
+    @Test func savedActionWaitsForForcedScanRatherThanFailingOrTraversingAgain() async throws {
+        let fixture = try HistoryIndexFixture()
+        defer { fixture.cleanup() }
+        #expect(fixture.file.save(fixture.snapshot(fixture.scan().cache)))
+        let gate = CompatibilityScanGate()
+        let store = SessionStore(
+            root: fixture.grok, timing: SessionStoreTiming(historyValidationDelay: .seconds(30)),
+            nativeRoots: fixture.nativeRoots, indexFile: fixture.file,
+            scanOperation: { _, cache, forced in
+                if forced { await gate.hold() }
+                return fixture.scan(cache: cache, ignoringCache: forced)
+            })
+        defer { store.stop() }
+        store.start()
+        try await waitUntil { store.appliedScanSequence == 1 && !store.isLoading }
+        let displayed = store.sessions
+        let forced = Task { await store.reload() }
+        try await waitUntilAsync { await gate.isWaiting }
+        let action = Task { await store.validatedSessions(for: displayed) }
+        await Task.yield()
+        #expect(store.appliedScanSequence == 1)
+        await gate.release()
+        await forced.value
+        let ready = await action.value
+        #expect(ready.count == 3 && ready.allSatisfy(\.isHistoryValidated))
+        #expect(store.scanSequence == 2 && store.appliedScanSequence == 2)
+        #expect(!store.hasUnvalidatedHistory && store.canPruneMissingProjects)
     }
 }
 

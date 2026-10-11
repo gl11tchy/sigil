@@ -119,7 +119,8 @@ struct SessionIndexFile: Sendable {
                 safeSource(key, under: root.path, inspected: &inspected), session.directory.isFileURL,
                 session.directory.host?.isEmpty != false,
                 session.directory.query == nil, session.directory.fragment == nil,
-                session.directory.path == key, UUID(uuidString: session.nativeSessionID) != nil,
+                session.directory.standardizedFileURL.path == key,
+                validIdentifier(session.nativeSessionID, provider: session.provider),
                 absolutePath(session.cwd), session.summary.utf8.count <= 4096,
                 [session.modelID, session.agentName, session.reasoningEffort, session.kind, entry.nativeSummary]
                     .allSatisfy({ ($0?.utf8.count ?? 0) <= 4096 }),
@@ -133,7 +134,9 @@ struct SessionIndexFile: Sendable {
             else { return false }
             let relative = String(key.dropFirst(root.path.count + 1)).split(separator: "/")
             if session.provider == .grokBuild {
-                let folder = grokFolders[session.cwd] ?? GrokPaths.sessionFolderName(forCanonicalPath: session.cwd)
+                let folder =
+                    grokFolders[session.cwd]
+                    ?? GrokPaths.sessionFolderName(forCanonicalPath: GrokPaths.canonicalPath(session.cwd))
                 grokFolders[session.cwd] = folder
                 guard relative.count == 2, relative.last?.lowercased() == session.nativeSessionID.lowercased(),
                     relative.first.map(String.init) == folder,
@@ -164,6 +167,23 @@ struct SessionIndexFile: Sendable {
         provider == .grokBuild || provider == .claudeCode || provider == .codex
     }
 
+    private func validIdentifier(_ id: String, provider: CLIProvider) -> Bool {
+        if provider != .grokBuild { return UUID(uuidString: id) != nil }
+        // Grok summaries support non-UUID identifiers. They still identify exactly one safe folder component.
+        return !id.isEmpty && id.utf8.count <= 4096 && id != "." && id != ".."
+            && !id.contains("/") && !id.contains("\0")
+    }
+
+    /// Foundation standardizes the macOS system aliases back to /var and /tmp.
+    /// Expand only those OS aliases; arbitrary source/parent symlinks must still fail the no-follow checks.
+    private func physicalSystemPath(_ path: String) -> String {
+        for alias in ["/var", "/tmp", "/etc"] where path == alias || path.hasPrefix(alias + "/") {
+            let physical = GrokPaths.canonicalPath(alias)
+            return physical + path.dropFirst(alias.count)
+        }
+        return path
+    }
+
     private func absolutePath(_ path: String) -> Bool {
         guard path.hasPrefix("/"), !path.utf8.contains(0), path.utf8.count <= 4096,
             !path.contains("//"), path == "/" || !path.hasSuffix("/")
@@ -184,7 +204,7 @@ struct SessionIndexFile: Sendable {
         guard absolutePath(path), path.hasPrefix(root + "/") else { return false }
         let canonicalKey = "\0" + root
         if inspected[canonicalKey] == nil {
-            inspected[canonicalKey] = URL(fileURLWithPath: root).resolvingSymlinksInPath().path == root
+            inspected[canonicalKey] = GrokPaths.canonicalPath(root) == physicalSystemPath(root)
         }
         guard inspected[canonicalKey] == true else { return false }
         var component = root
@@ -195,7 +215,7 @@ struct SessionIndexFile: Sendable {
                 continue
             }
             var info = stat()
-            if lstat(component, &info) == 0 {
+            if lstat(physicalSystemPath(component), &info) == 0 {
                 let safe = info.st_mode & S_IFMT != S_IFLNK
                 inspected[component] = safe
                 if !safe { return false }
@@ -215,7 +235,9 @@ struct SessionIndexFile: Sendable {
         var descriptor = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC)
         guard descriptor >= 0 else { throw CocoaError(.fileReadUnknown) }
         do {
-            for component in url.deletingLastPathComponent().path.split(separator: "/").map(String.init) {
+            for component in physicalSystemPath(url.deletingLastPathComponent().path).split(separator: "/").map(
+                String.init)
+            {
                 if create, mkdirat(descriptor, component, 0o700) != 0, errno != EEXIST {
                     throw CocoaError(.fileWriteUnknown)
                 }

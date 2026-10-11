@@ -3201,9 +3201,14 @@ final class AppModel {
 
     /// The user's Trash confirmation remains scoped to the same source identity after revalidation.
     func deleteValidatedConversations(_ sessions: [GrokSession]) async -> Int {
+        let validatedSessions = await store.validatedSessions(for: sessions)
         var deleted = 0
         for session in sessions {
-            guard let validated = await store.validatedSession(for: session) else {
+            guard
+                let validated = validatedSessions.first(where: {
+                    $0.reference == session.reference && $0.directory == session.directory
+                })
+            else {
                 showHistoryValidationError()
                 continue
             }
@@ -3460,6 +3465,7 @@ final class AppModel {
         if store.appliedScanSequence == 0, deferredOpenTabs.contains(where: { $0.provider != .grokBuild }) {
             return
         }
+        if store.appliedScanSequence == 0, store.hasUnvalidatedHistory { return }
         let candidates = deferredOpenTabs
         let previousSelection = selectedTabID
         let hadSavedSelection = deferredSelectedEntry != nil || deferredLegacySelectedSessionID != nil
@@ -3488,12 +3494,15 @@ final class AppModel {
             if let known, !known.isHistoryValidated {
                 waitsForEarlierRetry = true
                 deferredOpenTabs.append(entry)
-                if restorationHistoryValidation == nil {
+                if restorationHistoryValidation == nil, store.hasPendingHistoryValidation {
+                    let savedSessions = candidates.compactMap { entry in
+                        store.sessions.first { $0.id == sidebarID(entry) && samePath($0.cwd, entry.cwd) }
+                    }
                     restorationHistoryValidation = Task { [weak self] in
                         guard let self else { return }
-                        let validated = await self.store.validatedSession(for: known)
+                        let validated = await self.store.validatedSessions(for: savedSessions)
                         self.restorationHistoryValidation = nil
-                        if validated != nil { self.restoreOpenTabs() }
+                        if !validated.isEmpty { self.restoreOpenTabs() }
                     }
                 }
                 continue

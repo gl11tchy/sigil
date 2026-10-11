@@ -260,7 +260,16 @@ enum RemoteCommands {
                 guard AppModel.isUsableDirectory(URL(fileURLWithPath: session.cwd))
                 else { return failure(request, "Restore the folder on your Mac, then try again.") }
             }
-            model.open(session)
+            let ready: GrokSession
+            if model.isOpen(session) {
+                ready = session
+            } else {
+                guard let validated = await model.store.validatedSession(for: session) else {
+                    return failure(request, "That chat is not available. Refresh history on your Mac, then try again.")
+                }
+                ready = validated
+            }
+            model.open(ready)
             let opened = model.tabs.contains {
                 $0.sessionID == session.id
                     && GrokPaths.canonicalPath($0.workingDirectory.path) == GrokPaths.canonicalPath(session.cwd)

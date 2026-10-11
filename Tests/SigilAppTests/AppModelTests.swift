@@ -22,8 +22,10 @@ struct AppModelTests {
         let roots = SessionIndexFile.roots(grok: root, native: [])
         #expect(file.save(.init(roots: roots, entries: SessionScanner.scan(root: root, cache: [:]).cache)))
         // Replace the source with malformed bytes while retaining the saved display row.
-        let directory = root.appendingPathComponent(GrokPaths.sessionFolderName(forCanonicalPath: cwd.path))
-            .appendingPathComponent(id)
+        let directory = root.appendingPathComponent(
+            GrokPaths.sessionFolderName(forCanonicalPath: GrokPaths.canonicalPath(cwd.path))
+        )
+        .appendingPathComponent(id)
         try Data("{".utf8).write(to: directory.appendingPathComponent("summary.json"))
         let store = SessionStore(root: root, timing: SessionStoreTiming(), indexFile: file)
         defer { store.stop() }
@@ -51,12 +53,58 @@ struct AppModelTests {
         #expect(model.tabs.isEmpty)
         #expect(try Data(contentsOf: directory.appendingPathComponent("summary.json")) == Data("{".utf8))
         #expect(fixture.settings.openTabs.tabs.map(\.sessionID) == [id])
+        // The failed envelope is attempted once; restoration/observation cannot spin a fresh traversal.
+        #expect(await waitUntil { !store.hasPendingHistoryValidation })
+        let failedSequence = store.scanSequence
+        for _ in 0..<3 { model.restoreOpenTabs() }
+        try await Task.sleep(for: .milliseconds(350))
+        #expect(store.scanSequence == failedSequence && model.tabs.isEmpty)
         // Source repair, rather than saved metadata, unlocks the deferred saved tab.
         try fixture.writeListedSession(id: id, cwd: cwd.path)
         await store.reload()
         model.restoreOpenTabs()
         #expect(model.tabs.count == 1)
         #expect(model.tabs.first?.nativeSessionID == id)
+    }
+
+    @Test @MainActor
+    func savedHistoryEventuallyUnlocksHousekeepingAndRemoteOpenWaitsForTheSameValidationPass() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("generated-project")
+        try fixture.writeListedSession(id: "saved-tab", cwd: cwd.path)
+        try fixture.writeListedSession(id: "remote-tab", cwd: cwd.path)
+        let root = fixture.store.root
+        let file = SessionIndexFile(url: fixture.root.appendingPathComponent("private/history-index.json"))
+        #expect(
+            file.save(
+                .init(
+                    roots: SessionIndexFile.roots(grok: root, native: []),
+                    entries: SessionScanner.scan(root: root, cache: [:]).cache)))
+        fixture.settings.pinnedConversations = [.init(sessionID: "missing-pin", cwd: cwd.path)]
+        fixture.defaults.set(try JSONEncoder().encode([cwd.path: "kept legacy note"]), forKey: "panel.notes")
+        fixture.settings.openTabs = OpenTabsSnapshot(
+            tabs: [.init(sessionID: "saved-tab", cwd: cwd.path)], selectedSessionID: "saved-tab")
+        let store = SessionStore(
+            root: root, timing: SessionStoreTiming(historyValidationDelay: .milliseconds(500)), indexFile: file)
+        defer { store.stop() }
+        store.start()
+        #expect(await waitUntil { store.appliedScanSequence == 1 && !store.isLoading })
+        #expect(store.hasUnvalidatedHistory)
+        let error = ErrorBox()
+        let model = fixture.model(store: store, presentError: { error.error = $0 })
+        defer { model.closeAllTabsAndWait() }
+        let reply = await RemoteCommands.execute(
+            RemoteRequest(challenge: "test", sequence: 1, action: "open", text: cwd.path, name: "remote-tab"),
+            model: model)
+        #expect(reply.ok && error.error == nil)
+        #expect(
+            await waitUntil {
+                model.tabs.count == 2 && fixture.settings.sigilConversationsSeeded
+                    && fixture.settings.pinnedConversations.isEmpty && model.panel.legacyFolderNotes.isEmpty
+            })
+        #expect(store.scanSequence == 2 && !store.hasUnvalidatedHistory && store.canPruneMissingProjects)
+        #expect(Set(model.tabs.map(\.nativeSessionID)) == ["saved-tab", "remote-tab"])
     }
 
     @Test @MainActor
