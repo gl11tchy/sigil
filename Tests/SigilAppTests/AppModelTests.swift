@@ -106,11 +106,24 @@ struct AppModelTests {
             RemoteRequest(challenge: "test", sequence: 1, action: "open", text: cwd.path, name: "remote-tab"),
             model: model)
         #expect(reply.ok && error.error == nil)
+        let housekeepingSettled = await waitUntil {
+            model.tabs.count == 2 && fixture.settings.sigilConversationsSeeded
+                && fixture.settings.pinnedConversations.isEmpty && model.panel.legacyFolderNotes.isEmpty
+        }
         #expect(
-            await waitUntil {
-                model.tabs.count == 2 && fixture.settings.sigilConversationsSeeded
-                    && fixture.settings.pinnedConversations.isEmpty && model.panel.legacyFolderNotes.isEmpty
-            })
+            housekeepingSettled,
+            """
+            tabs=\(model.tabs.map(\.nativeSessionID)), seeded=\(fixture.settings.sigilConversationsSeeded),
+            pins=\(fixture.settings.pinnedConversations.map(\.sessionID)),
+            legacyFolders=\(model.panel.legacyFolderNotes.keys.sorted()),
+            scan=\(store.appliedScanSequence), loading=\(store.isLoading),
+            unvalidated=\(store.hasUnvalidatedHistory), canPrune=\(store.canPruneMissingProjects),
+            noteSaved=\(store.sessions.map { model.panel.notesStore.isSaved(for: $0.id, cwd: $0.cwd) })
+            """)
+        #expect(model.tabs.count == 2)
+        #expect(fixture.settings.sigilConversationsSeeded)
+        #expect(fixture.settings.pinnedConversations.isEmpty)
+        #expect(model.panel.legacyFolderNotes.isEmpty)
         #expect(store.scanSequence == 2)
         #expect(!store.hasUnvalidatedHistory)
         #expect(store.canPruneMissingProjects)
