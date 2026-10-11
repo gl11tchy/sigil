@@ -5,7 +5,15 @@ public struct ProviderInstallation: Sendable, Equatable {
     public let executable: URL?
     public let version: String?
     public let problem: String?
-    public var isAvailable: Bool { executable != nil && problem == nil }
+    public let timedOut: Bool
+    public var isAvailable: Bool { executable != nil && problem == nil && !timedOut }
+
+    public init(executable: URL?, version: String?, problem: String?, timedOut: Bool = false) {
+        self.executable = executable
+        self.version = version
+        self.problem = problem
+        self.timedOut = timedOut
+    }
 
     /// The blocking process wait belongs on dispatch threads, not Swift's
     /// cooperative executor. Cancellation is fenced by the caller's generation.
@@ -67,6 +75,7 @@ public struct ProviderInstallation: Sendable, Equatable {
             return ProviderInstallation(
                 executable: nil, version: nil, problem: "\(provider.name) could not be started.")
         }
+        let ownedRoot = probeInfo(process.processIdentifier).map(ProbeProcess.init)
         try? pipe.fileHandleForWriting.close()
         let fd = pipe.fileHandleForReading.fileDescriptor
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
@@ -88,9 +97,16 @@ public struct ProviderInstallation: Sendable, Equatable {
         while exited.wait(timeout: .now() + .milliseconds(10)) == .timedOut {
             drain()
             if DispatchTime.now() >= deadline {
-                kill(process.processIdentifier, SIGKILL)
+                let stoppedTree = stopProbeTree(ownedRoot)
+                let stopped = exited.wait(timeout: .now() + .milliseconds(250)) == .success
+                guard stoppedTree, stopped else {
+                    return ProviderInstallation(
+                        executable: nil, version: nil,
+                        problem: "\(provider.name)'s timed-out version check could not be stopped safely. Check Again.")
+                }
                 return ProviderInstallation(
-                    executable: nil, version: nil, problem: "\(provider.name) did not answer its version check.")
+                    executable: nil, version: nil, problem: "\(provider.name) did not answer its version check.",
+                    timedOut: true)
             }
         }
         drain()
@@ -110,5 +126,101 @@ public struct ProviderInstallation: Sendable, Equatable {
         }
         let version = lines.dropFirst(index + 1).first.map { String($0.prefix(160)) }
         return ProviderInstallation(executable: URL(fileURLWithPath: path), version: version, problem: nil)
+    }
+
+    private struct ProbeProcess: Equatable {
+        let pid: pid_t
+        let parent: pid_t
+        let seconds: UInt64
+        let microseconds: UInt64
+
+        init(_ info: proc_bsdinfo) {
+            pid = pid_t(info.pbi_pid)
+            parent = pid_t(info.pbi_ppid)
+            seconds = info.pbi_start_tvsec
+            microseconds = info.pbi_start_tvusec
+        }
+    }
+
+    private static func probeInfo(_ pid: pid_t) -> proc_bsdinfo? {
+        guard pid > 0 else { return nil }
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.stride)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size,
+            info.pbi_pid == UInt32(pid), info.pbi_uid == getuid(), info.pbi_start_tvsec > 0
+        else { return nil }
+        return info
+    }
+
+    /// Freeze the owned probe tree before enumerating it: a stopped parent
+    /// cannot fork while its children are captured. Foundation children can
+    /// have separate process groups, so the root group alone is insufficient.
+    /// Reads are scoped to these PIDs, never arguments/files or the inventory.
+    private static func stopProbeTree(_ root: ProbeProcess?) -> Bool {
+        guard let root, root.parent == getpid(),
+            let rootInfo = probeInfo(root.pid), ProbeProcess(rootInfo) == root
+        else {
+            return false
+        }
+        let pid = root.pid
+        let deadline = DispatchTime.now() + .milliseconds(250)
+        var pending = [root]
+        var captured: [ProbeProcess] = []
+        var complete = true
+        while let current = pending.popLast() {
+            guard captured.count < 64, DispatchTime.now() < deadline,
+                let info = probeInfo(current.pid), ProbeProcess(info) == current
+            else {
+                complete = false
+                break
+            }
+            captured.append(current)
+            if info.pbi_status == SZOMB { continue }
+            guard kill(current.pid, SIGSTOP) == 0 else {
+                complete = false
+                break
+            }
+            var stopped = false
+            while DispatchTime.now() < deadline {
+                guard let now = probeInfo(current.pid), ProbeProcess(now) == current else { break }
+                if now.pbi_status == SSTOP || now.pbi_status == SZOMB {
+                    stopped = true
+                    break
+                }
+                usleep(1_000)
+            }
+            guard stopped else {
+                complete = false
+                break
+            }
+            var children = [pid_t](repeating: 0, count: 64)
+            errno = 0
+            let count = proc_listchildpids(current.pid, &children, Int32(children.count * MemoryLayout<pid_t>.stride))
+            guard count >= 0, count < Int32(children.count), count > 0 || errno == 0 else {
+                complete = false
+                break
+            }
+            for child in children.prefix(Int(count)) {
+                guard let childInfo = probeInfo(child), childInfo.pbi_ppid == UInt32(current.pid) else {
+                    complete = false
+                    break
+                }
+                pending.append(ProbeProcess(childInfo))
+            }
+            if !complete { break }
+        }
+        // Kill leaves first while their verified parents remain stopped.
+        // On an incomplete walk, clean up every identity captured so far too.
+        for child in (captured + pending).reversed() where child.pid != pid {
+            if let info = probeInfo(child.pid), ProbeProcess(info) == child,
+                kill(child.pid, SIGKILL) != 0, errno != ESRCH
+            {
+                complete = false
+            }
+        }
+        guard let now = probeInfo(pid), ProbeProcess(now) == root else { return false }
+        let stoppedGroup = getpgid(pid) == pid && kill(-pid, SIGKILL) == 0
+        if !stoppedGroup { kill(pid, SIGKILL) }
+        return complete && stoppedGroup
     }
 }

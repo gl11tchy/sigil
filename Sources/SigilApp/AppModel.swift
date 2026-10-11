@@ -87,6 +87,8 @@ final class AppModel {
     private var isRestoringTabs = false
     /// Saved entries that are temporarily unavailable stay here instead of being erased.
     private var deferredOpenTabs: [OpenTabsSnapshot.Entry] = []
+    private var savedOpenTabOrder: [OpenTabsSnapshot.Entry] = []
+    @ObservationIgnored private var restoredSavedTabOrder: [TerminalTab.ID: Int] = [:]
     private var deferredSelectedEntry: OpenTabsSnapshot.Entry?
     /// Older snapshots saved only an ID. Keep it until the first matching tab
     /// can be restored or the user makes a new selection.
@@ -148,14 +150,15 @@ final class AppModel {
         kimiKeyStore: (any KimiKeyStore)? = nil,
         providerInstallations: [CLIProvider: ProviderInstallation] = [:],
         providerProbe: ProviderProbe? = nil,
-        providerCheckClock: (@Sendable () -> TimeInterval)? = nil
+        providerCheckClock: (@Sendable () -> TimeInterval)? = nil,
+        providerCheckSleep: ProviderChecks.Sleep? = nil
     ) {
         self.settings = settings
         self.store = store
         self.panel = panel ?? RightPanel()
         self.providerChecks = ProviderChecks(
             settings: settings, installations: providerInstallations,
-            probe: providerProbe, clock: providerCheckClock)
+            probe: providerProbe, clock: providerCheckClock, sleep: providerCheckSleep)
         self.hasInjectedProviderProbe = providerProbe != nil
         if let pairingStore {
             self.remoteControl = RemoteControl(store: pairingStore)
@@ -174,6 +177,10 @@ final class AppModel {
         self.kimiKeyStore =
             kimiKeyStore ?? (Self.isRunningAutomatedTests ? InMemoryKimiKeyStore() : KeychainKimiKeyStore())
         hasKimiAPIKey = self.kimiKeyStore.load() != nil
+        providerChecks.didFinishChecks = { [weak self] in
+            guard let self, self.checkingProviders.isEmpty, !self.deferredOpenTabs.isEmpty else { return }
+            self.restoreOpenTabs()
+        }
     }
 
     /// Stores a Kimi Platform API key in the Keychain. Returns false when it was not stored.
@@ -2162,7 +2169,16 @@ final class AppModel {
 
     func checkedProviderLaunchProblem(_ provider: CLIProvider) async -> String? {
         guard !Task.isCancelled else { return "Session launch was cancelled." }
-        if providerLaunchProblem(provider) != nil { await refreshProviderInstallationsForEntry() }
+        if providerVersionCheckTimedOut(provider), !providerIsRecovering(provider),
+            !checkingProviders.contains(provider), !Self.isSmokeTest,
+            !Self.isRunningAutomatedTests || hasInjectedProviderProbe
+        {
+            // Choosing this provider's Check Again/start control is explicit.
+            // Routine inventory entry must leave other exhausted budgets alone.
+            await refreshProviderInstallations(only: [provider])
+        } else if providerLaunchProblem(provider) != nil {
+            await refreshProviderInstallationsForEntry()
+        }
         guard !Task.isCancelled else { return "Session launch was cancelled." }
         return providerLaunchProblem(provider)
     }
@@ -2174,6 +2190,14 @@ final class AppModel {
 
     func providerRequiresCheck(_ provider: CLIProvider) -> Bool {
         providerChecks.requiresCheck(provider)
+    }
+
+    func providerIsRecovering(_ provider: CLIProvider) -> Bool {
+        providerChecks.isRecovering(provider)
+    }
+
+    func providerVersionCheckTimedOut(_ provider: CLIProvider) -> Bool {
+        providerInstallations[provider]?.timedOut == true
     }
 
     private func canLaunchProvider(_ provider: CLIProvider) -> Bool {
@@ -2347,6 +2371,7 @@ final class AppModel {
         spec.bridgeSocketPath = nil
         let tabID = UUID()
         let tab = TerminalTab(id: tabID, spec: tagged(spec, tabID: tabID), settings: settings)
+        restoredSavedTabOrder[tab.id] = restoredSavedTabOrder.removeValue(forKey: old.id)
         tab.onUnseenActivityChange = { [weak self] in self?.refreshDockIndicator() }
         tab.onSettle = { [weak self, weak tab] in
             if let self, let tab { self.restartForThemeWhenSettled(tab) }
@@ -2756,6 +2781,9 @@ final class AppModel {
         selectedTab?.clearUnseenActivity()
         refreshDockIndicator()
         retryPendingTerminalFocus()
+        if !Self.isSmokeTest, !Self.isRunningAutomatedTests || hasInjectedProviderProbe {
+            providerChecks.applicationDidBecomeActive()
+        }
     }
 
     /// A panel shell opened while the sheet was up takes focus once it closes.
@@ -3322,6 +3350,7 @@ final class AppModel {
             didLoadOpenTabsSnapshot = true
             let snapshot = settings.openTabs
             deferredOpenTabs = snapshot.tabs
+            savedOpenTabOrder = snapshot.tabs
             if let selectedCWD = snapshot.selectedCWD, let selectedID = snapshot.selectedSessionID {
                 deferredSelectedEntry = .init(
                     sessionID: selectedID, cwd: selectedCWD, provider: snapshot.selectedProvider ?? .grokBuild)
@@ -3334,7 +3363,7 @@ final class AppModel {
         // Retained fresh results must not restore a later saved entry ahead
         // of one whose required replacement check is still pending.
         guard checkingProviders.isEmpty,
-            !deferredOpenTabs.contains(where: { providerChecks.requiresCheck($0.provider) })
+            !deferredOpenTabs.contains(where: { providerChecks.requiresRestorationCheck($0.provider) })
         else { return }
         // Native paths come from the initial history scan. Starting Grok first
         // would reorder a mixed saved snapshot before those paths can be known.
@@ -3353,10 +3382,18 @@ final class AppModel {
             persistOpenTabs()
         }
         var restoredSelection: TerminalTab.ID?
+        var waitsForEarlierRetry = false
         for entry in candidates {
             if tabs.contains(where: {
                 tabMatches($0, sessionID: sidebarID(entry), cwd: entry.cwd)
             }) {
+                continue
+            }
+            // Restore the ready prefix immediately, but never let a later
+            // success overtake an earlier saved tab with a retry still pending.
+            if waitsForEarlierRetry || providerChecks.isRecovering(entry.provider) {
+                waitsForEarlierRetry = true
+                deferredOpenTabs.append(entry)
                 continue
             }
             let known = store.sessions.first { $0.id == sidebarID(entry) && samePath($0.cwd, entry.cwd) }
@@ -3385,6 +3422,13 @@ final class AppModel {
                 provider: entry.provider, sessionFile: entry.provider == .grokBuild ? nil : directory
             )
             let tab = add(spec)
+            if let order = savedOpenTabOrder.firstIndex(where: { sameEntry($0, entry) }) {
+                if let index = tabs.firstIndex(where: { (restoredSavedTabOrder[$0.id] ?? -1) > order }) {
+                    tabs.removeLast()
+                    tabs.insert(tab, at: index)
+                }
+                restoredSavedTabOrder[tab.id] = order
+            }
             if deferredSelectedEntry.map({ sameEntry($0, entry) }) == true
                 || (deferredSelectedEntry == nil
                     && deferredLegacySelectedSessionID == entry.sessionID
@@ -3395,6 +3439,14 @@ final class AppModel {
         }
         if let restoredSelection {
             select(restoredSelection)
+        } else if let entry = deferredSelectedEntry,
+            let restored = tabs.first(where: { tabMatches($0, sessionID: sidebarID(entry), cwd: entry.cwd) })
+        {
+            select(restored.id)
+        } else if let legacy = deferredLegacySelectedSessionID, let previousSelection,
+            tabs.contains(where: { $0.id == previousSelection && $0.nativeSessionID == legacy })
+        {
+            select(previousSelection)
         } else if !hadSavedSelection, let previousSelection, tabs.contains(where: { $0.id == previousSelection }) {
             select(previousSelection)
         }
@@ -3409,16 +3461,24 @@ final class AppModel {
                 model: tab.spec.model ?? "", effort: tab.spec.reasoningEffort ?? "", provider: tab.spec.provider)
         }
         let liveKeys = Set(entries.map { entryKey($0) })
-        entries.append(
-            contentsOf: deferredOpenTabs.filter {
-                !liveKeys.contains(entryKey($0))
-            }
-        )
+        // Keep deferred references in their saved positions without sorting
+        // live tabs the user may have moved. Recovery after exhaustion can then
+        // insert the resumed tab before its later restored peers.
+        for entry in deferredOpenTabs where !liveKeys.contains(entryKey(entry)) {
+            let order = savedOpenTabOrder.firstIndex(where: { sameEntry($0, entry) })
+            let index =
+                order.flatMap { order in
+                    entries.firstIndex { candidate in
+                        (savedOpenTabOrder.firstIndex(where: { sameEntry($0, candidate) }) ?? -1) > order
+                    }
+                } ?? entries.count
+            entries.insert(entry, at: index)
+        }
         let liveSelection = selectedTab.flatMap { tab -> OpenTabsSnapshot.Entry? in
             guard let sessionID = tab.nativeSessionID else { return nil }
             return .init(sessionID: sessionID, cwd: tab.workingDirectory.path, provider: tab.spec.provider)
         }
-        let exactSelection = deferredSelectedEntry ?? liveSelection
+        let exactSelection = deferredSelectedEntry ?? (deferredLegacySelectedSessionID == nil ? liveSelection : nil)
         settings.openTabs = OpenTabsSnapshot(
             tabs: entries,
             selectedSessionID: exactSelection?.sessionID ?? deferredLegacySelectedSessionID,

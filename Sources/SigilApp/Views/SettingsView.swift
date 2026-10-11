@@ -121,6 +121,7 @@ struct SettingsView: View {
                             Text(
                                 model.providerInstallations[.grokBuild]?.executable?.path
                                     ?? (model.checkingProviders.contains(.grokBuild)
+                                        || model.providerIsRecovering(.grokBuild)
                                         ? "Checking installed Grok…" : "Path unavailable")
                             )
                             .mono(12)
