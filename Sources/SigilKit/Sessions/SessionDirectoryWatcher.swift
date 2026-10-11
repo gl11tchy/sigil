@@ -1,4 +1,5 @@
 import CoreServices
+import Darwin
 import Foundation
 import os
 
@@ -212,9 +213,17 @@ final class SessionDirectoryWatcher: Sendable {
             suffix.append(ancestor.lastPathComponent)
             ancestor.deleteLastPathComponent()
         }
-        var resolved = ancestor.resolvingSymlinksInPath()
+        // Foundation intentionally retains OS aliases such as /var on some
+        // macOS versions; FSEvents reports the native /private/var spelling.
+        let nativePath = ancestor.path.withCString { path -> String? in
+            guard let resolved = realpath(path, nil) else { return nil }
+            defer { free(resolved) }
+            return String(cString: resolved)
+        }
+        var resolved = nativePath.map { URL(fileURLWithPath: $0) } ?? ancestor.resolvingSymlinksInPath()
         for component in suffix.reversed() { resolved.appendPathComponent(component) }
-        return resolved.standardizedFileURL
+        // Re-standardizing would turn /private/var back into /var again.
+        return resolved
     }
 
     fileprivate static let restartMask =

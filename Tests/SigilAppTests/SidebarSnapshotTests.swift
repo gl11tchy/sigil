@@ -136,12 +136,12 @@ struct SidebarSnapshotTests {
         let clock = SnapshotClock()
         let model = snapshotModel(fixture, clock: clock)
         defer { model.closeAllTabsAndWait() }
-        #expect(model.sidebarSnapshot().projects.first?.id == first.path)
+        #expect(model.sidebarSnapshot().projects.first?.id == GrokPaths.canonicalPath(first.path))
         try FileManager.default.removeItem(at: alias)
         try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: second)
         clock.advance(1)
-        #expect(model.sidebarSnapshot().projects.first?.id == second.path)
-        #expect(model.eventSidebarSnapshot().projects.first?.id == second.path)
+        #expect(model.sidebarSnapshot().projects.first?.id == GrokPaths.canonicalPath(second.path))
+        #expect(model.eventSidebarSnapshot().projects.first?.id == GrokPaths.canonicalPath(second.path))
         #expect(model.sidebarSnapshotBuildCount == 2)
     }
 
@@ -181,7 +181,7 @@ struct SidebarSnapshotTests {
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(observed.withLock { $0 }, "FSEvents must invalidate without hover or input")
-        #expect(model.sidebarSnapshot().projects.first?.id == second.path)
+        #expect(model.sidebarSnapshot().projects.first?.id == GrokPaths.canonicalPath(second.path))
         task.cancel()
         await task.value
         let stopped = OSAllocatedUnfairLock(initialState: false)

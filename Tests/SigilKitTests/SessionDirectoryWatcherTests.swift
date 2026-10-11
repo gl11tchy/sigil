@@ -20,8 +20,8 @@ struct SessionDirectoryWatcherTests {
     }
 
     @Test func sidebarWatchPlanIncludesMissingRootsAndAliasParents() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-            .resolvingSymlinksInPath()
+        let root = URL(fileURLWithPath: GrokPaths.canonicalPath(FileManager.default.temporaryDirectory.path))
+            .appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let actual = root.appendingPathComponent("actual")
         try FileManager.default.createDirectory(at: actual, withIntermediateDirectories: true)
@@ -60,6 +60,27 @@ struct SessionDirectoryWatcherTests {
         let worktreePlan = SidebarPathWatcher.plan(paths: [actual.path])
         #expect(worktreePlan.identities.contains(admin.appendingPathComponent("commondir").path))
         #expect(worktreePlan.roots.contains(admin.deletingLastPathComponent().path))
+    }
+
+    @Test func watcherCanonicalPathsMatchPOSIXForExistingAndMissingOSAliasPaths() throws {
+        let lexical = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: lexical, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: lexical) }
+        let native = URL(fileURLWithPath: GrokPaths.canonicalPath(lexical.path))
+        #expect(SessionDirectoryWatcher.canonicalURL(lexical).path == native.path)
+        #expect(
+            SessionDirectoryWatcher.canonicalURL(lexical.appendingPathComponent("missing/child")).path
+                == native.appendingPathComponent("missing/child").path)
+        let alias = lexical.appendingPathComponent("alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: native)
+        let plan = SidebarPathWatcher.plan(paths: [alias.path])
+        // Resolve the OS prefix but retain the symlink name from the event.
+        #expect(plan.identities.contains(native.appendingPathComponent("alias").path))
+        #expect(
+            SessionDirectoryWatcher.shouldScan(
+                path: native.appendingPathComponent("alias").path,
+                flags: FSEventStreamEventFlags(kFSEventStreamEventFlagItemIsSymlink),
+                contents: .sidebarPaths(plan.identities)))
     }
     @Test func notesPolicyIncludesMarkdownAndParentReplacementEventsOnly() {
         let contents = SessionDirectoryWatcher.Contents.notes(root: URL(fileURLWithPath: "/sigil/notes"))

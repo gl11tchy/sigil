@@ -641,3 +641,10 @@ regression, watch-path rebuilding on hover and partial-watch coverage. The focus
 repair reuses the watch-path set, reconciles startup/remount, preserves scheduled
 fallback for partial plans and updates the original assertion without weakening
 its row-order contract. No additional implementation worker or ticket was opened.
+
+Runtime CI then exposed lexical versus canonical project-ID assertions and a quiet
+watcher event mismatch. A generated local path probe confirmed Foundation retains
+`/var` while POSIX resolves `/private/var`; the watcher now resolves its existing
+ancestor with POSIX before restoring a missing suffix. Assertions compare canonical
+project identities; the quiet event, idle-build and cancellation requirements remain
+unchanged. Final runtime evidence remains pending the repaired exact-head CI.
