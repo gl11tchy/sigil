@@ -366,7 +366,16 @@ public final class SessionStore {
     /// Does not read a transcript.
     public func search(
         _ query: String,
-        boost: ((GrokSession) -> Int)? = nil,
+        displayedTitle: ((GrokSession) -> String)? = nil
+    ) -> [GrokSession] {
+        search(query, boost: nil, displayedTitle: displayedTitle)
+    }
+
+    /// The boost label is required so existing trailing title closures keep
+    /// selecting the original overload, including with Swift's forward scan.
+    public func search(
+        _ query: String,
+        boost: ((GrokSession) -> Int)?,
         displayedTitle: ((GrokSession) -> String)? = nil
     ) -> [GrokSession] {
         SessionScanner.search(
