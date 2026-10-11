@@ -34,6 +34,13 @@ struct SessionDirectoryWatcherTests {
         #expect(plan.identities.contains(actual.appendingPathComponent("missing/child").path))
         #expect(!plan.roots.contains("/"))
         #expect(!plan.needsFallback)
+        let orphan = SidebarPathWatcher.plan(paths: [actual.path], classificationPaths: [actual.path])
+        #expect(orphan.needsFallback)
+        let mainGit = actual.appendingPathComponent(".git")
+        try FileManager.default.createDirectory(at: mainGit, withIntermediateDirectories: true)
+        let repository = SidebarPathWatcher.plan(paths: [actual.path], classificationPaths: [actual.path])
+        #expect(!repository.needsFallback)
+        try FileManager.default.removeItem(at: mainGit)
         let alternate =
             alias.path.hasPrefix("/private/var/")
             ? String(alias.path.dropFirst("/private".count)) : "/private" + alias.path

@@ -82,7 +82,7 @@ struct SidebarView: View {
 
     var body: some View {
         let snapshot = model.sidebarSnapshot()
-        let filesystemPaths = model.sidebarFilesystemPaths
+        let filesystemObservation = model.sidebarFilesystemObservation
         #if DEBUG
             let _ = observeHover?(glide)
         #endif
@@ -95,8 +95,8 @@ struct SidebarView: View {
         }
         .background(palette.canvas)
         .environment(\.sidebarGlide, glide)
-        .task(id: filesystemPaths) {
-            await model.observeSidebarFilesystem(paths: filesystemPaths)
+        .task(id: filesystemObservation) {
+            await model.observeSidebarFilesystem(observation: filesystemObservation)
         }
         .onChange(of: focus) { _, focus in
             model.isSidebarFocused = focus != nil

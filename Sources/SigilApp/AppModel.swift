@@ -912,7 +912,10 @@ final class AppModel {
 
     /// The last snapshot built and the inputs it was built from.
     @ObservationIgnored private var lastSidebarSnapshot:
-        (inputs: SidebarInputs, snapshot: SidebarSnapshot, builtAt: TimeInterval, filesystemPaths: [String])?
+        (
+            inputs: SidebarInputs, snapshot: SidebarSnapshot, builtAt: TimeInterval,
+            observation: SidebarFilesystemObservation
+        )?
     @ObservationIgnored private let sidebarClock: @Sendable () -> TimeInterval
     static let sidebarFreshnessWindow: TimeInterval = 1
     /// Read by snapshot consumers so a filesystem event rerenders a quiet view.
@@ -947,17 +950,24 @@ final class AppModel {
         }
         let snapshot = buildSidebarSnapshot()
         sidebarSnapshotBuildCount += 1
-        lastSidebarSnapshot = (inputs, snapshot, now, buildSidebarFilesystemPaths())
+        lastSidebarSnapshot = (inputs, snapshot, now, buildSidebarFilesystemObservation())
         return snapshot
     }
 
-    var sidebarFilesystemPaths: [String] {
-        // SidebarView reads this immediately after sidebarSnapshot(), so its
-        // task identity reuses the same input pass rather than scanning on hover.
-        lastSidebarSnapshot?.filesystemPaths ?? buildSidebarFilesystemPaths()
+    struct SidebarFilesystemObservation: Hashable, Sendable {
+        var paths: [String]
+        var classificationPaths: [String]
     }
 
-    private func buildSidebarFilesystemPaths() -> [String] {
+    var sidebarFilesystemPaths: [String] { sidebarFilesystemObservation.paths }
+
+    var sidebarFilesystemObservation: SidebarFilesystemObservation {
+        // SidebarView reads this immediately after sidebarSnapshot(), so its
+        // task identity reuses the same input pass rather than scanning on hover.
+        lastSidebarSnapshot?.observation ?? buildSidebarFilesystemObservation()
+    }
+
+    private func buildSidebarFilesystemObservation() -> SidebarFilesystemObservation {
         sidebarFilesystemPathBuildCount += 1
         var paths = Set(store.sessions.lazy.map(\.cwd))
         paths.formUnion(tabs.lazy.map { $0.workingDirectory.path })
@@ -967,13 +977,21 @@ final class AppModel {
         paths.formUnion(settings.archivedConversations.lazy.map(\.cwd))
         paths.formUnion(settings.conversationNames.lazy.map(\.cwd))
         paths.insert(settings.focusedProjectPath)
-        return paths.filter { $0.hasPrefix("/") }.sorted()
+        let classificationPaths =
+            settings.showWorktreeSessions
+            ? []
+            : Set(store.sessions.lazy.map(\.cwd))
+                .filter { $0.hasPrefix("/") && !isEphemeralByPath(path: $0) }.sorted()
+        return SidebarFilesystemObservation(
+            paths: paths.filter { $0.hasPrefix("/") }.sorted(),
+            classificationPaths: classificationPaths)
     }
 
     /// SwiftUI owns this task's lifetime. Passive FSEvents schedule a refresh at
     /// the cache deadline; unchanged, idle sidebars do no periodic list work.
-    func observeSidebarFilesystem(paths: [String]? = nil) async {
-        let paths = paths ?? sidebarFilesystemPaths
+    func observeSidebarFilesystem(observation: SidebarFilesystemObservation? = nil) async {
+        let observation = observation ?? sidebarFilesystemObservation
+        let paths = observation.paths
         guard !paths.isEmpty else { return }
         let watcher = SidebarPathWatcher()
         let stream = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
@@ -984,7 +1002,9 @@ final class AppModel {
             stream.continuation.finish()
         }
         func start() {
-            let coverage = watcher.start(paths: paths) { stream.continuation.yield(true) }
+            let coverage = watcher.start(paths: paths, classificationPaths: observation.classificationPaths) {
+                stream.continuation.yield(true)
+            }
             if coverage == .complete {
                 fallback?.cancel()
                 fallback = nil

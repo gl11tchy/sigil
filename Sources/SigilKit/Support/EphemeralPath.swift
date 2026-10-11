@@ -29,6 +29,13 @@ public func invalidateEphemeralPathCache() {
     ephemeralPathCache.withLock { $0.removeAll(keepingCapacity: true) }
 }
 
+/// These lexical scratch markers remain ephemeral even if a symlink retargets.
+/// Git classification is unnecessary for such paths; an ordinary alias into a
+/// scratch folder still needs filesystem observation.
+public func isEphemeralByPath(path: String) -> Bool {
+    isTemporaryVariant(path) || hasScratchWorkspaceMarker(path)
+}
+
 private struct EphemeralCacheEntry {
     var value: Bool
     var device: UInt64?

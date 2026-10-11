@@ -11,8 +11,10 @@ public final class SidebarPathWatcher: Sendable {
     public init() {}
 
     @discardableResult
-    public func start(paths: [String], changed: @escaping @Sendable () -> Void) -> Coverage {
-        let plan = Self.plan(paths: paths)
+    public func start(
+        paths: [String], classificationPaths: [String] = [], changed: @escaping @Sendable () -> Void
+    ) -> Coverage {
+        let plan = Self.plan(paths: paths, classificationPaths: classificationPaths)
         let started = watcher.start(
             paths: plan.roots, latency: 0.25, contents: .sidebarPaths(plan.identities)
         ) { _ in changed() }
@@ -28,12 +30,14 @@ public final class SidebarPathWatcher: Sendable {
 
     /// Observe missing roots through an existing ancestor without deleting any
     /// saved reference. Watch alias parents so retargeting a symlink is visible.
-    static func plan(paths: [String]) -> (roots: [String], identities: Set<String>, needsFallback: Bool) {
+    static func plan(
+        paths: [String], classificationPaths: [String] = []
+    ) -> (roots: [String], identities: Set<String>, needsFallback: Bool) {
         var roots: Set<String> = []
         var identities: Set<String> = []
         var examined: Set<String> = []
         var needsFallback = false
-        for path in Set(paths) {
+        for path in Set(paths + classificationPaths) {
             // Foundation's standardizedFileURL may resolve an existing alias
             // when a descendant is missing. Preserve the alias spelling too.
             let lexical = URL(fileURLWithPath: path)
@@ -84,6 +88,31 @@ public final class SidebarPathWatcher: Sendable {
                 }
             }
         }
+        // With no existing Git boundary, an ancestor outside these roots may
+        // acquire a marker. Keep fallback for those classification inputs.
+        if classificationPaths.contains(where: { !hasGitBoundary(path: $0) }) { needsFallback = true }
         return (roots.sorted(), identities, needsFallback)
+    }
+
+    private static func hasGitBoundary(path: String) -> Bool {
+        var folder = SessionDirectoryWatcher.canonicalURL(URL(fileURLWithPath: path))
+        while folder.path != "/" {
+            let git = folder.appendingPathComponent(".git")
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: git.path, isDirectory: &isDirectory) {
+                if isDirectory.boolValue { return true }
+                if let text = try? String(contentsOf: git, encoding: .utf8), text.hasPrefix("gitdir:") {
+                    let target = text.dropFirst("gitdir:".count).trimmingCharacters(in: .whitespacesAndNewlines)
+                    let admin = URL(fileURLWithPath: target, relativeTo: folder).standardizedFileURL
+                    if admin.deletingLastPathComponent().lastPathComponent == "worktrees",
+                        FileManager.default.fileExists(atPath: admin.appendingPathComponent("commondir").path)
+                    {
+                        return true
+                    }
+                }
+            }
+            folder.deleteLastPathComponent()
+        }
+        return false
     }
 }
