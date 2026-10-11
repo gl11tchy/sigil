@@ -34,8 +34,7 @@ struct SidebarVersionNoticeTests {
             NSHostingView(
                 rootView:
                     SidebarView(model: model, observeHover: { probe.glide = $0 })
-                    .environment(\.palette, Palette(theme: .sigilDark))
-                    .environment(\.accessibilityReduceMotion, true)))
+                    .environment(\.palette, Palette(theme: .sigilDark))))
         defer { hosted.window.close() }
         try await Task.sleep(for: .milliseconds(100))
         let initialBuilds = model.sidebarSnapshotBuildCount
@@ -53,7 +52,7 @@ struct SidebarVersionNoticeTests {
         let elapsed = start.duration(to: .now)
         let builds = model.sidebarSnapshotBuildCount - initialBuilds
         print(
-            "REA-1255 hover fixture: sessions=1000 rows=20 elapsed=\(elapsed) snapshotBuilds=\(builds); DEBUG, reduceMotion=true, actual onHover callback, 200x460 app-host window; excludes seeding/initial layout"
+            "REA-1255 hover fixture: sessions=1000 rows=20 elapsed=\(elapsed) snapshotBuilds=\(builds); DEBUG, reduceMotion=\(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion), actual onHover callback, 200x460 app-host window; excludes seeding/initial layout"
         )
         #expect(builds < 20, "The hover sweep must reuse snapshots within the freshness window")
     }

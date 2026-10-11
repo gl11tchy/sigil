@@ -951,13 +951,15 @@ final class AppModel {
     }
 
     var sidebarFilesystemPaths: [String] {
-        Set(
-            store.sessions.map(\.cwd) + tabs.map { $0.workingDirectory.path }
-                + settings.addedProjects.map(\.path) + settings.pinnedProjects
-                + settings.pinnedConversations.map(\.cwd) + settings.archivedConversations.map(\.cwd)
-                + settings.conversationNames.map(\.cwd) + [settings.focusedProjectPath]
-        )
-        .filter { $0.hasPrefix("/") }.sorted()
+        var paths = Set(store.sessions.lazy.map(\.cwd))
+        paths.formUnion(tabs.lazy.map { $0.workingDirectory.path })
+        paths.formUnion(settings.addedProjects.lazy.map(\.path))
+        paths.formUnion(settings.pinnedProjects)
+        paths.formUnion(settings.pinnedConversations.lazy.map(\.cwd))
+        paths.formUnion(settings.archivedConversations.lazy.map(\.cwd))
+        paths.formUnion(settings.conversationNames.lazy.map(\.cwd))
+        paths.insert(settings.focusedProjectPath)
+        return paths.filter { $0.hasPrefix("/") }.sorted()
     }
 
     /// SwiftUI owns this task's lifetime. Passive FSEvents schedule a refresh at
@@ -975,6 +977,9 @@ final class AppModel {
             watcher.start(paths: paths) { stream.continuation.yield(()) }
         }
         if start() {
+            // Cover changes between the first render and arming the stream.
+            // Subsequent invalidations rearm before SwiftUI can render again.
+            invalidateSidebarFilesystem()
             for await _ in stream.stream {
                 let remaining = max(
                     0,

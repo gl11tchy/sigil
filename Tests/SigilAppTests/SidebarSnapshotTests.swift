@@ -159,19 +159,20 @@ struct SidebarSnapshotTests {
         await fixture.store.reload()
         let model = fixture.model()
         defer { model.closeAllTabsAndWait() }
+        let task = Task { await model.observeSidebarFilesystem() }
+        defer { task.cancel() }
+        try await Task.sleep(for: .milliseconds(100))
         let observed = OSAllocatedUnfairLock(initialState: false)
         withObservationTracking {
             _ = model.sidebarSnapshot()
         } onChange: {
             observed.withLock { $0 = true }
         }
-        let task = Task { await model.observeSidebarFilesystem() }
-        defer { task.cancel() }
-        try await Task.sleep(for: .milliseconds(100))
+        let idleBuilds = model.sidebarSnapshotBuildCount
         // No one-second full-list timer on an unchanged, visible sidebar.
         try await Task.sleep(for: .milliseconds(1_200))
         #expect(!observed.withLock { $0 })
-        #expect(model.sidebarSnapshotBuildCount == 1)
+        #expect(model.sidebarSnapshotBuildCount == idleBuilds)
         try FileManager.default.removeItem(at: alias)
         try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: second)
         let deadline = ContinuousClock.now + .seconds(4)
