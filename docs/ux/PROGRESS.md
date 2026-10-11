@@ -16,13 +16,18 @@ search keeps its existing title/path input. Search help states the prefix limit.
 
 [The verification record](../qa/rea-1272.md) records the generated main reproduction
 and passing direct Swift 6/Address Sanitizer checks, including 900 sessions/100
-notes with no reads during queries. The first full CI exposed idle snapshot observation of note publication; the
-active-query generation guard fixes that cause without changing the assertion.
-A generated benchmark also prompted off-main matching and independent initial
-overlays. Real store/Observation/app-host validation awaits a new ordinary
-exact-final-head CI gate. Existing local build/process denials remain
-binding; no local UI, daily app install or personal data inspection. Parent
-personal final-diff review remains required before merge.
+notes with no reads during queries. The first two full CI runs each failed the
+original quiet-sidebar observation assertion; neither identified its source.
+An active-query guard avoids idle note subscriptions but did not eliminate that
+CI failure. A temporary trace then passed full CI, showing initial note
+publication with a quiet sidebar and complete, event-free filesystem coverage.
+This does not establish why the earlier runs failed. The trace is removed and
+a controlled held-read publication test adds timing-specific evidence while
+preserving the original assertions. A generated benchmark also prompted
+off-main matching and independent initial overlays. The clean final-head CI
+gate remains required. Existing local build/process denials remain binding;
+no local UI, daily app install or personal data inspection. Parent personal
+final-diff review remains required before merge.
 
 ## REA-1261: six-provider availability and first-run choice
 

@@ -951,8 +951,6 @@ final class AppModel {
     static let sidebarFreshnessWindow: TimeInterval = 1
     /// Read by snapshot consumers so a filesystem event rerenders a quiet view.
     private var sidebarFilesystemGeneration = 0
-    var sidebarFilesystemInvalidationCount: Int { sidebarFilesystemGeneration }
-    @ObservationIgnored private(set) var sidebarFilesystemTrace: [String] = []
     /// Snapshots built so far. Tests read it to prove events reuse one.
     @ObservationIgnored private(set) var sidebarSnapshotBuildCount = 0
     @ObservationIgnored private(set) var sidebarFilesystemPathBuildCount = 0
@@ -1038,7 +1036,6 @@ final class AppModel {
             let coverage = watcher.start(paths: paths, classificationPaths: observation.classificationPaths) {
                 stream.continuation.yield(true)
             }
-            sidebarFilesystemTrace.append("coverage:\(coverage)")
             if coverage == .complete {
                 fallback?.cancel()
                 fallback = nil
@@ -1057,7 +1054,6 @@ final class AppModel {
         // Reconcile the initial/remount gap before relying on future events.
         invalidateSidebarFilesystem()
         for await filesystemEvent in stream.stream {
-            sidebarFilesystemTrace.append("event:\(filesystemEvent)")
             let remaining =
                 filesystemEvent
                 ? max(

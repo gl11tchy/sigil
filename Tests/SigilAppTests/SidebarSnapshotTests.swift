@@ -1,14 +1,59 @@
 import Foundation
 import Observation
-import SigilKit
 import Testing
 import os
 
 @testable import SigilApp
+@testable import SigilKit
 
 @Suite(.serialized)
 @MainActor
 struct SidebarSnapshotTests {
+    @Test func heldInitialNotePublicationDoesNotInvalidateAnIdleObservedSnapshot() async throws {
+        let fixture = try ModelFixture()
+        defer {
+            fixture.store.stop()
+            fixture.cleanup()
+        }
+        let folder = try fixture.directory("held-note-publication")
+        try fixture.writeListedSession(id: "note", cwd: folder.path, summary: "Weekly")
+        await fixture.store.reload()
+        let note = try #require(fixture.store.sessions.first)
+        let writer = ConversationNotesStore(root: fixture.notesRoot)
+        writer.setNote("zirconia", for: note.id, cwd: note.cwd)
+        writer.flushNow()
+        let gate = SnapshotNoteReadGate()
+        defer { gate.release() }
+        let notes = ConversationNotesStore(root: fixture.notesRoot, searchReader: gate.reader)
+        let model = snapshotModel(fixture, clock: SnapshotClock(), notesStore: notes)
+        defer { model.closeAllTabsAndWait() }
+        model.openRecents()
+        let enteredDeadline = ContinuousClock.now + .seconds(4)
+        while !gate.entered, ContinuousClock.now < enteredDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(gate.entered)
+        #expect(notes.searchPublishedCount == 0)
+        let generation = notes.searchGeneration
+        let observed = OSAllocatedUnfairLock(initialState: false)
+        withObservationTracking {
+            _ = model.sidebarSnapshot()
+        } onChange: {
+            observed.withLock { $0 = true }
+        }
+        let builds = model.sidebarSnapshotBuildCount
+        gate.release()
+        let publicationDeadline = ContinuousClock.now + .seconds(4)
+        while notes.searchPublishedCount == 0, ContinuousClock.now < publicationDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(notes.searchPublishedCount > 0)
+        #expect(notes.searchGeneration > generation)
+        #expect(!observed.withLock { $0 })
+        #expect(model.sidebarSnapshot().listed == [note])
+        #expect(model.sidebarSnapshotBuildCount == builds)
+    }
+
     @Test func notesPublicationAndUnsavedEditsInvalidateTheCachedSidebar() async throws {
         let fixture = try ModelFixture()
         defer {
@@ -313,41 +358,6 @@ struct SidebarSnapshotTests {
         defer { task.cancel() }
         try await Task.sleep(for: .milliseconds(100))
         let observed = OSAllocatedUnfairLock(initialState: false)
-        let sources = OSAllocatedUnfairLock(initialState: [String]())
-        withObservationTracking {
-            _ = model.panel.notesStore.searchGeneration
-        } onChange: {
-            sources.withLock { $0.append("notes") }
-        }
-        withObservationTracking {
-            _ = model.sidebarFilesystemInvalidationCount
-        } onChange: {
-            sources.withLock { $0.append("filesystem") }
-        }
-        withObservationTracking {
-            _ = model.store.sessions
-        } onChange: {
-            sources.withLock { $0.append("sessions") }
-        }
-        let notesBefore = model.panel.notesStore.searchGeneration
-        withObservationTracking {
-            _ = model.settings.focusedProjectPath
-            _ = model.settings.pinnedConversations
-            _ = model.settings.pinnedProjects
-            _ = model.settings.addedProjects
-            _ = model.settings.archivedConversations
-            _ = model.settings.conversationNames
-            _ = model.settings.showEmptySessions
-            _ = model.settings.showWorktreeSessions
-            _ = model.settings.showSubagentSessions
-            _ = model.settings.showOtherAppSessions
-            _ = model.settings.sigilConversations
-            _ = model.tabs
-            _ = model.searchText
-        } onChange: {
-            sources.withLock { $0.append("inputs") }
-        }
-        let filesystemBefore = model.sidebarFilesystemInvalidationCount
         withObservationTracking {
             _ = model.sidebarSnapshot()
         } onChange: {
@@ -356,13 +366,6 @@ struct SidebarSnapshotTests {
         let idleBuilds = model.sidebarSnapshotBuildCount
         // No one-second full-list timer on an unchanged, visible sidebar.
         try await Task.sleep(for: .milliseconds(1_200))
-        print(
-            "Quiet snapshot diagnostics", "sources", sources.withLock { $0 }, "query", model.searchText,
-            "notes", notesBefore, model.panel.notesStore.searchGeneration,
-            "filesystem", filesystemBefore, model.sidebarFilesystemInvalidationCount,
-            "stream", model.sidebarFilesystemTrace,
-            "paths", model.sidebarFilesystemObservation.paths,
-            "classifications", model.sidebarFilesystemObservation.classificationPaths)
         #expect(!observed.withLock { $0 })
         #expect(model.sidebarSnapshotBuildCount == idleBuilds)
         try FileManager.default.removeItem(at: alias)
@@ -608,16 +611,41 @@ private final class SnapshotClock: Sendable {
 }
 
 @MainActor
-private func snapshotModel(_ fixture: ModelFixture, clock: SnapshotClock) -> AppModel {
+private func snapshotModel(
+    _ fixture: ModelFixture, clock: SnapshotClock, notesStore: ConversationNotesStore? = nil
+) -> AppModel {
     AppModel(
         settings: fixture.settings, store: fixture.store, trashConversation: { _ in },
         presentError: { _ in },
         panel: RightPanel(
             defaults: fixture.defaults,
-            notesStore: ConversationNotesStore(root: fixture.notesRoot)),
+            notesStore: notesStore ?? ConversationNotesStore(root: fixture.notesRoot)),
         pairingStore: InMemoryRemotePairingStore(),
         providerInstallations: fixtureProviderInstallations(fixture.executable),
         sidebarClock: { clock.now() })
+}
+
+/// Controls publication timing without extra Observation subscriptions or waits
+/// inside the main actor. The original filesystem regression stays unchanged.
+private final class SnapshotNoteReadGate: Sendable {
+    private let state = OSAllocatedUnfairLock(initialState: false)
+    private let semaphore = DispatchSemaphore(value: 0)
+    var entered: Bool { state.withLock { $0 } }
+    func release() { semaphore.signal() }
+    var reader: ConversationNotesIndex.Reader {
+        .init(
+            metadata: ConversationNotesIndex.Reader.disk.metadata,
+            read: { url, stamp in
+                let bytes = ConversationNotesIndex.Reader.disk.read(url, stamp)
+                let first = self.state.withLock { entered in
+                    if entered { return false }
+                    entered = true
+                    return true
+                }
+                if first { _ = self.semaphore.wait(timeout: .now() + 4) }
+                return bytes
+            })
+    }
 }
 
 /// The lists SidebarView used to read one at a time from the model during a render.
