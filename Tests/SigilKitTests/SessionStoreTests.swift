@@ -153,7 +153,8 @@ struct SessionStoreTests {
 
         await harness.store.scan(ignoringCache: false)
 
-        #expect(harness.store.loadError?.contains("4 session item(s)") == true)
+        #expect(harness.store.loadError == nil)
+        #expect(harness.store.historyNotice?.contains("4 session summary file(s)") == true)
         #expect(!harness.store.isLoading)
         let ids = Set(harness.store.sessions.map(\.id))
         #expect(
@@ -585,7 +586,192 @@ struct SessionStoreTests {
         await harness.store.scan(ignoringCache: false)
 
         #expect(harness.store.sessions.first?.title == originalTitle)
-        #expect(harness.store.loadError?.contains("summary.json is invalid") == true)
+        #expect(harness.store.loadError == nil)
+        #expect(harness.store.historyNotice?.contains("incomplete or unsupported") == true)
+    }
+
+    @Test func compatibilityNoticesAggregateAndClearAfterVerifiedReplacement() async throws {
+        let fixture = try HistoryCompatibilityFixture()
+        defer { fixture.remove() }
+        let summary = fixture.claude.appendingPathComponent("rollout.jsonl")
+        try Data(#"{"type":"summary","summary":"Generated"}"#.utf8).write(to: summary)
+        try fixture.writeNative(version: "1.0.0")
+        let store = fixture.store()
+        defer { store.stop() }
+        await store.reload()
+        #expect(store.sessions.isEmpty)
+        #expect(store.loadError == nil)
+        #expect(store.historyNotice?.contains("Claude Code history") == true)
+        #expect(store.historyNotice?.contains("Codex history") == true)
+        #expect(store.historyNotice?.contains("1.0.0") == true)
+        #expect(!store.canPruneMissingProjects)
+        try fixture.writeNative(provider: .claudeCode, version: "2.1.283")
+        try fixture.writeNative()
+        await store.reload()
+        #expect(store.sessions.count == 2)
+        #expect(store.loadError == nil)
+        #expect(store.historyNotice == nil)
+        #expect(store.canPruneMissingProjects)
+    }
+
+    @Test(arguments: [CLIProvider.grokBuild, .claudeCode, .codex])
+    func lossOfAPreviouslyAvailableEmptyRootIsAReadProblem(provider: CLIProvider) async throws {
+        let fixture = try HistoryCompatibilityFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        defer { store.stop() }
+        await store.reload()
+        #expect(store.sessions.isEmpty)
+        #expect(store.loadError == nil)
+        try FileManager.default.removeItem(at: fixture.root(provider))
+        await store.reload()
+        #expect(store.sessions.isEmpty)
+        #expect(store.loadError != nil)
+        #expect(!store.canPruneMissingProjects)
+        try FileManager.default.createDirectory(at: fixture.root(provider), withIntermediateDirectories: true)
+        await store.reload()
+        #expect(store.loadError == nil)
+        #expect(store.canPruneMissingProjects)
+    }
+
+    @Test(arguments: [CLIProvider.grokBuild, .claudeCode, .codex])
+    func anInaccessibleEmptyProviderRootIsAReadProblem(provider: CLIProvider) async throws {
+        let fixture = try HistoryCompatibilityFixture()
+        defer { fixture.remove() }
+        let store = fixture.store()
+        defer { store.stop() }
+        let root = fixture.root(provider)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: root.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path) }
+        await store.reload()
+        #expect(store.sessions.isEmpty)
+        #expect(store.loadError != nil)
+        #expect(!store.canPruneMissingProjects)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
+        await store.reload()
+        #expect(store.loadError == nil)
+        #expect(store.canPruneMissingProjects)
+    }
+
+    @Test func neverAvailableProviderRootsAreNormalAbsence() async throws {
+        let fixture = try HistoryCompatibilityFixture(createProviderRoots: false)
+        defer { fixture.remove() }
+        let store = fixture.store()
+        defer { store.stop() }
+        await store.reload()
+        #expect(store.sessions.isEmpty)
+        #expect(store.loadError == nil)
+        #expect(store.historyNotice == nil)
+    }
+
+    @Test(arguments: [CLIProvider.claudeCode, .codex])
+    func rootLossCannotClearAnUncachedCompatibilityNotice(provider: CLIProvider) async throws {
+        let fixture = try HistoryCompatibilityFixture()
+        defer { fixture.remove() }
+        try fixture.writeNative(provider: provider, version: "1.0.0")
+        let store = fixture.store()
+        defer { store.stop() }
+        await store.reload()
+        #expect(store.sessions.isEmpty)
+        let notice = try #require(store.historyNotice)
+        try FileManager.default.removeItem(at: fixture.root(provider))
+        await store.reload()
+        #expect(store.loadError != nil)
+        #expect(store.historyNotice == notice)
+        try FileManager.default.createDirectory(at: fixture.root(provider), withIntermediateDirectories: true)
+        await store.reload()
+        #expect(store.loadError == nil)
+        #expect(store.historyNotice == nil)
+    }
+
+    @Test func inaccessibleNativeRootKeepsTheEarlierNoticeAndCachedRows() async throws {
+        let fixture = try HistoryCompatibilityFixture()
+        defer { fixture.remove() }
+        let held = try fixture.writeNative()
+        try fixture.writeNative(id: HistoryCompatibilityFixture.secondID, filename: "blocked/second.jsonl")
+        let store = fixture.store()
+        defer { store.stop() }
+        await store.reload()
+        try fixture.writeNative(version: "1.0.0")
+        await store.reload()
+        let notice = try #require(store.historyNotice)
+        let before = store.sessions
+        let blocked = fixture.codex.appendingPathComponent("blocked")
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: blocked.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: blocked.path) }
+        try FileManager.default.removeItem(at: held)
+        await store.reload()
+        #expect(store.loadError != nil)
+        #expect(store.historyNotice == notice)
+        #expect(store.sessions == before)
+        #expect(!store.canPruneMissingProjects)
+    }
+
+    @Test func aSummarylessGrokFolderProtectsMetadataWithoutKeepingAnUnrelatedDeletedRow() async throws {
+        let fixture = try HistoryCompatibilityFixture()
+        defer { fixture.remove() }
+        let deleted = try fixture.writeGrok()
+        let store = fixture.store()
+        defer { store.stop() }
+        await store.reload()
+        #expect(store.sessions.count == 1)
+        try FileManager.default.removeItem(at: deleted.deletingLastPathComponent())
+        try fixture.grokDirectory(id: HistoryCompatibilityFixture.secondID)
+        await store.reload()
+        #expect(store.sessions.isEmpty)
+        #expect(store.loadError == nil)
+        #expect(store.historyNotice?.contains("Grok history") == true)
+        #expect(
+            store.protectsGrokMetadata(
+                sessionID: HistoryCompatibilityFixture.secondID, cwd: HistoryCompatibilityFixture.cwd))
+        #expect(
+            !store.protectsGrokMetadata(
+                sessionID: HistoryCompatibilityFixture.firstID, cwd: HistoryCompatibilityFixture.cwd))
+        #expect(!store.canPruneMissingProjects)
+        try fixture.writeGrok(id: HistoryCompatibilityFixture.secondID)
+        await store.reload()
+        #expect(store.historyNotice == nil)
+        #expect(store.canPruneMissingProjects)
+        #expect(
+            !store.protectsGrokMetadata(
+                sessionID: HistoryCompatibilityFixture.secondID, cwd: HistoryCompatibilityFixture.cwd))
+    }
+
+    @Test func supersededCachedScanCannotPublishOldNoticeOrCoverage() async throws {
+        let fixture = try HistoryCompatibilityFixture()
+        defer { fixture.remove() }
+        let gate = CompatibilityScanGate()
+        let root = fixture.grok
+        let store = SessionStore(
+            root: root, timing: SessionStoreTiming(),
+            scanOperation: { _, _, forced in
+                if !forced {
+                    await gate.hold()
+                    return .init(
+                        sessions: [], cache: [:], loadError: "Superseded fixture error",
+                        coverage: .init(notices: [root.path: "Superseded compatibility notice"]))
+                }
+                return .init(sessions: [], cache: [:], loadError: nil)
+            })
+        defer { store.stop() }
+        let old = Task { await store.scan(ignoringCache: false) }
+        for _ in 0..<1_000 {
+            if await gate.isWaiting { break }
+            await Task.yield()
+        }
+        let waiting = await gate.isWaiting
+        #expect(waiting)
+        guard waiting else {
+            await gate.release()
+            await old.value
+            return
+        }
+        await store.reload()
+        await gate.release()
+        await old.value
+        #expect(store.loadError == nil)
+        #expect(store.historyNotice == nil)
+        #expect(store.canPruneMissingProjects)
     }
 
     @Test func totalReadFailureIsReportedAndPreservesLastKnownSessions() async throws {
@@ -661,6 +847,26 @@ struct SessionStoreTests {
 
         #expect(harness.store.sessions.map(\.id) == ["019ffeab-c76b-7fe1-be40-508369febd51"])
         #expect(harness.store.loadError != nil)
+    }
+}
+
+private actor CompatibilityScanGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var released = false
+    private(set) var isWaiting = false
+
+    func hold() async {
+        guard !released else { return }
+        await withCheckedContinuation {
+            continuation = $0
+            isWaiting = true
+        }
+    }
+
+    func release() {
+        released = true
+        continuation?.resume()
+        continuation = nil
     }
 }
 

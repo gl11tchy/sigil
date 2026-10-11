@@ -1039,7 +1039,7 @@ final class AppModel {
             settings.tabColors = remainingColors
         }
         let focused = settings.focusedProjectPath
-        if !focused.isEmpty,
+        if store.canPruneMissingProjects, !focused.isEmpty,
             !SidebarOrganization.isSentinel(focused),
             !store.sessions.contains(where: { inProject($0.cwd, focused) }),
             !isAddedProject(focused)
@@ -1079,6 +1079,9 @@ final class AppModel {
             _ = store.sessions
             // A watcher rescan can clear an error without changing sessions.
             _ = store.loadError
+            _ = store.historyNotice
+            _ = store.canPruneMissingProjects
+            _ = store.appliedScanSequence
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -1096,7 +1099,7 @@ final class AppModel {
     }
 
     /// Chats Sigil started before it kept a list: saved open tabs and chats
-    /// in Sigil's own worktrees. Runs once, after the first scan.
+    /// in Sigil's own worktrees. Completes once a scan verifies all history coverage.
     func seedSigilConversations() {
         // A scan with a read error may have missed chats; wait for a clean one.
         guard !settings.sigilConversationsSeeded, store.appliedScanSequence > 0, store.loadError == nil
@@ -1108,7 +1111,8 @@ final class AppModel {
             .filter { SigilWorktree.projectPath(of: $0.cwd) != nil && !$0.isSubagent }
             .map(\.id)
         settings.recordSigilConversations(saved + worktrees)
-        settings.sigilConversationsSeeded = true
+        // Seed verified chats now, and retry when incomplete files become readable.
+        if store.canPruneMissingProjects { settings.sigilConversationsSeeded = true }
     }
 
     /// A Codex tab can be renamed and colored before its chat id exists.
@@ -1285,6 +1289,7 @@ final class AppModel {
     ) -> [OpenTabsSnapshot.Entry] {
         entries.filter { entry in
             isNativeHistoryID(sidebarID(entry))
+                || store.protectsGrokMetadata(sessionID: entry.sessionID, cwd: entry.cwd)
                 || store.sessions.contains { $0.id == entry.sessionID && samePath($0.cwd, entry.cwd) }
                 || tabs.contains { tabMatches($0, sessionID: entry.sessionID, cwd: entry.cwd) }
                 || awaitsScan(sharedKey(list, entry.sessionID, entry.cwd))
@@ -1292,7 +1297,8 @@ final class AppModel {
     }
 
     private func pruningMissingProjects(_ paths: [String]) -> [String] {
-        paths.filter { path in
+        guard store.canPruneMissingProjects else { return paths }
+        return paths.filter { path in
             store.sessions.contains { inProject($0.cwd, path) }
                 || tabs.contains { inProject($0.workingDirectory.path, path) }
                 || isAddedProject(path)
@@ -1307,6 +1313,7 @@ final class AppModel {
     private func pruningMissingNames(_ names: [ConversationName]) -> [ConversationName] {
         names.filter { record in
             isNativeHistoryID(record.sessionID)
+                || store.protectsGrokMetadata(sessionID: record.sessionID, cwd: record.cwd)
                 || store.sessions.contains { $0.id == record.sessionID && samePath($0.cwd, record.cwd) }
                 || tabs.contains { tabMatches($0, sessionID: record.sessionID, cwd: record.cwd) }
                 || awaitsScan(sharedKey("name", record.sessionID, record.cwd))
@@ -1316,6 +1323,7 @@ final class AppModel {
     private func pruningMissingColors(_ records: [TabColorRecord]) -> [TabColorRecord] {
         records.filter { record in
             isNativeHistoryID(record.sessionID)
+                || store.protectsGrokMetadata(sessionID: record.sessionID, cwd: record.cwd)
                 || store.sessions.contains { $0.id == record.sessionID && samePath($0.cwd, record.cwd) }
                 || tabs.contains { tabMatches($0, sessionID: record.sessionID, cwd: record.cwd) }
                 || awaitsScan(sharedKey("color", record.sessionID, record.cwd))

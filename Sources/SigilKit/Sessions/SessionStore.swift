@@ -26,18 +26,23 @@ public final class SessionStore {
     public private(set) var isLoading: Bool = false
     /// Set when the sessions directory or one or more session summaries could not be read.
     public private(set) var loadError: String?
+    /// Compatibility information does not block loading or independently verified removals.
+    public private(set) var historyNotice: String?
+    /// An unknown file can belong to an otherwise empty project. Keep project metadata in that case.
+    public private(set) var canPruneMissingProjects = false
 
     public let root: URL
     /// The captured root shared by history scans, watchers and identity proof.
     public var codexHistoryRoot: URL? { nativeRoots.first { $0.0 == .codex }?.1 }
     @ObservationIgnored private var cache: [String: SessionCacheEntry] = [:]
+    @ObservationIgnored private var coverage = SessionScanner.Coverage()
     /// Folded search fields, one per entry of `sessions`, in the same order.
     @ObservationIgnored private var searchKeys: [SessionScanner.SearchKey] = []
     @ObservationIgnored private var isStarted = false
     /// How many scans have started, and which of them produced `sessions`.
     /// A scan numbered above a moment's `scanSequence` began after it.
     @ObservationIgnored public private(set) var scanSequence = 0
-    @ObservationIgnored public private(set) var appliedScanSequence = 0
+    public private(set) var appliedScanSequence = 0
     @ObservationIgnored private var forceEpoch = 0
     @ObservationIgnored private var forcedScansInFlight = 0
     @ObservationIgnored private var cachedScanPending = false
@@ -68,6 +73,9 @@ public final class SessionStore {
     /// also keep filesystem tests isolated from the user's provider history.
     convenience init(root: URL, timing: SessionStoreTiming, nativeRoots: [(CLIProvider, URL)] = []) {
         let nativeRoots = nativeRoots.map { ($0.0, SessionDirectoryWatcher.canonicalURL($0.1)) }
+        // Availability is a monotonic observed fact, including roots with zero sessions.
+        // Concurrent or superseded scans may observe it; only applied scans publish notices.
+        let availableRoots = SessionScanner.RootAvailability()
         self.init(
             root: root,
             timing: timing,
@@ -77,16 +85,19 @@ public final class SessionStore {
                     var result = SessionScanner.scan(
                         root: root,
                         cache: cache.filter { $0.value.session.provider == .grokBuild },
-                        ignoringCache: ignoringCache
+                        ignoringCache: ignoringCache,
+                        rootAvailability: availableRoots
                     )
                     for (provider, nativeRoot) in nativeRoots {
                         let native = NativeSessionScanner.scan(
-                            provider: provider, root: nativeRoot, cache: cache, ignoringCache: ignoringCache)
+                            provider: provider, root: nativeRoot, cache: cache, ignoringCache: ignoringCache,
+                            rootAvailability: availableRoots)
                         result.sessions += native.sessions
                         result.cache.merge(native.cache) { _, new in new }
                         result.loadError =
                             [result.loadError, native.loadError].compactMap { $0 }.joined(separator: "\n")
                             .nilIfBlank
+                        result.coverage.merge(native.coverage)
                     }
                     if !nativeRoots.isEmpty { result.sessions.sort(by: SessionScanner.isNewer) }
                     return result
@@ -168,6 +179,13 @@ public final class SessionStore {
         refreshWatcher()
     }
 
+    /// A present Grok folder without its summary is not proof that its saved metadata is stale.
+    public func protectsGrokMetadata(sessionID: String, cwd: String) -> Bool {
+        let folder = GrokPaths.sessionFolderName(forCanonicalPath: GrokPaths.canonicalPath(cwd))
+        let directory = root.appendingPathComponent(folder).appendingPathComponent(sessionID).standardizedFileURL.path
+        return coverage.unrecognizedGrokDirectories.contains(directory)
+    }
+
     /// Sessions whose title, project name, `~` path, or cwd match `query`.
     /// Closest title first, then newer activity. An empty or whitespace-only
     /// query returns every session, newest first, without evaluating
@@ -236,6 +254,21 @@ public final class SessionStore {
         }
         appliedScanSequence = sequence
         cache = result.cache
+        var nextCoverage = result.coverage
+        for root in nextCoverage.uncertainRoots {
+            if let previous = coverage.notices[root] {
+                if nextCoverage.notices[root] == nil {
+                    nextCoverage.notices[root] = previous
+                } else if let current = nextCoverage.notices[root], current != previous {
+                    nextCoverage.notices[root] = current + " Earlier compatibility notices remain unresolved."
+                }
+            }
+            // Preserve summary-less folders whose parent could not be enumerated.
+            let prefix = root.hasSuffix("/") ? root : root + "/"
+            nextCoverage.unrecognizedGrokDirectories.formUnion(
+                coverage.unrecognizedGrokDirectories.filter { $0.hasPrefix(prefix) })
+        }
+        coverage = nextCoverage
         if sessions != result.sessions {
             sessions = result.sessions
             searchKeys = sessions.map(SessionScanner.SearchKey.init)
@@ -243,6 +276,10 @@ public final class SessionStore {
         if loadError != result.loadError {
             loadError = result.loadError
         }
+        let notice = nextCoverage.notices.sorted { $0.key < $1.key }.map(\.value).joined(separator: "\n").nilIfBlank
+        if historyNotice != notice { historyNotice = notice }
+        let canPrune = nextCoverage.uncertainRoots.isEmpty && nextCoverage.notices.isEmpty && result.loadError == nil
+        if canPruneMissingProjects != canPrune { canPruneMissingProjects = canPrune }
         refreshWatcher()
     }
 

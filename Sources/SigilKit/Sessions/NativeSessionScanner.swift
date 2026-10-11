@@ -24,34 +24,52 @@ enum NativeSessionScanner {
     }
 
     static func scan(
-        provider: CLIProvider, root: URL, cache: [String: SessionCacheEntry], ignoringCache: Bool
+        provider: CLIProvider, root: URL, cache: [String: SessionCacheEntry], ignoringCache: Bool,
+        wasAvailable: Bool = false,
+        rootAvailability: SessionScanner.RootAvailability? = nil
     ) -> SessionScanner.Result {
         let previous = cache.filter { $0.value.session.provider == provider }
         let fm = FileManager()
-        var isDirectory: ObjCBool = false
-        guard fm.fileExists(atPath: root.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+        let rootPath = root.standardizedFileURL.path
+        var coverage = SessionScanner.Coverage()
+        let inspection = rootAvailability?.inspect(root) ?? (SessionScanner.rootStatus(root), false)
+        switch inspection.0 {
+        case .missing:
+            let uncertain = wasAvailable || inspection.1 || !previous.isEmpty
+            if uncertain { coverage.uncertainRoots.insert(rootPath) }
             return SessionScanner.Result(
                 sessions: previous.values.map(\.session), cache: previous,
-                loadError: previous.isEmpty ? nil : "\(provider.name) history is unavailable. Saved sessions are kept.")
+                loadError: uncertain ? "\(provider.name) history is unavailable. Saved sessions are kept." : nil,
+                coverage: coverage)
+        case .unreadable, .notDirectory:
+            coverage.uncertainRoots.insert(rootPath)
+            return SessionScanner.Result(
+                sessions: previous.values.map(\.session), cache: previous,
+                loadError: "\(provider.name) history is unavailable. Saved sessions are kept.", coverage: coverage)
+        case .available:
+            coverage.observedRoots.insert(rootPath)
         }
-        var failed = false
+        var readFailed = false
         guard
             let walker = fm.enumerator(
                 at: root, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
                 options: [.skipsHiddenFiles],
                 errorHandler: { _, _ in
-                    failed = true
+                    readFailed = true
                     return true
                 })
         else {
+            coverage.uncertainRoots.insert(rootPath)
             return SessionScanner.Result(
                 sessions: previous.values.map(\.session), cache: previous,
-                loadError: "\(provider.name) history could not be read.")
+                loadError: "\(provider.name) history could not be read.", coverage: coverage)
         }
         let names =
             provider == .codex
             ? codexNames(at: root.deletingLastPathComponent().appendingPathComponent("session_index.jsonl")) : [:]
         var next: [String: SessionCacheEntry] = [:]
+        var unrecognized = 0
+        var unsupportedVersions: Set<String> = []
         for case let file as URL in walker {
             if file.lastPathComponent == "subagents" || file.lastPathComponent == "tool-results" {
                 walker.skipDescendants()
@@ -61,7 +79,14 @@ enum NativeSessionScanner {
             let key = file.standardizedFileURL.path
             do {
                 let values = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
-                guard values.isRegularFile == true, values.isSymbolicLink != true else { continue }
+                guard let isRegular = values.isRegularFile, let isSymbolicLink = values.isSymbolicLink else {
+                    throw CocoaError(.fileReadUnknown)
+                }
+                guard isRegular, !isSymbolicLink else {
+                    unrecognized += 1
+                    if let old = previous[key] { next[key] = old }
+                    continue
+                }
                 let attributes = try fm.attributesOfItem(atPath: file.path)
                 guard let modified = attributes[.modificationDate] as? Date,
                     let size = attributes[.size] as? NSNumber,
@@ -80,10 +105,19 @@ enum NativeSessionScanner {
                     continue
                 }
                 let data = try boundedContents(file, size: size.uint64Value)
-                guard let session = parse(provider: provider, data: data, file: file, modified: modified) else {
-                    // Unrecognized files are not sessions; retain a previously recognized record.
+                let session: GrokSession
+                switch parseResult(provider: provider, data: data, file: file, modified: modified) {
+                case .session(let recognized):
+                    session = recognized
+                case .unsupportedVersion(let version):
+                    unsupportedVersions.insert(version)
+                    unrecognized += 1
                     if let old = previous[key] { next[key] = old }
-                    failed = true
+                    continue
+                case .unrecognized:
+                    unrecognized += 1
+                    // Format uncertainty protects this file, not every missing file in the root.
+                    if let old = previous[key] { next[key] = old }
                     continue
                 }
                 next[key] = SessionCacheEntry(
@@ -91,15 +125,26 @@ enum NativeSessionScanner {
                     inode: inode.uint64Value, device: device.uint64Value, changeDate: changed,
                     contents: Data(), session: named(session, names: names))
             } catch {
-                failed = true
+                readFailed = true
                 if let old = previous[key] { next[key] = old }
             }
         }
         // Inaccessible subdirectories must not make known conversations disappear.
-        if failed { for (key, old) in previous where next[key] == nil { next[key] = old } }
+        if readFailed {
+            coverage.uncertainRoots.insert(rootPath)
+            for (key, old) in previous where next[key] == nil { next[key] = old }
+        }
+        if unrecognized > 0 {
+            let versions = unsupportedVersions.sorted().prefix(3).joined(separator: ", ")
+            let detail = versions.isEmpty ? "" : " Unsupported versions: \(versions)."
+            coverage.notices[rootPath] =
+                "\(provider.name) history: \(unrecognized) file(s) are incomplete or unsupported. Saved conversations are kept."
+                + detail
+        }
         return SessionScanner.Result(
             sessions: next.values.map(\.session).sorted(by: SessionScanner.isNewer), cache: next,
-            loadError: failed ? "Some \(provider.name) history could not be read. Saved sessions are kept." : nil)
+            loadError: readFailed ? "Some \(provider.name) history could not be read. Saved sessions are kept." : nil,
+            coverage: coverage)
     }
 
     private static func boundedContents(_ file: URL, size: UInt64) throws -> Data {
@@ -122,7 +167,20 @@ enum NativeSessionScanner {
     }
 
     static func parse(provider: CLIProvider, data: Data, file: URL, modified: Date) -> GrokSession? {
-        guard provider == .claudeCode || provider == .codex else { return nil }
+        if case .session(let session) = parseResult(provider: provider, data: data, file: file, modified: modified) {
+            return session
+        }
+        return nil
+    }
+
+    enum ParseResult {
+        case session(GrokSession)
+        case unsupportedVersion(String)
+        case unrecognized
+    }
+
+    static func parseResult(provider: CLIProvider, data: Data, file: URL, modified: Date) -> ParseResult {
+        guard provider == .claudeCode || provider == .codex else { return .unrecognized }
         var nativeID: String?
         var cwd: String?
         var title = ""
@@ -131,13 +189,14 @@ enum NativeSessionScanner {
         var supported = false
         var isSubagent = false
         var hasObservedMessages = false
+        var unsupportedVersion: String?
         for line in data.split(separator: 0x0A) where line.count <= prefixLimit {
             guard let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
                 let type = object["type"] as? String
             else { continue }
             if provider == .codex {
                 guard let payload = object["payload"] as? [String: Any] else {
-                    if type == "session_meta" { return nil }
+                    if type == "session_meta" { return .unrecognized }
                     continue
                 }
                 if type == "event_msg", payload["type"] as? String == "user_message" {
@@ -161,10 +220,14 @@ enum NativeSessionScanner {
                 if type == "session_meta" {
                     guard let id = payload["id"] as? String, UUID(uuidString: id) != nil,
                         let path = payload["cwd"] as? String, path.hasPrefix("/"),
-                        let version = payload["cli_version"] as? String, supportedCodexVersion(version)
-                    else { return nil }
-                    if let nativeID, nativeID != id { return nil }
-                    if let cwd, cwd != path { return nil }
+                        let version = payload["cli_version"] as? String
+                    else { return .unrecognized }
+                    guard supportedCodexVersion(version) else {
+                        return CLIVersion(version) == nil
+                            ? .unrecognized : .unsupportedVersion(String(version.prefix(64)))
+                    }
+                    if let nativeID, nativeID != id { return .unrecognized }
+                    if let cwd, cwd != path { return .unrecognized }
                     nativeID = id
                     cwd = path
                     // Resuming appends metadata for the existing conversation, not a new creation.
@@ -191,6 +254,9 @@ enum NativeSessionScanner {
                         }.first ?? ""
                 }
             } else {
+                if let version = object["version"] as? String, !version.hasPrefix("2."), CLIVersion(version) != nil {
+                    unsupportedVersion = String(version.prefix(64))
+                }
                 if ["user", "assistant"].contains(type), object["isMeta"] as? Bool != true,
                     let message = object["message"] as? [String: Any]
                 {
@@ -204,8 +270,8 @@ enum NativeSessionScanner {
                     let path = object["cwd"] as? String, path.hasPrefix("/"),
                     let version = object["version"] as? String, version.hasPrefix("2.")
                 {
-                    if let nativeID, nativeID != id { return nil }
-                    if let cwd, cwd != path { return nil }
+                    if let nativeID, nativeID != id { return .unrecognized }
+                    if let cwd, cwd != path { return .unrecognized }
                     nativeID = id
                     cwd = path
                     supported = true
@@ -232,12 +298,15 @@ enum NativeSessionScanner {
                 }
             }
         }
-        guard supported, let nativeID, let cwd, !cwd.contains("\0") else { return nil }
-        return GrokSession(
-            id: nativeID, cwd: cwd, summary: String(title.prefix(240)).replacingOccurrences(of: "\n", with: " "),
-            createdAt: created ?? modified, updatedAt: modified, messageCount: 0,
-            modelID: model, agentName: nil, reasoningEffort: nil, kind: isSubagent ? "subagent" : nil,
-            directory: file, provider: provider, hasObservedMessages: hasObservedMessages)
+        guard supported, let nativeID, let cwd, !cwd.contains("\0") else {
+            return unsupportedVersion.map(ParseResult.unsupportedVersion) ?? .unrecognized
+        }
+        return .session(
+            GrokSession(
+                id: nativeID, cwd: cwd, summary: String(title.prefix(240)).replacingOccurrences(of: "\n", with: " "),
+                createdAt: created ?? modified, updatedAt: modified, messageCount: 0,
+                modelID: model, agentName: nil, reasoningEffort: nil, kind: isSubagent ? "subagent" : nil,
+                directory: file, provider: provider, hasObservedMessages: hasObservedMessages))
     }
 
     /// Codex's append-only name index is also version-sensitive. It only supplies

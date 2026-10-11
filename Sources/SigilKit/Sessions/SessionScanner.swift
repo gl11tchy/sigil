@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import os
 
 struct SessionCacheEntry: Sendable, Equatable {
     var modificationDate: Date
@@ -32,10 +33,56 @@ enum SessionTimestamp {
 }
 
 enum SessionScanner: Sendable {
+    /// Physical scan coverage is separate from whether a file has a supported format.
+    struct Coverage: Sendable {
+        var observedRoots: Set<String> = []
+        var uncertainRoots: Set<String> = []
+        var notices: [String: String] = [:]
+        var unrecognizedGrokDirectories: Set<String> = []
+
+        mutating func merge(_ other: Coverage) {
+            observedRoots.formUnion(other.observedRoots)
+            uncertainRoots.formUnion(other.uncertainRoots)
+            notices.merge(other.notices) { _, new in new }
+            unrecognizedGrokDirectories.formUnion(other.unrecognizedGrokDirectories)
+        }
+    }
+
     struct Result: Sendable {
         var sessions: [GrokSession]
         var cache: [String: SessionCacheEntry]
         var loadError: String?
+        var coverage = Coverage()
+
+        var notice: String? {
+            coverage.notices.sorted { $0.key < $1.key }.map(\.value).joined(separator: "\n").nilIfBlank
+        }
+    }
+
+    enum RootStatus: Sendable {
+        case available, missing, unreadable, notDirectory
+    }
+
+    /// Inspection and recording share a lock so overlapping scans cannot miss an earlier observation.
+    final class RootAvailability: Sendable {
+        private let roots = OSAllocatedUnfairLock(initialState: Set<String>())
+
+        func inspect(_ root: URL) -> (status: RootStatus, wasAvailable: Bool) {
+            roots.withLock { observed in
+                let path = root.standardizedFileURL.path
+                let status = SessionScanner.rootStatus(root)
+                let wasAvailable = observed.contains(path)
+                if case .available = status { observed.insert(path) }
+                return (status, wasAvailable)
+            }
+        }
+    }
+
+    /// `fileExists` also returns false on permission failures. Only ENOENT proves absence.
+    static func rootStatus(_ root: URL) -> RootStatus {
+        var info = stat()
+        guard stat(root.path, &info) == 0 else { return errno == ENOENT ? .missing : .unreadable }
+        return info.st_mode & S_IFMT == S_IFDIR ? .available : .notDirectory
     }
 
     /// Reads `summary.json` bodies. Production uses disk; tests inject a counter.
@@ -51,25 +98,33 @@ enum SessionScanner: Sendable {
         root: URL,
         cache: [String: SessionCacheEntry],
         ignoringCache: Bool = false,
-        contentReader: ContentReader = .disk
+        contentReader: ContentReader = .disk,
+        wasAvailable: Bool = false,
+        rootAvailability: RootAvailability? = nil
     ) -> Result {
         let fm = FileManager()
-        var isDirectory: ObjCBool = false
-        guard fm.fileExists(atPath: root.path, isDirectory: &isDirectory) else {
-            // The CLI creates the folder with its first session, so a missing
-            // root is only an error once it held sessions.
+        let rootPath = root.standardizedFileURL.path
+        var coverage = Coverage()
+        let inspection = rootAvailability?.inspect(root) ?? (rootStatus(root), false)
+        switch inspection.0 {
+        case .missing:
+            let uncertain = wasAvailable || inspection.1 || !cache.isEmpty
+            if uncertain { coverage.uncertainRoots.insert(rootPath) }
             return Result(
                 sessions: cachedSessions(cache),
                 cache: cache,
-                loadError: cache.isEmpty ? nil : "Sessions directory does not exist: \(root.path)"
+                loadError: uncertain ? "Sessions directory does not exist: \(root.path)" : nil,
+                coverage: coverage
             )
-        }
-        guard isDirectory.boolValue else {
+        case .unreadable, .notDirectory:
+            coverage.uncertainRoots.insert(rootPath)
             return Result(
                 sessions: cachedSessions(cache),
                 cache: cache,
-                loadError: "Sessions path is not a directory: \(root.path)"
+                loadError: "Sessions directory is unavailable: \(root.path)", coverage: coverage
             )
+        case .available:
+            coverage.observedRoots.insert(rootPath)
         }
 
         let projectDirs: [URL]
@@ -80,20 +135,28 @@ enum SessionScanner: Sendable {
                 options: [.skipsHiddenFiles]
             )
         } catch {
+            coverage.uncertainRoots.insert(rootPath)
             return Result(
                 sessions: cachedSessions(cache),
                 cache: cache,
-                loadError: "Could not read sessions directory: \(error.localizedDescription)"
+                loadError: "Could not read sessions directory: \(error.localizedDescription)", coverage: coverage
             )
         }
 
         var nextCache: [String: SessionCacheEntry] = [:]
         var sessions: [GrokSession] = []
         var issues: [String] = []
+        var incompleteCount = 0
         sessions.reserveCapacity(cache.count)
 
         for projectDir in projectDirs {
-            guard isDir(projectDir) else { continue }
+            do {
+                guard try isDir(projectDir) else { continue }
+            } catch {
+                issues.append("\(projectDir.lastPathComponent): directory could not be inspected")
+                preserveCachedSessions(under: projectDir, from: cache, into: &nextCache, sessions: &sessions)
+                continue
+            }
             let sessionDirs: [URL]
             do {
                 sessionDirs = try fm.contentsOfDirectory(
@@ -115,7 +178,18 @@ enum SessionScanner: Sendable {
             }
 
             for sessionDir in sessionDirs {
-                guard isDir(sessionDir) else { continue }
+                do {
+                    guard try isDir(sessionDir) else { continue }
+                } catch {
+                    issues.append("\(sessionDir.lastPathComponent): directory could not be inspected")
+                    preserveCachedSessions(under: sessionDir, from: cache, into: &nextCache, sessions: &sessions)
+                    let path = sessionDir.standardizedFileURL.path
+                    if nextCache[path] == nil, let entry = cache[path] {
+                        nextCache[path] = entry
+                        sessions.append(entry.session)
+                    }
+                    continue
+                }
                 switch loadSession(
                     at: sessionDir,
                     cache: cache,
@@ -131,15 +205,27 @@ enum SessionScanner: Sendable {
                         nextCache[path] = cached
                         sessions.append(cached.session)
                     }
+                case .unrecognized(let path):
+                    incompleteCount += 1
+                    coverage.unrecognizedGrokDirectories.insert(path)
+                    if let cached = cache[path] {
+                        nextCache[path] = cached
+                        sessions.append(cached.session)
+                    }
                 }
             }
         }
 
         sessions.sort(by: Self.isNewer)
+        if !issues.isEmpty { coverage.uncertainRoots.insert(rootPath) }
+        if incompleteCount > 0 {
+            coverage.notices[rootPath] =
+                "Grok history: \(incompleteCount) session summary file(s) are missing, incomplete or unsupported. Saved conversations are kept."
+        }
         return Result(
             sessions: sessions,
             cache: nextCache,
-            loadError: issueMessage(issues)
+            loadError: issueMessage(issues), coverage: coverage
         )
     }
 
@@ -283,8 +369,11 @@ enum SessionScanner: Sendable {
         !term.isEmpty && folded.contains(term)
     }
 
-    private static func isDir(_ url: URL) -> Bool {
-        (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+    private static func isDir(_ url: URL) throws -> Bool {
+        guard let value = try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        return value
     }
 
     private static func cachedSessions(_ cache: [String: SessionCacheEntry]) -> [GrokSession] {
@@ -318,6 +407,7 @@ enum SessionScanner: Sendable {
     private enum LoadResult {
         case loaded(path: String, entry: SessionCacheEntry)
         case failed(path: String, reason: String)
+        case unrecognized(path: String)
     }
 
     private static func loadSession(
@@ -330,6 +420,8 @@ enum SessionScanner: Sendable {
         let summaryURL = sessionDir.appendingPathComponent("summary.json")
         let identity: SummaryIdentity
         switch inspectSummary(summaryURL) {
+        case .unrecognized:
+            return .unrecognized(path: path)
         case .failed(let reason):
             return .failed(path: path, reason: reason)
         case .ok(let value):
@@ -353,7 +445,7 @@ enum SessionScanner: Sendable {
             let session = parse(
                 data: data, directory: sessionDir, fileModificationDate: identity.modificationDate)
         else {
-            return .failed(path: path, reason: "summary.json is invalid")
+            return .unrecognized(path: path)
         }
         return .loaded(
             path: path,
@@ -380,6 +472,7 @@ enum SessionScanner: Sendable {
     private enum InspectResult {
         case ok(SummaryIdentity)
         case failed(String)
+        case unrecognized
     }
 
     /// Metadata only: `getattrlist` plus `stat`. Never reads file contents.
@@ -392,13 +485,19 @@ enum SessionScanner: Sendable {
         do {
             values = try url.resourceValues(forKeys: keys)
         } catch {
+            let error = error as NSError
+            if error.domain == NSCocoaErrorDomain,
+                [CocoaError.fileNoSuchFile.rawValue, CocoaError.fileReadNoSuchFile.rawValue].contains(error.code)
+            {
+                return .unrecognized
+            }
             return .failed("summary.json could not be inspected")
         }
-        if values.isDirectory == true {
-            return .failed("summary.json is a directory")
+        if values.isDirectory == true || values.isRegularFile == false {
+            return .unrecognized
         }
         guard values.isRegularFile == true else {
-            return .failed("summary.json is not a regular file")
+            return .failed("summary.json file type is unavailable")
         }
         guard let modificationDate = values.contentModificationDate, let size = values.fileSize
         else {
