@@ -101,18 +101,14 @@ struct SidebarSnapshotTests {
         let model = snapshotModel(fixture, clock: SnapshotClock())
         defer { model.closeAllTabsAndWait() }
         model.openRecents()
-        let tab = TerminalTab(
-            spec: .init(
-                executable: fixture.executable, workingDirectory: folder,
-                mode: .continueLatest), settings: fixture.settings)
-        model.tabs.append(tab)
+        let tab = try #require(model.newTab(in: folder))
         #expect(model.sidebarSnapshot().listed.isEmpty)
         let count = model.sidebarSnapshotBuildCount
         tab.learnedSessionReference = .init(provider: .grokBuild, sessionID: session.id, cwd: folder.path)
         #expect(model.eventSidebarSnapshot().listed.map(\.id) == [session.id])
         #expect(model.sidebarSnapshotBuildCount == count + 1)
-        tab.noteTurnStarted()
-        #expect(model.activity(of: session) == .unknown)
+        tab.noteDisconnected()
+        #expect(model.activity(of: session) == .disconnected)
         _ = model.sidebarSnapshot()
         #expect(model.sidebarSnapshotBuildCount == count + 1)
         tab.noteInterrupted()
@@ -428,7 +424,9 @@ private func snapshotModel(_ fixture: ModelFixture, clock: SnapshotClock) -> App
         panel: RightPanel(
             defaults: fixture.defaults,
             notesStore: ConversationNotesStore(root: fixture.notesRoot)),
-        pairingStore: InMemoryRemotePairingStore(), sidebarClock: { clock.now() })
+        pairingStore: InMemoryRemotePairingStore(),
+        providerInstallations: fixtureProviderInstallations(fixture.executable),
+        sidebarClock: { clock.now() })
 }
 
 /// The lists SidebarView used to read one at a time from the model during a render.
