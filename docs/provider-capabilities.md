@@ -127,8 +127,8 @@ history major can still be an installed, launchable CLI.
 
 Without a valid stored default, the first completed six-provider inventory picks
 the first available CLI in tile order. This automatic choice is not persisted as
-a user preference. An explicit stored default always wins, and any provider
-interaction freezes initial selection before pending results can change it.
+a user preference. An explicit stored default always wins, and provider interaction or editing an
+Options override freezes initial selection before pending results can change it.
 A later refresh cannot reorder an already established initial choice. With no
 available CLI, the provisional choice remains unavailable rather than implying
 Grok is installed.

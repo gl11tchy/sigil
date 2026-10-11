@@ -169,7 +169,15 @@ struct NewSessionSheet: View {
                 if isRepository {
                     divider
                     SheetRow(label: "Work in") {
-                        Picker("Work in", selection: $startsInWorktree) {
+                        Picker(
+                            "Work in",
+                            selection: Binding(
+                                get: { startsInWorktree },
+                                set: {
+                                    preserveProviderChoice()
+                                    startsInWorktree = $0
+                                })
+                        ) {
                             Text("New worktree").tag(true)
                             Text("Project folder").tag(false)
                         }
@@ -181,7 +189,15 @@ struct NewSessionSheet: View {
                 if !recents.isEmpty {
                     divider
                     SheetRow(label: "Recent") {
-                        Picker("Recent", selection: $directory) {
+                        Picker(
+                            "Recent",
+                            selection: Binding(
+                                get: { directory },
+                                set: {
+                                    preserveProviderChoice()
+                                    directory = $0
+                                })
+                        ) {
                             ForEach(recentChoices, id: \.self) { url in
                                 Text(url.abbreviatedPath).tag(url)
                             }
@@ -314,6 +330,7 @@ struct NewSessionSheet: View {
         Binding(
             get: { choice(for: provider)[keyPath: field] },
             set: { value in
+                preserveProviderChoice()
                 var next = choice(for: provider)
                 next[keyPath: field] = value
                 choices[provider] = menu(for: provider)?.normalized(next) ?? next
@@ -377,6 +394,7 @@ struct NewSessionSheet: View {
                         .truncationMode(.head)
                         .help(directory.path)
                     Button("Choose…") {
+                        preserveProviderChoice()
                         if let picked = model.pickDirectory(startingAt: directory) {
                             directory = picked
                         }
