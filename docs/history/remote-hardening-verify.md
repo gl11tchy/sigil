@@ -1,3 +1,5 @@
+Shipped in [#53](https://github.com/gl11tchy-team/sigil/pull/53); kept for history. The [release receipt](https://github.com/gl11tchy-team/sigil/pull/53#issuecomment-5752716778) closes this original checkpoint.
+
 # Remote-stack hardening verification — 2026-09-20
 
 Completed in order A → B → C. Each full gate passed before the next task started.

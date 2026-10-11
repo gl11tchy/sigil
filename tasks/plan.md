@@ -1,3 +1,5 @@
+Completed historical bundle; retained because `.grok/workflows/ship-product-site.rhai` names this path. See [the dated disposition and delivery evidence](../docs/history/README.md). The original record below is preserved.
+
 # Implementation Plan: Phone remote that you can actually use
 
 Skills: using-agent-skills, impeccable, frontend-ui-engineering, planning-and-task-breakdown, spec-driven-development, test-driven-development, incremental-implementation, write-swift, security-and-hardening, apple-design, git-workflow-and-versioning
@@ -21,7 +23,7 @@ ASSUMPTIONS: Readable companion, not a pixel TUI. Attach writes to SigilDrops an
 
 ### Phase 3: Phone UI
 - [x] Task 5: Attach, chips, Stop while working, composer layout.
-- [x] Task 6: Playwright + native tests. Evidence: `tasks/verify.md`.
+- [x] Task 6: Playwright + native tests. Evidence: `docs/history/verify.md`.
 - [x] Task 7: Redeploy Sidereal and record the revision. The active deployment,
   `c5c7e7de-76a8-44d0-8d89-a1fdbe349ce2`, postdates #43 by under a minute, but the service
   deploys from local uploads, so it carries a snapshot id and no SHA and nothing proves what
@@ -44,7 +46,7 @@ ASSUMPTIONS: Readable companion, not a pixel TUI. Attach writes to SigilDrops an
 - [x] B: First sealed routing envelope, no URL tickets/room IDs, no-query logging policy. Full `Scripts/verify.sh` passed before C.
 - [x] C: Stamped upload bundle and revision-bearing `/health`; full `Scripts/verify.sh` passed.
 
-Evidence: `tasks/remote-hardening-verify.md`.
+Evidence: `docs/history/remote-hardening-verify.md`.
 
 Release follow-up: open the PR, clear CI and automated review, squash merge, install
 the merged Mac build, then deploy the matching stamped relay/PWA and verify production.

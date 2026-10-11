@@ -1,3 +1,5 @@
+Shipped in [#28](https://github.com/gl11tchy-team/sigil/pull/28); kept for history. Later delivery evidence is indexed in [task history](README.md).
+
 # Spec: Phone remote that you can actually use
 
 ## Objective

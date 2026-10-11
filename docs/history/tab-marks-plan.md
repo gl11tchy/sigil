@@ -1,3 +1,5 @@
+Shipped in [#128](https://github.com/gl11tchy-team/sigil/pull/128); kept for history.
+
 # Implementation Plan: Name and color a tab
 
 Skills: using-agent-skills, planning-and-task-breakdown, frontend-ui-engineering, test-driven-development, write-swift, code-review-and-quality, git-workflow-and-versioning

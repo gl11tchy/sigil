@@ -1,3 +1,5 @@
+Shipped in [#36](https://github.com/gl11tchy-team/sigil/pull/36); kept for history.
+
 # Spec: Persistent remote pairing
 
 Skills: using-agent-skills, spec-driven-development, planning-and-task-breakdown, test-driven-development, incremental-implementation, security-and-hardening, write-swift, git-workflow-and-versioning

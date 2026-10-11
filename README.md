@@ -2,7 +2,7 @@
 
 ![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-000000)
 ![Swift](https://img.shields.io/badge/Swift-6-F05138)
-[![CI](https://github.com/gl11tchy/sigil/actions/workflows/ci.yml/badge.svg)](https://github.com/gl11tchy/sigil/actions/workflows/ci.yml)
+[![CI](https://github.com/gl11tchy-team/sigil/actions/workflows/ci.yml/badge.svg)](https://github.com/gl11tchy-team/sigil/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-MIT-6A6A6A)
 
 A native macOS app for Claude Code, Codex, Devin, Cursor, Kimi Code, and Grok Build.
@@ -83,10 +83,13 @@ By gl11tchy.
 ## Phone remote control
 
 Open **Settings → Remote** to connect a phone using a QR code. The hosted
-companion is [https://remote.sigilapp.dev](https://remote.sigilapp.dev). The
-included **Sidereal** PWA controls open sessions from any internet connection.
-Deploy its small encrypted relay over HTTPS, then enter that address in Sigil.
-The Mac makes outbound connections only; no router ports need opening.
+web companion is [https://remote.sigilapp.dev](https://remote.sigilapp.dev).
+The native **[Sigil for iPhone](iOS/README.md)** app and included **Sidereal** PWA
+use the same encrypted relay to control sessions from an internet connection.
+The iPhone app also reopens supported saved conversations; the Mac supplies each
+provider's capabilities. See its README for pairing, controls, development, and
+verification limits. For self-hosting, deploy the relay over HTTPS and enter that
+address in Sigil. The Mac makes outbound connections only; no router ports need opening.
 
 See [Sidereal setup](Sidereal/README.md) for hosting, pairing, controls, and limits.
 Remote access is off by default. Disconnecting revokes it. Quitting preserves pairing for the next launch.
@@ -119,14 +122,20 @@ terminal itself.
 | `⌘⇧]` / `⌘⇧[` | Next / previous tab |
 | `⌘1`…`⌘9` | Go to tab |
 | `⌃⌘T` | List open tabs and jump to one |
+| `⌘X` / `⌘C` / `⌘V` / `⌘A` | Cut / copy / paste / select all |
 | `⌘F` | Find in the terminal |
+| `⌘G` / `⌘⇧G` | Next / previous terminal match |
 | `⌘⇧F` | Find conversations |
 | `⌘B` | Hide or show the thread list |
 | `⌥⌘B` | Hide or show the utility panel |
 | `⌥⌘1` / `⌥⌘2` | Panel terminal / notes |
 | `⌘+` / `⌘-` / `⌘0` | Font size |
 | `⌘R` | Reload the conversation list |
+| `⌥⌘R` | Rebuild conversation history |
 | `⌘⇧R` | Rename the conversation on screen |
+| `⌃⌘A` | Archive / unarchive selection, or remove a project |
+| `⌃⌘P` | Pin / unpin the selected conversation or project |
+| `⌘Return` | Deliver the selected Grok tab message |
 | `⌘,` | Settings |
 
 In the thread list, `↑` and `↓` move the selection, `⇧↑` and `⇧↓` extend a
@@ -134,7 +143,7 @@ multi-selection, `Return` opens it, and `F2` renames it.
 
 ## Requirements
 
-- macOS 14 or later
+- macOS 14 or later; Apple silicon for the currently published CI zip
 - At least one supported provider CLI, installed and signed in separately
 - For Grok: `~/.grok/bin/grok` (set another path in Settings)
 - Optional: `~/.grok/bin/grok-sigil`, the themed CLI build described below
@@ -148,9 +157,14 @@ that process needs the same access to your files and network that it has in a te
 Scripts/build-app.sh
 ```
 
-This makes a release bundle containing both Apple silicon and Intel executables. It
-refuses to package an old or single-architecture executable if that build fails. The
-result is `dist/Sigil.app`.
+This attempts a universal release build containing Apple silicon (`arm64`) and
+Intel (`x86_64`) executables, verifies both architectures, and writes `dist/Sigil.app`.
+The universal build currently fails; without an explicit fallback, the script
+stops instead of packaging an old or single-architecture executable.
+
+CI currently sets `SIGIL_ALLOW_THIN=1` and publishes an **arm64-only** zip for
+Apple silicon. That artifact does not support Intel Macs. Universal-build repair
+is tracked separately in [REA-1228](https://linear.app/reasonable-glyph/issue/REA-1228/make-the-universal-arm64-x86-64-build-succeed-and-stop-shipping-a-thin).
 
 Release builds need Apple's Metal Toolchain. Install it once if Xcode does not have it:
 
@@ -164,7 +178,8 @@ For a faster local bundle on the current Mac:
 SIGIL_CONFIG=debug Scripts/build-app.sh
 ```
 
-To allow a current-architecture release bundle for local use only:
+To allow a release build to fall back to the current Mac's architecture (the
+same fallback currently enabled in CI):
 
 ```sh
 SIGIL_ALLOW_THIN=1 Scripts/build-app.sh
@@ -211,7 +226,7 @@ Scripts/install.sh
 
 That copies `dist/Sigil.app` to `/Applications/Sigil.app` and opens it. GitHub
 cannot write to this Mac. After a merge to `main` and successful gates, CI builds a zip and attaches
-it to the rolling [latest release](https://github.com/gl11tchy/sigil/releases/latest).
+it to the rolling [latest release](https://github.com/gl11tchy-team/sigil/releases/latest).
 The isolated runner uses a pinned Xcode 26.5 image with an iOS 26.5 simulator.
 Guest toolchain checks must pass before a new runner base is published.
 On this Mac, agents must run `Scripts/install-latest.sh` after that merge. It
@@ -294,6 +309,12 @@ then runs app-hosted simulator tests through a local relay. It requires Xcode 26
 and an installed iOS 26 simulator. Neither gate makes paid model calls.
 The smoke launch uses temporary home, preferences, cache, and Grok
 folders. It does not restore tabs, register the bridge, or start a real session.
+
+## Task records
+
+Completed task records and the disposition of retained plans are indexed in
+[task history](docs/history/README.md). Historical checkboxes and verification
+receipts describe their original checkpoints; they are not new work instructions.
 
 ## License
 

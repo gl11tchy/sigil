@@ -1,3 +1,5 @@
+Shipped in [#36](https://github.com/gl11tchy-team/sigil/pull/36); kept for history.
+
 # Implementation Plan: Persistent remote pairing
 
 Left `tasks/plan.md` in place (phone-remote work, different job).
