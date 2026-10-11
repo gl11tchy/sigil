@@ -66,9 +66,12 @@ struct ProcessOpenFilesTests {
         defer { outside.stop() }
         let outsideSession = try await fixture.session("outside")
 
+        let saved = try JSONDecoder().decode(GrokSession.self, from: JSONEncoder().encode(session))
+        #expect(!saved.isHistoryValidated)
         let matched = CodexSessionBinding.resolve(
             process: generation, historyRoot: fixture.root,
-            sessions: [outsideSession, session], workingDirectory: fixture.cwd)
+            sessions: [outsideSession, saved], workingDirectory: fixture.cwd)
+        #expect(matched?.isHistoryValidated == true)
         #expect(matched?.nativeSessionID == session.nativeSessionID)
         #expect(matched?.directory == session.directory)
     }

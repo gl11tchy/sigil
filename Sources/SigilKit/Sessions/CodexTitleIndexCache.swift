@@ -8,6 +8,11 @@ import os
 final class CodexTitleIndexCache: Sendable {
     static let windowLimit = 2 * 1024 * 1024
     static let recordLimit = 16 * 1024 - 1
+    struct DisplaySnapshot: Sendable, Codable {
+        var identity: NativeSessionScanner.FileSnapshot
+        var names: [String: String]
+    }
+
     private struct Title: Sendable {
         var text: String
         var offset: UInt64
@@ -23,8 +28,26 @@ final class CodexTitleIndexCache: Sendable {
         var discarding = false
         var discardFirstNonempty: Bool
         var names: [String: String] = [:]
+        var hasParsingState = true
     }
     private let states = OSAllocatedUnfairLock(initialState: [String: State]())
+
+    func displaySnapshots() -> [String: DisplaySnapshot] {
+        states.withLock { $0.mapValues { DisplaySnapshot(identity: $0.identity, names: $0.names) } }
+    }
+
+    func restoreDisplaySnapshots(_ snapshots: [String: DisplaySnapshot]) {
+        states.withLock { states in
+            for (path, saved) in snapshots where states[path] == nil {
+                var state = State(
+                    identity: saved.identity, windowStart: 0, offset: 0, recordStart: 0,
+                    discardFirstNonempty: false)
+                state.names = saved.names
+                state.hasParsingState = false
+                states[path] = state
+            }
+        }
+    }
 
     func names(
         at file: URL, ignoringCache: Bool = false,
@@ -59,7 +82,9 @@ final class CodexTitleIndexCache: Sendable {
                 var state = State(
                     identity: before, windowStart: start, offset: start, recordStart: start,
                     discardFirstNonempty: start > 0)
-                if let old, before.isSameFile(as: old.identity), size > old.offset, start < old.offset {
+                if let old, old.hasParsingState, before.isSameFile(as: old.identity), size > old.offset,
+                    start < old.offset
+                {
                     let previous = try fingerprint(
                         handle, start: old.windowStart, end: old.offset, reader: reader)
                     if previous.digest == old.digest { state = old }

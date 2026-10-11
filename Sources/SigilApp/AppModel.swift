@@ -997,7 +997,9 @@ final class AppModel {
 
     /// Drops pins, archives, and names whose conversations are gone, after a successful scan.
     func pruneMissingPins() {
-        guard !store.isLoading, store.loadError == nil else { return }
+        guard !store.isLoading, store.loadError == nil, store.appliedScanSequence > 0,
+            !store.hasUnvalidatedHistory
+        else { return }
         // A missing folder lists nothing without an error; that is no proof
         // the pinned chats are gone.
         guard FileManager.default.fileExists(atPath: store.root.path) else { return }
@@ -1104,7 +1106,8 @@ final class AppModel {
     /// in Sigil's own worktrees. Completes once a scan verifies all history coverage.
     func seedSigilConversations() {
         // A scan with a read error may have missed chats; wait for a clean one.
-        guard !settings.sigilConversationsSeeded, store.appliedScanSequence > 0, store.loadError == nil
+        guard !settings.sigilConversationsSeeded, store.appliedScanSequence > 0, store.loadError == nil,
+            !store.hasUnvalidatedHistory
         else { return }
         let saved = settings.openTabs.tabs.map {
             ProviderSessionReference(provider: $0.provider, sessionID: $0.sessionID, cwd: $0.cwd).sidebarID
@@ -1247,6 +1250,7 @@ final class AppModel {
     /// conversation yet, or whose note file could not be written, keep their
     /// entry for a later launch.
     func migrateLegacyPanelNotes() {
+        guard store.appliedScanSequence > 0, !store.hasUnvalidatedHistory else { return }
         let legacy = panel.legacyFolderNotes
         guard !legacy.isEmpty else { return }
         var remaining = legacy
@@ -1334,6 +1338,7 @@ final class AppModel {
 
     /// The deleted conversation still sits in `store` until the next scan.
     private func dropOrphanedProjectPin(for session: GrokSession) {
+        guard !store.hasUnvalidatedHistory else { return }
         let othersRemain =
             store.sessions.contains { $0.id != session.id && inProject($0.cwd, session.projectPath) }
             || tabs.contains { inProject($0.workingDirectory.path, session.projectPath) }
@@ -2292,6 +2297,16 @@ final class AppModel {
             select(existing.id)
             return
         }
+        guard session.isHistoryValidated else {
+            Task {
+                if let validated = await store.validatedSession(for: session) {
+                    open(validated)
+                } else {
+                    showHistoryValidationError()
+                }
+            }
+            return
+        }
         guard canLaunchProvider(session.provider) else { return }
         let workingDirectory = URL(fileURLWithPath: session.cwd)
         guard Self.isUsableDirectory(workingDirectory) else {
@@ -3102,6 +3117,10 @@ final class AppModel {
     @discardableResult
     func deleteConversation(_ session: GrokSession, reload: Bool = true) -> Bool {
         guard session.provider.capabilities.delete else { return false }
+        guard session.isHistoryValidated else {
+            showHistoryValidationError()
+            return false
+        }
         let matchingTabs = tabs.filter {
             tabMatches($0, sessionID: session.id, cwd: session.cwd)
         }
@@ -3180,6 +3199,24 @@ final class AppModel {
         }
     }
 
+    /// The user's Trash confirmation remains scoped to the same source identity after revalidation.
+    func deleteValidatedConversations(_ sessions: [GrokSession]) async -> Int {
+        var deleted = 0
+        for session in sessions {
+            guard let validated = await store.validatedSession(for: session) else {
+                showHistoryValidationError()
+                continue
+            }
+            if deleteConversation(validated, reload: false) { deleted += 1 }
+        }
+        if deleted > 0 { await store.reload() }
+        return deleted
+    }
+
+    private func showHistoryValidationError() {
+        showError(title: "Conversation is unavailable", message: "Refresh history, then try again.")
+    }
+
     /// Trashes a multi-selection one conversation at a time; each delete keeps
     /// its own tab-restore-on-failure path. Returns how many went.
     @discardableResult
@@ -3197,6 +3234,16 @@ final class AppModel {
     /// long export cannot freeze the window.
     func exportTranscript(_ session: GrokSession) {
         guard session.provider.capabilities.export else { return }
+        guard session.isHistoryValidated else {
+            Task {
+                if let validated = await store.validatedSession(for: session) {
+                    exportTranscript(validated)
+                } else {
+                    showHistoryValidationError()
+                }
+            }
+            return
+        }
         exportTranscript(
             sessionID: session.id,
             title: title(for: session),
@@ -3384,6 +3431,8 @@ final class AppModel {
 
     /// Reopen saved tabs whose session directories still exist. Never starts a
     /// `.new` session: a launch must not create junk conversations on disk.
+    @ObservationIgnored private var restorationHistoryValidation: Task<Void, Never>?
+
     func restoreOpenTabs() {
         if !didLoadOpenTabsSnapshot {
             didLoadOpenTabsSnapshot = true
@@ -3436,6 +3485,19 @@ final class AppModel {
                 continue
             }
             let known = store.sessions.first { $0.id == sidebarID(entry) && samePath($0.cwd, entry.cwd) }
+            if let known, !known.isHistoryValidated {
+                waitsForEarlierRetry = true
+                deferredOpenTabs.append(entry)
+                if restorationHistoryValidation == nil {
+                    restorationHistoryValidation = Task { [weak self] in
+                        guard let self else { return }
+                        let validated = await self.store.validatedSession(for: known)
+                        self.restorationHistoryValidation = nil
+                        if validated != nil { self.restoreOpenTabs() }
+                    }
+                }
+                continue
+            }
             let directory =
                 entry.provider == .grokBuild
                 ? GrokPaths.sessionDirectory(cwd: entry.cwd, sessionID: entry.sessionID)

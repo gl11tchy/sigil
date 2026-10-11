@@ -106,10 +106,12 @@ struct SidebarView: View {
             presenting: pendingDelete
         ) { session in
             Button("Move to Trash", role: .destructive) {
-                if model.deleteConversation(session),
-                    keyboardSelectionID == model.sessionKey(session)
-                {
-                    keyboardSelectionID = nil
+                Task {
+                    if await model.deleteValidatedConversations([session]) > 0,
+                        keyboardSelectionID == model.sessionKey(session)
+                    {
+                        keyboardSelectionID = nil
+                    }
                 }
             }
             Button("Cancel", role: .cancel) {}
@@ -123,7 +125,7 @@ struct SidebarView: View {
         ) {
             Button("Move to Trash", role: .destructive) {
                 if let sessions = pendingBulkDelete {
-                    model.deleteConversations(sessions)
+                    Task { await model.deleteValidatedConversations(sessions) }
                 }
                 clearMultiSelection()
             }

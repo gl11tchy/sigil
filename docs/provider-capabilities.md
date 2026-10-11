@@ -215,7 +215,35 @@ index records must remain below 16 KiB, with bounded partial UTF-8/JSON carry an
 legacy complete-EOF projection. A symlink is never followed, and read races or
 cancellation cannot replace validated index state. Forced reloads rebuild it.
 Changed-index validation deliberately rereads old bytes; this is incremental parsing,
-not append-only byte I/O. No disk history index or watcher redesign is introduced.
+not append-only byte I/O. Watcher behavior remains scoped to the captured history roots.
+
+At launch the default store loads `~/Library/Application Support/Sigil/history-index.json`
+into the list and title/path search before its first background scan. The versioned
+index holds display fields and source identity, including Codex title-index snapshots;
+it omits transcript bytes and Claude incremental parser state. An unchanged first
+scan reads no summary, transcript or Codex title-index bodies. Changed files are
+parsed normally; the first change after a relaunch rebuilds the relevant parser state.
+Applied-scan sequencing advances only when an actual scan publishes its result.
+
+The saved index is untrusted display data. Decoding always clears source-validation
+authority, even if the file claims otherwise. Metadata cache hits and title overrides
+retain that distinction. Opening, saved-tab restoration, export and Trash validate
+the requested source envelope before using its identity. Housekeeping and legacy-note
+migration wait for a real scan and source-validated rows; a forced refresh validates
+the full list. Codex tab binding still requires its independent process/file proof,
+with the existing exact identity and cwd rules.
+
+The private cache is limited to 8 MiB, 10,000 rows and bounded display fields. Version,
+captured-root or decoding failures discard it and a later applied scan rewrites it.
+Absolute paths must remain inside the corresponding captured root; existing source
+symlink components, index symlinks and aliased index files are rejected. Index reads
+validate descriptor/path identity. Debounced writes run off the main actor and use
+private temporary files and atomic replacement, with mode 0600 checked before and
+after commit. Preparation failures retain the preceding index; no index failure
+writes or removes provider history. Multiple app copies may atomically replace this
+disposable cache, and each copy revalidates identities. Custom-root stores persist
+only when an isolated index location is explicitly injected.
+
 The scanner keeps metadata and display fields, not full transcripts. Oversized or
 unsupported records can still require a folder fallback.
 Search covers discovered titles and project paths, not every transcript message.

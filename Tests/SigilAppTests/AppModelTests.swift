@@ -10,6 +10,56 @@ import Testing
 struct AppModelTests {
 
     @Test @MainActor
+    func savedDisplayCannotPruneMigrateOrRestoreWithoutFreshSourceIdentity() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("generated-project")
+        let id = "11111111-1111-4111-8111-111111111111"
+        try fixture.writeListedSession(id: id, cwd: cwd.path)
+        let root = fixture.store.root.resolvingSymlinksInPath()
+        let file = SessionIndexFile(
+            url: fixture.root.resolvingSymlinksInPath().appendingPathComponent("private/history-index.json"))
+        let roots = SessionIndexFile.roots(grok: root, native: [])
+        #expect(file.save(.init(roots: roots, entries: SessionScanner.scan(root: root, cache: [:]).cache)))
+        // Replace the source with malformed bytes while retaining the saved display row.
+        let directory = root.appendingPathComponent(GrokPaths.sessionFolderName(forCanonicalPath: cwd.path))
+            .appendingPathComponent(id)
+        try Data("{".utf8).write(to: directory.appendingPathComponent("summary.json"))
+        let store = SessionStore(root: root, timing: SessionStoreTiming(), indexFile: file)
+        defer { store.stop() }
+        store.start()
+        #expect(await waitUntil { store.appliedScanSequence > 0 && !store.isLoading })
+        let displayed = try #require(store.sessions.first)
+        #expect(!displayed.isHistoryValidated)
+        fixture.settings.pinnedConversations = [.init(sessionID: "missing-pin", cwd: cwd.path)]
+        fixture.defaults.set(try JSONEncoder().encode([cwd.path: "kept legacy note"]), forKey: "panel.notes")
+        fixture.settings.openTabs = OpenTabsSnapshot(tabs: [.init(sessionID: id, cwd: cwd.path)], selectedSessionID: id)
+        let error = ErrorBox()
+        let model = fixture.model(store: store, presentError: { error.error = $0 })
+        defer { model.closeAllTabsAndWait() }
+        model.pruneMissingPins()
+        model.seedSigilConversations()
+        model.migrateLegacyPanelNotes()
+        #expect(fixture.settings.pinnedConversations.map(\.sessionID) == ["missing-pin"])
+        #expect(!fixture.settings.sigilConversationsSeeded)
+        #expect(model.panel.legacyFolderNotes[cwd.path] == "kept legacy note")
+        #expect(!model.deleteConversation(displayed))
+        #expect(error.error != nil)
+        error.error = nil
+        model.open(displayed)
+        #expect(await waitUntil { error.error != nil && !store.isLoading })
+        #expect(model.tabs.isEmpty)
+        #expect(try Data(contentsOf: directory.appendingPathComponent("summary.json")) == Data("{".utf8))
+        #expect(fixture.settings.openTabs.tabs.map(\.sessionID) == [id])
+        // Source repair, rather than saved metadata, unlocks the deferred saved tab.
+        try fixture.writeListedSession(id: id, cwd: cwd.path)
+        await store.reload()
+        model.restoreOpenTabs()
+        #expect(model.tabs.count == 1)
+        #expect(model.tabs.first?.nativeSessionID == id)
+    }
+
+    @Test @MainActor
     func requestingAndCancellingAProviderDoesNotStartAProcess() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }

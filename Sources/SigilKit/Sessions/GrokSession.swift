@@ -1,8 +1,8 @@
 import Foundation
 
 /// One Grok Build conversation, as recorded in `<session-dir>/summary.json`.
-public struct GrokSession: Identifiable, Hashable, Sendable {
-    public let id: String
+public struct GrokSession: Identifiable, Hashable, Sendable, Codable {
+    public var id: String { reference.sidebarID }
     public let provider: CLIProvider
     public let nativeSessionID: String
     public var reference: ProviderSessionReference {
@@ -25,6 +25,8 @@ public struct GrokSession: Identifiable, Hashable, Sendable {
     public let kind: String?
     /// On-disk location, used to watch the session and to export its transcript.
     public let directory: URL
+    /// Disk indexes supply display data only. Fresh source parsing supplies authority.
+    public let isHistoryValidated: Bool
 
     public init(
         id: String,
@@ -39,11 +41,11 @@ public struct GrokSession: Identifiable, Hashable, Sendable {
         kind: String? = nil,
         directory: URL,
         provider: CLIProvider = .grokBuild,
-        hasObservedMessages: Bool = false
+        hasObservedMessages: Bool = false,
+        isHistoryValidated: Bool = true
     ) {
         self.provider = provider
         self.nativeSessionID = id
-        self.id = ProviderSessionReference(provider: provider, sessionID: id, cwd: cwd).sidebarID
         self.cwd = cwd
         self.summary = summary
         self.createdAt = createdAt
@@ -55,6 +57,38 @@ public struct GrokSession: Identifiable, Hashable, Sendable {
         self.reasoningEffort = reasoningEffort
         self.kind = kind
         self.directory = directory
+        self.isHistoryValidated = isHistoryValidated
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case provider, nativeSessionID, cwd, summary, createdAt, updatedAt, messageCount
+        case hasObservedMessages, modelID, agentName, reasoningEffort, kind, directory
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try values.decode(String.self, forKey: .nativeSessionID),
+            cwd: try values.decode(String.self, forKey: .cwd),
+            summary: try values.decode(String.self, forKey: .summary),
+            createdAt: try values.decode(Date.self, forKey: .createdAt),
+            updatedAt: try values.decode(Date.self, forKey: .updatedAt),
+            messageCount: try values.decode(Int.self, forKey: .messageCount),
+            modelID: try values.decodeIfPresent(String.self, forKey: .modelID),
+            agentName: try values.decodeIfPresent(String.self, forKey: .agentName),
+            reasoningEffort: try values.decodeIfPresent(String.self, forKey: .reasoningEffort),
+            kind: try values.decodeIfPresent(String.self, forKey: .kind),
+            directory: try values.decode(URL.self, forKey: .directory),
+            provider: try values.decode(CLIProvider.self, forKey: .provider),
+            hasObservedMessages: try values.decode(Bool.self, forKey: .hasObservedMessages),
+            isHistoryValidated: false)
+    }
+
+    func validatingHistory() -> Self {
+        Self(
+            id: nativeSessionID, cwd: cwd, summary: summary, createdAt: createdAt, updatedAt: updatedAt,
+            messageCount: messageCount, modelID: modelID, agentName: agentName, reasoningEffort: reasoningEffort,
+            kind: kind, directory: directory, provider: provider, hasObservedMessages: hasObservedMessages)
     }
 
     /// Child of a parent chat: workflow / spawn_subagent. Hidden from the sidebar by default.

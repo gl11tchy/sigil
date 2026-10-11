@@ -567,3 +567,20 @@ validation and its limits. Existing scanner/watcher methods remain unchanged.
 Observation-backed store tests and AppTests run in ordinary exact-head CI. Parent
 personal review precedes any merge; no personal history, local UI, daily-app action
 or customer impact is claimed.
+
+
+## REA-1270: private saved history display index
+
+The default store publishes a bounded private display index before its first scan,
+including Codex title metadata so unchanged scans read no history bodies. Saved rows
+cannot supply launch, Trash, housekeeping or identity-adoption authority. Individual
+actions read the selected source envelope; forced refresh can validate the full list.
+The established Codex process/file binding proof remains independent.
+
+[The verification record](../qa/rea-1270.md) records the generated launch-cache gap,
+private atomic-write and untrusted-input failures, measured publication work and its
+limits. Local validation uses complete non-Observation production dependencies and
+Address Sanitizer. Store and app regressions run in ordinary CI; no personal history,
+local AppTests, UI smoke, daily-app replacement or customer impact is claimed.
+Parent personal review of the exact final diff precedes any merge. One worker and
+one ticket remain in flight.

@@ -912,6 +912,130 @@ struct SessionStoreTests {
 }
 
 /// Pauses one real read in the production detached scan; no replacement ScanOperation.
+extension SessionStoreTests {
+    @Test func savedDisplayPublishesBeforeFirstScanAndDeletedRowsDisappearWithoutBodyReads() async throws {
+        let fixture = try HistoryIndexFixture()
+        defer { fixture.cleanup() }
+        let titles = CodexTitleIndexCache()
+        #expect(fixture.file.save(fixture.snapshot(fixture.scan(titles: titles).cache, titles: titles)))
+        try FileManager.default.removeItem(at: fixture.claudeFile)
+        let gate = CompatibilityScanGate()
+        let meter = HistoryIndexMeter()
+        let restoredTitles = CodexTitleIndexCache()
+        let store = SessionStore(
+            root: fixture.grok, timing: SessionStoreTiming(indexWriteDelay: .milliseconds(5)),
+            nativeRoots: fixture.nativeRoots, indexFile: fixture.file, titleIndexCache: restoredTitles,
+            scanOperation: { _, cache, _ in
+                await gate.hold()
+                return fixture.scan(cache: cache, titles: restoredTitles, meter: meter)
+            })
+        defer { store.stop() }
+        store.start()
+        try await waitUntilAsync { await gate.isWaiting }
+        #expect(store.appliedScanSequence == 0)
+        #expect(store.sessions.count == 3)
+        #expect(store.search("Generated index title").count == 1)
+        #expect(store.isLoading && store.hasUnvalidatedHistory && !store.canPruneMissingProjects)
+        await gate.release()
+        try await waitUntil { !store.isLoading }
+        #expect(store.appliedScanSequence > 0)
+        #expect(store.sessions.count == 2)
+        #expect(meter.count == 0)
+        #expect(store.hasUnvalidatedHistory && !store.canPruneMissingProjects)
+        let candidate = try #require(store.sessions.first { $0.provider == .grokBuild })
+        let validated = try #require(await store.validatedSession(for: candidate))
+        #expect(validated.isHistoryValidated)
+        #expect(meter.count == 1)  // Only the requested Grok summary, no native bodies or title index.
+        try await waitUntil { fixture.file.load(roots: fixture.roots)?.entries.count == 2 }
+    }
+
+    @Test(arguments: [false, true])
+    func invalidSavedIndexIsIgnoredThenRewritten(wrongVersion: Bool) async throws {
+        let fixture = try HistoryIndexFixture()
+        defer { fixture.cleanup() }
+        var saved = fixture.snapshot(fixture.scan().cache)
+        if wrongVersion { saved.version = 999 }
+        try FileManager.default.createDirectory(
+            at: fixture.file.url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let bytes = wrongVersion ? try JSONEncoder().encode(saved) : Data("{".utf8)
+        try bytes.write(to: fixture.file.url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fixture.file.url.path)
+        let gate = CompatibilityScanGate()
+        let meter = HistoryIndexMeter()
+        let store = SessionStore(
+            root: fixture.grok, timing: SessionStoreTiming(indexWriteDelay: .milliseconds(5)),
+            nativeRoots: fixture.nativeRoots, indexFile: fixture.file,
+            scanOperation: { _, cache, _ in
+                await gate.hold()
+                return fixture.scan(cache: cache, meter: meter)
+            })
+        defer { store.stop() }
+        store.start()
+        try await waitUntilAsync { await gate.isWaiting }
+        #expect(store.sessions.isEmpty && store.appliedScanSequence == 0)
+        await gate.release()
+        try await waitUntil { !store.isLoading }
+        #expect(store.sessions.count == 3 && !store.hasUnvalidatedHistory)
+        #expect(meter.count > 0)
+        try await waitUntil { fixture.file.load(roots: fixture.roots)?.entries.count == 3 }
+    }
+
+    @Test func forcedScanSupersedesSavedStartupAndOnlyAppliedStateIsPersisted() async throws {
+        let fixture = try HistoryIndexFixture()
+        defer { fixture.cleanup() }
+        let saved = fixture.snapshot(fixture.scan().cache)
+        #expect(fixture.file.save(saved))
+        let gate = CompatibilityScanGate()
+        let store = SessionStore(
+            root: fixture.grok, timing: SessionStoreTiming(indexWriteDelay: .milliseconds(5)),
+            nativeRoots: fixture.nativeRoots, indexFile: fixture.file,
+            scanOperation: { _, cache, forced in
+                if forced { return .init(sessions: [], cache: [:], loadError: nil) }
+                await gate.hold()
+                return .init(sessions: cache.values.map(\.session), cache: cache, loadError: nil)
+            })
+        defer { store.stop() }
+        store.start()
+        try await waitUntilAsync { await gate.isWaiting }
+        #expect(store.appliedScanSequence == 0 && store.sessions.count == 3)
+        await store.reload()
+        let applied = store.appliedScanSequence
+        await gate.release()
+        try await waitUntil { !store.isLoading }
+        #expect(store.sessions.isEmpty && store.appliedScanSequence == applied)
+        try await waitUntil { fixture.file.load(roots: fixture.roots)?.entries.isEmpty == true }
+    }
+
+    @Test func forgedSavedIdentityCannotAuthorizeSourceActions() async throws {
+        let fixture = try HistoryIndexFixture()
+        defer { fixture.cleanup() }
+        var cache = fixture.scan().cache
+        let key = fixture.claudeFile.path
+        var entry = try #require(cache[key])
+        let original = entry.session
+        entry.session = GrokSession(
+            id: "22222222-2222-4222-8222-222222222222", cwd: original.cwd, summary: "Forged display identity",
+            createdAt: original.createdAt, updatedAt: original.updatedAt, messageCount: 1,
+            modelID: nil, agentName: nil, reasoningEffort: nil, directory: original.directory,
+            provider: .claudeCode)
+        cache[key] = entry
+        #expect(fixture.file.save(fixture.snapshot(cache)))
+        let store = SessionStore(
+            root: fixture.grok, timing: SessionStoreTiming(), nativeRoots: fixture.nativeRoots,
+            indexFile: fixture.file)
+        defer { store.stop() }
+        store.start()
+        try await waitUntil { store.appliedScanSequence > 0 && !store.isLoading }
+        let forged = try #require(store.sessions.first { $0.summary == "Forged display identity" })
+        #expect(!forged.isHistoryValidated)
+        #expect(await store.validatedSession(for: forged) == nil)
+        #expect(
+            store.sessions.contains {
+                $0.provider == .claudeCode && $0.nativeSessionID == fixture.id && $0.isHistoryValidated
+            })
+    }
+}
+
 private final class DetachedHistoryReadGate: Sendable {
     private struct State: Sendable {
         var armed = false

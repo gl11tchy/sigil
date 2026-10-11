@@ -6,6 +6,7 @@ struct SessionStoreTiming: Sendable {
     var maximumDebounceDelay: Duration = .seconds(3)
     var watcherRetryDelay: Duration = .seconds(2)
     var watcherLatency: CFTimeInterval = 1
+    var indexWriteDelay: Duration = .seconds(1)
 }
 
 /// Reads the Grok Build session history off disk and keeps it current.
@@ -30,6 +31,8 @@ public final class SessionStore {
     public private(set) var historyNotice: String?
     /// An unknown file can belong to an otherwise empty project. Keep project metadata in that case.
     public private(set) var canPruneMissingProjects = false
+
+    public var hasUnvalidatedHistory: Bool { sessions.contains { !$0.isHistoryValidated } }
 
     public let root: URL
     /// The captured root shared by history scans, watchers and identity proof.
@@ -58,9 +61,17 @@ public final class SessionStore {
     @ObservationIgnored private let timing: SessionStoreTiming
     @ObservationIgnored private let scanOperation: ScanOperation
     @ObservationIgnored private let nativeRoots: [(CLIProvider, URL)]
+    @ObservationIgnored private let indexFile: SessionIndexFile?
+    @ObservationIgnored private let titleIndexCache: CodexTitleIndexCache
+    @ObservationIgnored private let indexWriter = SessionIndexWriter()
+    @ObservationIgnored private var indexWriteTask: Task<Void, Never>?
+    @ObservationIgnored private var startupTask: Task<Void, Never>?
+    @ObservationIgnored private var startupGeneration = 0
 
     public convenience init() {
-        self.init(root: GrokPaths.sessionsRoot, includesNativeHistory: true)
+        self.init(
+            root: SessionDirectoryWatcher.canonicalURL(GrokPaths.sessionsRoot), timing: SessionStoreTiming(),
+            nativeRoots: NativeSessionScanner.roots, indexFile: SessionIndexFile(url: SessionIndexFile.defaultURL))
     }
 
     public convenience init(root: URL, includesNativeHistory: Bool = false) {
@@ -74,7 +85,9 @@ public final class SessionStore {
     convenience init(
         root: URL, timing: SessionStoreTiming, nativeRoots: [(CLIProvider, URL)] = [],
         nativeContentReader: NativeSessionScanner.ContentReader = .disk,
-        nativeRecordDecoder: NativeSessionRecordDecoder = .init()
+        nativeRecordDecoder: NativeSessionRecordDecoder = .init(),
+        indexFile: SessionIndexFile? = nil,
+        contentReader: SessionScanner.ContentReader = .disk
     ) {
         let nativeRoots = nativeRoots.map { ($0.0, SessionDirectoryWatcher.canonicalURL($0.1)) }
         // Availability is a monotonic observed fact, including roots with zero sessions.
@@ -86,12 +99,15 @@ public final class SessionStore {
             root: root,
             timing: timing,
             nativeRoots: nativeRoots,
+            indexFile: indexFile,
+            titleIndexCache: titleIndexCache,
             scanOperation: { root, cache, ignoringCache in
                 let scan = Task.detached(priority: .userInitiated) {
                     var result = SessionScanner.scan(
                         root: root,
                         cache: cache.filter { $0.value.session.provider == .grokBuild },
                         ignoringCache: ignoringCache,
+                        contentReader: contentReader,
                         rootAvailability: availableRoots
                     )
                     for (provider, nativeRoot) in nativeRoots {
@@ -122,12 +138,16 @@ public final class SessionStore {
         root: URL,
         timing: SessionStoreTiming,
         nativeRoots: [(CLIProvider, URL)] = [],
+        indexFile: SessionIndexFile? = nil,
+        titleIndexCache: CodexTitleIndexCache = CodexTitleIndexCache(),
         scanOperation: @escaping ScanOperation
     ) {
         self.root = root
         self.timing = timing
         self.scanOperation = scanOperation
         self.nativeRoots = nativeRoots
+        self.indexFile = indexFile
+        self.titleIndexCache = titleIndexCache
         let stream: AsyncStream<Bool>
         let continuation: AsyncStream<Bool>.Continuation
         (stream, continuation) = AsyncStream<Bool>.makeStream(
@@ -149,6 +169,8 @@ public final class SessionStore {
     }
 
     deinit {
+        startupTask?.cancel()
+        indexWriteTask?.cancel()
         eventContinuation.finish()
         eventPump?.cancel()
         watcherRetryTask?.cancel()
@@ -161,13 +183,44 @@ public final class SessionStore {
     public func start() {
         guard !isStarted else { return }
         isStarted = true
-        refreshWatcher()
-        startWatcherRetryLoop()
-        Task { await self.scan(ignoringCache: false) }
+        startupGeneration += 1
+        let generation = startupGeneration
+        isLoading = true
+        startupTask = Task { [weak self] in
+            guard let self else { return }
+            if let file = self.indexFile, self.scanSequence == 0 {
+                let roots = SessionIndexFile.roots(grok: self.root, native: self.nativeRoots)
+                let load = Task.detached(priority: .userInitiated) { file.load(roots: roots) }
+                let saved = await withTaskCancellationHandler {
+                    await load.value
+                } onCancel: {
+                    load.cancel()
+                }
+                guard !Task.isCancelled, self.isStarted, generation == self.startupGeneration else { return }
+                // A reload racing the disk load owns its result. Display publication is not a scan.
+                if self.scanSequence == 0, let saved {
+                    self.cache = saved.entries
+                    self.sessions = saved.entries.values.map(\.session).sorted(by: SessionScanner.isNewer)
+                    self.searchKeys = SessionScanner.searchKeys(for: self.sessions)
+                    self.titleIndexCache.restoreDisplaySnapshots(saved.titleIndexes)
+                }
+            }
+            guard !Task.isCancelled, self.isStarted, generation == self.startupGeneration else { return }
+            self.refreshWatcher()
+            self.startWatcherRetryLoop()
+            await self.scan(ignoringCache: false)
+            if generation == self.startupGeneration { self.startupTask = nil }
+        }
     }
 
     /// Stops watching. Safe to call when not started.
     public func stop() {
+        startupGeneration += 1
+        startupTask?.cancel()
+        startupTask = nil
+        indexWriteTask?.cancel()
+        indexWriteTask = nil
+        if inflight == 0 { isLoading = false }
         for watcher in nativeWatchers.values { watcher.stop() }
         nativeWatchers.removeAll()
         watcher.stop()
@@ -191,6 +244,24 @@ public final class SessionStore {
         await scan(ignoringCache: true)
         guard !Task.isCancelled else { return }
         refreshWatcher()
+    }
+
+    /// A saved display row cannot launch a CLI or authorize removal. Read its source again first.
+    public func validatedSession(for candidate: GrokSession) async -> GrokSession? {
+        guard !Task.isCancelled else { return nil }
+        func matches(_ session: GrokSession) -> Bool {
+            session.reference == candidate.reference && session.directory == candidate.directory
+        }
+        guard let current = sessions.first(where: matches) else { return nil }
+        if current.isHistoryValidated { return current }
+        let key = current.directory.standardizedFileURL.path
+        let roots = SessionIndexFile.roots(grok: root, native: nativeRoots)
+        guard let indexFile, indexFile.permitsSource(key, roots: roots, provider: current.provider) else { return nil }
+        await scan(ignoringCache: false, refreshing: key)
+        guard !Task.isCancelled, indexFile.permitsSource(key, roots: roots, provider: current.provider) else {
+            return nil
+        }
+        return sessions.first { matches($0) && $0.isHistoryValidated }
     }
 
     /// A present Grok folder without its summary is not proof that its saved metadata is stale.
@@ -229,7 +300,7 @@ public final class SessionStore {
     }
 
     /// Walks `root` off the main actor. Cache hits skip JSON decoding.
-    func scan(ignoringCache: Bool) async {
+    func scan(ignoringCache: Bool, refreshing key: String? = nil) async {
         guard !Task.isCancelled else { return }
         if !ignoringCache, forcedScansInFlight > 0 {
             cachedScanPending = true
@@ -260,7 +331,12 @@ public final class SessionStore {
         }
 
         let root = self.root
-        let snapshot = cache
+        var snapshot = cache
+        if let key, var entry = snapshot[key] {
+            // Keep uncertain rows for display while forcing this one source to be parsed.
+            entry.inode = nil
+            snapshot[key] = entry
+        }
         let result = await scanOperation(root, snapshot, ignoringCache)
 
         guard !Task.isCancelled, capturedForceEpoch == forceEpoch else { return }
@@ -286,16 +362,34 @@ public final class SessionStore {
         coverage = nextCoverage
         if sessions != result.sessions {
             sessions = result.sessions
-            searchKeys = sessions.map(SessionScanner.SearchKey.init)
+            searchKeys = SessionScanner.searchKeys(for: sessions)
         }
         if loadError != result.loadError {
             loadError = result.loadError
         }
         let notice = nextCoverage.notices.sorted { $0.key < $1.key }.map(\.value).joined(separator: "\n").nilIfBlank
         if historyNotice != notice { historyNotice = notice }
-        let canPrune = nextCoverage.uncertainRoots.isEmpty && nextCoverage.notices.isEmpty && result.loadError == nil
+        let canPrune =
+            nextCoverage.uncertainRoots.isEmpty && nextCoverage.notices.isEmpty && result.loadError == nil
+            && !hasUnvalidatedHistory
         if canPruneMissingProjects != canPrune { canPruneMissingProjects = canPrune }
+        scheduleIndexWrite(sequence: sequence)
         refreshWatcher()
+    }
+
+    private func scheduleIndexWrite(sequence: Int) {
+        guard let indexFile else { return }
+        indexWriteTask?.cancel()
+        let snapshot = SessionIndexFile.Snapshot(
+            roots: SessionIndexFile.roots(grok: root, native: nativeRoots), entries: cache)
+        let writer = indexWriter
+        let titles = titleIndexCache
+        let delay = timing.indexWriteDelay
+        indexWriteTask = Task {
+            do { try await Task.sleep(for: delay) } catch { return }
+            guard !Task.isCancelled else { return }
+            await writer.save(snapshot, to: indexFile, sequence: sequence, titleIndexCache: titles)
+        }
     }
 
     func scheduleDebouncedScan() {

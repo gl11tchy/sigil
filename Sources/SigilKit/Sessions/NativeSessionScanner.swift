@@ -138,7 +138,7 @@ enum NativeSessionScanner {
                     parsed = read.result
                 } else {
                     claude = nil
-                    let data = try boundedContents(file, size: size.uint64Value)
+                    let data = try boundedContents(file, size: size.uint64Value, reader: contentReader)
                     parsed = parseResult(
                         provider: provider, data: data, file: file, modified: modified, decoder: recordDecoder)
                 }
@@ -281,7 +281,7 @@ enum NativeSessionScanner {
         }
     }
 
-    struct FileSnapshot: Sendable, Equatable {
+    struct FileSnapshot: Sendable, Equatable, Codable {
         var inode: UInt64
         var device: Int32
         var size: Int64
@@ -428,20 +428,32 @@ enum NativeSessionScanner {
         if reader.isCancelled() { throw CancellationError() }
     }
 
-    private static func boundedContents(_ file: URL, size: UInt64) throws -> Data {
-        let handle = try FileHandle(forReadingFrom: file)
+    private static func boundedContents(_ file: URL, size: UInt64, reader: ContentReader) throws -> Data {
+        let descriptor = open(file.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        guard descriptor >= 0 else { throw CocoaError(.fileReadUnknown) }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         defer { try? handle.close() }
-        return try boundedContents(handle, size: size)
+        var before = stat()
+        guard fstat(descriptor, &before) == 0, before.st_mode & S_IFMT == S_IFREG,
+            before.st_size >= 0, UInt64(before.st_size) == size
+        else { throw CocoaError(.fileReadUnknown) }
+        let data = try boundedContents(handle, size: size, reader: reader)
+        var after = stat()
+        guard lstat(file.path, &after) == 0, after.st_mode & S_IFMT == S_IFREG,
+            FileSnapshot(before) == FileSnapshot(after)
+        else { throw CocoaError(.fileReadUnknown) }
+        return data
     }
 
-    static func boundedContents(_ handle: FileHandle, size: UInt64) throws -> Data {
-        var data = try handle.read(upToCount: prefixLimit) ?? Data()
+    static func boundedContents(_ handle: FileHandle, size: UInt64, reader: ContentReader = .disk) throws -> Data {
+        try checkCancellation(reader)
+        var data = try reader.read(handle, 0, prefixLimit)
         if size > UInt64(prefixLimit) {
             // Discard the partial prefix record rather than concatenate unrelated JSON.
             if let newline = data.lastIndex(of: 0x0A) { data = Data(data[...newline]) } else { data = Data() }
             let offset = max(UInt64(prefixLimit), size > UInt64(tailLimit) ? size - UInt64(tailLimit) : 0)
-            try handle.seek(toOffset: offset)
-            let tail = try handle.read(upToCount: tailLimit) ?? Data()
+            try checkCancellation(reader)
+            let tail = try reader.read(handle, offset, tailLimit)
             if let newline = tail.firstIndex(of: 0x0A) { data.append(tail.suffix(from: tail.index(after: newline))) }
         }
         return data
@@ -570,7 +582,7 @@ enum NativeSessionScanner {
             createdAt: session.createdAt, updatedAt: session.updatedAt, messageCount: session.messageCount,
             modelID: session.modelID, agentName: session.agentName, reasoningEffort: session.reasoningEffort,
             kind: session.kind, directory: session.directory, provider: session.provider,
-            hasObservedMessages: session.hasObservedMessages)
+            hasObservedMessages: session.hasObservedMessages, isHistoryValidated: session.isHistoryValidated)
     }
 
     private static func supportedCodexVersion(_ version: String) -> Bool {
