@@ -72,6 +72,9 @@ struct AppModelTests {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
         let cwd = try fixture.directory("generated-project")
+        // Temporary fixture projects are hidden worktrees by default. This launch checks
+        // migration for listed conversations, before deferred tabs make them visible.
+        fixture.settings.showWorktreeSessions = true
         try fixture.writeListedSession(id: "saved-tab", cwd: cwd.path)
         try fixture.writeListedSession(id: "remote-tab", cwd: cwd.path)
         let root = fixture.store.root
@@ -101,6 +104,7 @@ struct AppModelTests {
         let error = ErrorBox()
         let model = fixture.model(store: store, presentError: { error.error = $0 })
         defer { model.closeAllTabsAndWait() }
+        #expect(Set(model.sidebarSessions.map(\.nativeSessionID)) == ["saved-tab", "remote-tab"])
         await model.onAppear()
         let reply = await RemoteCommands.execute(
             RemoteRequest(challenge: "test", sequence: 1, action: "open", text: cwd.path, name: "remote-tab"),
@@ -124,6 +128,10 @@ struct AppModelTests {
         #expect(fixture.settings.sigilConversationsSeeded)
         #expect(fixture.settings.pinnedConversations.isEmpty)
         #expect(model.panel.legacyFolderNotes.isEmpty)
+        #expect(
+            store.sessions.filter {
+                model.panel.notes(forSessionID: $0.id, cwd: $0.cwd) == "kept legacy note"
+            }.count == 1)
         #expect(store.scanSequence == 2)
         #expect(!store.hasUnvalidatedHistory)
         #expect(store.canPruneMissingProjects)
