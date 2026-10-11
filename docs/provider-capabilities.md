@@ -152,16 +152,18 @@ An explicit empty title resets to the first prompt. A complete legacy final JSON
 object without a newline is projected without committing the unfinished line.
 
 Claude's in-memory cache holds display/identity fields, a scan offset, bounded
-partial-record bytes and continuity anchors. A growing file resumes at the prior
-offset only after its inode/device/birth identity, 4 KiB prefix/tail anchors,
-retained-field record digests and any partial record match. Validation rereads
-those bounded anchors; transcript parsing then reads only appended bytes.
-Replacement, truncation, a changed same-size file, or changed anchors triggers a
-cold scan. Identity/timestamps are checked again before publishing a result, and
-cancellation or a concurrent write preserves cached rows with uncertain coverage.
-These fixed anchors detect rewrites of the retained fields and sampled regions;
-they cannot prove every old byte is unchanged. An arbitrary in-place rewrite
-outside them can evade detection. An `ignoringCache` scan revalidates the full file.
+partial-record bytes and a SHA-256 fingerprint of every byte through that offset.
+Unchanged files are zero-read cache hits. A changed, growing file resumes parsing
+at the prior offset only after its inode/device/birth identity matches and a
+cancellable 64 KiB-chunk reread of the entire old prefix reproduces the fingerprint.
+Only new records are then parsed, but validation deliberately reads old bytes:
+this is incremental parsing, not append-only byte I/O. Replacement, truncation,
+a changed same-size file, or any old-prefix fingerprint mismatch triggers a cold
+scan. Identity/timestamps are checked again before publishing a result; concurrent
+writes and read failures preserve saved rows with uncertain coverage. Caller
+cancellation reaches the store's detached scanner, and canceled results cannot
+publish cache, sessions, notices or coverage. Existing scan ordering and force
+epochs remain authoritative. `ignoringCache` always performs a full scan.
 
 Codex retains its 512 KiB prefix/128 KiB tail transcript samples and latest 2 MiB
 name-index window; incremental Codex indexing belongs to REA-1268. The scanner

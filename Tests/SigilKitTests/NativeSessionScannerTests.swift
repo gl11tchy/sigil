@@ -319,7 +319,7 @@ struct NativeSessionScannerTests {
         print("Native history 900 sessions: cold=\(coldDuration), cached=\(warmDuration), search=\(searchDuration)")
     }
 
-    @Test func claudeMiddleRenameSurvivesGrowthWithoutStreamingOldRecordsAgain() throws {
+    @Test func claudeMiddleRenameSurvivesGrowthAfterFullPrefixValidation() throws {
         let fixture = try ClaudeTranscriptFixture()
         defer { fixture.remove() }
         let original = try fixture.longTranscript()
@@ -336,8 +336,14 @@ struct NativeSessionScannerTests {
         #expect(grown.sessions.first?.createdAt == cold.sessions.first?.createdAt)
         let reads = meter.snapshot()
         #expect(reads.filter { $0.offset >= UInt64(original.count) }.reduce(0) { $0 + $1.count } == appended.count)
-        // Continuity requires bounded reads of old anchors; old transcript records are not streamed again.
-        #expect(reads.filter { $0.offset < UInt64(original.count) }.reduce(0) { $0 + $1.count } < 10 * 1024)
+        // Changed-file validation rereads all prior bytes; only appended records are parsed after it matches.
+        #expect(reads.filter { $0.offset < UInt64(original.count) }.reduce(0) { $0 + $1.count } == original.count)
+        print("Claude append bytes: validation=\(original.count), new=\(appended.count)")
+        let rebuilt = NativeSessionScanner.scan(
+            provider: .claudeCode, root: fixture.root, cache: [:], ignoringCache: true)
+        #expect(
+            grown.cache[fixture.file.path]?.claudeScan?.continuityDigest
+                == rebuilt.cache[fixture.file.path]?.claudeScan?.continuityDigest)
         #expect((coldMeter.snapshot() + reads).allSatisfy { $0.requested <= 1024 * 1024 })
         try fixture.append(fixture.rename("Newest 解析✨"))
         let renamed = fixture.scan(cache: grown.cache)
@@ -445,6 +451,35 @@ struct NativeSessionScannerTests {
         #expect(scanned.cache[fixture.file.path]?.claudeScan?.offset == UInt64(replacement.count))
     }
 
+    @Test func claudeUnanchoredRewriteWithGrowthRevalidatesEveryOldByte() throws {
+        let fixture = try ClaudeTranscriptFixture()
+        defer { fixture.remove() }
+        let original = try fixture.longTranscript()
+        try original.write(to: fixture.file)
+        let first = fixture.scan()
+        let rowSize = fixture.padding(1).count
+        let offset =
+            try fixture.header().count + fixture.padding(700 * 1024).count
+            + fixture.rename("Older title").count + 80 * rowSize
+        let rename = try fixture.rename("Unanchored rewritten rename")
+        let row = Data(rename.dropLast()) + Data(repeating: 0x20, count: rowSize - rename.count) + Data([10])
+        var rewritten = original
+        rewritten.replaceSubrange(offset..<(offset + rowSize), with: row)
+        rewritten.append(fixture.padding(1024 * 1024))
+        try rewritten.write(to: fixture.file)
+        let meter = ClaudeReadMeter()
+        let warm = fixture.scan(cache: first.cache, reader: meter.reader())
+        let cold = NativeSessionScanner.scan(
+            provider: .claudeCode, root: fixture.root, cache: first.cache, ignoringCache: true)
+        #expect(warm.sessions.first?.title == "Unanchored rewritten rename")
+        #expect(warm.sessions == cold.sessions)
+        #expect(meter.snapshot().filter { $0.offset == 0 }.count == 2)
+        #expect(meter.snapshot().allSatisfy { $0.requested <= NativeSessionScanner.chunkLimit })
+        #expect(
+            warm.cache[fixture.file.path]?.claudeScan?.continuityDigest
+                == cold.cache[fixture.file.path]?.claudeScan?.continuityDigest)
+    }
+
     @Test func claudeOversizedRecordsDiscardThroughNewlineWithBoundedState() throws {
         let fixture = try ClaudeTranscriptFixture()
         defer { fixture.remove() }
@@ -467,9 +502,7 @@ struct NativeSessionScannerTests {
         #expect(next.sessions.first?.title == "After oversized")
         let state = try #require(next.cache[fixture.file.path]?.claudeScan)
         #expect(state.remainder.count <= NativeSessionScanner.prefixLimit)
-        #expect(state.prefix.count <= NativeSessionScanner.anchorLimit)
-        #expect(state.tail.count <= NativeSessionScanner.anchorLimit)
-        #expect(state.anchors.count <= 5)
+        #expect(state.continuityDigest.count == 32)
         #expect(meter.snapshot().allSatisfy { $0.requested <= 1024 * 1024 })
     }
 

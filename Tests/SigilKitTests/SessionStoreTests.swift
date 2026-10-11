@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import Testing
+import os
 
 @testable import SigilKit
 
@@ -571,6 +572,66 @@ struct SessionStoreTests {
         #expect(store.sessions.map(\.id) == ["fresh"])
     }
 
+    @Test(arguments: [false, true])
+    func cancelledProductionDetachedScanCannotPublish(forced: Bool) async throws {
+        let fixture = try HistoryCompatibilityFixture()
+        defer { fixture.remove() }
+        let held = try fixture.writeNative(provider: .claudeCode, version: "2.1.283")
+        let initial =
+            try Data(contentsOf: held) + Data("\n{\"type\":\"custom-title\",\"customTitle\":\"Kept title\"}\n".utf8)
+        try initial.write(to: held)
+        let unsupported = fixture.claude.appendingPathComponent("unsupported.jsonl")
+        try Data("{\"type\":\"summary\",\"summary\":\"Generated compatibility notice\"}\n".utf8).write(to: unsupported)
+        let gate = DetachedHistoryReadGate()
+        let store = SessionStore(
+            root: fixture.grok, timing: SessionStoreTiming(), nativeRoots: [(.claudeCode, fixture.claude)],
+            nativeContentReader: gate.reader)
+        defer { store.stop() }
+        await store.reload()
+        #expect(store.sessions.first?.title == "Kept title")
+        let previous = store.sessions
+        let notice = try #require(store.historyNotice)
+        let applied = store.appliedScanSequence
+        #expect(store.loadError == nil)
+        #expect(!store.canPruneMissingProjects)
+        try FileManager.default.removeItem(at: unsupported)
+        try (initial + Data("{\"type\":\"custom-title\",\"customTitle\":\"Fresh title\"}\n".utf8)).write(to: held)
+        gate.arm()
+        let operation = Task {
+            if forced { await store.reload() } else { await store.scan(ignoringCache: false) }
+        }
+        defer {
+            operation.cancel()
+            gate.release()
+        }
+        try await waitUntil { gate.isWaiting }
+        let waiting = gate.isWaiting
+        #expect(waiting)
+        guard waiting else {
+            operation.cancel()
+            gate.release()
+            await operation.value
+            return
+        }
+        operation.cancel()
+        gate.release()
+        await operation.value
+        #expect(gate.observedCancellation)
+        #expect(!gate.timedOut)
+        #expect(store.sessions == previous)
+        #expect(store.historyNotice == notice)
+        #expect(store.loadError == nil)
+        #expect(!store.canPruneMissingProjects)
+        #expect(store.appliedScanSequence == applied)
+        #expect(!store.isLoading)
+        // A fresh request still applies and clears the genuinely repaired notice.
+        await store.scan(ignoringCache: false)
+        #expect(store.sessions.first?.title == "Fresh title")
+        #expect(store.historyNotice == nil)
+        #expect(store.canPruneMissingProjects)
+        #expect(store.appliedScanSequence > applied)
+    }
+
     @Test func malformedUpdateIsReportedAndPreservesLastKnownSession() async throws {
         let harness = try FixtureHarness()
         defer { harness.tearDown() }
@@ -847,6 +908,45 @@ struct SessionStoreTests {
 
         #expect(harness.store.sessions.map(\.id) == ["019ffeab-c76b-7fe1-be40-508369febd51"])
         #expect(harness.store.loadError != nil)
+    }
+}
+
+/// Pauses one real read in the production detached scan; no replacement ScanOperation.
+private final class DetachedHistoryReadGate: Sendable {
+    private struct State: Sendable {
+        var armed = false
+        var waiting = false
+        var observedCancellation = false
+        var timedOut = false
+    }
+    private let state = OSAllocatedUnfairLock(initialState: State())
+    private let resume = DispatchSemaphore(value: 0)
+
+    var isWaiting: Bool { state.withLock { $0.waiting } }
+    var observedCancellation: Bool { state.withLock { $0.observedCancellation } }
+    var timedOut: Bool { state.withLock { $0.timedOut } }
+
+    func arm() { state.withLock { $0.armed = true } }
+    func release() { resume.signal() }
+
+    var reader: NativeSessionScanner.ContentReader {
+        NativeSessionScanner.ContentReader { handle, offset, count in
+            let data = try NativeSessionScanner.ContentReader.disk.read(handle, offset, count)
+            let pause = self.state.withLock { state in
+                guard state.armed else { return false }
+                state.armed = false
+                state.waiting = true
+                return true
+            }
+            if pause {
+                let timedOut = self.resume.wait(timeout: .now() + 5) == .timedOut
+                self.state.withLock {
+                    $0.observedCancellation = Task.isCancelled
+                    $0.timedOut = timedOut
+                }
+            }
+            return data
+        }
     }
 }
 

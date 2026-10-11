@@ -1,3 +1,4 @@
+import CryptoKit
 import Darwin
 import Foundation
 
@@ -9,7 +10,6 @@ enum NativeSessionScanner {
     static let prefixLimit = 512 * 1024
     static let tailLimit = 128 * 1024
     static let chunkLimit = 64 * 1024
-    static let anchorLimit = 4096
 
     struct ContentReader: Sendable {
         var read: @Sendable (FileHandle, UInt64, Int) throws -> Data
@@ -179,10 +179,6 @@ enum NativeSessionScanner {
             coverage: coverage)
     }
 
-    enum ClaudeField: Sendable, Hashable {
-        case identity, fallback, prompt, title, model
-    }
-
     /// Only bounded display fields survive a scan; transcript messages are not retained.
     struct ClaudeMetadata: Sendable, Equatable {
         var nativeID: String?
@@ -199,11 +195,10 @@ enum NativeSessionScanner {
         var ambiguous = false
 
         @discardableResult
-        mutating func consume(_ line: Data) -> [ClaudeField]? {
+        mutating func consume(_ line: Data) -> Bool {
             guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
                 let type = object["type"] as? String
-            else { return nil }
-            var fields: [ClaudeField] = []
+            else { return false }
             if let version = object["version"] as? String, !version.hasPrefix("2."), CLIVersion(version) != nil {
                 unsupportedVersion = String(version.prefix(64))
             }
@@ -213,11 +208,6 @@ enum NativeSessionScanner {
             {
                 if let nativeID, nativeID != id { ambiguous = true }
                 if let cwd, cwd != path { ambiguous = true }
-                if nativeID == nil || (created == nil && object["timestamp"] is String)
-                    || (!isSubagent && object["isSidechain"] as? Bool == true)
-                {
-                    fields.append(.identity)
-                }
                 nativeID = id
                 cwd = path
                 created = created ?? SessionTimestamp.parse(object["timestamp"] as? String)
@@ -234,10 +224,8 @@ enum NativeSessionScanner {
             }
             if type == "custom-title", let title = object["customTitle"] as? String {
                 explicitTitle = displayTitle(title)
-                fields.append(.title)
             } else if type == "summary", fallback.isEmpty, let summary = object["summary"] as? String {
                 fallback = displayTitle(summary)
-                fields.append(.fallback)
             } else if type == "user", firstPrompt.isEmpty, object["isMeta"] as? Bool != true,
                 let message = object["message"] as? [String: Any]
             {
@@ -249,10 +237,8 @@ enum NativeSessionScanner {
                     }.first ?? ""
                 if !text.hasPrefix("<") {
                     firstPrompt = displayTitle(text)
-                    fields.append(.prompt)
                     if fallback.isEmpty {
                         fallback = firstPrompt
-                        fields.append(.fallback)
                     }
                 }
             }
@@ -260,9 +246,8 @@ enum NativeSessionScanner {
                 let model = message["model"] as? String
             {
                 self.model = model
-                fields.append(.model)
             }
-            return fields
+            return true
         }
 
         func result(file: URL, modified: Date, fallbackCreated: Date) -> ParseResult {
@@ -282,12 +267,6 @@ enum NativeSessionScanner {
         private func displayTitle(_ text: String) -> String {
             String(text.prefix(240)).replacingOccurrences(of: "\n", with: " ")
         }
-    }
-
-    struct RecordAnchor: Sendable, Hashable {
-        var offset: UInt64
-        var count: Int
-        var digest: [UInt8]
     }
 
     struct FileSnapshot: Sendable, Equatable {
@@ -329,10 +308,8 @@ enum NativeSessionScanner {
         var discardingOversized = false
         var skippedOversized = false
         var incomplete = false
-        var prefix = Data()
-        var tail = Data()
-        /// Constant-count anchors cover records supplying retained display/identity fields.
-        var anchors: [ClaudeField: RecordAnchor] = [:]
+        /// Fingerprint of every byte through offset; validation streams those bytes again.
+        var continuityDigest: [UInt8] = []
     }
 
     private struct ClaudeRead {
@@ -356,20 +333,20 @@ enum NativeSessionScanner {
             UInt64(bitPattern: Int64(before.device)) == device
         else { throw CocoaError(.fileReadUnknown) }
         var state = ClaudeScanState(identity: before, fallbackCreated: modified)
+        var hasher = SHA256()
         if let cached, let old = cached.claudeScan, before.isSameFile(as: old.identity),
             old.offset == UInt64(cached.size), size > old.offset,
-            try hasContinuity(old, handle: handle, reader: reader)
+            let validated = try validatedPrefix(old, handle: handle, reader: reader)
         {
             state = old
+            hasher = validated
         }
         while state.offset < size {
             try checkCancellation(reader)
             let requested = min(chunkLimit, Int(size - state.offset))
             let chunk = try reader.read(handle, state.offset, requested)
             guard !chunk.isEmpty, chunk.count <= requested else { throw CocoaError(.fileReadUnknown) }
-            state.prefix.append(chunk.prefix(max(0, anchorLimit - state.prefix.count)))
-            state.tail.append(chunk)
-            state.tail = Data(state.tail.suffix(anchorLimit))
+            hasher.update(data: chunk)
             var cursor = chunk.startIndex
             while cursor < chunk.endIndex {
                 try checkCancellation(reader)
@@ -385,14 +362,7 @@ enum NativeSessionScanner {
                     }
                 }
                 if let newline {
-                    if !state.discardingOversized, let fields = state.metadata.consume(state.remainder), !fields.isEmpty
-                    {
-                        let lineEnd = state.offset + UInt64(chunk.distance(from: chunk.startIndex, to: newline))
-                        let anchor = RecordAnchor(
-                            offset: lineEnd - UInt64(state.remainder.count), count: state.remainder.count,
-                            digest: BLAKE3.hash(Array(state.remainder)))
-                        for field in fields { state.anchors[field] = anchor }
-                    }
+                    if !state.discardingOversized { state.metadata.consume(state.remainder) }
                     state.remainder = Data()
                     state.discardingOversized = false
                     cursor = chunk.index(after: newline)
@@ -408,51 +378,34 @@ enum NativeSessionScanner {
             throw CocoaError(.fileReadUnknown)
         }
         state.identity = before
+        state.continuityDigest = Array(hasher.finalize())
         // Legacy files may end with a complete JSON object but no newline. Project it
         // without committing it, so an appended delimiter/JSON/UTF-8 fragment is reparsed once.
         var projected = state.metadata
-        let unfinished = !state.remainder.isEmpty && projected.consume(state.remainder) == nil
+        let unfinished = !state.remainder.isEmpty && !projected.consume(state.remainder)
         state.incomplete = unfinished || state.skippedOversized || state.discardingOversized
         return ClaudeRead(
             state: state,
             result: projected.result(file: file, modified: modified, fallbackCreated: state.fallbackCreated))
     }
 
-    private static func hasContinuity(
+    /// Changed-file validation deliberately rereads the entire old prefix in bounded
+    /// chunks. Metadata parsing resumes only when its full fingerprint still matches.
+    private static func validatedPrefix(
         _ state: ClaudeScanState, handle: FileHandle, reader: ContentReader
-    ) throws -> Bool {
-        guard try readExactly(handle, offset: 0, count: state.prefix.count, reader: reader) == state.prefix,
-            try readExactly(
-                handle, offset: state.offset - UInt64(state.tail.count), count: state.tail.count, reader: reader)
-                == state.tail
-        else { return false }
-        if !state.remainder.isEmpty,
-            try readExactly(
-                handle, offset: state.offset - UInt64(state.remainder.count), count: state.remainder.count,
-                reader: reader)
-                != state.remainder
-        {
-            return false
-        }
-        for anchor in Set(state.anchors.values) {
-            let data = try readExactly(handle, offset: anchor.offset, count: anchor.count, reader: reader)
-            if BLAKE3.hash(Array(data)) != anchor.digest { return false }
-        }
-        return true
-    }
-
-    private static func readExactly(
-        _ handle: FileHandle, offset: UInt64, count: Int, reader: ContentReader
-    ) throws -> Data {
-        var data = Data()
-        while data.count < count {
+    ) throws -> SHA256? {
+        var hasher = SHA256()
+        var offset: UInt64 = 0
+        while offset < state.offset {
             try checkCancellation(reader)
-            let requested = count - data.count
-            let chunk = try reader.read(handle, offset + UInt64(data.count), requested)
+            let requested = min(chunkLimit, Int(state.offset - offset))
+            let chunk = try reader.read(handle, offset, requested)
             guard !chunk.isEmpty, chunk.count <= requested else { throw CocoaError(.fileReadUnknown) }
-            data.append(chunk)
+            hasher.update(data: chunk)
+            offset += UInt64(chunk.count)
         }
-        return data
+        try checkCancellation(reader)
+        return Array(hasher.finalize()) == state.continuityDigest ? hasher : nil
     }
 
     private static func checkCancellation(_ reader: ContentReader) throws {

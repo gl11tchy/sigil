@@ -519,14 +519,18 @@ the PR; parent reviews the revised exact diff. No merge, install or next ticket.
 
 The isolated scanner candidate reads complete Claude JSONL records with bounded
 chunks and retains the newest explicit rename across append rescans. Empty names
-reset to the first prompt. File identity, prefix/tail and retained-field anchors
-guard append reuse; replacement, truncation, changed anchors and read races
-invalidate or preserve earlier evidence. Partial JSON/UTF-8, oversized records and
-cancellation retain bounded state and incomplete-history protection. Codex indexing
-and parked PR150's provider UI are separate.
+reset to the first prompt. Changed files validate the entire old-prefix fingerprint
+in bounded cancellable reads before reusing parse state; this deliberately costs
+old-byte I/O while parsing only appended records. Replacement, truncation, rewrites
+and read races invalidate or preserve earlier evidence. Unchanged files remain
+zero-read cache hits. Caller cancellation reaches detached production work and
+cannot publish a canceled scan. Partial JSON/UTF-8 and oversized records retain
+bounded state and incomplete-history protection. Codex indexing and parked PR150's
+provider UI are separate.
 
-[The verification record](../qa/rea-1266.md) records the generated baseline, direct
-production-source cases and the anchor-validation limitation: fixed samples cannot
-prove every old byte is unchanged. The parent must review that limit alongside
-the final code and ordinary exact-head CI. No personal transcript, live CLI
+[The verification record](../qa/rea-1266.md) preserves the failed sampled-anchor
+candidate and the parent's explicit full-prefix revalidation decision. Revised
+production-source cases include the unanchored growth rewrite; the real detached
+store cancellation cases remain CI-only. The parent reviews final code and ordinary
+exact-head CI. No personal transcript, live CLI
 incident, local AppTests, native UI screenshot, merge or daily-app action is claimed.
