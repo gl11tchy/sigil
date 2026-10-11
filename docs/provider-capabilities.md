@@ -82,9 +82,18 @@ This optional local gate requires installed CLIs; ordinary CI does not.
   activation can advance one of those attempts without replenishing the budget.
   Pending recovery says the CLI is still being checked. After three retries,
   it says **Version check timed out** and offers **Check Again**. Explicit
-  refresh and Grok configuration changes fence canceled timers and old probe
+  checks reset only their requested provider's recovery; routine inventory,
+  entry and remote Options preserve exhausted budgets. Activation recovery uses
+  the app-wide delegate's model hook, including when only Settings remains open.
+  Timeout cleanup freezes and terminates a bounded owned descendant tree,
+  including separate child groups, before confirming the direct probe's exit.
+  Parent/birth identities fence signals. Incomplete cleanup is unavailable and
+  receives no automatic retry; deliberately detached/reparented daemons are not
+  inferred from the process inventory. Explicit refresh and Grok configuration
+  changes fence canceled timers and old probe
   results. Saved restoration keeps the ready prefix in order and retains
-  deferred positions/selection, including recovery after exhaustion. The full
+  deferred positions/selection, including recovery after exhaustion. A saved
+  position transfers when a live peer is restarted or replaced. The full
   Settings CLI inventory remains separate work (REA-1261).
 - `CLIProvider.checkedVersion` records these checked contracts. When an available
   CLI reports a newer semantic version, the sidebar and selected provider in New

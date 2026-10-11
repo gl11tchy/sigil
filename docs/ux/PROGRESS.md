@@ -475,3 +475,14 @@ format/whitespace checks, injected scheduler/probe CI regressions, and limits.
 SigilAppTests remain CI-only; the local SwiftPM denial was not retried or
 bypassed. No personal histories/prompts, local native UI smoke or app installation.
 Ordinary exact-head CI evidence is recorded in the ticket PR for parent review.
+
+PR148 review found lost saved rank on tab replacement, routine replenishment of
+exhausted retry budgets, activation tied to the main view, and direct-PID timeout
+cleanup leaving children. Remediation transfers rank in replacement construction,
+preserves exhaustion during ordinary entry/remote Options, uses the app-wide
+delegate model hook, and adds bounded identity-fenced descendant cleanup.
+Synthetic processes reproduced the original orphan and a separate-group child;
+the cleanup does not scan arguments/files or unrelated processes. Updated
+regressions include restarted peers, exhausted entry/options, Settings-only
+activation and synchronous/asynchronous child cleanup. Final evidence stays in
+the PR; parent reviews the revised exact diff. No merge, install or next ticket.

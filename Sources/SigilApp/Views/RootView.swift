@@ -168,9 +168,6 @@ struct WindowContent: View {
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             model.windowDidBecomeKey()
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            model.applicationDidBecomeActive()
-        }
         .onChange(of: announcementSnapshot) { old, new in
             announce(ScreenAnnouncement.change(from: old, to: new))
         }

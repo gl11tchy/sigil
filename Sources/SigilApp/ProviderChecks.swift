@@ -119,10 +119,11 @@ final class ProviderChecks {
     /// CLI lookup and version checks never block window drawing or input.
     /// Explicit refresh replaces all results; routine entry reuses successful
     /// checks for five minutes and coalesces checks already in progress.
+    /// An exhausted recovery stays exhausted until an explicit provider check.
     func refresh(force: Bool, only requested: Set<CLIProvider>? = nil) async {
         let providers = CLIProvider.allCases.filter {
             (requested?.contains($0) ?? true)
-                && (force || (!checking.contains($0) && !isRecovering($0) && !hasFreshProviderCheck($0)))
+                && (force || (!checking.contains($0) && recoveries[$0] == nil && !hasFreshProviderCheck($0)))
         }
         await check(providers, retry: false)
     }

@@ -2169,7 +2169,16 @@ final class AppModel {
 
     func checkedProviderLaunchProblem(_ provider: CLIProvider) async -> String? {
         guard !Task.isCancelled else { return "Session launch was cancelled." }
-        if providerLaunchProblem(provider) != nil { await refreshProviderInstallationsForEntry() }
+        if providerVersionCheckTimedOut(provider), !providerIsRecovering(provider),
+            !checkingProviders.contains(provider), !Self.isSmokeTest,
+            !Self.isRunningAutomatedTests || hasInjectedProviderProbe
+        {
+            // Choosing this provider's Check Again/start control is explicit.
+            // Routine inventory entry must leave other exhausted budgets alone.
+            await refreshProviderInstallations(only: [provider])
+        } else if providerLaunchProblem(provider) != nil {
+            await refreshProviderInstallationsForEntry()
+        }
         guard !Task.isCancelled else { return "Session launch was cancelled." }
         return providerLaunchProblem(provider)
     }
@@ -2189,11 +2198,6 @@ final class AppModel {
 
     func providerVersionCheckTimedOut(_ provider: CLIProvider) -> Bool {
         providerInstallations[provider]?.timedOut == true
-    }
-
-    func applicationDidBecomeActive() {
-        guard !Self.isSmokeTest, !Self.isRunningAutomatedTests || hasInjectedProviderProbe else { return }
-        providerChecks.applicationDidBecomeActive()
     }
 
     private func canLaunchProvider(_ provider: CLIProvider) -> Bool {
@@ -2367,6 +2371,7 @@ final class AppModel {
         spec.bridgeSocketPath = nil
         let tabID = UUID()
         let tab = TerminalTab(id: tabID, spec: tagged(spec, tabID: tabID), settings: settings)
+        restoredSavedTabOrder[tab.id] = restoredSavedTabOrder.removeValue(forKey: old.id)
         tab.onUnseenActivityChange = { [weak self] in self?.refreshDockIndicator() }
         tab.onSettle = { [weak self, weak tab] in
             if let self, let tab { self.restartForThemeWhenSettled(tab) }
@@ -2776,6 +2781,9 @@ final class AppModel {
         selectedTab?.clearUnseenActivity()
         refreshDockIndicator()
         retryPendingTerminalFocus()
+        if !Self.isSmokeTest, !Self.isRunningAutomatedTests || hasInjectedProviderProbe {
+            providerChecks.applicationDidBecomeActive()
+        }
     }
 
     /// A panel shell opened while the sheet was up takes focus once it closes.

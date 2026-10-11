@@ -820,17 +820,40 @@ struct ProviderLaunchAvailabilityTests {
         #expect(model.providerLaunchProblem(.codex)?.contains("Version check timed out") == true)
         #expect(model.providerLaunchProblem(.codex)?.contains("Check Again") == true)
         #expect(model.providerRequiresCheck(.codex))
-        for _ in 0..<20 { model.applicationDidBecomeActive() }
+        for _ in 0..<20 { model.appDidBecomeActive() }
         scheduler.advance(100)
         #expect(await gate.totalCalls == 4)
+        // Opening inventory, reading remote options, or checking another
+        // provider must not replenish Codex's exhausted recovery sequence.
+        await gate.answerImmediately(fixtureTimeout())
+        for _ in 0..<3 {
+            await model.refreshProviderInstallationsForEntry()
+            await model.refreshProviderInstallations(force: false, only: [.codex])
+            let options = await RemoteCommands.execute(
+                .init(challenge: "test", sequence: 1, action: "options"), model: model)
+            #expect(options.ok)
+            #expect(
+                options.options?.providers.first { $0.id == CLIProvider.codex.rawValue }?.problem?
+                    .contains("Version check timed out") == true)
+            #expect(model.providerLaunchProblem(.codex)?.contains("Version check timed out") == true)
+        }
+        await gate.answerImmediately(nil)
+        #expect(await gate.totalCalls == 4)
+        guard await gate.totalCalls == 4 else { return }
+        let other = Task { await model.refreshProviderInstallations(only: [.grokBuild]) }
+        await gate.waitForCalls(5)
+        await gate.release(round: 1, results: fixtureProviderInstallations(fixture.shell))
+        await other.value
+        #expect(!model.providerIsRecovering(.codex))
+        #expect(scheduler.pendingCount == 0)
         model.requestNewSession(in: fixture.root)
         let start = Task { await model.startDefaultSession(.codex) }
-        await gate.waitForCalls(5)
+        await gate.waitForCalls(6)
         await gate.release(round: 5, results: fixtureProviderInstallations(fixture.shell))
         await start.value
         #expect(model.tabs.count == 1)
         #expect(model.selectedTab?.spec.provider == .codex)
-        #expect(await gate.totalCalls == 5)
+        #expect(await gate.totalCalls == 6)
     }
 
     @Test(arguments: ["Fixture CLI is missing.", "Fixture CLI version is invalid."])
@@ -849,7 +872,7 @@ struct ProviderLaunchAvailabilityTests {
         await gate.waitForCalls(1)
         await gate.release(round: 1, results: [.codex: .init(executable: nil, version: nil, problem: problem)])
         await refresh.value
-        for _ in 0..<20 { model.applicationDidBecomeActive() }
+        for _ in 0..<20 { model.appDidBecomeActive() }
         scheduler.advance(300)
         #expect(scheduler.pendingCount == 0)
         #expect(await gate.totalCalls == 1)
@@ -941,6 +964,39 @@ struct ProviderLaunchAvailabilityTests {
         #expect(model.newTab(in: fixture.root)?.spec.executable == replacementPath)
     }
 
+    @Test func settingsOnlyGrokRetryUsesTheAppWideActivationHook() async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .grokBuild)
+        defer { fixture.cleanup() }
+        let gate = HeldProviderProbe()
+        let clock = ProviderCheckClock()
+        let scheduler = ProviderRetryScheduler(clock: clock)
+        defer { scheduler.cancelAll() }
+        let model = fixture.makeModel(
+            installations: fixtureProviderInstallations(fixture.shell),
+            probe: { provider, _ in await gate.probe(provider) },
+            clock: { clock.now }, sleep: { try await scheduler.sleep($0) })
+        let settingsCheck = Task { await model.refreshProviderInstallations(only: [.grokBuild]) }
+        await gate.waitForCalls(1)
+        await gate.release(round: 1, results: [.grokBuild: fixtureTimeout()])
+        await settingsCheck.value
+        await scheduler.waitForTimer()
+        #expect(scheduler.nextDeadline == 5)
+        // This is the app-wide model hook called by AppDelegate. No RootView
+        // or WindowContent is constructed or required to receive activation.
+        model.appDidBecomeActive()
+        for _ in 0..<1_000 {
+            if await gate.totalCalls == 2 { break }
+            await Task.yield()
+        }
+        #expect(await gate.totalCalls == 2)
+        guard await gate.totalCalls == 2 else { return }
+        await gate.release(round: 2, results: fixtureProviderInstallations(fixture.shell))
+        await waitForProviderResult(model, .grokBuild)
+        #expect(clock.now == 0)
+        #expect(model.providerLaunchProblem(.grokBuild) == nil)
+        #expect(scheduler.pendingCount == 0)
+    }
+
     @Test func activationBurstsExpediteOnlyOneRetryWithoutResettingTheBudget() async throws {
         let fixture = try LaunchAvailabilityFixture(provider: .codex)
         defer { fixture.cleanup() }
@@ -957,16 +1013,16 @@ struct ProviderLaunchAvailabilityTests {
         await gate.release(round: 1, results: [.codex: fixtureTimeout()])
         await first.value
         await scheduler.waitForTimer()
-        for _ in 0..<20 { model.applicationDidBecomeActive() }
+        for _ in 0..<20 { model.appDidBecomeActive() }
         await gate.waitForCalls(2)
-        for _ in 0..<20 { model.applicationDidBecomeActive() }
+        for _ in 0..<20 { model.appDidBecomeActive() }
         #expect(await gate.totalCalls == 2)
         await gate.release(round: 2, results: [.codex: fixtureTimeout()])
         await waitForProviderResult(model, .codex)
         await scheduler.waitForTimer()
         #expect(scheduler.pendingCount == 1)
         #expect(scheduler.nextDeadline == 15)
-        for _ in 0..<20 { model.applicationDidBecomeActive() }
+        for _ in 0..<20 { model.appDidBecomeActive() }
         #expect(await gate.totalCalls == 2)
         scheduler.advance(15)
         await gate.waitForCalls(3)
@@ -1048,6 +1104,11 @@ struct ProviderLaunchAvailabilityTests {
             #expect(fixture.settings.openTabs.tabs.map(\.sessionID) == entries.map(\.sessionID))
             #expect(fixture.settings.openTabs.selectedSessionID == entries[0].sessionID)
             #expect(model.providerLaunchProblem(late)?.contains("Version check timed out") == true)
+            let peer = try #require(model.tabs.first)
+            model.restartTab(id: peer.id)
+            #expect(model.tabs.first?.id != peer.id)
+            #expect(model.tabs.map(\.spec.provider) == [early])
+            #expect(fixture.settings.openTabs.tabs.map(\.sessionID) == entries.map(\.sessionID))
             let manual = Task { await model.refreshProviderInstallations(only: [late]) }
             await gate.waitForCalls(7)
             await gate.release(round: 5, results: available)
@@ -1086,12 +1147,19 @@ private actor HeldProviderProbe {
     private var callCount = 0
     var totalCalls: Int { callCount }
     private var waiters: [(Int, CheckedContinuation<Void, Never>)] = []
+    private var immediateResult: ProviderInstallation?
+
+    func answerImmediately(_ result: ProviderInstallation?) { immediateResult = result }
 
     func probe(_ provider: CLIProvider) async -> ProviderInstallation {
         await withCheckedContinuation { continuation in
             let round = rounds[provider, default: 0] + 1
             rounds[provider] = round
-            pending.append((provider, round, continuation))
+            if let immediateResult {
+                continuation.resume(returning: immediateResult)
+            } else {
+                pending.append((provider, round, continuation))
+            }
             callCount += 1
             for waiter in waiters where callCount >= waiter.0 { waiter.1.resume() }
             waiters.removeAll { callCount >= $0.0 }

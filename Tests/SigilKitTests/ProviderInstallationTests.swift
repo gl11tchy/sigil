@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Testing
 
@@ -86,5 +87,56 @@ struct ProviderInstallationTests {
         #expect(!found.isAvailable)
         #expect(!found.timedOut)
         #expect(found.problem != nil)
+    }
+
+    @Test(arguments: [
+        ("/bin/sh", false, false), ("/bin/sh", false, true),
+        ("/bin/zsh", false, false), ("/bin/zsh", false, true),
+        ("/bin/bash", false, false), ("/bin/bash", false, true),
+        ("/bin/sh", true, false), ("/bin/sh", true, true),
+    ])
+    func timedOutProbeStopsItsChildAndReapsTheDirectProcess(
+        shell: String, separateGroup: Bool, asynchronous: Bool
+    ) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let capture = root.appendingPathComponent("pids")
+        let binary = root.appendingPathComponent("spawn")
+        let header = separateGroup ? "#!/bin/bash\nset -m\n" : "#!/bin/sh\n"
+        try
+            (header
+            + "/bin/sleep 3 &\nchild=$!\nprintf '%s %s\\n' \"$$\" \"$child\" > '\(capture.path)'\n/bin/ps -o pgid= -p \"$child\" >> '\(capture.path)'\nwait\n")
+            .write(to: binary, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: binary.path)
+        let environment = ["SHELL": shell, "PATH": "/usr/bin:/bin", "HOME": root.path, "ZDOTDIR": root.path]
+        let found: ProviderInstallation
+        if asynchronous {
+            found = await ProviderInstallation.detectAsync(
+                provider: .codex, configuredExecutable: binary, environment: environment, timeout: 0.2)
+        } else {
+            found = ProviderInstallation.detect(
+                provider: .codex, configuredExecutable: binary, environment: environment, timeout: 0.2)
+        }
+        #expect(found.timedOut)
+        #expect(!found.isAvailable)
+        let pids = try String(contentsOf: capture, encoding: .utf8)
+            .split(whereSeparator: \.isWhitespace).compactMap { pid_t($0) }
+        #expect(pids.count == 3)
+        guard pids.count == 3 else { return }
+        #expect(pids[2] == (separateGroup ? pids[1] : pids[0]))
+        let directResult = kill(pids[0], 0)
+        let directError = errno
+        #expect(directResult == -1 && directError == ESRCH)
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.stride)
+        let childExists = proc_pidinfo(pids[1], PROC_PIDTBSDINFO, 0, &info, size) == size
+        let childIsRunning = childExists && info.pbi_status != SZOMB
+        #expect(!childIsRunning)
+        if childIsRunning {
+            // On a regression only this bounded fake sleep is left to finish.
+            // Never signal a PID from a later, possibly reused observation.
+            try await Task.sleep(for: .seconds(3.2))
+        }
     }
 }
