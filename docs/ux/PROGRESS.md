@@ -4,6 +4,35 @@ The resumable record for the [experience contract](EXPERIENCE.md). Each entry
 says what was built, how it was checked, what the check showed, and what is
 still open. Nothing here is a timing; counts are counted actions.
 
+## REA-1272: find conversations by note text
+
+The Mac sidebar searches the first 64 KiB of eligible conversation notes after
+all title/path hits. A serial background index uses provider/native ID/canonical
+workspace keys, metadata reuse and stale-scan fences. A separate cancellable
+background matcher publishes cached query membership after a 50ms debounce.
+Ambiguous flat notes and conflict copies are excluded, and indexing never moves
+legacy files. Unsaved edits and publication invalidate the cached sidebar. Phone
+search keeps its existing title/path input. Search help states the prefix limit.
+
+[The verification record](../qa/rea-1272.md) records the generated main reproduction
+and passing direct Swift 6/Address Sanitizer checks, including 900 sessions/100
+notes with no reads during queries. The first two full CI runs each failed the
+original quiet-sidebar observation assertion; neither identified its source.
+An active-query guard avoids idle note subscriptions but did not eliminate that
+CI failure. A temporary trace then passed full CI, showing initial note
+publication with a quiet sidebar and complete, event-free filesystem coverage.
+This does not establish why the earlier runs failed. The trace is removed and
+a controlled held-read publication test adds timing-specific evidence while
+preserving the original assertions. A generated benchmark also prompted
+off-main matching and independent initial overlays. Clean-head CI then passed
+the original filesystem regression and the controlled publication/Observation
+assertions, but failed the new test's visible-row assertion because the
+temporary directory was hidden by its default worktree filter. The fixture now
+explicitly enables those rows, retaining every assertion. A new exact-head CI
+gate remains required. Existing local build/process denials remain binding;
+no local UI, daily app install or personal data inspection. Parent personal
+final-diff review remains required before merge.
+
 ## REA-1261: six-provider availability and first-run choice
 
 New Session and Options expose the checked state of all six CLIs. Settings lists

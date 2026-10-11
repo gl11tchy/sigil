@@ -243,6 +243,7 @@ struct SidebarView: View {
                 .onKeyPress(.escape) { handleEscape() }
                 .onExitCommand { _ = handleEscape() }
                 .accessibilityLabel("Search conversations")
+                .help("Search titles, folders, and the first 64 KiB of conversation notes. Note matches appear last.")
                 if !model.searchText.isEmpty {
                     Button {
                         model.searchText = ""

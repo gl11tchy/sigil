@@ -1,14 +1,133 @@
 import Foundation
 import Observation
-import SigilKit
 import Testing
 import os
 
 @testable import SigilApp
+@testable import SigilKit
 
 @Suite(.serialized)
 @MainActor
 struct SidebarSnapshotTests {
+    @Test func heldInitialNotePublicationDoesNotInvalidateAnIdleObservedSnapshot() async throws {
+        let fixture = try ModelFixture()
+        defer {
+            fixture.store.stop()
+            fixture.cleanup()
+        }
+        // Temporary test directories are hidden by the default worktree filter.
+        fixture.settings.showWorktreeSessions = true
+        let folder = try fixture.directory("held-note-publication")
+        try fixture.writeListedSession(id: "note", cwd: folder.path, summary: "Weekly")
+        await fixture.store.reload()
+        let note = try #require(fixture.store.sessions.first)
+        let writer = ConversationNotesStore(root: fixture.notesRoot)
+        writer.setNote("zirconia", for: note.id, cwd: note.cwd)
+        writer.flushNow()
+        let gate = SnapshotNoteReadGate()
+        defer { gate.release() }
+        let notes = ConversationNotesStore(root: fixture.notesRoot, searchReader: gate.reader)
+        let model = snapshotModel(fixture, clock: SnapshotClock(), notesStore: notes)
+        defer { model.closeAllTabsAndWait() }
+        model.openRecents()
+        let enteredDeadline = ContinuousClock.now + .seconds(4)
+        while !gate.entered, ContinuousClock.now < enteredDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(gate.entered)
+        #expect(notes.searchPublishedCount == 0)
+        let generation = notes.searchGeneration
+        let observed = OSAllocatedUnfairLock(initialState: false)
+        withObservationTracking {
+            _ = model.sidebarSnapshot()
+        } onChange: {
+            observed.withLock { $0 = true }
+        }
+        let builds = model.sidebarSnapshotBuildCount
+        gate.release()
+        let publicationDeadline = ContinuousClock.now + .seconds(4)
+        while notes.searchPublishedCount == 0, ContinuousClock.now < publicationDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(notes.searchPublishedCount > 0)
+        #expect(notes.searchGeneration > generation)
+        #expect(!observed.withLock { $0 })
+        #expect(model.sidebarSnapshot().listed == [note])
+        #expect(model.sidebarSnapshotBuildCount == builds)
+    }
+
+    @Test func notesPublicationAndUnsavedEditsInvalidateTheCachedSidebar() async throws {
+        let fixture = try ModelFixture()
+        defer {
+            fixture.store.stop()
+            fixture.cleanup()
+        }
+        fixture.settings.showWorktreeSessions = true
+        let folder = try fixture.directory("note-search")
+        try fixture.writeListedSession(
+            id: "title", cwd: folder.path, summary: "Zirconia", updatedAt: "2026-01-01T00:00:00Z")
+        try fixture.writeListedSession(
+            id: "note", cwd: folder.path, summary: "Weekly", updatedAt: "2026-06-01T00:00:00Z")
+        await fixture.store.reload()
+        let note = try #require(fixture.store.sessions.first { $0.id == "note" })
+        let writer = ConversationNotesStore(root: fixture.notesRoot)
+        writer.setNote("zirconia", for: note.id, cwd: note.cwd)
+        writer.flushNow()
+        let model = snapshotModel(fixture, clock: SnapshotClock())
+        defer { model.closeAllTabsAndWait() }
+        model.openRecents()
+        model.searchText = "zirconia"
+        _ = model.eventSidebarSnapshot()
+        let deadline = ContinuousClock.now + .seconds(4)
+        while !model.panel.notesStore.matchesSearch(for: note.reference), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(model.eventSidebarSnapshot().listed.map(\.id) == ["title", "note"])
+        let count = model.sidebarSnapshotBuildCount
+        model.panel.notesStore.setNote("sapphire", for: note.id, cwd: note.cwd)
+        #expect(model.eventSidebarSnapshot().listed.map(\.id) == ["title"])
+        #expect(model.sidebarSnapshotBuildCount == count + 1)
+        model.searchText = "sapphire"
+        _ = model.eventSidebarSnapshot()
+        let editedDeadline = ContinuousClock.now + .seconds(4)
+        while !model.panel.notesStore.matchesSearch(for: note.reference), ContinuousClock.now < editedDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(model.eventSidebarSnapshot().listed == [note])
+        model.archive(note)
+        // Search remains global and includes archived conversations.
+        #expect(model.eventSidebarSnapshot().listed == [note])
+        model.searchText = " \n "
+        #expect(model.eventSidebarSnapshot().sessions.map(\.id) == ["title"])
+        model.openArchived()
+        #expect(model.eventSidebarSnapshot().sessions == [note])
+        model.unarchive(note)
+        model.openRecents()
+        #expect(model.eventSidebarSnapshot().sessions == fixture.store.sessions)
+        model.panel.notesStore.flushNow()
+    }
+
+    @Test func editingNotesDoesNotInvalidateAnIdleSidebarSnapshot() async throws {
+        let fixture = try ModelFixture()
+        defer {
+            fixture.store.stop()
+            fixture.cleanup()
+        }
+        let folder = try fixture.directory("idle-notes")
+        try fixture.writeListedSession(id: "note", cwd: folder.path, summary: "Weekly")
+        await fixture.store.reload()
+        let note = try #require(fixture.store.sessions.first)
+        let model = snapshotModel(fixture, clock: SnapshotClock())
+        defer { model.closeAllTabsAndWait() }
+        model.openRecents()
+        let original = model.eventSidebarSnapshot()
+        let count = model.sidebarSnapshotBuildCount
+        model.panel.notesStore.setNote("unsaved zirconia", for: note.id, cwd: note.cwd)
+        #expect(model.eventSidebarSnapshot().sessions == original.sessions)
+        #expect(model.sidebarSnapshotBuildCount == count)
+        model.panel.notesStore.flushNow()
+    }
+
     @Test func searchCategoriesAndTheirCacheInputsChangeOrderImmediately() async throws {
         let fixture = try ModelFixture()
         defer {
@@ -494,16 +613,41 @@ private final class SnapshotClock: Sendable {
 }
 
 @MainActor
-private func snapshotModel(_ fixture: ModelFixture, clock: SnapshotClock) -> AppModel {
+private func snapshotModel(
+    _ fixture: ModelFixture, clock: SnapshotClock, notesStore: ConversationNotesStore? = nil
+) -> AppModel {
     AppModel(
         settings: fixture.settings, store: fixture.store, trashConversation: { _ in },
         presentError: { _ in },
         panel: RightPanel(
             defaults: fixture.defaults,
-            notesStore: ConversationNotesStore(root: fixture.notesRoot)),
+            notesStore: notesStore ?? ConversationNotesStore(root: fixture.notesRoot)),
         pairingStore: InMemoryRemotePairingStore(),
         providerInstallations: fixtureProviderInstallations(fixture.executable),
         sidebarClock: { clock.now() })
+}
+
+/// Controls publication timing without extra Observation subscriptions or waits
+/// inside the main actor. The original filesystem regression stays unchanged.
+private final class SnapshotNoteReadGate: Sendable {
+    private let state = OSAllocatedUnfairLock(initialState: false)
+    private let semaphore = DispatchSemaphore(value: 0)
+    var entered: Bool { state.withLock { $0 } }
+    func release() { semaphore.signal() }
+    var reader: ConversationNotesIndex.Reader {
+        .init(
+            metadata: ConversationNotesIndex.Reader.disk.metadata,
+            read: { url, stamp in
+                let bytes = ConversationNotesIndex.Reader.disk.read(url, stamp)
+                let first = self.state.withLock { entered in
+                    if entered { return false }
+                    entered = true
+                    return true
+                }
+                if first { _ = self.semaphore.wait(timeout: .now() + 4) }
+                return bytes
+            })
+    }
 }
 
 /// The lists SidebarView used to read one at a time from the model during a render.

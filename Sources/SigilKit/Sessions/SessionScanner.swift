@@ -349,7 +349,7 @@ enum SessionScanner: Sendable {
     }
 
     /// Closest title first: exact, prefix, every term at a word start, contains,
-    /// then folder or path. Category boosts only break ties within a rank.
+    /// then folder/path and note-only matches. Category boosts only break ties within a rank.
     /// Titles compare without case. Transcript text is not a field.
     enum SearchRank: Int, Sendable {
         case exactTitle = 0
@@ -357,23 +357,29 @@ enum SessionScanner: Sendable {
         case titleWordStart = 2
         case titleContains = 3
         case folderOrPath = 4
+        case notes = 5
     }
 
     /// Shared search ordering for conversation lists. An empty query keeps the
-    /// published newest-first list without evaluating either caller closure.
+    /// published newest-first list without evaluating any caller closure.
     static func search(
         _ query: String,
         sessions: [GrokSession],
         keys: [SearchKey],
         boost: ((GrokSession) -> Int)? = nil,
-        displayedTitle: ((GrokSession) -> String)? = nil
+        displayedTitle: ((GrokSession) -> String)? = nil,
+        foldedNotes: ((GrokSession) -> String?)? = nil,
+        matchingNotes: ((GrokSession) -> Bool)? = nil
     ) -> [GrokSession] {
         guard let query = SearchQuery(query) else { return sessions }
         return zip(sessions, keys)
             .compactMap { session, key -> (session: GrokSession, rank: SearchRank, boost: Int)? in
-                guard let rank = searchRank(key, query: query, displayedTitle: displayedTitle?(session)) else {
-                    return nil
+                var rank = searchRank(key, query: query, displayedTitle: displayedTitle?(session))
+                if rank == nil, matchingNotes?(session) == true { rank = .notes }
+                if rank == nil, let notes = foldedNotes?(session), query.terms.allSatisfy({ holds(notes, $0) }) {
+                    rank = .notes
                 }
+                guard let rank else { return nil }
                 return (session, rank, boost?(session) ?? 0)
             }
             .sorted { lhs, rhs in

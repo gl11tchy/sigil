@@ -58,6 +58,32 @@ public final class ConversationNotesStore {
     }
 
     private var entries: [String: Entry] = [:]
+    /// Read by sidebar snapshots; all index/overlay publication is observable.
+    public private(set) var searchGeneration: UInt64 = 0
+    @ObservationIgnored private var searchReferences: Set<ProviderSessionReference> = []
+    @ObservationIgnored private var searchSnapshot: ConversationNotesIndex.Snapshot?
+    @ObservationIgnored private var searchCache: [String: ConversationNotesIndex.Cached] = [:]
+    @ObservationIgnored private var searchOverlays: [String: String] = [:]
+    @ObservationIgnored private var searchOverlayPaths: [ProviderSessionReference: String] = [:]
+    @ObservationIgnored private var searchRequest: UInt64 = 0
+    @ObservationIgnored private var searchBusy = false
+    @ObservationIgnored private var searchPending = false
+    @ObservationIgnored private var searchRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var searchCancellation: OSAllocatedUnfairLock<Bool>?
+    @ObservationIgnored private let searchReader: ConversationNotesIndex.Reader
+    @ObservationIgnored private let searchQueue = DispatchQueue(label: "com.gl11tchy.sigil.notes-search", qos: .utility)
+    @ObservationIgnored private(set) var searchScanCount = 0
+    @ObservationIgnored private(set) var searchPublishedCount = 0
+    @ObservationIgnored private var matchingQuery = ""
+    @ObservationIgnored private var matchingReferences: Set<ProviderSessionReference> = []
+    @ObservationIgnored private var matchingRequest: UInt64 = 0
+    @ObservationIgnored private var matchingResultRequest: UInt64 = 0
+    @ObservationIgnored private var matchingBusy = false
+    @ObservationIgnored private var matchingPending = false
+    @ObservationIgnored private var matchingTask: Task<Void, Never>?
+    @ObservationIgnored private var matchingCancellation: OSAllocatedUnfairLock<Bool>?
+    @ObservationIgnored private let matchingQueue = DispatchQueue(
+        label: "com.gl11tchy.sigil.notes-match", qos: .userInitiated)
     @ObservationIgnored private var flushTask: Task<Void, Never>?
     @ObservationIgnored private let watcher = SessionDirectoryWatcher()
     @ObservationIgnored private var watching = false
@@ -73,11 +99,216 @@ public final class ConversationNotesStore {
     public init(root: URL? = nil) {
         self.root = root ?? Self.defaultRoot
         self.conflictTimestamp = { Int64(Date().timeIntervalSince1970 * 1000) }
+        self.searchReader = .disk
     }
 
     init(root: URL, conflictTimestamp: @escaping @Sendable () -> Int64) {
         self.root = root
         self.conflictTimestamp = conflictTimestamp
+        self.searchReader = .disk
+    }
+
+    init(root: URL, searchReader: ConversationNotesIndex.Reader) {
+        self.root = root
+        self.conflictTimestamp = { Int64(Date().timeIntervalSince1970 * 1000) }
+        self.searchReader = searchReader
+    }
+
+    deinit {
+        searchRefreshTask?.cancel()
+        searchCancellation?.withLock { $0 = true }
+        matchingTask?.cancel()
+        matchingCancellation?.withLock { $0 = true }
+    }
+
+    /// Membership checks are memory-only. Canonicalization and exact-path
+    /// discovery happen once off-main when the captured identity set changes.
+    public func prepareSearch(for sessions: [GrokSession]) {
+        let references = Set(sessions.map(\.reference))
+        guard references != searchReferences else { return }
+        searchReferences = references
+        // Adding a same-ID folder can make a former flat-note match ambiguous.
+        searchSnapshot = nil
+        searchGeneration &+= 1
+        startWatching()
+        requestSearchRefresh(immediate: true)
+        requestMatching()
+    }
+
+    /// No filesystem access, decoding or folding per search keystroke.
+    public func foldedNote(for reference: ProviderSessionReference) -> String? {
+        _ = searchGeneration
+        guard searchReferences.contains(reference) else { return nil }
+        if let snapshot = searchSnapshot { return snapshot.foldedNote(for: reference, overlays: searchOverlays) }
+        return searchOverlayPaths[reference].flatMap { searchOverlays[$0] }.flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// Query changes capture memory and schedule work; they never scan note text
+    /// or touch the filesystem on the main actor.
+    public func prepareSearchQuery(_ query: String) {
+        guard query != matchingQuery else { return }
+        matchingQuery = query
+        requestMatching()
+    }
+
+    public func matchesSearch(for reference: ProviderSessionReference) -> Bool {
+        _ = searchGeneration
+        return matchingResultRequest == matchingRequest && matchingReferences.contains(reference)
+    }
+
+    var searchMatchIsCurrent: Bool { matchingResultRequest == matchingRequest }
+
+    private func requestMatching() {
+        matchingRequest &+= 1
+        matchingCancellation?.withLock { $0 = true }
+        matchingTask?.cancel()
+        if !matchingReferences.isEmpty {
+            matchingReferences = []
+            searchGeneration &+= 1
+        }
+        guard SessionScanner.SearchQuery(matchingQuery) != nil else {
+            matchingResultRequest = matchingRequest
+            return
+        }
+        matchingTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
+            guard !Task.isCancelled, let self else { return }
+            self.startMatching()
+        }
+    }
+
+    private func startMatching() {
+        guard !matchingBusy else {
+            matchingPending = true
+            return
+        }
+        guard SessionScanner.SearchQuery(matchingQuery) != nil else { return }
+        matchingBusy = true
+        let request = matchingRequest
+        let query = matchingQuery
+        let references = searchReferences
+        let snapshot = searchSnapshot
+        let overlays = searchOverlays
+        let paths = searchOverlayPaths
+        let cancelled = OSAllocatedUnfairLock(initialState: false)
+        matchingCancellation = cancelled
+        matchingQueue.async { [weak self] in
+            let matches = ConversationNotesIndex.matchingReferences(
+                query: query, references: references, snapshot: snapshot, overlays: overlays, directPaths: paths,
+                isCancelled: { cancelled.withLock { $0 } })
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.matchingBusy = false
+                self.matchingCancellation = nil
+                if request == self.matchingRequest, let matches {
+                    self.matchingReferences = matches
+                    self.matchingResultRequest = request
+                    self.searchGeneration &+= 1
+                }
+                if self.matchingPending {
+                    self.matchingPending = false
+                    self.startMatching()
+                }
+            }
+        }
+    }
+
+    private func registerSearchOverlay(_ url: URL, sessionID: String, cwd: String) {
+        guard cwd.hasPrefix("/") else { return }
+        let provider: CLIProvider
+        let id: String
+        if Self.isValidSessionID(sessionID) {
+            provider = .grokBuild
+            id = sessionID
+        } else {
+            let parts = sessionID.split(separator: ":", omittingEmptySubsequences: false)
+            guard parts.count == 2, let native = CLIProvider(rawValue: String(parts[0])),
+                native == .codex || native == .claudeCode
+            else { return }
+            provider = native
+            id = String(parts[1])
+        }
+        let reference = ProviderSessionReference(provider: provider, sessionID: id, cwd: cwd)
+        guard searchOverlayPaths[reference] != url.path else { return }
+        searchOverlayPaths[reference] = url.path
+        searchGeneration &+= 1
+        requestMatching()
+    }
+
+    /// Project aliases can retarget without changing a raw session reference.
+    public func invalidateSearchPaths() {
+        guard !searchReferences.isEmpty else { return }
+        requestSearchRefresh()
+    }
+
+    private func publishSearchOverlay(_ url: URL) {
+        guard let entry = entries[url.path] else { return }
+        let folded = ConversationNotesIndex.foldedPrefix(entry.text)
+        guard searchOverlays[url.path] != folded else { return }
+        searchOverlays[url.path] = folded
+        searchGeneration &+= 1
+        requestMatching()
+    }
+
+    private func requestSearchRefresh(immediate: Bool = false) {
+        searchRequest &+= 1
+        searchCancellation?.withLock { $0 = true }
+        searchRefreshTask?.cancel()
+        guard !searchReferences.isEmpty else { return }
+        if immediate {
+            startSearchScan()
+            return
+        }
+        searchRefreshTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+            guard !Task.isCancelled, let self else { return }
+            self.startSearchScan()
+        }
+    }
+
+    private func startSearchScan() {
+        guard !searchBusy else {
+            searchPending = true
+            return
+        }
+        guard !searchReferences.isEmpty else { return }
+        searchBusy = true
+        searchScanCount += 1
+        let request = searchRequest
+        let references = searchReferences
+        let root = self.root
+        let cache = searchCache
+        let reader = searchReader
+        let cancelled = OSAllocatedUnfairLock(initialState: false)
+        searchCancellation = cancelled
+        searchQueue.async { [weak self] in
+            let catalog = ConversationNotesIndex.catalog(
+                root: root, references: references, isCancelled: { cancelled.withLock { $0 } })
+            let snapshot = ConversationNotesIndex.scan(
+                catalog: catalog, cache: cache, reader: reader, isCancelled: { cancelled.withLock { $0 } })
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.searchBusy = false
+                self.searchCancellation = nil
+                if request == self.searchRequest, let snapshot {
+                    self.searchPublishedCount += 1
+                    let changed =
+                        self.searchSnapshot?.folded != snapshot.folded
+                        || self.searchSnapshot?.catalog.references != snapshot.catalog.references
+                        || self.searchSnapshot?.origins != snapshot.origins
+                    self.searchSnapshot = snapshot
+                    self.searchCache = snapshot.cache
+                    if changed {
+                        self.searchGeneration &+= 1
+                        self.requestMatching()
+                    }
+                }
+                if self.searchPending {
+                    self.searchPending = false
+                    self.startSearchScan()
+                }
+            }
+        }
     }
 
     public static var defaultRoot: URL {
@@ -89,6 +320,7 @@ public final class ConversationNotesStore {
 
     public func note(for sessionID: String, cwd: String) -> String {
         guard let url = fileURL(for: sessionID, cwd: cwd) else { return "" }
+        registerSearchOverlay(url, sessionID: sessionID, cwd: cwd)
         load(url, legacyID: Self.isValidSessionID(sessionID) ? sessionID : nil)
         return entries[url.path]?.text ?? ""
     }
@@ -100,12 +332,14 @@ public final class ConversationNotesStore {
 
     public func setNote(_ text: String, for sessionID: String, cwd: String) {
         guard let url = fileURL(for: sessionID, cwd: cwd) else { return }
+        registerSearchOverlay(url, sessionID: sessionID, cwd: cwd)
         // Edits/deletes must not adopt a flat note that another folder still
         // needs. Adoption remains exclusive to the first explicit note read.
         load(url)
         entries[url.path]?.text = text
         entries[url.path]?.generation &+= 1
         entries[url.path]?.dirty = true
+        publishSearchOverlay(url)
         scheduleFlush()
     }
 
@@ -126,6 +360,7 @@ public final class ConversationNotesStore {
         entries[url.path]?.text = ""
         entries[url.path]?.generation &+= 1
         entries[url.path]?.dirty = true
+        publishSearchOverlay(url)
         scheduleFlush()
     }
 
@@ -156,6 +391,7 @@ public final class ConversationNotesStore {
         } catch {
             entries[url.path] = Entry(text: "", baseline: nil, notice: .saveFailed)
         }
+        publishSearchOverlay(url)
     }
 
     private func startWatching() {
@@ -180,6 +416,7 @@ public final class ConversationNotesStore {
     }
 
     private func refresh() {
+        requestSearchRefresh()
         guard !refreshing else {
             refreshAgain = true
             return
@@ -226,6 +463,7 @@ public final class ConversationNotesStore {
                         entry.notice = entry.dirty ? .conflictUnsaved : .saveFailed
                     }
                     self.entries[url.path] = entry
+                    self.publishSearchOverlay(url)
                 }
                 self.refreshing = false
                 if self.refreshAgain {
