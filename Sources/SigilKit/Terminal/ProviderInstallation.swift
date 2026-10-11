@@ -75,6 +75,7 @@ public struct ProviderInstallation: Sendable, Equatable {
             return ProviderInstallation(
                 executable: nil, version: nil, problem: "\(provider.name) could not be started.")
         }
+        let ownedRoot = probeInfo(process.processIdentifier).map(ProbeProcess.init)
         try? pipe.fileHandleForWriting.close()
         let fd = pipe.fileHandleForReading.fileDescriptor
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
@@ -96,7 +97,7 @@ public struct ProviderInstallation: Sendable, Equatable {
         while exited.wait(timeout: .now() + .milliseconds(10)) == .timedOut {
             drain()
             if DispatchTime.now() >= deadline {
-                let stoppedTree = stopProbeTree(process.processIdentifier)
+                let stoppedTree = stopProbeTree(ownedRoot)
                 let stopped = exited.wait(timeout: .now() + .milliseconds(250)) == .success
                 guard stoppedTree, stopped else {
                     return ProviderInstallation(
@@ -155,11 +156,13 @@ public struct ProviderInstallation: Sendable, Equatable {
     /// cannot fork while its children are captured. Foundation children can
     /// have separate process groups, so the root group alone is insufficient.
     /// Reads are scoped to these PIDs, never arguments/files or the inventory.
-    private static func stopProbeTree(_ pid: pid_t) -> Bool {
-        guard let rootInfo = probeInfo(pid), rootInfo.pbi_ppid == UInt32(getpid()) else {
+    private static func stopProbeTree(_ root: ProbeProcess?) -> Bool {
+        guard let root, root.parent == getpid(),
+            let rootInfo = probeInfo(root.pid), ProbeProcess(rootInfo) == root
+        else {
             return false
         }
-        let root = ProbeProcess(rootInfo)
+        let pid = root.pid
         let deadline = DispatchTime.now() + .milliseconds(250)
         var pending = [root]
         var captured: [ProbeProcess] = []
