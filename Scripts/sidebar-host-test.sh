@@ -107,7 +107,7 @@ with tempfile.TemporaryDirectory(prefix='sigil-sidebar-host-') as temporary:
         summary = json.loads(subprocess.check_output([
             'xcrun', 'xcresulttool', 'get', 'test-results', 'summary', '--path', str(result)
         ], env=environment, timeout=30))
-        if summary.get('passedTests') != 1 or summary.get('failedTests') != 0 or summary.get('skippedTests') != 0:
-            raise SystemExit(f'Expected one passed fixture with no failures or skips: {summary}')
-        print(f'Sidebar host: one fixture passed, no retries or skips. Evidence: {result}')
+        if summary.get('passedTests') != 2 or summary.get('failedTests') != 0 or summary.get('skippedTests') != 0:
+            raise SystemExit(f'Expected two passed fixtures with no failures or skips: {summary}')
+        print(f'Sidebar host: two fixtures passed, no retries or skips. Evidence: {result}')
 PY

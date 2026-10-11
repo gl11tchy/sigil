@@ -151,10 +151,12 @@ final class AppModel {
         providerInstallations: [CLIProvider: ProviderInstallation] = [:],
         providerProbe: ProviderProbe? = nil,
         providerCheckClock: (@Sendable () -> TimeInterval)? = nil,
-        providerCheckSleep: ProviderChecks.Sleep? = nil
+        providerCheckSleep: ProviderChecks.Sleep? = nil,
+        sidebarClock: (@Sendable () -> TimeInterval)? = nil
     ) {
         self.settings = settings
         self.store = store
+        self.sidebarClock = sidebarClock ?? { ProcessInfo.processInfo.systemUptime }
         self.panel = panel ?? RightPanel()
         self.providerChecks = ProviderChecks(
             settings: settings, installations: providerInstallations,
@@ -878,7 +880,15 @@ final class AppModel {
         var showEmptySessions: Bool
         var showWorktreeSessions: Bool
         var showSubagentSessions: Bool
-        var tabIDs: [UUID]
+        var showOtherAppSessions: Bool
+        var sigilConversations: [String]
+        var tabs: [SidebarTabIdentity]
+    }
+
+    private struct SidebarTabIdentity: Equatable {
+        var id: UUID
+        var sessionID: String?
+        var cwd: String
     }
 
     private func sidebarInputs() -> SidebarInputs {
@@ -894,32 +904,145 @@ final class AppModel {
             showEmptySessions: settings.showEmptySessions,
             showWorktreeSessions: settings.showWorktreeSessions,
             showSubagentSessions: settings.showSubagentSessions,
-            tabIDs: tabs.map(\.id)
+            showOtherAppSessions: settings.showOtherAppSessions,
+            sigilConversations: settings.sigilConversations,
+            tabs: tabs.map { SidebarTabIdentity(id: $0.id, sessionID: $0.sessionID, cwd: $0.workingDirectory.path) }
         )
     }
 
     /// The last snapshot built and the inputs it was built from.
-    @ObservationIgnored private var lastSidebarSnapshot: (inputs: SidebarInputs, snapshot: SidebarSnapshot)?
+    @ObservationIgnored private var lastSidebarSnapshot:
+        (
+            inputs: SidebarInputs, snapshot: SidebarSnapshot, builtAt: TimeInterval,
+            observation: SidebarFilesystemObservation
+        )?
+    @ObservationIgnored private let sidebarClock: @Sendable () -> TimeInterval
+    static let sidebarFreshnessWindow: TimeInterval = 1
+    /// Read by snapshot consumers so a filesystem event rerenders a quiet view.
+    private var sidebarFilesystemGeneration = 0
     /// Snapshots built so far. Tests read it to prove events reuse one.
     @ObservationIgnored private(set) var sidebarSnapshotBuildCount = 0
+    @ObservationIgnored private(set) var sidebarFilesystemPathBuildCount = 0
 
-    /// Event-time row order (arrow keys, row-list cleanup): the last snapshot
-    /// while none of its inputs has changed, else a new one. A render always
-    /// builds its own, so worktree and symlink checks stay fresh on screen.
+    /// Events and renders share the same input and freshness rules.
     func eventSidebarSnapshot() -> SidebarSnapshot {
-        if let last = lastSidebarSnapshot, last.inputs == sidebarInputs() {
-            return last.snapshot
-        }
         return sidebarSnapshot()
     }
 
     /// Every list one sidebar render reads, from a single search and grouping.
     func sidebarSnapshot() -> SidebarSnapshot {
+        _ = sidebarFilesystemGeneration
         let inputs = sidebarInputs()
+        let now = sidebarClock()
+        if let last = lastSidebarSnapshot,
+            last.inputs == inputs, now >= last.builtAt,
+            now - last.builtAt < Self.sidebarFreshnessWindow
+        {
+            return last.snapshot
+        }
+        let filesystemExpired =
+            lastSidebarSnapshot.map {
+                now < $0.builtAt || now - $0.builtAt >= Self.sidebarFreshnessWindow
+            } ?? true
+        if filesystemExpired {
+            canonicalPathCache.removeAll(keepingCapacity: true)
+            invalidateEphemeralPathCache()
+        }
         let snapshot = buildSidebarSnapshot()
         sidebarSnapshotBuildCount += 1
-        lastSidebarSnapshot = (inputs, snapshot)
+        lastSidebarSnapshot = (inputs, snapshot, now, buildSidebarFilesystemObservation())
         return snapshot
+    }
+
+    struct SidebarFilesystemObservation: Hashable, Sendable {
+        var paths: [String]
+        var classificationPaths: [String]
+    }
+
+    var sidebarFilesystemPaths: [String] { sidebarFilesystemObservation.paths }
+
+    var sidebarFilesystemObservation: SidebarFilesystemObservation {
+        // SidebarView reads this immediately after sidebarSnapshot(), so its
+        // task identity reuses the same input pass rather than scanning on hover.
+        lastSidebarSnapshot?.observation ?? buildSidebarFilesystemObservation()
+    }
+
+    private func buildSidebarFilesystemObservation() -> SidebarFilesystemObservation {
+        sidebarFilesystemPathBuildCount += 1
+        var paths = Set(store.sessions.lazy.map(\.cwd))
+        paths.formUnion(tabs.lazy.map { $0.workingDirectory.path })
+        paths.formUnion(settings.addedProjects.lazy.map(\.path))
+        paths.formUnion(settings.pinnedProjects)
+        paths.formUnion(settings.pinnedConversations.lazy.map(\.cwd))
+        paths.formUnion(settings.archivedConversations.lazy.map(\.cwd))
+        paths.formUnion(settings.conversationNames.lazy.map(\.cwd))
+        paths.insert(settings.focusedProjectPath)
+        let classificationPaths =
+            settings.showWorktreeSessions
+            ? []
+            : Set(store.sessions.lazy.map(\.cwd))
+                .filter { $0.hasPrefix("/") && !isEphemeralByPath(path: $0) }.sorted()
+        return SidebarFilesystemObservation(
+            paths: paths.filter { $0.hasPrefix("/") }.sorted(),
+            classificationPaths: classificationPaths)
+    }
+
+    /// SwiftUI owns this task's lifetime. Passive FSEvents schedule a refresh at
+    /// the cache deadline; unchanged, idle sidebars do no periodic list work.
+    func observeSidebarFilesystem(observation: SidebarFilesystemObservation? = nil) async {
+        let observation = observation ?? sidebarFilesystemObservation
+        let paths = observation.paths
+        guard !paths.isEmpty else { return }
+        let watcher = SidebarPathWatcher()
+        let stream = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        var fallback: Task<Void, Never>?
+        defer {
+            fallback?.cancel()
+            watcher.stop()
+            stream.continuation.finish()
+        }
+        func start() {
+            let coverage = watcher.start(paths: paths, classificationPaths: observation.classificationPaths) {
+                stream.continuation.yield(true)
+            }
+            if coverage == .complete {
+                fallback?.cancel()
+                fallback = nil
+            } else if fallback == nil {
+                // Keep bounded refresh alongside a partial stream, too. One
+                // working root cannot cover a root-level alias elsewhere.
+                fallback = Task {
+                    while !Task.isCancelled {
+                        do { try await Task.sleep(for: .seconds(Self.sidebarFreshnessWindow)) } catch { return }
+                        stream.continuation.yield(false)
+                    }
+                }
+            }
+        }
+        start()
+        // Reconcile the initial/remount gap before relying on future events.
+        invalidateSidebarFilesystem()
+        for await filesystemEvent in stream.stream {
+            let remaining =
+                filesystemEvent
+                ? max(
+                    0,
+                    (lastSidebarSnapshot?.builtAt ?? sidebarClock())
+                        + Self.sidebarFreshnessWindow - sidebarClock()) : 0
+            do { try await Task.sleep(for: .seconds(remaining)) } catch { return }
+            guard !Task.isCancelled else { return }
+            invalidateSidebarFilesystem()
+            // Re-resolve aliases after root changes; never keep watching only
+            // the old symlink destination.
+            if filesystemEvent { start() }
+        }
+    }
+
+    private func invalidateSidebarFilesystem() {
+        lastSidebarSnapshot = nil
+        canonicalPathCache.removeAll(keepingCapacity: true)
+        invalidateEphemeralPathCache()
+        sidebarFilesystemGeneration &+= 1
     }
 
     private func buildSidebarSnapshot() -> SidebarSnapshot {

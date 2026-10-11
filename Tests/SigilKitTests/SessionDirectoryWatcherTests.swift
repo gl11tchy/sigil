@@ -5,6 +5,86 @@ import Testing
 @testable import SigilKit
 
 struct SessionDirectoryWatcherTests {
+    @Test func sidebarPolicyWatchesIdentityAndGitMarkersWithoutSourceFileChurn() {
+        let contents = SessionDirectoryWatcher.Contents.sidebarPaths([
+            "/generated/project", "/generated/project/.git", "/generated/link",
+        ])
+        let file = FSEventStreamEventFlags(kFSEventStreamEventFlagItemIsFile)
+        let directory = FSEventStreamEventFlags(kFSEventStreamEventFlagItemIsDir)
+        #expect(SessionDirectoryWatcher.shouldScan(path: "/generated/link", flags: file, contents: contents))
+        #expect(SessionDirectoryWatcher.shouldScan(path: "/generated/project/.git", flags: file, contents: contents))
+        #expect(SessionDirectoryWatcher.shouldScan(path: "/generated", flags: directory, contents: contents))
+        for path in ["/generated/project/code.swift", "/generated/project/.git/index", "/generated/unrelated"] {
+            #expect(!SessionDirectoryWatcher.shouldScan(path: path, flags: file, contents: contents))
+        }
+    }
+
+    @Test func sidebarWatchPlanIncludesMissingRootsAndAliasParents() throws {
+        let root = URL(fileURLWithPath: GrokPaths.canonicalPath(FileManager.default.temporaryDirectory.path))
+            .appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let actual = root.appendingPathComponent("actual")
+        try FileManager.default.createDirectory(at: actual, withIntermediateDirectories: true)
+        let alias = root.appendingPathComponent("alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: actual)
+        let plan = SidebarPathWatcher.plan(paths: [alias.appendingPathComponent("missing/child").path])
+        #expect(plan.roots.contains(root.path))
+        #expect(plan.roots.contains(actual.path))
+        #expect(plan.identities.contains(alias.path))
+        #expect(plan.identities.contains(actual.appendingPathComponent("missing/child").path))
+        #expect(!plan.roots.contains("/"))
+        #expect(!plan.needsFallback)
+        let orphan = SidebarPathWatcher.plan(paths: [actual.path], classificationPaths: [actual.path])
+        #expect(orphan.needsFallback)
+        let mainGit = actual.appendingPathComponent(".git")
+        try FileManager.default.createDirectory(at: mainGit, withIntermediateDirectories: true)
+        let repository = SidebarPathWatcher.plan(paths: [actual.path], classificationPaths: [actual.path])
+        #expect(!repository.needsFallback)
+        try FileManager.default.removeItem(at: mainGit)
+        let alternate =
+            alias.path.hasPrefix("/private/var/")
+            ? String(alias.path.dropFirst("/private".count)) : "/private" + alias.path
+        let alternatePlan = SidebarPathWatcher.plan(paths: [alternate])
+        let nativeAlias = SessionDirectoryWatcher.nativeURL(alias.deletingLastPathComponent())
+            .appendingPathComponent(alias.lastPathComponent).path
+        #expect(
+            SessionDirectoryWatcher.shouldScan(
+                path: nativeAlias,
+                flags: FSEventStreamEventFlags(kFSEventStreamEventFlagItemIsSymlink),
+                contents: .sidebarPaths(alternatePlan.identities)))
+        let partial = SidebarPathWatcher.plan(paths: [actual.path, "/Sigil1255-Generated-\(UUID().uuidString)"])
+        #expect(!partial.roots.isEmpty && partial.needsFallback)
+        let admin = root.appendingPathComponent("repo/.git/worktrees/generated")
+        try FileManager.default.createDirectory(at: admin, withIntermediateDirectories: true)
+        try Data("gitdir: \(admin.path)\n".utf8).write(to: actual.appendingPathComponent(".git"))
+        let worktreePlan = SidebarPathWatcher.plan(paths: [actual.path])
+        #expect(worktreePlan.identities.contains(admin.appendingPathComponent("commondir").path))
+        #expect(worktreePlan.roots.contains(admin.deletingLastPathComponent().path))
+    }
+
+    @Test func watcherCanonicalPathsMatchPOSIXForExistingAndMissingOSAliasPaths() throws {
+        let lexical = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: lexical, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: lexical) }
+        let native = URL(fileURLWithPath: GrokPaths.canonicalPath(lexical.path))
+        #expect(SessionDirectoryWatcher.nativeURL(lexical).path == native.path)
+        #expect(
+            SessionDirectoryWatcher.canonicalURL(lexical).path
+                == lexical.resolvingSymlinksInPath().standardizedFileURL.path)
+        #expect(
+            SessionDirectoryWatcher.nativeURL(lexical.appendingPathComponent("missing/child")).path
+                == native.appendingPathComponent("missing/child").path)
+        let alias = lexical.appendingPathComponent("alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: native)
+        let plan = SidebarPathWatcher.plan(paths: [alias.path])
+        // Resolve the OS prefix but retain the symlink name from the event.
+        #expect(plan.identities.contains(native.appendingPathComponent("alias").path))
+        #expect(
+            SessionDirectoryWatcher.shouldScan(
+                path: native.appendingPathComponent("alias").path,
+                flags: FSEventStreamEventFlags(kFSEventStreamEventFlagItemIsSymlink),
+                contents: .sidebarPaths(plan.identities)))
+    }
     @Test func notesPolicyIncludesMarkdownAndParentReplacementEventsOnly() {
         let contents = SessionDirectoryWatcher.Contents.notes(root: URL(fileURLWithPath: "/sigil/notes"))
         let file = FSEventStreamEventFlags(kFSEventStreamEventFlagItemIsFile)

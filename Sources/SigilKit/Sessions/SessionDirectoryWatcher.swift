@@ -1,4 +1,5 @@
 import CoreServices
+import Darwin
 import Foundation
 import os
 
@@ -10,6 +11,8 @@ final class SessionDirectoryWatcher: Sendable {
         case nativeHistory(root: URL, titleIndex: URL?)
         /// Markdown notes, including atomic replacements and deleted parents.
         case notes(root: URL)
+        /// Only project identity and Git markers affect the sidebar's grouping/filter.
+        case sidebarPaths(Set<String>)
     }
 
     /// `FSEventStreamRef` is not Sendable; keep the handle as a bit pattern under the lock.
@@ -28,6 +31,14 @@ final class SessionDirectoryWatcher: Sendable {
         contents: Contents = .grokSummaries,
         handler: @escaping @Sendable (_ requiresRestart: Bool) -> Void
     ) -> Bool {
+        start(paths: [path], latency: latency, contents: contents, handler: handler)
+    }
+
+    @discardableResult
+    func start(
+        paths: [String], latency: CFTimeInterval,
+        contents: Contents, handler: @escaping @Sendable (Bool) -> Void
+    ) -> Bool {
         let replacement = state.withLock { current -> (UInt64, UInt, EventSink?) in
             current.generation &+= 1
             let old = (current.generation, current.streamBits, current.sink)
@@ -37,12 +48,17 @@ final class SessionDirectoryWatcher: Sendable {
         }
         dispose(streamBits: replacement.1, sink: replacement.2)
 
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
-            isDirectory.boolValue
-        else {
-            return false
-        }
+        let roots = Set(
+            paths.compactMap { path -> String? in
+                var isDirectory: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+                    isDirectory.boolValue
+                else { return nil }
+                let url = URL(fileURLWithPath: path)
+                if case .sidebarPaths = contents { return Self.nativeURL(url).path }
+                return Self.canonicalURL(url).path
+            })
+        guard !roots.isEmpty else { return false }
 
         let sink = EventSink(contents: contents, handler: handler)
         var context = FSEventStreamContext(
@@ -70,7 +86,7 @@ final class SessionDirectoryWatcher: Sendable {
                 nil,
                 sessionFSEventCallback,
                 &context,
-                [Self.canonicalURL(URL(fileURLWithPath: path)).path] as CFArray,
+                Array(roots) as CFArray,
                 FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
                 latency,
                 flags
@@ -140,6 +156,10 @@ final class SessionDirectoryWatcher: Sendable {
             & FSEventStreamEventFlags(
                 kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagItemIsDir) != 0
         switch contents {
+        case .sidebarPaths(let paths):
+            let event = URL(fileURLWithPath: path).path
+            return paths.contains(event)
+                || (directoryEvent && paths.contains { $0.hasPrefix(event + "/") })
         case .notes(let root):
             let event = canonicalURL(URL(fileURLWithPath: path)).path
             let root = canonicalURL(root).path
@@ -198,6 +218,28 @@ final class SessionDirectoryWatcher: Sendable {
         var resolved = ancestor.resolvingSymlinksInPath()
         for component in suffix.reversed() { resolved.appendPathComponent(component) }
         return resolved.standardizedFileURL
+    }
+
+    /// Sidebar event names need the POSIX spelling, independently of the
+    /// existing history-root identity used by SessionStore and its scanners.
+    static func nativeURL(_ url: URL) -> URL {
+        var ancestor = url.standardizedFileURL
+        var suffix: [String] = []
+        while !FileManager.default.fileExists(atPath: ancestor.path), ancestor.path != "/" {
+            suffix.append(ancestor.lastPathComponent)
+            ancestor.deleteLastPathComponent()
+        }
+        // Foundation intentionally retains OS aliases such as /var on some
+        // macOS versions; FSEvents reports the native /private/var spelling.
+        let nativePath = ancestor.path.withCString { path -> String? in
+            guard let resolved = realpath(path, nil) else { return nil }
+            defer { free(resolved) }
+            return String(cString: resolved)
+        }
+        var resolved = nativePath.map { URL(fileURLWithPath: $0) } ?? ancestor.resolvingSymlinksInPath()
+        for component in suffix.reversed() { resolved.appendPathComponent(component) }
+        // Re-standardizing would turn /private/var back into /var again.
+        return resolved
     }
 
     fileprivate static let restartMask =

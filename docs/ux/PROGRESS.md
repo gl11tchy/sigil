@@ -617,3 +617,42 @@ sequencing and app deletion tests await ordinary exact-head CI at PR creation.
 Existing local build/process denials remain respected. No personal history,
 additional worker/ticket, local AppTests, daily-app replacement or customer timing
 claim. Parent personal review precedes merge.
+
+## REA-1255: reuse sidebar snapshots during hover and navigation
+
+Equal visibility inputs now share a one-second snapshot across renders and
+keyboard events. All filter/membership and mutable tab-identity keys are included;
+tab activity remains independently observed by rows. A view-owned passive
+filesystem stream schedules quiet invalidation and stops with the sidebar.
+Unchanged watched views do no periodic full-list rebuild; unsupported streams
+retain bounded fallback refresh. Saved history and project authority are preserved.
+
+[The verification record](../qa/rea-1255.md) defines the generated 1,000-session,
+20-row callback sweep and its limits. Baseline app-host CI began before changing
+production behavior; the PR carries measured timings and exact-head CI evidence. Local
+pure watcher type-check/ASan policy checks pass; local stream delivery is unavailable.
+No customer history, local AppTests, daily-app replacement or merge. One ticket
+and worker remain active, with parent personal review before merge.
+
+The first baseline run passed 1,172 Swift tests but exposed a read-only SwiftUI
+environment override in the new harness; the corrected fixture records the host's
+actual setting. Automatic review also identified the existing render-count
+regression, watch-path rebuilding on hover and partial-watch coverage. The focused
+repair reuses the watch-path set, reconciles startup/remount, preserves scheduled
+fallback for partial plans and updates the original assertion without weakening
+its row-order contract. No additional implementation worker or ticket was opened.
+
+Runtime CI then exposed lexical versus canonical project-ID assertions and a quiet
+watcher event mismatch. A generated local path probe confirmed Foundation retains
+`/var` while POSIX resolves `/private/var`; sidebar watches resolve the existing
+ancestor with POSIX before restoring a missing suffix. Assertions compare canonical
+project identities; the quiet event, idle-build and cancellation requirements remain
+unchanged. Final runtime evidence remains pending the repaired exact-head CI.
+
+The next CI passed every SidebarSnapshot test, including actual quiet events,
+idle reuse, fallback and cancellation. It also exposed that the shared history-root
+helper established scanner authority identities. The follow-up confines native
+POSIX spelling to sidebar watch paths, restores history-root behavior and adds an
+assertion preserving the original canonical helper contract. A Git admin-root
+expectation now uses the consistently native watch plan. No history/root-loss
+assertions were changed or removed.

@@ -9,6 +9,54 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct SidebarVersionNoticeTests {
+    @Test func thousandSessionTwentyRowHoverSweep() async throws {
+        try #require(NSApplication.shared.isRunning)
+        let fixture = try SidebarFixture()
+        defer { fixture.cleanup() }
+        fixture.settings.showWorktreeSessions = true
+        let folder = try fixture.directory("hover-project")
+        for index in 0..<1_000 {
+            try fixture.writeListedSession(id: "hover-\(index)", cwd: folder.path)
+        }
+        await fixture.store.reload()
+        try #require(fixture.store.sessions.count == 1_000)
+        let model = AppModel(
+            settings: fixture.settings, store: fixture.store,
+            trashConversation: { _ in }, presentError: { _ in },
+            panel: RightPanel(defaults: fixture.defaults, notesStore: ConversationNotesStore(root: fixture.notesRoot)),
+            pairingStore: InMemoryRemotePairingStore(), providerInstallations: [:])
+        defer { model.closeAllTabsAndWait() }
+        model.openRecents()
+        let rows = Array(model.sidebarSnapshot().rowIDs.prefix(20))
+        try #require(rows.count == 20)
+        let probe = HoverProbe()
+        let hosted = host(
+            NSHostingView(
+                rootView:
+                    SidebarView(model: model, observeHover: { probe.glide = $0 })
+                    .environment(\.palette, Palette(theme: .sigilDark))))
+        defer { hosted.window.close() }
+        try await Task.sleep(for: .milliseconds(100))
+        let initialBuilds = model.sidebarSnapshotBuildCount
+        let start = ContinuousClock.now
+        for row in rows {
+            try #require(probe.glide != nil)
+            probe.glide?.hover(row, true)
+            let deadline = ContinuousClock.now + .seconds(1)
+            while probe.glide?.target != row, ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(1))
+            }
+            try #require(probe.glide?.target == row, "Each real hover callback must render its highlight")
+            hosted.view.layoutSubtreeIfNeeded()
+        }
+        let elapsed = start.duration(to: .now)
+        let builds = model.sidebarSnapshotBuildCount - initialBuilds
+        print(
+            "REA-1255 hover fixture: sessions=1000 rows=20 elapsed=\(elapsed) snapshotBuilds=\(builds); DEBUG, reduceMotion=\(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion), actual onHover callback, 200x460 app-host window; excludes seeding/initial layout"
+        )
+        #expect(builds < 20, "The hover sweep must reuse snapshots within the freshness window")
+    }
+
     /// CI only: this hosts SwiftUI in a window, using generated history and fake installations.
     @Test func threeNoticesPreserveTheListViewportInANarrowShortSidebar() async throws {
         try #require(NSApplication.shared.isRunning, "The fixture requires the SwiftUI app-host event loop")
@@ -206,6 +254,11 @@ struct SidebarVersionNoticeTests {
         guard element.responds(to: selector) else { return nil }
         return element.perform(selector)?.takeUnretainedValue()
     }
+}
+
+@MainActor
+private final class HoverProbe {
+    var glide: SidebarGlide?
 }
 
 private struct AccessibilityControl: View {

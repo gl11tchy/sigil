@@ -27,13 +27,13 @@ struct MacSidebarRowOrderTests {
         #expect(model.sidebarSnapshotBuildCount == 1)
         #expect(first.listed.map(\.id) == ["a-one", "a-two"])
 
-        // A render always builds; the arrow keys and cleanup after it do not.
+        // Render, arrow keys and cleanup share the fresh equal-input snapshot.
         let rendered = model.sidebarSnapshot()
-        #expect(model.sidebarSnapshotBuildCount == 2)
+        #expect(model.sidebarSnapshotBuildCount == 1)
         for _ in 0..<5 {
             #expect(model.eventSidebarSnapshot() == rendered)
         }
-        #expect(model.sidebarSnapshotBuildCount == 2)
+        #expect(model.sidebarSnapshotBuildCount == 1)
     }
 
     @Test func everyInputChangeBuildsANewSnapshot() async throws {
