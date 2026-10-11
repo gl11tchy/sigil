@@ -17,8 +17,12 @@ import os
         let keys = SessionScanner.searchKeys(for: sessions)
         let before = meter.counts
         for query in ["zirconia", "CAFE", "zirconia cafe", "missing"] {
+            let matches = try #require(
+                ConversationNotesIndex.matchingReferences(
+                    query: query,
+                    references: Set(sessions.map(\.reference)), snapshot: index, overlays: [:]))
             let found = SessionScanner.search(
-                query, sessions: sessions, keys: keys, foldedNotes: { index.foldedNote(for: $0.reference) })
+                query, sessions: sessions, keys: keys, matchingNotes: { matches.contains($0.reference) })
             #expect(found.count == (query == "missing" ? 0 : 100))
         }
         #expect(meter.counts == before)
@@ -209,6 +213,31 @@ import os
                 reader: meter.reader))
         #expect(index.catalog.items.isEmpty && index.folded.isEmpty)
         #expect(meter.counts.metadata == 0 && meter.counts.reads == 0)
+    }
+
+    @Test func matchingUsesInitialOverlaysAndEveryTermWithoutFilesystemAccess() throws {
+        let fixture = try NoteIndexFixture()
+        defer { fixture.cleanup() }
+        let first = fixture.session("draft").reference
+        let other = fixture.session("draft", cwd: "/generated/other").reference
+        let paths = [first: fixture.file(first).path]
+        let overlays = [fixture.file(first).path: "zirconia cafe"]
+        #expect(
+            ConversationNotesIndex.matchingReferences(
+                query: "zirconia CAFE", references: [first, other],
+                snapshot: nil, overlays: overlays, directPaths: paths) == [first])
+        #expect(
+            ConversationNotesIndex.matchingReferences(
+                query: "zirconia missing", references: [first],
+                snapshot: nil, overlays: overlays, directPaths: paths)?.isEmpty == true)
+        #expect(
+            ConversationNotesIndex.matchingReferences(
+                query: "", references: [first],
+                snapshot: nil, overlays: overlays, directPaths: paths)?.isEmpty == true)
+        #expect(
+            ConversationNotesIndex.matchingReferences(
+                query: "zirconia", references: [first],
+                snapshot: nil, overlays: overlays, directPaths: paths, isCancelled: { true }) == nil)
     }
 }
 

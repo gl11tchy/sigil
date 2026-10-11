@@ -163,6 +163,27 @@ enum ConversationNotesIndex: Sendable {
         return prefixText(data, mayBeTruncated: true).map(SearchMatchHighlight.fold) ?? ""
     }
 
+    /// Called on the matching queue, never by a sidebar row or search keystroke.
+    static func matchingReferences(
+        query: String, references: Set<ProviderSessionReference>, snapshot: Snapshot?,
+        overlays: [String: String], directPaths: [ProviderSessionReference: String] = [:],
+        isCancelled: @Sendable () -> Bool = { false }
+    ) -> Set<ProviderSessionReference>? {
+        guard let query = SessionScanner.SearchQuery(query) else { return [] }
+        var result: Set<ProviderSessionReference> = []
+        for reference in references {
+            guard !isCancelled() else { return nil }
+            let text: String?
+            if let snapshot {
+                text = snapshot.foldedNote(for: reference, overlays: overlays)
+            } else {
+                text = directPaths[reference].flatMap { overlays[$0] }
+            }
+            if let text, query.terms.allSatisfy({ !isCancelled() && text.contains($0) }) { result.insert(reference) }
+        }
+        return isCancelled() ? nil : result
+    }
+
     private static func prefixText(_ data: Data, mayBeTruncated: Bool) -> String? {
         if let text = String(data: data, encoding: .utf8) { return text }
         guard mayBeTruncated else { return nil }

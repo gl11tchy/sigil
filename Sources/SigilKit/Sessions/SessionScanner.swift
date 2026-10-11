@@ -368,12 +368,14 @@ enum SessionScanner: Sendable {
         keys: [SearchKey],
         boost: ((GrokSession) -> Int)? = nil,
         displayedTitle: ((GrokSession) -> String)? = nil,
-        foldedNotes: ((GrokSession) -> String?)? = nil
+        foldedNotes: ((GrokSession) -> String?)? = nil,
+        matchingNotes: ((GrokSession) -> Bool)? = nil
     ) -> [GrokSession] {
         guard let query = SearchQuery(query) else { return sessions }
         return zip(sessions, keys)
             .compactMap { session, key -> (session: GrokSession, rank: SearchRank, boost: Int)? in
                 var rank = searchRank(key, query: query, displayedTitle: displayedTitle?(session))
+                if rank == nil, matchingNotes?(session) == true { rank = .notes }
                 if rank == nil, let notes = foldedNotes?(session), query.terms.allSatisfy({ holds(notes, $0) }) {
                     rank = .notes
                 }

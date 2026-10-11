@@ -8,15 +8,19 @@ still open. Nothing here is a timing; counts are counted actions.
 
 The Mac sidebar searches the first 64 KiB of eligible conversation notes after
 all title/path hits. A serial background index uses provider/native ID/canonical
-workspace keys, metadata reuse and stale-scan fences; queries read folded memory.
+workspace keys, metadata reuse and stale-scan fences. A separate cancellable
+background matcher publishes cached query membership after a 50ms debounce.
 Ambiguous flat notes and conflict copies are excluded, and indexing never moves
 legacy files. Unsaved edits and publication invalidate the cached sidebar. Phone
 search keeps its existing title/path input. Search help states the prefix limit.
 
 [The verification record](../qa/rea-1272.md) records the generated main reproduction
 and passing direct Swift 6/Address Sanitizer checks, including 900 sessions/100
-notes with no reads during queries. Real store/Observation/app-host validation
-awaits the normal exact-head CI gate. Existing local build/process denials remain
+notes with no reads during queries. The first full CI exposed idle snapshot observation of note publication; the
+active-query generation guard fixes that cause without changing the assertion.
+A generated benchmark also prompted off-main matching and independent initial
+overlays. Real store/Observation/app-host validation awaits a new ordinary
+exact-final-head CI gate. Existing local build/process denials remain
 binding; no local UI, daily app install or personal data inspection. Parent
 personal final-diff review remains required before merge.
 

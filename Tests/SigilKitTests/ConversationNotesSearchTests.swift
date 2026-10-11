@@ -79,10 +79,35 @@ struct ConversationNotesSearchTests {
         try await waitUntil { gate.entered }
         store.setNote("unsaved zirconia", for: session.id, cwd: session.cwd)
         #expect(!store.isSaved(for: session.id, cwd: session.cwd))
+        #expect(store.foldedNote(for: session.reference) == "unsaved zirconia")
+        store.prepareSearchQuery("zirconia")
+        try await waitUntil { store.matchesSearch(for: session.reference) }
+        // The reader is still held: matching only the explicit overlay is independent.
         gate.release()
         try await waitUntil { store.searchPublishedCount > 0 }
         #expect(store.foldedNote(for: session.reference) == "unsaved zirconia")
         store.flushNow()
+    }
+
+    @Test func rapidQueryChangesPublishOnlyTheLatestMatches() async throws {
+        let fixture = try NoteIndexFixture()
+        defer { fixture.cleanup() }
+        let session = fixture.session("query")
+        try fixture.write("zirconia café", for: session.reference)
+        let store = ConversationNotesStore(root: fixture.root)
+        store.prepareSearch(for: [session])
+        try await waitUntil { store.searchPublishedCount > 0 }
+        store.prepareSearchQuery("zirconia")
+        store.prepareSearchQuery("missing")
+        store.prepareSearchQuery("cafe zirconia")
+        try await waitUntil { store.searchMatchIsCurrent }
+        #expect(store.matchesSearch(for: session.reference))
+        store.prepareSearchQuery("zirconia missing")
+        #expect(!store.matchesSearch(for: session.reference))
+        try await waitUntil { store.searchMatchIsCurrent }
+        #expect(!store.matchesSearch(for: session.reference))
+        store.prepareSearchQuery(" \n ")
+        #expect(store.searchMatchIsCurrent && !store.matchesSearch(for: session.reference))
     }
 
     @Test func changedMembershipCancelsAFormerlyUnambiguousLegacyRead() async throws {

@@ -272,8 +272,7 @@ the first 64 KiB of each eligible conversation note. It does not search every
 transcript message, and phone search continues to use titles and paths only.
 For a nonempty query, results rank exact title, title prefix, every query term at
 a folded Unicode word start, title contains, folder/path, then note-only matches.
-Within that rank,
-one category wins: open conversation, pinned, focused project, then other; newer
+Within that rank, one category wins: open conversation, pinned, focused project, then other; newer
 activity follows, with provider, native ID and cwd breaking final ties. A stronger
 match always beats a weaker boosted match. Search remains global inside a project;
 substring highlighting is unchanged. Empty queries keep the published newest-first
@@ -364,9 +363,14 @@ prefix**, retaining complete Unicode scalars at the boundary. Terms beyond that
 prefix are not searchable. Metadata caching avoids rereading unchanged bodies;
 one serial background worker coalesces invalidations and cancels stale scans.
 Work is bounded by the captured session set and the prefix cap, with no notes-tree
-enumeration. Query keystrokes use folded text in memory without file reads.
-Unsaved editor text overrides disk snapshots. Index publication and local edits
-invalidate the sidebar snapshot; directory events refresh unopened indexed notes,
+enumeration. Query changes schedule a cancellable, 50ms-debounced matcher on a separate
+background queue; title/path results remain immediate and note matches publish
+asynchronously. The main actor reads cached match membership without scanning
+note text or reading files.
+Explicit editor overlays are available even before the first disk snapshot.
+Unsaved editor text overrides disk snapshots. Match publication and local edits
+invalidate active search snapshots; idle sidebar snapshots do not observe note
+generations. directory events refresh unopened indexed notes,
 including replacement and deletion. Workspace alias invalidation re-resolves the
 canonical paths off the main actor. The search field's help states the prefix
 limit and that note matches appear last. No excerpt UI is included.

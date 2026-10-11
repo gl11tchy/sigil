@@ -32,7 +32,7 @@ struct SidebarSnapshotTests {
         model.searchText = "zirconia"
         _ = model.eventSidebarSnapshot()
         let deadline = ContinuousClock.now + .seconds(4)
-        while model.panel.notesStore.foldedNote(for: note.reference) != "zirconia", ContinuousClock.now < deadline {
+        while !model.panel.notesStore.matchesSearch(for: note.reference), ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(model.eventSidebarSnapshot().listed.map(\.id) == ["title", "note"])
@@ -41,6 +41,11 @@ struct SidebarSnapshotTests {
         #expect(model.eventSidebarSnapshot().listed.map(\.id) == ["title"])
         #expect(model.sidebarSnapshotBuildCount == count + 1)
         model.searchText = "sapphire"
+        _ = model.eventSidebarSnapshot()
+        let editedDeadline = ContinuousClock.now + .seconds(4)
+        while !model.panel.notesStore.matchesSearch(for: note.reference), ContinuousClock.now < editedDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
         #expect(model.eventSidebarSnapshot().listed == [note])
         model.archive(note)
         // Search remains global and includes archived conversations.
@@ -52,6 +57,27 @@ struct SidebarSnapshotTests {
         model.unarchive(note)
         model.openRecents()
         #expect(model.eventSidebarSnapshot().sessions == fixture.store.sessions)
+        model.panel.notesStore.flushNow()
+    }
+
+    @Test func editingNotesDoesNotInvalidateAnIdleSidebarSnapshot() async throws {
+        let fixture = try ModelFixture()
+        defer {
+            fixture.store.stop()
+            fixture.cleanup()
+        }
+        let folder = try fixture.directory("idle-notes")
+        try fixture.writeListedSession(id: "note", cwd: folder.path, summary: "Weekly")
+        await fixture.store.reload()
+        let note = try #require(fixture.store.sessions.first)
+        let model = snapshotModel(fixture, clock: SnapshotClock())
+        defer { model.closeAllTabsAndWait() }
+        model.openRecents()
+        let original = model.eventSidebarSnapshot()
+        let count = model.sidebarSnapshotBuildCount
+        model.panel.notesStore.setNote("unsaved zirconia", for: note.id, cwd: note.cwd)
+        #expect(model.eventSidebarSnapshot().sessions == original.sessions)
+        #expect(model.sidebarSnapshotBuildCount == count)
         model.panel.notesStore.flushNow()
     }
 

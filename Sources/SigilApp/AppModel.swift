@@ -355,6 +355,7 @@ final class AppModel {
 
     private func sidebarSessions(index: SidebarIndex) -> [GrokSession] {
         panel.notesStore.prepareSearch(for: store.sessions)
+        panel.notesStore.prepareSearchQuery(searchText)
         let boost: ((GrokSession) -> Int)?
         if SidebarOrganization.isSearching(searchText) {
             let openKeys = Set(
@@ -376,7 +377,7 @@ final class AppModel {
             boost = nil
         }
         var result = store.search(
-            searchText, boost: boost, foldedNotes: { self.panel.notesStore.foldedNote(for: $0.reference) }
+            searchText, boost: boost, matchingNotes: { self.panel.notesStore.matchesSearch(for: $0.reference) }
         ) {
             self.title(for: $0, in: index)
         }
@@ -920,6 +921,7 @@ final class AppModel {
 
     private func sidebarInputs() -> SidebarInputs {
         panel.notesStore.prepareSearch(for: store.sessions)
+        panel.notesStore.prepareSearchQuery(searchText)
         return SidebarInputs(
             sessions: store.sessions,
             searchText: searchText,
@@ -935,7 +937,7 @@ final class AppModel {
             showOtherAppSessions: settings.showOtherAppSessions,
             sigilConversations: settings.sigilConversations,
             tabs: tabs.map { SidebarTabIdentity(id: $0.id, sessionID: $0.sessionID, cwd: $0.workingDirectory.path) },
-            notesGeneration: panel.notesStore.searchGeneration
+            notesGeneration: SidebarOrganization.isSearching(searchText) ? panel.notesStore.searchGeneration : 0
         )
     }
 
