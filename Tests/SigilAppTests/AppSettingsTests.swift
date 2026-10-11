@@ -2,6 +2,7 @@ import Foundation
 import Testing
 
 @testable import SigilApp
+@testable import SigilKit
 
 @Suite(.serialized)
 struct AppSettingsTests {
@@ -254,4 +255,41 @@ private func isolatedDefaults() -> (value: UserDefaults, reset: () -> Void) {
     let name = "SigilAppTests.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: name)!
     return (defaults, { defaults.removePersistentDomain(forName: name) })
+}
+
+extension AppSettingsTests {
+    @Test @MainActor
+    func firstRunInstalledChoiceDoesNotBecomeAnExplicitPreference() {
+        let defaults = isolatedDefaults()
+        defer { defaults.reset() }
+        let settings = AppSettings(defaults: defaults.value)
+        let ready = ProviderInstallation(executable: URL(fileURLWithPath: "/bin/sh"), version: "fixture", problem: nil)
+        settings.chooseInitialInstalledProvider([.codex: ready, .grokBuild: ready])
+        #expect(settings.defaultProvider == .codex)
+        #expect(!settings.hasExplicitDefaultProvider)
+        #expect(defaults.value.string(forKey: "session.defaultProvider") == nil)
+        settings.chooseInitialInstalledProvider([.claudeCode: ready])
+        #expect(settings.defaultProvider == .codex)
+        settings.defaultProvider = .kimi
+        let reloaded = AppSettings(defaults: defaults.value)
+        reloaded.chooseInitialInstalledProvider([.claudeCode: ready])
+        #expect(reloaded.defaultProvider == .kimi)
+        #expect(reloaded.hasExplicitDefaultProvider)
+    }
+
+    @Test @MainActor
+    func noInstalledCLIAndEarlyInteractionDoNotSwitchTheInitialChoice() {
+        let defaults = isolatedDefaults()
+        defer { defaults.reset() }
+        let settings = AppSettings(defaults: defaults.value)
+        settings.chooseInitialInstalledProvider([:])
+        let ready = ProviderInstallation(executable: URL(fileURLWithPath: "/bin/sh"), version: "fixture", problem: nil)
+        settings.chooseInitialInstalledProvider([.claudeCode: ready])
+        #expect(settings.defaultProvider == .grokBuild)
+        let other = AppSettings(defaults: defaults.value)
+        other.finishInitialProviderSelection()
+        other.chooseInitialInstalledProvider([.codex: ready])
+        #expect(other.defaultProvider == .grokBuild)
+        #expect(!other.hasExplicitDefaultProvider)
+    }
 }

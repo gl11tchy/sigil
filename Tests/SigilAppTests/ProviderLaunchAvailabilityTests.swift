@@ -1354,3 +1354,94 @@ private final class ProviderRetryCancellation: @unchecked Sendable {
     var isCancelled: Bool { lock.withLock { cancelled } }
     func cancel() { lock.withLock { cancelled = true } }
 }
+
+extension ProviderLaunchAvailabilityTests {
+    @Test(arguments: [false, true])
+    func firstRunChoiceWaitsForAllChecksAndPreservesInteraction(interacted: Bool) async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .codex)
+        defer { fixture.cleanup() }
+        let gate = HeldProviderProbe()
+        let model = fixture.makeModel(probe: { provider, _ in await gate.probe(provider) })
+        let refresh = Task { await model.refreshProviderInstallations(force: false) }
+        await gate.waitForCalls(CLIProvider.allCases.count)
+        #expect(model.providerTileStatus(.codex) == .checking)
+        if interacted { fixture.settings.finishInitialProviderSelection() }
+        var results = fixtureProviderInstallations(fixture.shell)
+        results[.claudeCode] = .init(
+            executable: nil, version: nil, problem: "Install Claude Code", failure: .notInstalled)
+        await gate.release(round: 1, provider: .codex, results: results)
+        for _ in 0..<100 { await Task.yield() }
+        #expect(fixture.settings.defaultProvider == .grokBuild)
+        await gate.release(round: 1, results: results)
+        await refresh.value
+        #expect(fixture.settings.defaultProvider == (interacted ? .grokBuild : .codex))
+        #expect(model.providerTileStatus(.claudeCode) == .notInstalled)
+        #expect(model.providerTileStatus(.codex) == .available)
+        // A later explicit refresh cannot change an established initial choice.
+        let again = Task { await model.refreshProviderInstallations() }
+        await gate.waitForCalls(2 * CLIProvider.allCases.count)
+        await gate.release(round: 2, results: fixtureProviderInstallations(fixture.shell))
+        await again.value
+        #expect(fixture.settings.defaultProvider == (interacted ? .grokBuild : .codex))
+    }
+
+    @Test func inventoryReportsKnownKimiKeyStateAndHistoryVersionSeparately() throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .codex)
+        defer { fixture.cleanup() }
+        var results = fixtureProviderInstallations(fixture.shell)
+        results[.codex] = .init(executable: fixture.shell, version: "codex-cli 1.0.0", problem: nil)
+        let model = fixture.makeModel(installations: results)
+        fixture.settings.kimiSignIn = .apiKey
+        #expect(model.providerTileStatus(.kimi) == .needsSignIn)
+        #expect(model.providerAvailabilityDescription(.kimi)?.contains("API key") == true)
+        #expect(model.providerTileStatus(.codex) == .available)
+        #expect(model.providerAvailabilityDescription(.codex)?.contains("History format is not supported") == true)
+        #expect(model.providerLaunchProblem(.codex) == nil)
+        fixture.settings.kimiSignIn = .kimiAccount
+        #expect(model.providerTileStatus(.kimi) == .available)
+        #expect(model.providerAvailabilityDescription(.kimi) == nil)
+    }
+}
+
+extension ProviderLaunchAvailabilityTests {
+    @Test func anExplicitDefaultChosenDuringChecksWinsOverTheInitialInventory() async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .codex)
+        defer { fixture.cleanup() }
+        let gate = HeldProviderProbe()
+        let model = fixture.makeModel(probe: { provider, _ in await gate.probe(provider) })
+        let refresh = Task { await model.refreshProviderInstallations(force: false) }
+        await gate.waitForCalls(CLIProvider.allCases.count)
+        fixture.settings.defaultProvider = .kimi
+        await gate.release(round: 1, results: fixtureProviderInstallations(fixture.shell))
+        await refresh.value
+        #expect(fixture.settings.defaultProvider == .kimi)
+        #expect(fixture.defaults.string(forKey: "session.defaultProvider") == CLIProvider.kimi.rawValue)
+    }
+}
+
+extension ProviderLaunchAvailabilityTests {
+    @Test(arguments: [false, true])
+    func omittedRemoteProviderResolvesTheInitialInventoryAndKeepsStoredPreference(explicit: Bool) async throws {
+        let fixture = try LaunchAvailabilityFixture(provider: .codex)
+        defer { fixture.cleanup() }
+        if explicit { fixture.settings.defaultProvider = .cursor }
+        let gate = HeldProviderProbe()
+        let model = fixture.makeModel(probe: { provider, _ in await gate.probe(provider) })
+        defer { model.closeAllTabsAndWait() }
+        let request = RemoteRequest(challenge: "test", sequence: 1, action: "new", worktree: false)
+        let launch = Task { await RemoteCommands.execute(request, model: model) }
+        await gate.waitForCalls(CLIProvider.allCases.count)
+        #expect(model.tabs.isEmpty)
+        var results = fixtureProviderInstallations(fixture.shell)
+        for provider in [CLIProvider.claudeCode, .grokBuild] {
+            results[provider] = .init(
+                executable: nil, version: nil, problem: "Install \(provider.name)", failure: .notInstalled)
+        }
+        await gate.release(round: 1, results: results)
+        let reply = await launch.value
+        #expect(reply.ok)
+        #expect(model.tabs.count == 1)
+        #expect(model.selectedTab?.spec.provider == (explicit ? .cursor : .codex))
+        #expect(fixture.settings.defaultProvider == (explicit ? .cursor : .codex))
+    }
+}

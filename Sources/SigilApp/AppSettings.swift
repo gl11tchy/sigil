@@ -206,7 +206,36 @@ final class AppSettings {
 
     /// The CLI focused first in New Session and its optional configuration sheet.
     var defaultProvider: CLIProvider {
-        didSet { defaults.set(defaultProvider.rawValue, forKey: Key.defaultProvider) }
+        didSet {
+            guard !isChoosingInitialProvider else { return }
+            hasExplicitDefaultProvider = true
+            finishInitialProviderSelection()
+            defaults.set(defaultProvider.rawValue, forKey: Key.defaultProvider)
+        }
+    }
+    private(set) var hasExplicitDefaultProvider: Bool
+    private var hasFinishedInitialProviderSelection = false
+    private var isChoosingInitialProvider = false
+    var needsInitialProviderSelection: Bool {
+        !hasExplicitDefaultProvider && !hasFinishedInitialProviderSelection
+    }
+
+    /// Interaction freezes the initial choice even if an inventory is pending.
+    /// Only an explicit saved default is persisted across app launches.
+    func finishInitialProviderSelection() {
+        hasFinishedInitialProviderSelection = true
+    }
+
+    func chooseInitialInstalledProvider(_ installations: [CLIProvider: ProviderInstallation]) {
+        guard needsInitialProviderSelection else { return }
+        // Decide once from a completed inventory, never from probe arrival order.
+        finishInitialProviderSelection()
+        guard let provider = CLIProvider.allCases.first(where: { installations[$0]?.isAvailable == true }) else {
+            return
+        }
+        isChoosingInitialProvider = true
+        defaultProvider = provider
+        isChoosingInitialProvider = false
     }
     /// On by default: a new chat in a git repository gets its own worktree.
     var startsInWorktree: Bool {
@@ -293,9 +322,9 @@ final class AppSettings {
         model = defaults.string(forKey: Key.model) ?? ""
         let storedEffort = defaults.string(forKey: Key.effort) ?? ""
         effort = Self.effortOptions.contains(storedEffort) ? storedEffort : ""
-        defaultProvider =
-            defaults.string(forKey: Key.defaultProvider).flatMap(CLIProvider.init(rawValue:))
-            ?? .grokBuild
+        let storedProvider = defaults.string(forKey: Key.defaultProvider).flatMap(CLIProvider.init(rawValue:))
+        hasExplicitDefaultProvider = storedProvider != nil
+        defaultProvider = storedProvider ?? .grokBuild
         startsInWorktree = defaults.object(forKey: Key.startsInWorktree) as? Bool ?? true
         kimiSignIn =
             defaults.string(forKey: Key.kimiSignIn).flatMap(KimiSignIn.init(rawValue:)) ?? .kimiAccount

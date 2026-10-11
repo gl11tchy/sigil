@@ -4,6 +4,23 @@ The resumable record for the [experience contract](EXPERIENCE.md). Each entry
 says what was built, how it was checked, what the check showed, and what is
 still open. Nothing here is a timing; counts are counted actions.
 
+## REA-1261: six-provider availability and first-run choice
+
+New Session and Options expose the checked state of all six CLIs. Settings lists
+checked paths, reported versions and full problems with one shared Check Again.
+Confirmed missing lookup, failed version commands, timeouts, unknown/stale checks
+and Kimi's known missing API key remain distinct. History compatibility notices
+do not block an installed CLI. A first-run default settles once from the complete
+inventory; explicit preferences and in-progress provider choices are preserved.
+
+[The verification record](../qa/rea-1261.md) records the synthetic baseline and
+nine passing production-probe/status groups, plus CI-only selection/render tests.
+The real renamed-app AX/window-ID screenshot acceptance gate is **unmet**: its
+builder reaches the already denied local SwiftPM path, and normal CI artifacts
+contain test results rather than a current runnable Mac bundle. No bypass, daily
+app replacement or new binary distribution was attempted. Exact-head CI and
+parent personal review remain required; no native screenshot success is claimed.
+
 ## REA-1264: incomplete history and scan coverage
 
 The isolated candidate separates per-file compatibility notices from actual read

@@ -177,9 +177,11 @@ final class AppModel {
         self.kimiKeyStore =
             kimiKeyStore ?? (Self.isRunningAutomatedTests ? InMemoryKimiKeyStore() : KeychainKimiKeyStore())
         hasKimiAPIKey = self.kimiKeyStore.load() != nil
+        chooseInitialProviderIfReady()
         providerChecks.didFinishChecks = { [weak self] in
-            guard let self, self.checkingProviders.isEmpty, !self.deferredOpenTabs.isEmpty else { return }
-            self.restoreOpenTabs()
+            guard let self, self.checkingProviders.isEmpty else { return }
+            self.chooseInitialProviderIfReady()
+            if !self.deferredOpenTabs.isEmpty { self.restoreOpenTabs() }
         }
     }
 
@@ -2135,6 +2137,7 @@ final class AppModel {
     /// optional sheet is the only place that overrides them for this launch.
     func startDefaultSession(_ provider: CLIProvider) async {
         guard showsNewSessionSurface, !isStartingNewSession else { return }
+        settings.finishInitialProviderSelection()
         let project = pendingSessionDirectory ?? newSessionDirectory
         isStartingNewSession = true
         defer { isStartingNewSession = false }
@@ -2194,6 +2197,34 @@ final class AppModel {
     /// Shared by desktop, phone and restoration. Unknown never permits launch.
     func providerLaunchProblem(_ provider: CLIProvider) -> String? {
         providerChecks.problem(provider)
+    }
+
+    /// All six results must be known before first-run selection can settle.
+    private func chooseInitialProviderIfReady() {
+        guard checkingProviders.isEmpty,
+            CLIProvider.allCases.allSatisfy({ providerInstallations[$0] != nil })
+        else { return }
+        settings.chooseInitialInstalledProvider(providerInstallations)
+    }
+
+    func providerTileStatus(_ provider: CLIProvider) -> ProviderTileStatus {
+        if provider == .grokBuild, !settings.usesInstalledGrok, !settings.executableExists { return .unavailable }
+        return ProviderTileStatus.status(
+            installation: providerInstallations[provider],
+            isChecking: checkingProviders.contains(provider) || providerIsRecovering(provider),
+            requiresCheck: providerRequiresCheck(provider),
+            needsSignIn: provider == .kimi && settings.kimiSignIn == .apiKey && !hasKimiAPIKey)
+    }
+
+    func providerAvailabilityDescription(_ provider: CLIProvider) -> String? {
+        if providerVersionCheckTimedOut(provider), providerIsRecovering(provider) {
+            return "Version check timed out for \(provider.name). Checking again…"
+        }
+        if let problem = providerLaunchProblem(provider) { return problem }
+        if providerTileStatus(provider) == .needsSignIn {
+            return "Add a Kimi API key in Settings, or use a Kimi account."
+        }
+        return provider.versionNotice(for: providerInstallations[provider])
     }
 
     func providerRequiresCheck(_ provider: CLIProvider) -> Bool {

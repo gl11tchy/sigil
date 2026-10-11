@@ -25,6 +25,7 @@ struct ProviderInstallationTests {
         #expect(!missing.isAvailable)
         #expect(missing.problem != nil)
         #expect(!missing.timedOut)
+        #expect(missing.failure == .notInstalled)
     }
     @Test func detectsAnExecutableAndVersionWithoutStartingAConversation() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -74,12 +75,14 @@ struct ProviderInstallationTests {
         #expect(!found.isAvailable)
     }
 
-    @Test func invalidVersionExitIsNotATimeout() throws {
+    @Test(arguments: [9, 127])
+    func invalidVersionExitIsNotATimeoutOrMissing(exitCode: Int) throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let binary = root.appendingPathComponent("invalid")
-        try "#!/bin/sh\nexit 9\n".write(to: binary, atomically: true, encoding: .utf8)
+        try "#!/bin/sh\nprintf '__SIGIL_NOT_INSTALLED__\\n'\nexit \(exitCode)\n".write(
+            to: binary, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: binary.path)
         let found = ProviderInstallation.detect(
             provider: .codex, configuredExecutable: binary,
@@ -87,6 +90,9 @@ struct ProviderInstallationTests {
         #expect(!found.isAvailable)
         #expect(!found.timedOut)
         #expect(found.problem != nil)
+        #expect(found.failure == .probeFailed)
+        #expect(found.executable == binary)
+        #expect(found.problem?.contains("Install") == false)
     }
 
     @Test(arguments: [

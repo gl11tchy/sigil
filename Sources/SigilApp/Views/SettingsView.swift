@@ -3,25 +3,28 @@ import SigilKit
 import SwiftUI
 
 struct SettingsView: View {
+    enum Tab: Hashable { case appearance, general, remote }
     @Bindable var model: AppModel
+    @State private var selectedTab: Tab
     @State private var settingsError: String?
     @State private var pathDraft: ExecutablePathDraft
     @State private var listedModels = GrokModelCatalog.fallback
     @State private var tabMessagingSwitch = TabMessagingSwitch()
     @FocusState private var isExecutablePathFocused: Bool
 
-    init(model: AppModel) {
+    init(model: AppModel, initialTab: Tab = .appearance) {
         self.model = model
+        _selectedTab = State(initialValue: initialTab)
         _pathDraft = State(initialValue: ExecutablePathDraft(text: model.settings.executablePath))
     }
 
     private var palette: Palette { Palette(theme: model.settings.theme) }
 
     var body: some View {
-        TabView {
-            appearance.tabItem { Label("Appearance", systemImage: "paintbrush") }
-            general.tabItem { Label("General", systemImage: "gearshape") }
-            RemoteControlView(model: model).tabItem { Label("Remote", systemImage: "iphone") }
+        TabView(selection: $selectedTab) {
+            appearance.tabItem { Label("Appearance", systemImage: "paintbrush") }.tag(Tab.appearance)
+            general.tabItem { Label("General", systemImage: "gearshape") }.tag(Tab.general)
+            RemoteControlView(model: model).tabItem { Label("Remote", systemImage: "iphone") }.tag(Tab.remote)
         }
         .tint(palette.accent)
         .environment(\.palette, palette)
@@ -78,6 +81,65 @@ struct SettingsView: View {
         }
     }
 
+    private var cliAvailability: some View {
+        SettingsSection(
+            title: "CLIs",
+            footer:
+                "Checks paths and versions. Kimi API keys are configured below; other sign-ins are managed by each CLI."
+        ) {
+            HStack {
+                Text("Availability").ui(12, .medium).foregroundStyle(palette.ink)
+                Spacer()
+                Button("Check Again") {
+                    Task { await model.refreshProviderInstallations() }
+                }
+                .buttonStyle(SigilButtonStyle(kind: .secondary, height: 28))
+                .disabled(!model.checkingProviders.isEmpty)
+                .accessibilityIdentifier("settings-cli-check-again")
+            }
+            .padding(12)
+            ForEach(CLIProvider.allCases) { provider in
+                SettingsDivider()
+                cliAvailabilityRow(provider)
+            }
+        }
+        .accessibilityIdentifier("settings-clis")
+    }
+
+    private func cliAvailabilityRow(_ provider: CLIProvider) -> some View {
+        let status = model.providerTileStatus(provider)
+        let installation = model.providerInstallations[provider]
+        let description = model.providerAvailabilityDescription(provider)
+        return HStack(alignment: .top, spacing: 12) {
+            Text(provider.name)
+                .ui(13, .medium)
+                .foregroundStyle(status == .available ? palette.ink : palette.ink2)
+                .frame(width: 100, alignment: .leading)
+            VStack(alignment: .leading, spacing: 4) {
+                if !status.caption.isEmpty {
+                    Text(status.caption).ui(12.5, .medium)
+                }
+                if let executable = installation?.executable {
+                    Text(executable.path).mono(11.5).textSelection(.enabled)
+                    if let version = installation?.version {
+                        Text(version).mono(11.5).textSelection(.enabled)
+                    } else if installation?.isAvailable == true {
+                        Text("Version not reported").ui(12.5)
+                    }
+                }
+                if let description {
+                    Text(description).ui(12.5)
+                }
+            }
+            .foregroundStyle(palette.ink2)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("settings-cli-\(provider.rawValue)")
+    }
+
     private var general: some View {
         SettingsPage(minHeight: 620) {
             SettingsSection(
@@ -100,6 +162,8 @@ struct SettingsView: View {
                     isOn: Bindable(model.settings).startsInWorktree
                 )
             }
+
+            cliAvailability
 
             SettingsSection(title: "Grok CLI") {
                 VStack(alignment: .leading, spacing: 6) {
@@ -158,11 +222,6 @@ struct SettingsView: View {
                         )
                         .ui(12, .medium)
                         Spacer()
-                        Button("Check Again") {
-                            Task { await model.refreshProviderInstallations(force: true, only: [.grokBuild]) }
-                        }
-                        .buttonStyle(SigilButtonStyle(kind: .secondary, height: 28))
-                        .disabled(model.checkingProviders.contains(.grokBuild))
                     }
                     .foregroundStyle(model.providerLaunchProblem(.grokBuild) == nil ? palette.greenInk : palette.ink2)
                     Text(
