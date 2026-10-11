@@ -122,8 +122,10 @@ public struct ProviderInstallation: Sendable, Equatable {
         drain()
         let lines = String(decoding: output, as: UTF8.self).split(whereSeparator: \.isNewline)
         guard process.terminationStatus == 0 else {
-            let missing = lines.contains { $0 == missingMarker }
             let path = lines.last { $0.hasPrefix(marker) }.map { String($0.dropFirst(marker.count)) }
+            // Output from a found CLI cannot turn its failed version command
+            // into an executable lookup failure.
+            let missing = path == nil && lines.contains { $0 == missingMarker }
             let executable = path.flatMap { path -> URL? in
                 path.hasPrefix("/") && FileManager.default.isExecutableFile(atPath: path)
                     ? URL(fileURLWithPath: path) : nil
