@@ -336,6 +336,15 @@ struct SidebarView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                     // Wrapped notices scroll with history so navigation keeps its space at small window sizes.
+                    if model.store.historyNotice != nil {
+                        Text("Some history files are incomplete or unsupported. Details in Settings.")
+                            .ui(12.5).foregroundStyle(palette.ink2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12)
+                            .padding(.bottom, 8)
+                            .accessibilityIdentifier("sidebar-history-compatibility-notice")
+                    }
                     ForEach(CLIProvider.allCases) { provider in
                         if let notice = provider.versionNotice(for: model.providerInstallations[provider]) {
                             Text(notice).ui(12).foregroundStyle(palette.ink2)

@@ -204,6 +204,15 @@ struct SettingsView: View {
             KimiSettingsSection(model: model)
 
             SettingsSection(title: "Sidebar") {
+                if let notice = model.store.historyNotice {
+                    Text(notice)
+                        .ui(12.5).foregroundStyle(palette.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .accessibilityIdentifier("settings-history-compatibility-notice")
+                    SettingsDivider()
+                }
                 SettingsToggle(
                     "Show one-message sessions",
                     isOn: Bindable(model.settings).showEmptySessions

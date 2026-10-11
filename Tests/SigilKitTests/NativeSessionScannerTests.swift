@@ -88,14 +88,15 @@ struct NativeSessionScannerTests {
         #expect(NativeSessionScanner.parse(provider: .codex, data: appended, file: file, modified: Date()) == nil)
     }
 
-    @Test func brokenNewVersionMetadataStillReportsAReadProblem() throws {
+    @Test func brokenNewVersionMetadataShowsACompatibilityNotice() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         try codexFixture(version: "0.158.0", nativeID: "broken").write(to: root.appendingPathComponent("rollout.jsonl"))
         let result = NativeSessionScanner.scan(provider: .codex, root: root, cache: [:], ignoringCache: false)
         #expect(result.sessions.isEmpty)
-        #expect(result.loadError == "Some Codex history could not be read. Saved sessions are kept.")
+        #expect(result.loadError == nil)
+        #expect(result.notice?.contains("Codex history") == true)
     }
 
     @Test func modernCodexUserItemsAndNativeRenamesAreSearchable() throws {
@@ -185,11 +186,82 @@ struct NativeSessionScannerTests {
         try unsupported.write(to: file)
         let next = NativeSessionScanner.scan(provider: .codex, root: root, cache: initial.cache, ignoringCache: false)
         #expect(next.sessions == initial.sessions)
-        #expect(next.loadError != nil)
+        #expect(next.loadError == nil)
+        #expect(next.notice?.contains("9.0") == true)
         #expect(try Data(contentsOf: file) == unsupported)
         let missing = NativeSessionScanner.scan(
             provider: .codex, root: root.appendingPathComponent("missing"), cache: initial.cache, ignoringCache: false)
         #expect(missing.sessions == initial.sessions)
+    }
+
+    @Test(arguments: ["summary", "partial", "major", "schema", "ambiguous"])
+    func unrecognizedFilesProtectOnlyTheirOwnCachedRow(kind: String) throws {
+        let fixture = try HistoryCompatibilityFixture()
+        defer { fixture.remove() }
+        let held = try fixture.writeNative()
+        let deleted = try fixture.writeNative(id: HistoryCompatibilityFixture.secondID, filename: "deleted.jsonl")
+        let initial = NativeSessionScanner.scan(provider: .codex, root: fixture.codex, cache: [:], ignoringCache: false)
+        #expect(initial.sessions.count == 2)
+        let replacement: Data
+        switch kind {
+        case "summary": replacement = Data(#"{"type":"summary","summary":"Generated"}"#.utf8)
+        case "partial": replacement = Data(#"{"type":"session_meta","payload":{"id":"unfinished""#.utf8)
+        case "major": replacement = codexFixture(version: "1.0.0")
+        case "schema": replacement = Data(#"{"type":"session_meta","payload":[]}"#.utf8)
+        default:
+            replacement = codexFixture() + Data([0x0A]) + codexFixture(nativeID: HistoryCompatibilityFixture.secondID)
+        }
+        try replacement.write(to: held)
+        try FileManager.default.removeItem(at: deleted)
+        let next = NativeSessionScanner.scan(
+            provider: .codex, root: fixture.codex, cache: initial.cache, ignoringCache: false)
+        #expect(next.loadError == nil)
+        #expect(next.notice != nil)
+        #expect(next.sessions.map(\.nativeSessionID) == [HistoryCompatibilityFixture.firstID])
+        #expect(next.cache.count == 1)
+        #expect(try Data(contentsOf: held) == replacement)
+        try FileManager.default.removeItem(at: held)
+        let cleared = NativeSessionScanner.scan(
+            provider: .codex, root: fixture.codex, cache: next.cache, ignoringCache: false)
+        #expect(cleared.sessions.isEmpty)
+        #expect(cleared.notice == nil)
+        #expect(cleared.loadError == nil)
+    }
+
+    @Test(arguments: ["summary", "partial", "1.9.0"])
+    func claudeCompatibilityFilesDoNotBlockAnOtherwiseCompleteScan(kind: String) throws {
+        let fixture = try HistoryCompatibilityFixture()
+        defer { fixture.remove() }
+        let file = fixture.claude.appendingPathComponent("generated.jsonl")
+        if kind == "1.9.0" {
+            try fixture.writeNative(provider: .claudeCode, version: kind, filename: file.lastPathComponent)
+        } else {
+            let content = kind == "summary" ? #"{"type":"summary","summary":"Generated"}"# : #"{"type":"user""#
+            try Data(content.utf8).write(to: file)
+        }
+        let result = NativeSessionScanner.scan(
+            provider: .claudeCode, root: fixture.claude, cache: [:], ignoringCache: false)
+        #expect(result.sessions.isEmpty)
+        #expect(result.loadError == nil)
+        #expect(result.notice?.contains("Claude Code history") == true)
+        if kind == "1.9.0" { #expect(result.notice?.contains(kind) == true) }
+    }
+
+    @Test func inaccessibleNativeSubdirectoryPreservesCachedRowsAndReportsUncertainty() throws {
+        let fixture = try HistoryCompatibilityFixture()
+        defer { fixture.remove() }
+        let blockedFile = try fixture.writeNative(filename: "blocked/held.jsonl")
+        let deleted = try fixture.writeNative(id: HistoryCompatibilityFixture.secondID, filename: "deleted.jsonl")
+        let initial = NativeSessionScanner.scan(provider: .codex, root: fixture.codex, cache: [:], ignoringCache: false)
+        let blocked = blockedFile.deletingLastPathComponent()
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: blocked.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: blocked.path) }
+        try FileManager.default.removeItem(at: deleted)
+        let next = NativeSessionScanner.scan(
+            provider: .codex, root: fixture.codex, cache: initial.cache, ignoringCache: false)
+        #expect(next.loadError != nil)
+        #expect(Set(next.sessions.map(\.id)) == Set(initial.sessions.map(\.id)))
+        #expect(next.coverage.uncertainRoots.contains(fixture.codex.path))
     }
 
     @Test func indexesNineHundredSessionsWithBoundedCacheAndSearch() throws {

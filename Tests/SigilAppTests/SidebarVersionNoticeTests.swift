@@ -22,6 +22,11 @@ struct SidebarVersionNoticeTests {
         }
         await fixture.store.reload()
         try #require(fixture.store.sessions.count == 8)
+        let incompleteFolder = GrokPaths.sessionDirectory(
+            cwd: try fixture.directory("pending-project").path, sessionID: "pending")
+        try FileManager.default.createDirectory(at: incompleteFolder, withIntermediateDirectories: true)
+        await fixture.store.reload()
+        try #require(fixture.store.loadError == nil && fixture.store.historyNotice != nil)
 
         func model(versions: [CLIProvider: String]) -> AppModel {
             AppModel(
@@ -130,6 +135,9 @@ struct SidebarVersionNoticeTests {
                 identifiers.contains("sidebar-\(provider.rawValue)-version-notice"),
                 "Exported accessibility tree: \(tree). \(diagnostic)")
         }
+        #expect(
+            identifiers.contains("sidebar-history-compatibility-notice"),
+            "Exported compatibility notice: \(tree). \(diagnostic)")
     }
 
     private func host(_ model: AppModel) -> (window: NSWindow, view: NSView) {

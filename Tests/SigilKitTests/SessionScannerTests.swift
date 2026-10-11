@@ -134,7 +134,8 @@ struct SessionScannerTests {
 
         let result = SessionScanner.scan(root: fixture.root, cache: [:])
         #expect(result.sessions.isEmpty)
-        #expect(result.loadError?.contains("summary.json is invalid") == true)
+        #expect(result.loadError == nil)
+        #expect(result.notice?.contains("incomplete or unsupported") == true)
     }
 
     @Test func unreadableSummaryIsReportedWithoutSession() throws {
@@ -164,7 +165,8 @@ struct SessionScannerTests {
         try Data("not valid json".utf8).write(to: url, options: .atomic)
         let second = SessionScanner.scan(root: fixture.root, cache: first.cache)
         #expect(second.sessions.first?.title == "Hello")
-        #expect(second.loadError?.contains("summary.json is invalid") == true)
+        #expect(second.loadError == nil)
+        #expect(second.notice?.contains("incomplete or unsupported") == true)
     }
 
     @Test func sameSizeSameMtimeAtomicReplaceStillReloads() throws {

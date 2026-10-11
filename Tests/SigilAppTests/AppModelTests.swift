@@ -4063,6 +4063,63 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func compatibilityNoticesAllowVerifiedHousekeepingAndProtectAffectedMetadata() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let first = try fixture.directory("first")
+        let second = try fixture.directory("second")
+        try fixture.writeListedSession(id: "deleted", cwd: first.path)
+        try fixture.writeListedSession(id: "held", cwd: second.path)
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let entries: [OpenTabsSnapshot.Entry] = [
+            .init(sessionID: "deleted", cwd: first.path), .init(sessionID: "held", cwd: second.path),
+            .init(sessionID: "pending", cwd: second.path),
+        ]
+        fixture.settings.pinnedConversations = entries
+        fixture.settings.archivedConversations = entries
+        fixture.settings.conversationNames = entries.map {
+            .init(sessionID: $0.sessionID, cwd: $0.cwd, name: $0.sessionID)
+        }
+        fixture.settings.tabColors = entries.map { .init(sessionID: $0.sessionID, cwd: $0.cwd, color: .cyan) }
+        fixture.settings.pinnedProjects = [first.path, second.path]
+        fixture.settings.focusedProjectPath = first.path
+        model.panel.setNotes("Keep generated notes", forSessionID: "pending", cwd: second.path)
+        let heldDirectory = GrokPaths.sessionDirectory(cwd: second.path, sessionID: "held")
+        try Data("{unfinished".utf8).write(to: heldDirectory.appendingPathComponent("summary.json"))
+        try fixture.createSession(id: "pending", cwd: second)
+        try FileManager.default.removeItem(at: GrokPaths.sessionDirectory(cwd: first.path, sessionID: "deleted"))
+        await fixture.store.reload()
+        #expect(fixture.store.loadError == nil)
+        #expect(fixture.store.historyNotice != nil)
+        #expect(fixture.store.sessions.map(\.id) == ["held"])
+        model.pruneMissingPins()
+        #expect(Set(fixture.settings.pinnedConversations.map(\.sessionID)) == ["held", "pending"])
+        #expect(Set(fixture.settings.archivedConversations.map(\.sessionID)) == ["held", "pending"])
+        #expect(Set(fixture.settings.conversationNames.map(\.sessionID)) == ["held", "pending"])
+        #expect(Set(fixture.settings.tabColors.map(\.sessionID)) == ["held", "pending"])
+        #expect(fixture.settings.pinnedProjects == [first.path, second.path])
+        #expect(fixture.settings.focusedProjectPath == first.path)
+        #expect(model.panel.notes(forSessionID: "pending", cwd: second.path) == "Keep generated notes")
+        fixture.settings.sigilConversationsSeeded = false
+        model.seedSigilConversations()
+        #expect(fixture.settings.sigilConversationsSeeded)
+        try FileManager.default.removeItem(at: heldDirectory)
+        try FileManager.default.removeItem(at: GrokPaths.sessionDirectory(cwd: second.path, sessionID: "pending"))
+        await fixture.store.reload()
+        #expect(fixture.store.historyNotice == nil)
+        model.pruneMissingPins()
+        #expect(fixture.settings.pinnedConversations.isEmpty)
+        #expect(fixture.settings.archivedConversations.isEmpty)
+        #expect(fixture.settings.conversationNames.isEmpty)
+        #expect(fixture.settings.tabColors.isEmpty)
+        #expect(fixture.settings.pinnedProjects.isEmpty)
+        #expect(fixture.settings.focusedProjectPath.isEmpty)
+        #expect(model.panel.notes(forSessionID: "pending", cwd: second.path) == "Keep generated notes")
+    }
+
+    @Test @MainActor
     func pruneKeepsAnotherCopysNewEntriesUntilAScanCouldSeeThem() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }

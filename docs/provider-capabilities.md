@@ -140,8 +140,8 @@ including prerelease suffixes and a resumed conversation's newer metadata, are
 accepted without a minor-version cap.
 Every observed metadata header must keep the same session ID and cwd. The first
 accepted header supplies the creation timestamp; resumed headers cannot replace
-it. Codex 0.0.x, Codex 1.x, malformed metadata and unsupported envelopes remain a
-visible read problem, not invented conversations. The checked Codex contract stays **0.157.1**; accepting
+it. Codex 0.0.x, Codex 1.x, malformed metadata and unsupported envelopes produce a
+visible compatibility notice without inventing conversations. The checked Codex contract stays **0.157.1**; accepting
 a synthetic newer-version envelope is not a claim that a newer CLI was fully checked.
 
 Each changed file contributes at most a 512 KiB prefix and 128 KiB tail. The
@@ -150,6 +150,25 @@ files may therefore use a folder fallback instead of an inaccessible title.
 Search covers discovered titles and project paths, not every transcript message.
 Subagent directories are excluded. Cached entries survive read errors and
 unrecognized rewrites. Native transcripts are never rewritten or deleted.
+
+A summary-only, mid-write or unsupported native file protects only its previously
+recognized row. A complete scan can still remove a different file's deleted row.
+Grok folders with missing or invalid `summary.json` follow the same notice policy
+and protect saved metadata for that folder. The sidebar shows a concise accessible
+history notice; Settings shows provider counts and any observed unsupported
+versions. Format notices do not replace the installed-versus-checked CLI notices.
+
+Actual read or enumeration failures set `loadError` and preserve cached records
+within uncertain coverage. The store remembers roots observed during its lifetime,
+including empty roots: disappearance then reports a read problem, while a missing
+never-used root is normal. An incomplete scan cannot clear a prior format notice.
+Only a later complete scan that verifies replacement or absence can clear it.
+Known deleted Grok rows can lose their pins, archives, names and colors while a
+different unsupported folder keeps its metadata. Native identity metadata retains
+its existing conservative policy. Project pins and focus stay while any format
+notice or read uncertainty prevents proving a project's absence. Notes are not
+pruned by history scans. Seeding remains enabled when the scan has notices alone.
+
 Filesystem events refresh native JSONL changes and the adjacent Codex title index.
 The Codex watcher excludes unrelated files in its parent directory. Grok still
 watches summaries rather than its frequently changing journals. Scanner and watcher
@@ -227,6 +246,6 @@ provider behavior after every future CLI update.
 REA-1214 owns the Codex version rule and the compatibility notice. New-tab identity
 binding remains a separate verified-identity requirement in [REA-1216](https://linear.app/reasonable-glyph/issue/REA-1216).
 It does not gain evidence from a compatible envelope or a cwd/time match. Separating
-unsupported-format notices from I/O failures and housekeeping is [REA-1264](https://linear.app/reasonable-glyph/issue/REA-1264);
-the existing read-error behavior remains here. Installation captions and the CLIs
+unsupported-format notices from I/O failures and housekeeping is implemented in
+[REA-1264](https://linear.app/reasonable-glyph/issue/REA-1264). Installation captions and the CLIs
 Settings list belong to [REA-1261](https://linear.app/reasonable-glyph/issue/REA-1261).

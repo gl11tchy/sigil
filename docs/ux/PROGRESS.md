@@ -4,6 +4,25 @@ The resumable record for the [experience contract](EXPERIENCE.md). Each entry
 says what was built, how it was checked, what the check showed, and what is
 still open. Nothing here is a timing; counts are counted actions.
 
+## REA-1264: incomplete history and scan coverage
+
+The isolated candidate separates per-file compatibility notices from actual read
+uncertainty. Unsupported files keep their own cached row; a complete scan can
+remove an independently deleted row. Missing or invalid Grok summaries protect
+that folder's metadata, and incomplete coverage keeps project pins and focus.
+Previously available empty roots now remain known during the store's lifetime.
+The conversation list contains an accessible notice, with details in Settings.
+REA-1214's version acceptance and REA-1216's identity evidence remain unchanged.
+
+[The ticket verification record](../qa/rea-1264.md) records the synthetic baseline
+and 11 passing local production-scanner assertion groups. Strict format lint,
+syntax parsing and diff checks passed. Store and app macro compilation are blocked
+locally by the Observation plugin sandbox; no SwiftPM retry or local UI run occurred.
+The focused store/app tests and the existing app-hosted viewport/accessibility
+fixture require normal PR CI; the PR and Linear comment will record exact-head
+results before parent review. No daily app install, live provider behavior or
+Settings native accessibility proof is claimed.
+
 ## REA-1214: Codex version compatibility
 
 The Codex minor-version cap and installed-versus-checked notices are recorded in
