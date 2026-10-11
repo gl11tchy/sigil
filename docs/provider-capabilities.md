@@ -144,9 +144,31 @@ it. Codex 0.0.x, Codex 1.x, malformed metadata and unsupported envelopes produce
 visible compatibility notice without inventing conversations. The checked Codex contract stays **0.157.1**; accepting
 a synthetic newer-version envelope is not a claim that a newer CLI was fully checked.
 
-Each changed file contributes at most a 512 KiB prefix and 128 KiB tail. The
-scanner keeps metadata and display fields, not full transcripts. Large history
-files may therefore use a folder fallback instead of an inaccessible title.
+Claude cold scans stream the whole JSONL file in 64 KiB chunks. Complete records
+up to 512 KiB are parsed, with a carried partial JSON/UTF-8 record; larger records
+are discarded through their newline and retain an incomplete-history notice.
+The newest explicit `custom-title` wins even in the middle of a long transcript.
+An explicit empty title resets to the first prompt. A complete legacy final JSON
+object without a newline is projected without committing the unfinished line.
+
+Claude's in-memory cache holds display/identity fields, a scan offset, bounded
+partial-record bytes and a SHA-256 fingerprint of every byte through that offset.
+Unchanged files are zero-read cache hits. A changed, growing file resumes parsing
+at the prior offset only after its inode/device/birth identity matches and a
+cancellable 64 KiB-chunk reread of the entire old prefix reproduces the fingerprint.
+Only new records are then parsed, but validation deliberately reads old bytes:
+this is incremental parsing, not append-only byte I/O. Replacement, truncation,
+a changed same-size file, or any old-prefix fingerprint mismatch triggers a cold
+scan. Identity/timestamps are checked again before publishing a result; concurrent
+writes and read failures preserve saved rows with uncertain coverage. Caller
+cancellation reaches the store's detached scanner, and canceled results cannot
+publish cache, sessions, notices or coverage. Existing scan ordering and force
+epochs remain authoritative. `ignoringCache` always performs a full scan.
+
+Codex retains its 512 KiB prefix/128 KiB tail transcript samples and latest 2 MiB
+name-index window; incremental Codex indexing belongs to REA-1268. The scanner
+keeps metadata and display fields, not full transcripts. Oversized or unsupported
+records can still require a folder fallback.
 Search covers discovered titles and project paths, not every transcript message.
 Subagent directories are excluded. Cached entries survive read errors and
 unrecognized rewrites. Native transcripts are never rewritten or deleted.

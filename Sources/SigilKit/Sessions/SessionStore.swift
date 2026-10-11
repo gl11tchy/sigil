@@ -71,7 +71,10 @@ public final class SessionStore {
 
     /// Capture the same roots for the watcher and detached scans. Explicit roots
     /// also keep filesystem tests isolated from the user's provider history.
-    convenience init(root: URL, timing: SessionStoreTiming, nativeRoots: [(CLIProvider, URL)] = []) {
+    convenience init(
+        root: URL, timing: SessionStoreTiming, nativeRoots: [(CLIProvider, URL)] = [],
+        nativeContentReader: NativeSessionScanner.ContentReader = .disk
+    ) {
         let nativeRoots = nativeRoots.map { ($0.0, SessionDirectoryWatcher.canonicalURL($0.1)) }
         // Availability is a monotonic observed fact, including roots with zero sessions.
         // Concurrent or superseded scans may observe it; only applied scans publish notices.
@@ -81,7 +84,7 @@ public final class SessionStore {
             timing: timing,
             nativeRoots: nativeRoots,
             scanOperation: { root, cache, ignoringCache in
-                await Task.detached(priority: .userInitiated) {
+                let scan = Task.detached(priority: .userInitiated) {
                     var result = SessionScanner.scan(
                         root: root,
                         cache: cache.filter { $0.value.session.provider == .grokBuild },
@@ -91,7 +94,7 @@ public final class SessionStore {
                     for (provider, nativeRoot) in nativeRoots {
                         let native = NativeSessionScanner.scan(
                             provider: provider, root: nativeRoot, cache: cache, ignoringCache: ignoringCache,
-                            rootAvailability: availableRoots)
+                            rootAvailability: availableRoots, contentReader: nativeContentReader)
                         result.sessions += native.sessions
                         result.cache.merge(native.cache) { _, new in new }
                         result.loadError =
@@ -101,7 +104,12 @@ public final class SessionStore {
                     }
                     if !nativeRoots.isEmpty { result.sessions.sort(by: SessionScanner.isNewer) }
                     return result
-                }.value
+                }
+                return await withTaskCancellationHandler {
+                    await scan.value
+                } onCancel: {
+                    scan.cancel()
+                }
             }
         )
     }
@@ -171,11 +179,13 @@ public final class SessionStore {
 
     /// Forces a rescan, ignoring any caches.
     public func reload() async {
+        guard !Task.isCancelled else { return }
         debounceTask?.cancel()
         debounceTask = nil
         firstPendingEvent = nil
         refreshWatcher()
         await scan(ignoringCache: true)
+        guard !Task.isCancelled else { return }
         refreshWatcher()
     }
 
@@ -216,6 +226,7 @@ public final class SessionStore {
 
     /// Walks `root` off the main actor. Cache hits skip JSON decoding.
     func scan(ignoringCache: Bool) async {
+        guard !Task.isCancelled else { return }
         if !ignoringCache, forcedScansInFlight > 0 {
             cachedScanPending = true
             return
@@ -248,7 +259,7 @@ public final class SessionStore {
         let snapshot = cache
         let result = await scanOperation(root, snapshot, ignoringCache)
 
-        guard capturedForceEpoch == forceEpoch else { return }
+        guard !Task.isCancelled, capturedForceEpoch == forceEpoch else { return }
         if !ignoringCache {
             guard forcedScansInFlight == 0, sequence >= appliedScanSequence else { return }
         }
