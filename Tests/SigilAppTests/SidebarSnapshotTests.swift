@@ -313,6 +313,41 @@ struct SidebarSnapshotTests {
         defer { task.cancel() }
         try await Task.sleep(for: .milliseconds(100))
         let observed = OSAllocatedUnfairLock(initialState: false)
+        let sources = OSAllocatedUnfairLock(initialState: [String]())
+        withObservationTracking {
+            _ = model.panel.notesStore.searchGeneration
+        } onChange: {
+            sources.withLock { $0.append("notes") }
+        }
+        withObservationTracking {
+            _ = model.sidebarFilesystemInvalidationCount
+        } onChange: {
+            sources.withLock { $0.append("filesystem") }
+        }
+        withObservationTracking {
+            _ = model.store.sessions
+        } onChange: {
+            sources.withLock { $0.append("sessions") }
+        }
+        let notesBefore = model.panel.notesStore.searchGeneration
+        withObservationTracking {
+            _ = model.settings.focusedProjectPath
+            _ = model.settings.pinnedConversations
+            _ = model.settings.pinnedProjects
+            _ = model.settings.addedProjects
+            _ = model.settings.archivedConversations
+            _ = model.settings.conversationNames
+            _ = model.settings.showEmptySessions
+            _ = model.settings.showWorktreeSessions
+            _ = model.settings.showSubagentSessions
+            _ = model.settings.showOtherAppSessions
+            _ = model.settings.sigilConversations
+            _ = model.tabs
+            _ = model.searchText
+        } onChange: {
+            sources.withLock { $0.append("inputs") }
+        }
+        let filesystemBefore = model.sidebarFilesystemInvalidationCount
         withObservationTracking {
             _ = model.sidebarSnapshot()
         } onChange: {
@@ -321,6 +356,13 @@ struct SidebarSnapshotTests {
         let idleBuilds = model.sidebarSnapshotBuildCount
         // No one-second full-list timer on an unchanged, visible sidebar.
         try await Task.sleep(for: .milliseconds(1_200))
+        print(
+            "Quiet snapshot diagnostics", "sources", sources.withLock { $0 }, "query", model.searchText,
+            "notes", notesBefore, model.panel.notesStore.searchGeneration,
+            "filesystem", filesystemBefore, model.sidebarFilesystemInvalidationCount,
+            "stream", model.sidebarFilesystemTrace,
+            "paths", model.sidebarFilesystemObservation.paths,
+            "classifications", model.sidebarFilesystemObservation.classificationPaths)
         #expect(!observed.withLock { $0 })
         #expect(model.sidebarSnapshotBuildCount == idleBuilds)
         try FileManager.default.removeItem(at: alias)
