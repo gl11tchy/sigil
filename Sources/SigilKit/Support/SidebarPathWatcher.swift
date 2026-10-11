@@ -49,6 +49,12 @@ public final class SidebarPathWatcher: Sendable {
                     identities.insert(folder.path)
                     identities.insert(folder.appendingPathComponent(".git").path)
                     let parent = folder.deletingLastPathComponent()
+                    // FSEvents reports canonical OS prefixes (for example
+                    // /private/var), but must retain this symlink's own name.
+                    let nativeSpelling = SessionDirectoryWatcher.canonicalURL(parent)
+                        .appendingPathComponent(folder.lastPathComponent)
+                    identities.insert(nativeSpelling.path)
+                    identities.insert(nativeSpelling.appendingPathComponent(".git").path)
                     if parent.path != "/",
                         (try? FileManager.default.destinationOfSymbolicLink(atPath: folder.path)) != nil
                     {

@@ -34,6 +34,17 @@ struct SessionDirectoryWatcherTests {
         #expect(plan.identities.contains(actual.appendingPathComponent("missing/child").path))
         #expect(!plan.roots.contains("/"))
         #expect(!plan.needsFallback)
+        let alternate =
+            alias.path.hasPrefix("/private/var/")
+            ? String(alias.path.dropFirst("/private".count)) : "/private" + alias.path
+        let alternatePlan = SidebarPathWatcher.plan(paths: [alternate])
+        let nativeAlias = SessionDirectoryWatcher.canonicalURL(alias.deletingLastPathComponent())
+            .appendingPathComponent(alias.lastPathComponent).path
+        #expect(
+            SessionDirectoryWatcher.shouldScan(
+                path: nativeAlias,
+                flags: FSEventStreamEventFlags(kFSEventStreamEventFlagItemIsSymlink),
+                contents: .sidebarPaths(alternatePlan.identities)))
         let partial = SidebarPathWatcher.plan(paths: [actual.path, "/Sigil1255-Generated-\(UUID().uuidString)"])
         #expect(!partial.roots.isEmpty && partial.needsFallback)
         let admin = root.appendingPathComponent("repo/.git/worktrees/generated")
