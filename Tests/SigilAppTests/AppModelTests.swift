@@ -85,6 +85,7 @@ struct AppModelTests {
         fixture.defaults.set(try JSONEncoder().encode([cwd.path: "kept legacy note"]), forKey: "panel.notes")
         fixture.settings.openTabs = OpenTabsSnapshot(
             tabs: [.init(sessionID: "saved-tab", cwd: cwd.path)], selectedSessionID: "saved-tab")
+        fixture.settings.isTabMessagingEnabled = false
         let store = SessionStore(
             root: root, timing: SessionStoreTiming(historyValidationDelay: .milliseconds(500)), indexFile: file)
         defer { store.stop() }
@@ -94,6 +95,7 @@ struct AppModelTests {
         let error = ErrorBox()
         let model = fixture.model(store: store, presentError: { error.error = $0 })
         defer { model.closeAllTabsAndWait() }
+        await model.onAppear()
         let reply = await RemoteCommands.execute(
             RemoteRequest(challenge: "test", sequence: 1, action: "open", text: cwd.path, name: "remote-tab"),
             model: model)

@@ -596,3 +596,9 @@ review findings were traced to callers and addressed: failed restoration retries
 remote-open await, Grok identifier compatibility, repeated saved-tab traversals and
 forced-scan coordination. Direct ASan index checks include generated /tmp alias and
 non-UUID Grok cases; store/app behavior remains CI-only. No merge or app replacement.
+
+Follow-up exact-head CI reduced 42 failures to 11. Closed-source deletion exposed
+existence-dependent Foundation path standardization; generated /tmp and /var cases
+reproduced it and now pass with stable expansion of only OS aliases. The automatic
+launch fixture now calls the real onAppear lifecycle to install its housekeeping
+observer. All original success/count/identity assertions remain intact.

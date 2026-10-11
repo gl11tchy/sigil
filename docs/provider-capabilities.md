@@ -241,8 +241,9 @@ with the existing exact identity and cwd rules.
 The private cache is limited to 8 MiB, 10,000 rows and bounded display fields. Version,
 captured-root or decoding failures discard it and a later applied scan rewrites it.
 Grok keeps its supported safe folder identifiers; native providers require UUIDs.
-Cache keys and file URLs use the same Foundation-standardized spelling. Only macOS
-system aliases (/var, /tmp and /etc) are expanded for no-follow filesystem checks.
+Cache/file identity compares paths with only macOS system aliases (/var, /tmp and
+/etc) expanded, independent of whether the source still exists. Raw traversal
+components and arbitrary symlinks remain rejected by the no-follow checks.
 Absolute paths must remain inside the corresponding captured root; existing source
 symlink components, index symlinks and aliased index files are rejected. Index reads
 validate descriptor/path identity. Debounced writes run off the main actor and use

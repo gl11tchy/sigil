@@ -31,6 +31,7 @@ import os
         #expect(unchanged.sessions.allSatisfy { !$0.isHistoryValidated })
 
         try FileManager.default.removeItem(at: fixture.claudeFile)
+        #expect(fixture.file.load(roots: fixture.roots) != nil)
         try Data("{\"id\":\"\(fixture.id)\",\"thread_name\":\"Changed index title\"}\n".utf8)
             .write(to: fixture.titleFile)
         let changed = fixture.scan(cache: unchanged.cache, titles: freshTitles, meter: meter)
