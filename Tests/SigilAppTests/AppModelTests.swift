@@ -86,8 +86,14 @@ struct AppModelTests {
         fixture.settings.openTabs = OpenTabsSnapshot(
             tabs: [.init(sessionID: "saved-tab", cwd: cwd.path)], selectedSessionID: "saved-tab")
         fixture.settings.isTabMessagingEnabled = false
+        // Watcher installation schedules a catch-up scan. Keep that unrelated debounce outside
+        // this launch/restoration check so the exact count measures the shared validation pass.
         let store = SessionStore(
-            root: root, timing: SessionStoreTiming(historyValidationDelay: .milliseconds(500)), indexFile: file)
+            root: root,
+            timing: SessionStoreTiming(
+                debounceDelay: .seconds(30), maximumDebounceDelay: .seconds(30),
+                historyValidationDelay: .milliseconds(500)),
+            indexFile: file)
         defer { store.stop() }
         store.start()
         #expect(await waitUntil { store.appliedScanSequence == 1 && !store.isLoading })
@@ -105,7 +111,9 @@ struct AppModelTests {
                 model.tabs.count == 2 && fixture.settings.sigilConversationsSeeded
                     && fixture.settings.pinnedConversations.isEmpty && model.panel.legacyFolderNotes.isEmpty
             })
-        #expect(store.scanSequence == 2 && !store.hasUnvalidatedHistory && store.canPruneMissingProjects)
+        #expect(store.scanSequence == 2)
+        #expect(!store.hasUnvalidatedHistory)
+        #expect(store.canPruneMissingProjects)
         #expect(Set(model.tabs.map(\.nativeSessionID)) == ["saved-tab", "remote-tab"])
     }
 

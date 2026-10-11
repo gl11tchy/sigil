@@ -251,7 +251,7 @@ struct HistoryIndexFixture: Sendable {
     init(temporaryRoot: URL? = nil, grokID: String? = nil) throws {
         self.grokID = grokID ?? id
         base = (temporaryRoot ?? FileManager.default.temporaryDirectory.resolvingSymlinksInPath())
-            .appendingPathComponent("Sigil-HistoryIndex-\(UUID().uuidString)")
+            .appendingPathComponent("Sigil-SavedHistory-\(UUID().uuidString)")
         grok = base.appendingPathComponent("grok/sessions")
         claude = base.appendingPathComponent("claude/projects")
         codex = base.appendingPathComponent("codex/sessions")
