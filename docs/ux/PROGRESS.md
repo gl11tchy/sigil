@@ -551,3 +551,19 @@ production-source cases include the unanchored growth rewrite; the real detached
 store cancellation cases remain CI-only. The parent reviews final code and ordinary
 exact-head CI. No personal transcript, live CLI
 incident, local AppTests, native UI screenshot, merge or daily-app action is claimed.
+
+## REA-1268: selective native-history parsing and title-index reuse
+
+Conservative record selection leaves metadata validation authoritative, including
+escaped keys and late conflicting identities. The Codex index uses a store-scoped
+cache with full snapshot identity, complete retained-window fingerprint validation,
+bounded record carry and window eviction. Missing/evicted index titles restore
+transcript titles. Claude's full old-prefix validation, cancellation and publication
+ordering remain in place; watcher redesign and REA-1270's disk cache are separate.
+
+[The verification record](../qa/rea-1268.md) records generated baseline/candidate
+performance, differential and failure fixtures, local direct production-source
+validation and its limits. Existing scanner/watcher methods remain unchanged.
+Observation-backed store tests and AppTests run in ordinary exact-head CI. Parent
+personal review precedes any merge; no personal history, local UI, daily-app action
+or customer impact is claimed.

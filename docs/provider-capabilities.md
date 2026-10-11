@@ -195,10 +195,29 @@ cancellation reaches the store's detached scanner, and canceled results cannot
 publish cache, sessions, notices or coverage. Existing scan ordering and force
 epochs remain authoritative. `ignoringCache` always performs a full scan.
 
+Both adapters select possible row-changing records before Foundation JSON decoding.
+Markers never supply metadata: selected envelopes still validate normally. Identity,
+version and model candidates remain selected after a title is known; escaped keys
+or values fall back to full decoding. First-prompt and observed-content candidates
+remain selected until found, including Codex event and response-item titles.
+Claude's unfinished final record always validates for its incomplete-history notice.
+Record limits and all identity/version acceptance rules stay the same.
+
 Codex retains its 512 KiB prefix/128 KiB tail transcript samples and latest 2 MiB
-name-index window; incremental Codex indexing belongs to REA-1268. The scanner
-keeps metadata and display fields, not full transcripts. Oversized or unsupported
-records can still require a folder fallback.
+name-index window. A store-scoped in-memory index cache checks the full regular-file
+snapshot (path, inode/device/birth identity, size, mtime and ctime); unchanged files
+need no content reads or JSON decoding. Growing files resume complete-record parsing
+only after every byte of the previously retained window matches its SHA-256
+fingerprint. Replacement, truncation, same-size changes or rewrite-with-growth
+mismatches rebuild the current window. Moving windows evict earlier names and restore
+the transcript's title when an index override disappears. Reads use 64 KiB chunks;
+index records must remain below 16 KiB, with bounded partial UTF-8/JSON carry and
+legacy complete-EOF projection. A symlink is never followed, and read races or
+cancellation cannot replace validated index state. Forced reloads rebuild it.
+Changed-index validation deliberately rereads old bytes; this is incremental parsing,
+not append-only byte I/O. No disk history index or watcher redesign is introduced.
+The scanner keeps metadata and display fields, not full transcripts. Oversized or
+unsupported records can still require a folder fallback.
 Search covers discovered titles and project paths, not every transcript message.
 Subagent directories are excluded. Cached entries survive read errors and
 unrecognized rewrites. Native transcripts are never rewritten or deleted.
