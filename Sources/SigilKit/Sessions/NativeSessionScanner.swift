@@ -40,7 +40,9 @@ enum NativeSessionScanner {
         provider: CLIProvider, root: URL, cache: [String: SessionCacheEntry], ignoringCache: Bool,
         wasAvailable: Bool = false,
         rootAvailability: SessionScanner.RootAvailability? = nil,
-        contentReader: ContentReader = .disk
+        contentReader: ContentReader = .disk,
+        recordDecoder: NativeSessionRecordDecoder = .init(),
+        titleIndexCache: CodexTitleIndexCache? = nil
     ) -> SessionScanner.Result {
         let previous = cache.filter { $0.value.session.provider == provider }
         let fm = FileManager()
@@ -80,7 +82,9 @@ enum NativeSessionScanner {
         }
         let names =
             provider == .codex
-            ? codexNames(at: root.deletingLastPathComponent().appendingPathComponent("session_index.jsonl")) : [:]
+            ? (titleIndexCache ?? CodexTitleIndexCache()).names(
+                at: root.deletingLastPathComponent().appendingPathComponent("session_index.jsonl"),
+                ignoringCache: ignoringCache, reader: contentReader, decoder: recordDecoder) : [:]
         var next: [String: SessionCacheEntry] = [:]
         var unrecognized = 0
         var unsupportedVersions: Set<String> = []
@@ -118,7 +122,7 @@ enum NativeSessionScanner {
                     old.device == device.uint64Value, old.changeDate == changed
                 {
                     var cached = old
-                    cached.session = named(old.session, names: names)
+                    cached.session = named(old.session, names: names, fallback: old.nativeSummary)
                     next[key] = cached
                     if old.claudeScan?.incomplete == true { unrecognized += 1 }
                     continue
@@ -128,13 +132,15 @@ enum NativeSessionScanner {
                 if provider == .claudeCode {
                     let read = try readClaude(
                         file, size: size.uint64Value, inode: inode.uint64Value, device: device.uint64Value,
-                        modified: modified, cached: ignoringCache ? nil : previous[key], reader: contentReader)
+                        modified: modified, cached: ignoringCache ? nil : previous[key], reader: contentReader,
+                        decoder: recordDecoder)
                     claude = read
                     parsed = read.result
                 } else {
                     claude = nil
                     let data = try boundedContents(file, size: size.uint64Value)
-                    parsed = parseResult(provider: provider, data: data, file: file, modified: modified)
+                    parsed = parseResult(
+                        provider: provider, data: data, file: file, modified: modified, decoder: recordDecoder)
                 }
                 let session: GrokSession
                 switch parsed {
@@ -155,7 +161,8 @@ enum NativeSessionScanner {
                 next[key] = SessionCacheEntry(
                     modificationDate: modified, size: size.intValue,
                     inode: inode.uint64Value, device: device.uint64Value, changeDate: changed,
-                    contents: Data(), session: named(session, names: names), claudeScan: claude?.state)
+                    contents: Data(), session: named(session, names: names), claudeScan: claude?.state,
+                    nativeSummary: provider == .codex ? session.summary : nil)
             } catch {
                 readFailed = true
                 if let old = previous[key] { next[key] = old }
@@ -195,8 +202,13 @@ enum NativeSessionScanner {
         var ambiguous = false
 
         @discardableResult
-        mutating func consume(_ line: Data) -> Bool {
-            guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+        mutating func consume(_ line: Data, decoder: NativeSessionRecordDecoder = .init()) -> Bool {
+            guard
+                decoder.mayChangeRow(
+                    line, provider: .claudeCode, needsPrompt: firstPrompt.isEmpty,
+                    needsContent: !hasObservedMessages, needsSummary: fallback.isEmpty)
+            else { return true }
+            guard let object = decoder.object(line),
                 let type = object["type"] as? String
             else { return false }
             if let version = object["version"] as? String, !version.hasPrefix("2."), CLIVersion(version) != nil {
@@ -319,7 +331,7 @@ enum NativeSessionScanner {
 
     private static func readClaude(
         _ file: URL, size: UInt64, inode: UInt64, device: UInt64, modified: Date,
-        cached: SessionCacheEntry?, reader: ContentReader
+        cached: SessionCacheEntry?, reader: ContentReader, decoder: NativeSessionRecordDecoder
     ) throws -> ClaudeRead {
         let handle = try FileHandle(forReadingFrom: file)
         defer { try? handle.close() }
@@ -350,7 +362,7 @@ enum NativeSessionScanner {
             var cursor = chunk.startIndex
             while cursor < chunk.endIndex {
                 try checkCancellation(reader)
-                let newline = chunk[cursor...].firstIndex(of: 0x0A)
+                let newline = NativeSessionRecordDecoder.nextNewline(in: chunk, from: cursor)
                 let end = newline ?? chunk.endIndex
                 if !state.discardingOversized {
                     if state.remainder.count + chunk.distance(from: cursor, to: end) > prefixLimit {
@@ -362,7 +374,7 @@ enum NativeSessionScanner {
                     }
                 }
                 if let newline {
-                    if !state.discardingOversized { state.metadata.consume(state.remainder) }
+                    if !state.discardingOversized { state.metadata.consume(state.remainder, decoder: decoder) }
                     state.remainder = Data()
                     state.discardingOversized = false
                     cursor = chunk.index(after: newline)
@@ -382,7 +394,11 @@ enum NativeSessionScanner {
         // Legacy files may end with a complete JSON object but no newline. Project it
         // without committing it, so an appended delimiter/JSON/UTF-8 fragment is reparsed once.
         var projected = state.metadata
-        let unfinished = !state.remainder.isEmpty && !projected.consume(state.remainder)
+        var finalDecoder = decoder
+        // A partial final record must still validate even when it cannot change
+        // display fields, because its validity determines the incomplete notice.
+        finalDecoder.selectsCandidates = false
+        let unfinished = !state.remainder.isEmpty && !projected.consume(state.remainder, decoder: finalDecoder)
         state.incomplete = unfinished || state.skippedOversized || state.discardingOversized
         return ClaudeRead(
             state: state,
@@ -444,12 +460,15 @@ enum NativeSessionScanner {
         case unrecognized
     }
 
-    static func parseResult(provider: CLIProvider, data: Data, file: URL, modified: Date) -> ParseResult {
+    static func parseResult(
+        provider: CLIProvider, data: Data, file: URL, modified: Date,
+        decoder: NativeSessionRecordDecoder = .init()
+    ) -> ParseResult {
         guard provider == .claudeCode || provider == .codex else { return .unrecognized }
         if provider == .claudeCode {
             var metadata = ClaudeMetadata()
-            for line in data.split(separator: 0x0A) where line.count <= prefixLimit {
-                metadata.consume(Data(line))
+            for line in NativeSessionRecordDecoder.records(in: data, limit: prefixLimit) {
+                metadata.consume(line, decoder: decoder)
             }
             return metadata.result(file: file, modified: modified, fallbackCreated: modified)
         }
@@ -461,8 +480,12 @@ enum NativeSessionScanner {
         var supported = false
         var isSubagent = false
         var hasObservedMessages = false
-        for line in data.split(separator: 0x0A) where line.count <= prefixLimit {
-            guard let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+        for record in NativeSessionRecordDecoder.records(in: data, limit: prefixLimit) {
+            guard
+                decoder.mayChangeRow(
+                    record, provider: .codex, needsPrompt: title.isEmpty, needsContent: !hasObservedMessages)
+            else { continue }
+            guard let object = decoder.object(record),
                 let type = object["type"] as? String
             else { continue }
             if provider == .codex {
@@ -537,31 +560,11 @@ enum NativeSessionScanner {
                 directory: file, provider: provider, hasObservedMessages: hasObservedMessages))
     }
 
-    /// Codex's append-only name index is also version-sensitive. It only supplies
-    /// display names for sessions whose transcript identity already validated.
-    private static func codexNames(at file: URL) -> [String: String] {
-        guard let handle = try? FileHandle(forReadingFrom: file) else { return [:] }
-        defer { try? handle.close() }
-        let limit: UInt64 = 2 * 1024 * 1024
-        guard let size = try? handle.seekToEnd() else { return [:] }
-        let offset = size > limit ? size - limit : 0
-        try? handle.seek(toOffset: offset)
-        guard let data = try? handle.read(upToCount: Int(limit)) else { return [:] }
-        var lines = data.split(separator: 0x0A)
-        if offset > 0, !lines.isEmpty { lines.removeFirst() }
-        var names: [String: String] = [:]
-        for line in lines where line.count < 16_384 {
-            guard let row = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
-                let id = row["id"] as? String, UUID(uuidString: id) != nil,
-                let title = row["thread_name"] as? String, !title.isEmpty
-            else { continue }
-            names[id] = String(title.prefix(240)).replacingOccurrences(of: "\n", with: " ")
-        }
-        return names
-    }
-
-    private static func named(_ session: GrokSession, names: [String: String]) -> GrokSession {
-        guard let name = names[session.nativeSessionID], name != session.summary else { return session }
+    private static func named(
+        _ session: GrokSession, names: [String: String], fallback: String? = nil
+    ) -> GrokSession {
+        let name = names[session.nativeSessionID] ?? fallback ?? session.summary
+        guard name != session.summary else { return session }
         return GrokSession(
             id: session.nativeSessionID, cwd: session.cwd, summary: name,
             createdAt: session.createdAt, updatedAt: session.updatedAt, messageCount: session.messageCount,

@@ -73,12 +73,15 @@ public final class SessionStore {
     /// also keep filesystem tests isolated from the user's provider history.
     convenience init(
         root: URL, timing: SessionStoreTiming, nativeRoots: [(CLIProvider, URL)] = [],
-        nativeContentReader: NativeSessionScanner.ContentReader = .disk
+        nativeContentReader: NativeSessionScanner.ContentReader = .disk,
+        nativeRecordDecoder: NativeSessionRecordDecoder = .init()
     ) {
         let nativeRoots = nativeRoots.map { ($0.0, SessionDirectoryWatcher.canonicalURL($0.1)) }
         // Availability is a monotonic observed fact, including roots with zero sessions.
         // Concurrent or superseded scans may observe it; only applied scans publish notices.
         let availableRoots = SessionScanner.RootAvailability()
+        // Scoped to this store's captured roots, never shared across CLI homes.
+        let titleIndexCache = CodexTitleIndexCache()
         self.init(
             root: root,
             timing: timing,
@@ -94,7 +97,8 @@ public final class SessionStore {
                     for (provider, nativeRoot) in nativeRoots {
                         let native = NativeSessionScanner.scan(
                             provider: provider, root: nativeRoot, cache: cache, ignoringCache: ignoringCache,
-                            rootAvailability: availableRoots, contentReader: nativeContentReader)
+                            rootAvailability: availableRoots, contentReader: nativeContentReader,
+                            recordDecoder: nativeRecordDecoder, titleIndexCache: titleIndexCache)
                         result.sessions += native.sessions
                         result.cache.merge(native.cache) { _, new in new }
                         result.loadError =

@@ -15,6 +15,8 @@ struct SessionCacheEntry: Sendable, Equatable {
     var session: GrokSession
     /// Claude JSONL progress only; Grok summaries and Codex samples keep their existing paths.
     var claudeScan: NativeSessionScanner.ClaudeScanState? = nil
+    /// Transcript title before a Codex index override, so eviction/removal can restore it.
+    var nativeSummary: String? = nil
 }
 
 enum SessionTimestamp {
