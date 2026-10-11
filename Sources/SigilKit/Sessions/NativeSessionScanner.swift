@@ -25,15 +25,17 @@ enum NativeSessionScanner {
 
     static func scan(
         provider: CLIProvider, root: URL, cache: [String: SessionCacheEntry], ignoringCache: Bool,
-        wasAvailable: Bool = false
+        wasAvailable: Bool = false,
+        rootAvailability: SessionScanner.RootAvailability? = nil
     ) -> SessionScanner.Result {
         let previous = cache.filter { $0.value.session.provider == provider }
         let fm = FileManager()
         let rootPath = root.standardizedFileURL.path
         var coverage = SessionScanner.Coverage()
-        switch SessionScanner.rootStatus(root) {
+        let inspection = rootAvailability?.inspect(root) ?? (SessionScanner.rootStatus(root), false)
+        switch inspection.0 {
         case .missing:
-            let uncertain = wasAvailable || !previous.isEmpty
+            let uncertain = wasAvailable || inspection.1 || !previous.isEmpty
             if uncertain { coverage.uncertainRoots.insert(rootPath) }
             return SessionScanner.Result(
                 sessions: previous.values.map(\.session), cache: previous,
@@ -77,8 +79,12 @@ enum NativeSessionScanner {
             let key = file.standardizedFileURL.path
             do {
                 let values = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
-                guard values.isRegularFile == true, values.isSymbolicLink != true else {
-                    if previous[key] != nil { readFailed = true }
+                guard let isRegular = values.isRegularFile, let isSymbolicLink = values.isSymbolicLink else {
+                    throw CocoaError(.fileReadUnknown)
+                }
+                guard isRegular, !isSymbolicLink else {
+                    unrecognized += 1
+                    if let old = previous[key] { next[key] = old }
                     continue
                 }
                 let attributes = try fm.attributesOfItem(atPath: file.path)

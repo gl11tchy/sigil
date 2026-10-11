@@ -4104,11 +4104,13 @@ struct AppModelTests {
         #expect(model.panel.notes(forSessionID: "pending", cwd: second.path) == "Keep generated notes")
         fixture.settings.sigilConversationsSeeded = false
         model.seedSigilConversations()
-        #expect(fixture.settings.sigilConversationsSeeded)
+        #expect(!fixture.settings.sigilConversationsSeeded)
         try FileManager.default.removeItem(at: heldDirectory)
         try FileManager.default.removeItem(at: GrokPaths.sessionDirectory(cwd: second.path, sessionID: "pending"))
         await fixture.store.reload()
         #expect(fixture.store.historyNotice == nil)
+        model.seedSigilConversations()
+        #expect(fixture.settings.sigilConversationsSeeded)
         model.pruneMissingPins()
         #expect(fixture.settings.pinnedConversations.isEmpty)
         #expect(fixture.settings.archivedConversations.isEmpty)
@@ -4117,6 +4119,50 @@ struct AppModelTests {
         #expect(fixture.settings.pinnedProjects.isEmpty)
         #expect(fixture.settings.focusedProjectPath.isEmpty)
         #expect(model.panel.notes(forSessionID: "pending", cwd: second.path) == "Keep generated notes")
+    }
+
+    @Test @MainActor
+    func aCachedScanWithEqualNoticeCountStillPrunesVerifiedDeletedMetadata() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let project = try fixture.directory("generated-project")
+        try fixture.writeListedSession(id: "held", cwd: project.path)
+        await fixture.store.reload()
+        try Data("{partial".utf8).write(
+            to: GrokPaths.sessionDirectory(cwd: project.path, sessionID: "held").appendingPathComponent("summary.json"))
+        try fixture.createSession(id: "previous-pending", cwd: project)
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let entries: [OpenTabsSnapshot.Entry] = [
+            .init(sessionID: "previous-pending", cwd: project.path),
+            .init(sessionID: "next-pending", cwd: project.path),
+        ]
+        fixture.settings.pinnedConversations = entries
+        fixture.settings.archivedConversations = entries
+        fixture.settings.conversationNames = entries.map {
+            .init(sessionID: $0.sessionID, cwd: $0.cwd, name: $0.sessionID)
+        }
+        fixture.settings.tabColors = entries.map { .init(sessionID: $0.sessionID, cwd: $0.cwd, color: .cyan) }
+        let sessions = fixture.store.sessions
+        let notice = fixture.store.historyNotice
+        let sequence = fixture.store.appliedScanSequence
+        try FileManager.default.removeItem(
+            at: GrokPaths.sessionDirectory(cwd: project.path, sessionID: "previous-pending"))
+        try fixture.createSession(id: "next-pending", cwd: project)
+        await fixture.store.scan(ignoringCache: false)
+        #expect(fixture.store.sessions == sessions)
+        #expect(fixture.store.historyNotice == notice)
+        #expect(fixture.store.appliedScanSequence > sequence)
+        #expect(fixture.store.loadError == nil && !fixture.store.isLoading)
+        for _ in 0..<1_000 {
+            if fixture.settings.pinnedConversations.map(\.sessionID) == ["next-pending"] { break }
+            await Task.yield()
+        }
+        #expect(fixture.settings.pinnedConversations.map(\.sessionID) == ["next-pending"])
+        #expect(fixture.settings.archivedConversations.map(\.sessionID) == ["next-pending"])
+        #expect(fixture.settings.conversationNames.map(\.sessionID) == ["next-pending"])
+        #expect(fixture.settings.tabColors.map(\.sessionID) == ["next-pending"])
     }
 
     @Test @MainActor

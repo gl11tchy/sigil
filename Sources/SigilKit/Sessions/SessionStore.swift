@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import os
 
 struct SessionStoreTiming: Sendable {
     var debounceDelay: Duration = .seconds(1)
@@ -43,7 +42,7 @@ public final class SessionStore {
     /// How many scans have started, and which of them produced `sessions`.
     /// A scan numbered above a moment's `scanSequence` began after it.
     @ObservationIgnored public private(set) var scanSequence = 0
-    @ObservationIgnored public private(set) var appliedScanSequence = 0
+    public private(set) var appliedScanSequence = 0
     @ObservationIgnored private var forceEpoch = 0
     @ObservationIgnored private var forcedScansInFlight = 0
     @ObservationIgnored private var cachedScanPending = false
@@ -76,24 +75,23 @@ public final class SessionStore {
         let nativeRoots = nativeRoots.map { ($0.0, SessionDirectoryWatcher.canonicalURL($0.1)) }
         // Availability is a monotonic observed fact, including roots with zero sessions.
         // Concurrent or superseded scans may observe it; only applied scans publish notices.
-        let availableRoots = OSAllocatedUnfairLock(initialState: Set<String>())
+        let availableRoots = SessionScanner.RootAvailability()
         self.init(
             root: root,
             timing: timing,
             nativeRoots: nativeRoots,
             scanOperation: { root, cache, ignoringCache in
                 await Task.detached(priority: .userInitiated) {
-                    let previousRoots = availableRoots.withLock { $0 }
                     var result = SessionScanner.scan(
                         root: root,
                         cache: cache.filter { $0.value.session.provider == .grokBuild },
                         ignoringCache: ignoringCache,
-                        wasAvailable: previousRoots.contains(root.standardizedFileURL.path)
+                        rootAvailability: availableRoots
                     )
                     for (provider, nativeRoot) in nativeRoots {
                         let native = NativeSessionScanner.scan(
                             provider: provider, root: nativeRoot, cache: cache, ignoringCache: ignoringCache,
-                            wasAvailable: previousRoots.contains(nativeRoot.standardizedFileURL.path))
+                            rootAvailability: availableRoots)
                         result.sessions += native.sessions
                         result.cache.merge(native.cache) { _, new in new }
                         result.loadError =
@@ -101,8 +99,6 @@ public final class SessionStore {
                             .nilIfBlank
                         result.coverage.merge(native.coverage)
                     }
-                    let observedRoots = result.coverage.observedRoots
-                    availableRoots.withLock { $0.formUnion(observedRoots) }
                     if !nativeRoots.isEmpty { result.sessions.sort(by: SessionScanner.isNewer) }
                     return result
                 }.value

@@ -15,7 +15,10 @@ The conversation list contains an accessible notice, with details in Settings.
 REA-1214's version acceptance and REA-1216's identity evidence remain unchanged.
 
 [The ticket verification record](../qa/rea-1264.md) records the synthetic baseline
-and 11 passing local production-scanner assertion groups. Strict format lint,
+and 14 passing local production-scanner assertion groups. The review pass added
+immediate coordinated root observation, per-file non-regular replacement notices,
+an applied-scan observation for equal-count folder changes, and retryable seeding.
+Strict format lint,
 syntax parsing and diff checks passed. Store and app macro compilation are blocked
 locally by the Observation plugin sandbox; no SwiftPM retry or local UI run occurred.
 The focused store/app tests and the existing app-hosted viewport/accessibility

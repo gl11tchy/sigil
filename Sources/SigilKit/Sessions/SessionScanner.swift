@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import os
 
 struct SessionCacheEntry: Sendable, Equatable {
     var modificationDate: Date
@@ -58,8 +59,23 @@ enum SessionScanner: Sendable {
         }
     }
 
-    enum RootStatus {
+    enum RootStatus: Sendable {
         case available, missing, unreadable, notDirectory
+    }
+
+    /// Inspection and recording share a lock so overlapping scans cannot miss an earlier observation.
+    final class RootAvailability: Sendable {
+        private let roots = OSAllocatedUnfairLock(initialState: Set<String>())
+
+        func inspect(_ root: URL) -> (status: RootStatus, wasAvailable: Bool) {
+            roots.withLock { observed in
+                let path = root.standardizedFileURL.path
+                let status = SessionScanner.rootStatus(root)
+                let wasAvailable = observed.contains(path)
+                if case .available = status { observed.insert(path) }
+                return (status, wasAvailable)
+            }
+        }
     }
 
     /// `fileExists` also returns false on permission failures. Only ENOENT proves absence.
@@ -83,14 +99,16 @@ enum SessionScanner: Sendable {
         cache: [String: SessionCacheEntry],
         ignoringCache: Bool = false,
         contentReader: ContentReader = .disk,
-        wasAvailable: Bool = false
+        wasAvailable: Bool = false,
+        rootAvailability: RootAvailability? = nil
     ) -> Result {
         let fm = FileManager()
         let rootPath = root.standardizedFileURL.path
         var coverage = Coverage()
-        switch rootStatus(root) {
+        let inspection = rootAvailability?.inspect(root) ?? (rootStatus(root), false)
+        switch inspection.0 {
         case .missing:
-            let uncertain = wasAvailable || !cache.isEmpty
+            let uncertain = wasAvailable || inspection.1 || !cache.isEmpty
             if uncertain { coverage.uncertainRoots.insert(rootPath) }
             return Result(
                 sessions: cachedSessions(cache),
@@ -402,7 +420,7 @@ enum SessionScanner: Sendable {
         let summaryURL = sessionDir.appendingPathComponent("summary.json")
         let identity: SummaryIdentity
         switch inspectSummary(summaryURL) {
-        case .missing:
+        case .unrecognized:
             return .unrecognized(path: path)
         case .failed(let reason):
             return .failed(path: path, reason: reason)
@@ -454,7 +472,7 @@ enum SessionScanner: Sendable {
     private enum InspectResult {
         case ok(SummaryIdentity)
         case failed(String)
-        case missing
+        case unrecognized
     }
 
     /// Metadata only: `getattrlist` plus `stat`. Never reads file contents.
@@ -471,15 +489,15 @@ enum SessionScanner: Sendable {
             if error.domain == NSCocoaErrorDomain,
                 [CocoaError.fileNoSuchFile.rawValue, CocoaError.fileReadNoSuchFile.rawValue].contains(error.code)
             {
-                return .missing
+                return .unrecognized
             }
             return .failed("summary.json could not be inspected")
         }
-        if values.isDirectory == true {
-            return .failed("summary.json is a directory")
+        if values.isDirectory == true || values.isRegularFile == false {
+            return .unrecognized
         }
         guard values.isRegularFile == true else {
-            return .failed("summary.json is not a regular file")
+            return .failed("summary.json file type is unavailable")
         }
         guard let modificationDate = values.contentModificationDate, let size = values.fileSize
         else {

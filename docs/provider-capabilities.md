@@ -167,7 +167,9 @@ Known deleted Grok rows can lose their pins, archives, names and colors while a
 different unsupported folder keeps its metadata. Native identity metadata retains
 its existing conservative policy. Project pins and focus stay while any format
 notice or read uncertainty prevents proving a project's absence. Notes are not
-pruned by history scans. Seeding remains enabled when the scan has notices alone.
+pruned by history scans. Seeding records verified chats when the scan has notices
+alone and completes its one-time migration only after coverage is complete.
+Every applied scan signals housekeeping even if the notice count stays equal.
 
 Filesystem events refresh native JSONL changes and the adjacent Codex title index.
 The Codex watcher excludes unrelated files in its parent directory. Grok still

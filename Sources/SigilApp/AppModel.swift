@@ -1081,6 +1081,7 @@ final class AppModel {
             _ = store.loadError
             _ = store.historyNotice
             _ = store.canPruneMissingProjects
+            _ = store.appliedScanSequence
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -1098,7 +1099,7 @@ final class AppModel {
     }
 
     /// Chats Sigil started before it kept a list: saved open tabs and chats
-    /// in Sigil's own worktrees. Runs once, after the first scan.
+    /// in Sigil's own worktrees. Completes once a scan verifies all history coverage.
     func seedSigilConversations() {
         // A scan with a read error may have missed chats; wait for a clean one.
         guard !settings.sigilConversationsSeeded, store.appliedScanSequence > 0, store.loadError == nil
@@ -1110,7 +1111,8 @@ final class AppModel {
             .filter { SigilWorktree.projectPath(of: $0.cwd) != nil && !$0.isSubagent }
             .map(\.id)
         settings.recordSigilConversations(saved + worktrees)
-        settings.sigilConversationsSeeded = true
+        // Seed verified chats now, and retry when incomplete files become readable.
+        if store.canPruneMissingProjects { settings.sigilConversationsSeeded = true }
     }
 
     /// A Codex tab can be renamed and colored before its chat id exists.

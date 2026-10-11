@@ -6,6 +6,26 @@ import Testing
 @Suite
 struct SessionScannerTests {
 
+    @Test func anOverlappingScanRemembersRootAvailabilityBeforeTheEarlierScanFinishes() throws {
+        let fixture = try ScannerFixture()
+        defer { fixture.tearDown() }
+        let file = try fixture.write(summary: "Generated", cwd: "/tmp/generated-project", id: "generated")
+        let data = try Data(contentsOf: file)
+        let root = fixture.root
+        let availability = SessionScanner.RootAvailability()
+        let earlier = SessionScanner.scan(
+            root: root, cache: [:],
+            contentReader: .init { _ in
+                // The first scan already inspected the root but has not returned its result.
+                try FileManager.default.removeItem(at: root)
+                let overlapping = SessionScanner.scan(root: root, cache: [:], rootAvailability: availability)
+                #expect(overlapping.loadError != nil)
+                #expect(overlapping.coverage.uncertainRoots.contains(root.standardizedFileURL.path))
+                return data
+            }, rootAvailability: availability)
+        #expect(earlier.sessions.count == 1)
+    }
+
     @Test func unchangedFileSkipsContentReadOnSecondScan() throws {
         let fixture = try ScannerFixture()
         defer { fixture.tearDown() }
@@ -155,18 +175,31 @@ struct SessionScannerTests {
         #expect(result.loadError?.contains("summary.json could not be read") == true)
     }
 
-    @Test func invalidUpdatePreservesCachedSession() throws {
+    @Test(arguments: ["partial", "missing", "directory"])
+    func invalidUpdatePreservesOnlyItsOwnCachedSession(kind: String) throws {
         let fixture = try ScannerFixture()
         defer { fixture.tearDown() }
         let url = try fixture.write(summary: "Hello", cwd: "/proj", id: "s1")
+        let deleted = try fixture.write(summary: "Deleted", cwd: "/proj", id: "s2")
         let first = SessionScanner.scan(root: fixture.root, cache: [:])
-        #expect(first.sessions.first?.title == "Hello")
+        #expect(first.sessions.count == 2)
 
-        try Data("not valid json".utf8).write(to: url, options: .atomic)
+        try FileManager.default.removeItem(at: deleted.deletingLastPathComponent())
+        if kind == "partial" {
+            try Data("not valid json".utf8).write(to: url, options: .atomic)
+        } else {
+            try FileManager.default.removeItem(at: url)
+            if kind == "directory" {
+                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            }
+        }
         let second = SessionScanner.scan(root: fixture.root, cache: first.cache)
+        #expect(second.sessions.map(\.id) == ["s1"])
         #expect(second.sessions.first?.title == "Hello")
         #expect(second.loadError == nil)
         #expect(second.notice?.contains("incomplete or unsupported") == true)
+        #expect(
+            second.coverage.unrecognizedGrokDirectories == [url.deletingLastPathComponent().standardizedFileURL.path])
     }
 
     @Test func sameSizeSameMtimeAtomicReplaceStillReloads() throws {

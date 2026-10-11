@@ -153,8 +153,8 @@ struct SessionStoreTests {
 
         await harness.store.scan(ignoringCache: false)
 
-        #expect(harness.store.loadError?.contains("1 session item(s)") == true)
-        #expect(harness.store.historyNotice?.contains("3 session summary file(s)") == true)
+        #expect(harness.store.loadError == nil)
+        #expect(harness.store.historyNotice?.contains("4 session summary file(s)") == true)
         #expect(!harness.store.isLoading)
         let ids = Set(harness.store.sessions.map(\.id))
         #expect(

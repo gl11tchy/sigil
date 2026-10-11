@@ -71,6 +71,48 @@ struct SigilOnlyHistoryTests {
         #expect(!settings.isSigilConversation(other.id))
     }
 
+    @Test func incompleteHistorySeedsKnownChatsAndRetriesRecoveredWorktreeChats() async throws {
+        let suite = "SigilOnlyHistoryTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("Sigil-REA1264-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        // This is only a synthetic cwd string; no folder or history is read under the worktree root.
+        let recovered = session(
+            "44444444-4444-4444-8444-444444444444",
+            cwd: SigilWorktree.root.appendingPathComponent("%2Ftmp%2Fgenerated-project/abcd1234").path)
+        let known = session("33333333-3333-4333-8333-333333333333", cwd: "/tmp/generated-project")
+        let store = SessionStore(
+            root: root, timing: SessionStoreTiming(),
+            scanOperation: { _, _, forced in
+                .init(
+                    sessions: forced ? [known, recovered] : [known], cache: [:], loadError: nil,
+                    coverage: .init(notices: forced ? [:] : [root.path: "Generated incomplete history"]))
+            })
+        defer { store.stop() }
+        await store.scan(ignoringCache: false)
+        let settings = AppSettings(defaults: defaults)
+        settings.showWorktreeSessions = true
+        settings.openTabs = .init(
+            tabs: [.init(sessionID: known.nativeSessionID, cwd: known.cwd, provider: .claudeCode)],
+            selectedSessionID: nil)
+        let model = AppModel(
+            settings: settings, store: store, presentError: { _ in },
+            panel: RightPanel(
+                defaults: defaults, notesStore: ConversationNotesStore(root: root.appendingPathComponent("notes"))),
+            pairingStore: InMemoryRemotePairingStore(), providerInstallations: [:])
+        defer { model.closeAllTabsAndWait() }
+        model.seedSigilConversations()
+        #expect(settings.isSigilConversation(known.id))
+        #expect(!settings.sigilConversationsSeeded)
+        await store.reload()
+        model.seedSigilConversations()
+        #expect(settings.sigilConversationsSeeded)
+        #expect(settings.isSigilConversation(recovered.id))
+        #expect(model.sidebarSessions.contains { $0.id == recovered.id })
+    }
+
     @Test func twoCopiesRecordingChatsKeepBoth() throws {
         let suite = "SigilOnlyHistoryTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))

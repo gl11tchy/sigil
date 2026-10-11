@@ -194,7 +194,7 @@ struct NativeSessionScannerTests {
         #expect(missing.sessions == initial.sessions)
     }
 
-    @Test(arguments: ["summary", "partial", "major", "schema", "ambiguous"])
+    @Test(arguments: ["summary", "partial", "major", "schema", "ambiguous", "symlink", "directory"])
     func unrecognizedFilesProtectOnlyTheirOwnCachedRow(kind: String) throws {
         let fixture = try HistoryCompatibilityFixture()
         defer { fixture.remove() }
@@ -211,7 +211,17 @@ struct NativeSessionScannerTests {
         default:
             replacement = codexFixture() + Data([0x0A]) + codexFixture(nativeID: HistoryCompatibilityFixture.secondID)
         }
-        try replacement.write(to: held)
+        if kind == "symlink" || kind == "directory" {
+            try FileManager.default.removeItem(at: held)
+            if kind == "symlink" {
+                let target = try fixture.writeNative(filename: "generated-target")
+                try FileManager.default.createSymbolicLink(at: held, withDestinationURL: target)
+            } else {
+                try FileManager.default.createDirectory(at: held, withIntermediateDirectories: true)
+            }
+        } else {
+            try replacement.write(to: held)
+        }
         try FileManager.default.removeItem(at: deleted)
         let next = NativeSessionScanner.scan(
             provider: .codex, root: fixture.codex, cache: initial.cache, ignoringCache: false)
@@ -219,7 +229,9 @@ struct NativeSessionScannerTests {
         #expect(next.notice != nil)
         #expect(next.sessions.map(\.nativeSessionID) == [HistoryCompatibilityFixture.firstID])
         #expect(next.cache.count == 1)
-        #expect(try Data(contentsOf: held) == replacement)
+        if kind != "symlink" && kind != "directory" {
+            #expect(try Data(contentsOf: held) == replacement)
+        }
         try FileManager.default.removeItem(at: held)
         let cleared = NativeSessionScanner.scan(
             provider: .codex, root: fixture.codex, cache: next.cache, ignoringCache: false)
