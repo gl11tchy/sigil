@@ -41,7 +41,7 @@ public final class SidebarPathWatcher: Sendable {
             // Foundation's standardizedFileURL may resolve an existing alias
             // when a descendant is missing. Preserve the alias spelling too.
             let lexical = URL(fileURLWithPath: path)
-            for spelling in Set([lexical, SessionDirectoryWatcher.canonicalURL(lexical)]) {
+            for spelling in Set([lexical, SessionDirectoryWatcher.nativeURL(lexical)]) {
                 var folder = spelling
                 var existingParent = spelling.deletingLastPathComponent()
                 while !FileManager.default.fileExists(atPath: existingParent.path), existingParent.path != "/" {
@@ -55,7 +55,7 @@ public final class SidebarPathWatcher: Sendable {
                     let parent = folder.deletingLastPathComponent()
                     // FSEvents reports canonical OS prefixes (for example
                     // /private/var), but must retain this symlink's own name.
-                    let nativeSpelling = SessionDirectoryWatcher.canonicalURL(parent)
+                    let nativeSpelling = SessionDirectoryWatcher.nativeURL(parent)
                         .appendingPathComponent(folder.lastPathComponent)
                     identities.insert(nativeSpelling.path)
                     identities.insert(nativeSpelling.appendingPathComponent(".git").path)
@@ -73,7 +73,7 @@ public final class SidebarPathWatcher: Sendable {
                             let target = text.dropFirst("gitdir:".count).trimmingCharacters(in: .whitespacesAndNewlines)
                             let admin = URL(fileURLWithPath: target, relativeTo: folder).standardizedFileURL
                             if admin.deletingLastPathComponent().lastPathComponent == "worktrees" {
-                                let marker = SessionDirectoryWatcher.canonicalURL(
+                                let marker = SessionDirectoryWatcher.nativeURL(
                                     admin.appendingPathComponent("commondir"))
                                 identities.insert(marker.path)
                                 var parent = admin.deletingLastPathComponent()
@@ -91,11 +91,12 @@ public final class SidebarPathWatcher: Sendable {
         // With no existing Git boundary, an ancestor outside these roots may
         // acquire a marker. Keep fallback for those classification inputs.
         if classificationPaths.contains(where: { !hasGitBoundary(path: $0) }) { needsFallback = true }
-        return (roots.sorted(), identities, needsFallback)
+        let nativeRoots = Set(roots.map { SessionDirectoryWatcher.nativeURL(URL(fileURLWithPath: $0)).path })
+        return (nativeRoots.sorted(), identities, needsFallback)
     }
 
     private static func hasGitBoundary(path: String) -> Bool {
-        var folder = SessionDirectoryWatcher.canonicalURL(URL(fileURLWithPath: path))
+        var folder = SessionDirectoryWatcher.nativeURL(URL(fileURLWithPath: path))
         while folder.path != "/" {
             let git = folder.appendingPathComponent(".git")
             var isDirectory: ObjCBool = false

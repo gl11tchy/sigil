@@ -45,7 +45,7 @@ struct SessionDirectoryWatcherTests {
             alias.path.hasPrefix("/private/var/")
             ? String(alias.path.dropFirst("/private".count)) : "/private" + alias.path
         let alternatePlan = SidebarPathWatcher.plan(paths: [alternate])
-        let nativeAlias = SessionDirectoryWatcher.canonicalURL(alias.deletingLastPathComponent())
+        let nativeAlias = SessionDirectoryWatcher.nativeURL(alias.deletingLastPathComponent())
             .appendingPathComponent(alias.lastPathComponent).path
         #expect(
             SessionDirectoryWatcher.shouldScan(
@@ -67,9 +67,12 @@ struct SessionDirectoryWatcherTests {
         try FileManager.default.createDirectory(at: lexical, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: lexical) }
         let native = URL(fileURLWithPath: GrokPaths.canonicalPath(lexical.path))
-        #expect(SessionDirectoryWatcher.canonicalURL(lexical).path == native.path)
+        #expect(SessionDirectoryWatcher.nativeURL(lexical).path == native.path)
         #expect(
-            SessionDirectoryWatcher.canonicalURL(lexical.appendingPathComponent("missing/child")).path
+            SessionDirectoryWatcher.canonicalURL(lexical).path
+                == lexical.resolvingSymlinksInPath().standardizedFileURL.path)
+        #expect(
+            SessionDirectoryWatcher.nativeURL(lexical.appendingPathComponent("missing/child")).path
                 == native.appendingPathComponent("missing/child").path)
         let alias = lexical.appendingPathComponent("alias")
         try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: native)

@@ -54,7 +54,9 @@ final class SessionDirectoryWatcher: Sendable {
                 guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
                     isDirectory.boolValue
                 else { return nil }
-                return Self.canonicalURL(URL(fileURLWithPath: path)).path
+                let url = URL(fileURLWithPath: path)
+                if case .sidebarPaths = contents { return Self.nativeURL(url).path }
+                return Self.canonicalURL(url).path
             })
         guard !roots.isEmpty else { return false }
 
@@ -207,6 +209,20 @@ final class SessionDirectoryWatcher: Sendable {
     /// Resolving a deleted file directly leaves aliases such as /var unresolved.
     /// Resolve its nearest existing ancestor, then restore the missing suffix.
     static func canonicalURL(_ url: URL) -> URL {
+        var ancestor = url.standardizedFileURL
+        var suffix: [String] = []
+        while !FileManager.default.fileExists(atPath: ancestor.path), ancestor.path != "/" {
+            suffix.append(ancestor.lastPathComponent)
+            ancestor.deleteLastPathComponent()
+        }
+        var resolved = ancestor.resolvingSymlinksInPath()
+        for component in suffix.reversed() { resolved.appendPathComponent(component) }
+        return resolved.standardizedFileURL
+    }
+
+    /// Sidebar event names need the POSIX spelling, independently of the
+    /// existing history-root identity used by SessionStore and its scanners.
+    static func nativeURL(_ url: URL) -> URL {
         var ancestor = url.standardizedFileURL
         var suffix: [String] = []
         while !FileManager.default.fileExists(atPath: ancestor.path), ancestor.path != "/" {
