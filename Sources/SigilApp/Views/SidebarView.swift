@@ -55,6 +55,10 @@ enum KeyboardRowOutline {
 /// you open. A plus on a folder starts a chat there. Archive lives on the row.
 struct SidebarView: View {
     @Bindable var model: AppModel
+    #if DEBUG
+        /// CI's isolated app host drives the same callback as a row's onHover.
+        var observeHover: ((SidebarGlide) -> Void)? = nil
+    #endif
     @Environment(\.palette) private var palette
     @FocusState private var focus: SidebarFocus?
     /// Arrow-key highlight. Separate from open/active so those markers stay
@@ -78,6 +82,9 @@ struct SidebarView: View {
 
     var body: some View {
         let snapshot = model.sidebarSnapshot()
+        #if DEBUG
+            let _ = observeHover?(glide)
+        #endif
         VStack(spacing: 0) {
             header
             searchRow
