@@ -25,6 +25,7 @@ struct ProviderInstallationTests {
         #expect(!missing.isAvailable)
         #expect(missing.problem != nil)
         #expect(!missing.timedOut)
+        #expect(missing.failure == .notInstalled)
     }
     @Test func detectsAnExecutableAndVersionWithoutStartingAConversation() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -87,6 +88,9 @@ struct ProviderInstallationTests {
         #expect(!found.isAvailable)
         #expect(!found.timedOut)
         #expect(found.problem != nil)
+        #expect(found.failure == .probeFailed)
+        #expect(found.executable == binary)
+        #expect(found.problem?.contains("Install") == false)
     }
 
     @Test(arguments: [

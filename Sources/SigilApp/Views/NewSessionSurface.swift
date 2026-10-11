@@ -11,6 +11,7 @@ struct NewSessionSurface: View {
     @State private var keyboardProvider: CLIProvider
     @State private var hoveredProvider: CLIProvider?
     @State private var inspectedProvider: CLIProvider?
+    @State private var hasChosenProvider = false
 
     private var terminalBackground: Color { Color(nsColor: Palette.nsColor(model.settings.theme.backgroundHex)) }
 
@@ -38,6 +39,7 @@ struct NewSessionSurface: View {
                 .focused($isProviderRowFocused)
                 .onKeyPress(.return) {
                     let provider = focusedProvider ?? keyboardProvider
+                    preserveProviderChoice()
                     inspectedProvider = provider
                     Task { await model.startDefaultSession(provider) }
                     return .handled
@@ -79,6 +81,9 @@ struct NewSessionSurface: View {
             keyboardProvider = model.settings.defaultProvider
             isProviderRowFocused = true
         }
+        .onChange(of: model.settings.defaultProvider) { _, provider in
+            if !hasChosenProvider { keyboardProvider = provider }
+        }
         .onKeyPress(.leftArrow) { moveFocus(-1) }
         .onKeyPress(.rightArrow) { moveFocus(1) }
         .onKeyPress(.escape) {
@@ -89,7 +94,7 @@ struct NewSessionSurface: View {
 
     private var feedback: String {
         if let provider = inspectedProvider ?? focusedProvider ?? (isProviderRowFocused ? keyboardProvider : nil),
-            let problem = availabilityDescription(provider)
+            let problem = model.providerAvailabilityDescription(provider)
         {
             return problem
         }
@@ -97,15 +102,17 @@ struct NewSessionSurface: View {
     }
 
     private func providerButton(_ provider: CLIProvider) -> some View {
-        let problem = availabilityDescription(provider)
-        let needsCheck = canRequestCheck(provider)
-        let isChecking = model.checkingProviders.contains(provider) || model.providerIsRecovering(provider)
+        let status = model.providerTileStatus(provider)
+        let description = model.providerAvailabilityDescription(provider)
         let focused = focusedProvider == provider || (isProviderRowFocused && keyboardProvider == provider)
         let emphasized = focused || hoveredProvider == provider
         let shape = RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
         return Button {
+            preserveProviderChoice()
             inspectedProvider = provider
-            Task { await model.startDefaultSession(provider) }
+            if status == .available || canRequestCheck(provider) {
+                Task { await model.startDefaultSession(provider) }
+            }
         } label: {
             VStack(spacing: 10) {
                 ImpressedProviderMark(
@@ -118,15 +125,11 @@ struct NewSessionSurface: View {
                     .foregroundStyle(palette.ink2)
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
-                Text(
-                    isChecking
-                        ? "Checking…"
-                        : needsCheck
-                            ? (model.providerVersionCheckTimedOut(provider) ? "Check Again" : "Check required")
-                            : problem == nil ? "" : "Unavailable"
-                )
-                .ui(11)
-                .foregroundStyle(palette.ink2)
+                Text(status.caption)
+                    .ui(11.5)
+                    .foregroundStyle(palette.ink2)
+                    .lineLimit(2)
+                    .frame(minHeight: 28)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
@@ -136,12 +139,12 @@ struct NewSessionSurface: View {
         .buttonStyle(ProviderSurfaceButtonStyle())
         .focusEffectDisabled()
         .focused($focusedProvider, equals: provider)
-        .disabled(model.isStartingNewSession || isChecking || (problem != nil && !needsCheck))
+        .disabled(model.isStartingNewSession)
         .onHover { hoveredProvider = $0 ? provider : nil }
-        .help(problem ?? "Start \(provider.name) with your defaults")
+        .help(description ?? "Start \(provider.name) with your defaults")
         .accessibilityLabel(provider.name)
-        .accessibilityValue(problem ?? "Available")
-        .accessibilityHint(problem ?? "Starts a new session with your defaults")
+        .accessibilityValue(status.caption.isEmpty ? "Available" : status.caption)
+        .accessibilityHint(description ?? "Starts a new session with your defaults")
         .accessibilityIdentifier("new-session-\(provider.rawValue)")
     }
 
@@ -150,13 +153,14 @@ struct NewSessionSurface: View {
             && (provider != .grokBuild || model.settings.usesInstalledGrok || model.settings.executableExists)
     }
 
-    private func availabilityDescription(_ provider: CLIProvider) -> String? {
-        canRequestCheck(provider) && !model.providerVersionCheckTimedOut(provider)
-            ? "Check \(provider.name) before starting." : model.providerLaunchProblem(provider)
+    private func preserveProviderChoice() {
+        hasChosenProvider = true
+        model.settings.finishInitialProviderSelection()
     }
 
     private func moveFocus(_ offset: Int) -> KeyPress.Result {
         guard !model.isStartingNewSession else { return .handled }
+        preserveProviderChoice()
         inspectedProvider = nil
         keyboardProvider = NewSessionLaunch.provider(after: focusedProvider ?? keyboardProvider, movingBy: offset)
         focusedProvider = nil

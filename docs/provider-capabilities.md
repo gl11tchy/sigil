@@ -93,8 +93,9 @@ This optional local gate requires installed CLIs; ordinary CI does not.
   changes fence canceled timers and old probe
   results. Saved restoration keeps the ready prefix in order and retains
   deferred positions/selection, including recovery after exhaustion. A saved
-  position transfers when a live peer is restarted or replaced. The full
-  Settings CLI inventory remains separate work (REA-1261).
+  position transfers when a live peer is restarted or replaced. Settings lists
+  all six providers and its single **Check Again** explicitly refreshes their
+  shared inventory, including exhausted timeout budgets.
 - `CLIProvider.checkedVersion` records these checked contracts. When an available
   CLI reports a newer semantic version, the sidebar and selected provider in New
   Session name both versions in a quiet compatibility notice. Compatible versions
@@ -103,6 +104,34 @@ This optional local gate requires installed CLIs; ordinary CI does not.
   claim. Sidebar notices share the history scroll area so wrapped text preserves
   navigation and the list viewport at small window sizes. A version notice does
   not prevent starting the installed CLI.
+
+## Provider availability in New Session and Settings
+
+Both the inline one-click surface and the Options sheet show every provider's
+availability before selection. Unknown/stale successes say **Check required**;
+pending probes and bounded timeout recovery say **Checking…**. A confirmed
+login-shell lookup failure says **Not installed**, a failed `--version` says
+**Check failed**, and an exhausted timeout says **Check timed out**. Unclassified
+errors and unavailable custom paths retain their full problem and **Unavailable**
+status. A found path remains visible when its version command fails. No status
+claims that a CLI account is authenticated: **Needs sign-in** is used only for
+Kimi's configured API-key mode when Sigil has no key. Other sign-ins belong to
+the CLI. The probe never starts a model call.
+
+Unavailable tiles remain inspectable; their status is an accessibility value,
+and help/accessibility hints explain the problem. A ready inline tile still
+starts in one click. Settings lists all six paths, reported version strings (or
+**Version not reported**) and current problems. Existing installed-versus-checked
+history notices remain separate from launch availability: an unsupported Codex
+history major can still be an installed, launchable CLI.
+
+Without a valid stored default, the first completed six-provider inventory picks
+the first available CLI in tile order. This automatic choice is not persisted as
+a user preference. An explicit stored default always wins, and any provider
+interaction freezes initial selection before pending results can change it.
+A later refresh cannot reorder an already established initial choice. With no
+available CLI, the provisional choice remains unavailable rather than implying
+Grok is installed.
 
 ## Grok executable selection
 
@@ -114,7 +143,8 @@ resume, restart and restoration launch the checked absolute path. Model lookup,
 transcript export and tab-message registration use that same selection.
 
 Settings shows Installed Grok or Custom executable, the checked path/version or
-current problem, and **Check Again** for Grok. **Choose…** makes a custom or themed
+current problem. The CLIs section's **Check Again** refreshes Grok and the other
+five providers. **Choose…** makes a custom or themed
 path an explicit choice. That choice survives relaunch, including a missing file,
 and does not silently fall back. **Use Installed Grok** clears the override and
 rechecks discovery. Known old installer/themed paths without an explicit-choice

@@ -377,6 +377,39 @@ struct NewSessionSheetTests {
         #expect(inline.count > 1000)
     }
 
+    @Test @MainActor
+    func sheetAndSettingsRenderSixProviderInventoryWithKnownProblems() throws {
+        _ = NSApplication.shared
+        let name = "SigilProviderInventory.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let settings = AppSettings(defaults: defaults)
+        settings.kimiSignIn = .apiKey
+        let ready = ProviderInstallation(executable: URL(fileURLWithPath: "/bin/sh"), version: "fixture", problem: nil)
+        let model = AppModel(
+            settings: settings, store: SessionStore(root: root.appendingPathComponent("sessions")),
+            kimiKeyStore: InMemoryKimiKeyStore(),
+            providerInstallations: [
+                .claudeCode: ready,
+                .codex: .init(executable: nil, version: nil, problem: "Install Codex", failure: .notInstalled),
+                .devin: .init(executable: nil, version: nil, problem: "Version check timed out", timedOut: true),
+                .cursor: .init(
+                    executable: ready.executable, version: nil, problem: "Version check failed", failure: .probeFailed),
+                .kimi: ready, .grokBuild: ready,
+            ])
+        #expect(model.providerTileStatus(.codex).caption == "Not installed")
+        #expect(model.providerTileStatus(.devin) == .timedOut)
+        #expect(model.providerTileStatus(.cursor) == .checkFailed)
+        #expect(model.providerTileStatus(.kimi) == .needsSignIn)
+        #expect(model.settings.defaultProvider == .claudeCode)
+        #expect(try png(of: NewSessionSheet(model: model)).count > 1000)
+        #expect(try png(of: NewSessionSurface(model: model).frame(width: 540, height: 450)).count > 1000)
+        #expect(try png(of: SettingsView(model: model, initialTab: .general).frame(height: 620)).count > 1000)
+    }
+
     @Test func providerLogosUseTheInstalledApps() {
         #expect(CLIProvider.claudeCode.applicationBundleID == "com.anthropic.claudefordesktop")
         #expect(CLIProvider.codex.applicationBundleID == "com.openai.codex")

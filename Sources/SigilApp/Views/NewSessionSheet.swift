@@ -80,6 +80,7 @@ struct NewSessionSheet: View {
 
     @State private var directory: URL = FileManager.default.homeDirectoryForCurrentUser
     @State private var provider: CLIProvider
+    @State private var hasChosenProvider: Bool
     /// Each CLI keeps its own choice while the sheet is open.
     @State private var choices: [CLIProvider: ProviderModelMenu.Choice] = [:]
     @State private var grokModels = GrokModelCatalog.fallback
@@ -93,6 +94,7 @@ struct NewSessionSheet: View {
     init(model: AppModel, provider: CLIProvider? = nil) {
         self.model = model
         _provider = State(initialValue: provider ?? model.settings.defaultProvider)
+        _hasChosenProvider = State(initialValue: provider != nil || model.settings.hasExplicitDefaultProvider)
         _startsInWorktree = State(initialValue: model.settings.startsInWorktree)
     }
 
@@ -152,13 +154,12 @@ struct NewSessionSheet: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 providerRow
-                if let problem = model.providerLaunchProblem(provider) {
+                if let problem = model.providerAvailabilityDescription(provider) {
                     Text(problem).ui(12).foregroundStyle(palette.ink2)
-                        .accessibilityIdentifier("new-session-provider-problem")
-                } else if let notice = providerVersionNotice {
-                    Text(notice).ui(12).foregroundStyle(palette.ink2)
                         .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("new-session-provider-version-notice")
+                        .accessibilityIdentifier(
+                            model.providerLaunchProblem(provider) == nil && providerVersionNotice != nil
+                                ? "new-session-provider-version-notice" : "new-session-provider-problem")
                 }
             }
             .padding(.bottom, 16)
@@ -263,6 +264,9 @@ struct NewSessionSheet: View {
         .defaultFocus($isProviderRowFocused, true)
         .interactiveDismissDisabled(isStartingSession)
         .onDisappear { startTask?.cancel() }
+        .onChange(of: model.settings.defaultProvider) { _, next in
+            if !hasChosenProvider { provider = next }
+        }
         .task(id: provider) { await model.refreshProviderInstallationsForEntry() }
         .onAppear {
             let initial = model.pendingSessionDirectory ?? model.newSessionDirectory
@@ -325,10 +329,13 @@ struct NewSessionSheet: View {
             ForEach(CLIProvider.allCases) { item in
                 ProviderChoice(
                     provider: item,
+                    status: model.providerTileStatus(item),
+                    statusDescription: model.providerAvailabilityDescription(item),
                     isSelected: provider == item,
                     isFocused: focusedProvider == item,
                     focus: $focusedProvider
                 ) {
+                    preserveProviderChoice()
                     switch NewSessionLaunch.action(selected: provider, tapped: item) {
                     case .select(let next):
                         provider = next
@@ -348,7 +355,13 @@ struct NewSessionSheet: View {
         .onKeyPress(.rightArrow) { moveProvider(by: 1) }
     }
 
+    private func preserveProviderChoice() {
+        hasChosenProvider = true
+        model.settings.finishInitialProviderSelection()
+    }
+
     private func moveProvider(by offset: Int) -> KeyPress.Result {
+        preserveProviderChoice()
         provider = NewSessionLaunch.provider(after: provider, movingBy: offset)
         return .handled
     }
@@ -380,6 +393,7 @@ struct NewSessionSheet: View {
     }
 
     private func start(_ provider: CLIProvider) {
+        preserveProviderChoice()
         guard canStart else { return }
         let launch = menu(for: provider)?.launch(choice(for: provider)) ?? (model: "", effort: "", fastMode: false)
         let project = directory
@@ -428,6 +442,8 @@ private struct SheetRow<Control: View>: View {
 /// A CLI as a large tile. Selected is `hover2`; the keyboard ring is `lineStrong`.
 private struct ProviderChoice: View {
     let provider: CLIProvider
+    let status: ProviderTileStatus
+    let statusDescription: String?
     let isSelected: Bool
     let isFocused: Bool
     var focus: FocusState<CLIProvider?>.Binding
@@ -449,7 +465,12 @@ private struct ProviderChoice: View {
                 Text(provider.name)
                     .ui(12.5, .medium)
                     .lineLimit(1)
-                    .foregroundStyle(isSelected ? palette.ink : palette.ink2)
+                    .foregroundStyle(isSelected && status == .available ? palette.ink : palette.ink2)
+                Text(status.caption)
+                    .ui(11.5)
+                    .foregroundStyle(palette.ink2)
+                    .lineLimit(2)
+                    .frame(minHeight: 28)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
@@ -474,8 +495,10 @@ private struct ProviderChoice: View {
         .focused(focus, equals: provider)
         .onHover { isHovering = $0 }
         .accessibilityLabel(provider.name)
+        .accessibilityValue(status.caption.isEmpty ? "Available" : status.caption)
+        .accessibilityHint(statusDescription ?? "Select this CLI, then press again to start")
         .accessibilityIdentifier("new-session-\(provider.rawValue)")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
-        .help(isSelected ? "Start \(provider.name)" : provider.name)
+        .help(statusDescription ?? (isSelected ? "Start \(provider.name)" : provider.name))
     }
 }

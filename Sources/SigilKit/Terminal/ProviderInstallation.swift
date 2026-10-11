@@ -2,17 +2,26 @@ import Darwin
 import Foundation
 
 public struct ProviderInstallation: Sendable, Equatable {
+    public enum Failure: Sendable, Equatable {
+        case notInstalled
+        case probeFailed
+    }
+
+    public let failure: Failure?
     public let executable: URL?
     public let version: String?
     public let problem: String?
     public let timedOut: Bool
-    public var isAvailable: Bool { executable != nil && problem == nil && !timedOut }
+    public var isAvailable: Bool { executable != nil && problem == nil && !timedOut && failure == nil }
 
-    public init(executable: URL?, version: String?, problem: String?, timedOut: Bool = false) {
+    public init(
+        executable: URL?, version: String?, problem: String?, timedOut: Bool = false, failure: Failure? = nil
+    ) {
         self.executable = executable
         self.version = version
         self.problem = problem
         self.timedOut = timedOut
+        self.failure = failure
     }
 
     /// The blocking process wait belongs on dispatch threads, not Swift's
@@ -49,19 +58,20 @@ public struct ProviderInstallation: Sendable, Equatable {
             ?? (CLIProvider.fallbackPath
                 + (provider == .grokBuild ? ":" + GrokPaths.installerBin(environment: environment) : ""))
         let marker = "__SIGIL_EXECUTABLE__="
+        let missingMarker = "__SIGIL_NOT_INSTALLED__"
         let process = Process()
         process.executableURL = URL(fileURLWithPath: shell)
         if URL(fileURLWithPath: shell).lastPathComponent == "fish" {
             process.arguments = [
                 "-lic",
-                "set -gx PATH $PATH (string split : -- $argv[1]); set executable (command -s -- $argv[2]); or exit 127; printf '\\n%s%s\\n' $argv[3] $executable; exec $executable --version",
-                fallbackPath, command, marker,
+                "set -gx PATH $PATH (string split : -- $argv[1]); set executable (command -s -- $argv[2]); or begin; printf '\\n%s\\n' $argv[4]; exit 127; end; printf '\\n%s%s\\n' $argv[3] $executable; exec $executable --version",
+                fallbackPath, command, marker, missingMarker,
             ]
         } else {
             process.arguments = [
                 "-lic",
-                "export PATH=\"$PATH:$1\"; executable=$(command -v -- \"$2\") || exit 127; test -x \"$executable\" || exit 126; printf '\\n%s%s\\n' \"$3\" \"$executable\"; exec \"$executable\" --version",
-                "sigil-provider-check", fallbackPath, command, marker,
+                "export PATH=\"$PATH:$1\"; executable=$(command -v -- \"$2\") || { printf '\\n%s\\n' \"$4\"; exit 127; }; test -x \"$executable\" || exit 126; printf '\\n%s%s\\n' \"$3\" \"$executable\"; exec \"$executable\" --version",
+                "sigil-provider-check", fallbackPath, command, marker, missingMarker,
             ]
         }
         process.environment = environment
@@ -110,11 +120,21 @@ public struct ProviderInstallation: Sendable, Equatable {
             }
         }
         drain()
-        guard process.terminationStatus == 0 else {
-            return ProviderInstallation(
-                executable: nil, version: nil, problem: "Install \(provider.name) or check its executable path.")
-        }
         let lines = String(decoding: output, as: UTF8.self).split(whereSeparator: \.isNewline)
+        guard process.terminationStatus == 0 else {
+            let missing = lines.contains { $0 == missingMarker }
+            let path = lines.last { $0.hasPrefix(marker) }.map { String($0.dropFirst(marker.count)) }
+            let executable = path.flatMap { path -> URL? in
+                path.hasPrefix("/") && FileManager.default.isExecutableFile(atPath: path)
+                    ? URL(fileURLWithPath: path) : nil
+            }
+            return ProviderInstallation(
+                executable: executable, version: nil,
+                problem: missing
+                    ? "Install \(provider.name) or check its executable path."
+                    : "\(provider.name)'s version check failed. Check Again or check its executable path.",
+                failure: missing ? .notInstalled : .probeFailed)
+        }
         guard let index = lines.lastIndex(where: { $0.hasPrefix(marker) }) else {
             return ProviderInstallation(
                 executable: nil, version: nil, problem: "\(provider.name) did not report its executable.")
