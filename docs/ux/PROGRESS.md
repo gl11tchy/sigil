@@ -567,3 +567,38 @@ validation and its limits. Existing scanner/watcher methods remain unchanged.
 Observation-backed store tests and AppTests run in ordinary exact-head CI. Parent
 personal review precedes any merge; no personal history, local UI, daily-app action
 or customer impact is claimed.
+
+
+## REA-1270: private saved history display index
+
+The default store publishes a bounded private display index before its first scan,
+including Codex title metadata so unchanged scans read no history bodies. Saved rows
+cannot supply launch, Trash, housekeeping or identity-adoption authority. Individual
+actions and saved tabs share one delayed source-validation pass after the first
+stat-only scan. Valid ordinary launches resume housekeeping and legacy-note migration
+automatically. Unchanged failed envelopes remain display-only without restoration
+retry loops; forced scans coordinate with waiting actions. The established Codex
+process/file binding proof remains independent.
+
+[The verification record](../qa/rea-1270.md) records the generated launch-cache gap,
+private atomic-write and untrusted-input failures, measured publication work and its
+limits. Local validation uses complete non-Observation production dependencies and
+Address Sanitizer. Store and app regressions run in ordinary CI; no personal history,
+local AppTests, UI smoke, daily-app replacement or customer impact is claimed.
+Parent personal review of the exact final diff precedes any merge. One worker and
+one ticket remain in flight.
+
+REA-1270 remediation: initial CI at `7a59188` exposed /var versus /private/var
+cache/file URL identity failures and a fixture encoded cwd without the CLI realpath
+rule. The revision keeps standardized cache keys and strict no-follow checks,
+recognizes only OS system aliases, and corrects the fixture cwd. All five automated
+review findings were traced to callers and addressed: failed restoration retries,
+remote-open await, Grok identifier compatibility, repeated saved-tab traversals and
+forced-scan coordination. Direct ASan index checks include generated /tmp alias and
+non-UUID Grok cases; store/app behavior remains CI-only. No merge or app replacement.
+
+Follow-up exact-head CI reduced 42 failures to 11. Closed-source deletion exposed
+existence-dependent Foundation path standardization; generated /tmp and /var cases
+reproduced it and now pass with stable expansion of only OS aliases. The automatic
+launch fixture now calls the real onAppear lifecycle to install its housekeeping
+observer. All original success/count/identity assertions remain intact.

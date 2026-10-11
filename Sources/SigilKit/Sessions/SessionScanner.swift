@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 import os
 
-struct SessionCacheEntry: Sendable, Equatable {
+struct SessionCacheEntry: Sendable, Equatable, Codable {
     var modificationDate: Date
     var size: Int
     /// POSIX inode of the source file. With `device`, an atomic replace cannot reuse this entry.
@@ -11,12 +11,17 @@ struct SessionCacheEntry: Sendable, Equatable {
     /// Attribute-change time (`ctime`). Catches in-place rewrites that restore mtime.
     var changeDate: Date? = nil
     /// Bytes used to build `session`. A metadata miss can skip JSON decoding when the body matches.
-    var contents: Data
+    var contents = Data()
     var session: GrokSession
     /// Claude JSONL progress only; Grok summaries and Codex samples keep their existing paths.
     var claudeScan: NativeSessionScanner.ClaudeScanState? = nil
     /// Transcript title before a Codex index override, so eviction/removal can restore it.
     var nativeSummary: String? = nil
+
+    // Transcript bytes and incremental parser state never enter the display index.
+    private enum CodingKeys: String, CodingKey {
+        case modificationDate, size, inode, device, changeDate, session, nativeSummary
+    }
 }
 
 enum SessionTimestamp {
@@ -94,7 +99,20 @@ enum SessionScanner: Sendable {
         var read: @Sendable (URL) throws -> Data
 
         static let disk = ContentReader { url in
-            try Data(contentsOf: url)
+            let descriptor = open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+            guard descriptor >= 0 else { throw CocoaError(.fileReadUnknown) }
+            let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+            defer { try? handle.close() }
+            var before = stat()
+            guard fstat(descriptor, &before) == 0, before.st_mode & S_IFMT == S_IFREG else {
+                throw CocoaError(.fileReadUnknown)
+            }
+            let data = try handle.readToEnd() ?? Data()
+            var after = stat()
+            guard lstat(url.path, &after) == 0, after.st_mode & S_IFMT == S_IFREG,
+                NativeSessionScanner.FileSnapshot(before) == NativeSessionScanner.FileSnapshot(after)
+            else { throw CocoaError(.fileReadUnknown) }
+            return data
         }
     }
 
@@ -294,11 +312,23 @@ enum SessionScanner: Sendable {
         /// Folded project name, `~` path, and cwd.
         let foldedPaths: [String]
 
-        init(_ session: GrokSession) {
-            title = session.title
+        init(_ session: GrokSession, projectName: String? = nil) {
+            let name = projectName ?? session.projectName
+            let summary = session.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+            title = summary.isEmpty ? "Untitled session in \(name)" : summary
             foldedTitle = SessionScanner.foldedTitle(title)
-            foldedPaths = [session.projectName, session.displayPath, session.cwd]
+            foldedPaths = [name, session.displayPath, session.cwd]
                 .map(SearchMatchHighlight.fold)
+        }
+    }
+
+    /// Resolve shared project display paths once while publishing a list.
+    static func searchKeys(for sessions: [GrokSession]) -> [SearchKey] {
+        var names: [String: String] = [:]
+        return sessions.map { session in
+            let name = names[session.cwd] ?? session.projectName
+            names[session.cwd] = name
+            return SearchKey(session, projectName: name)
         }
     }
 
@@ -374,9 +404,11 @@ enum SessionScanner: Sendable {
     }
 
     private static func isDir(_ url: URL) throws -> Bool {
-        guard let value = try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory else {
+        let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        guard let value = values.isDirectory, let symbolic = values.isSymbolicLink else {
             throw CocoaError(.fileReadUnknown)
         }
+        if symbolic { throw CocoaError(.fileReadNoPermission) }
         return value
     }
 
@@ -482,7 +514,7 @@ enum SessionScanner: Sendable {
     /// Metadata only: `getattrlist` plus `stat`. Never reads file contents.
     private static func inspectSummary(_ url: URL) -> InspectResult {
         let keys: Set<URLResourceKey> = [
-            .isRegularFileKey, .isDirectoryKey, .contentModificationDateKey, .fileSizeKey,
+            .isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey, .fileSizeKey,
             .attributeModificationDateKey,
         ]
         let values: URLResourceValues
@@ -497,7 +529,7 @@ enum SessionScanner: Sendable {
             }
             return .failed("summary.json could not be inspected")
         }
-        if values.isDirectory == true || values.isRegularFile == false {
+        if values.isDirectory == true || values.isRegularFile == false || values.isSymbolicLink == true {
             return .unrecognized
         }
         guard values.isRegularFile == true else {

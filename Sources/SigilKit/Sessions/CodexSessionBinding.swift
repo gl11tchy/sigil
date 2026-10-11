@@ -59,6 +59,6 @@ public enum CodexSessionBinding {
             after.st_ctimespec.tv_sec == before.st_ctimespec.tv_sec,
             after.st_ctimespec.tv_nsec == before.st_ctimespec.tv_nsec
         else { return nil }
-        return session
+        return session.validatingHistory()
     }
 }

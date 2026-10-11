@@ -96,12 +96,13 @@ jobs:
           if-no-files-found: warn
 
       - name: iPhone app, shipping extensions, and native relay tests
+        id: native_verification
         env:
           SIGIL_NATIVE_ARTIFACTS: ${{ runner.temp }}/sigil-native-${{ github.run_id }}-${{ github.run_attempt }}
         run: iOS/scripts/ci.sh
 
       - name: Upload native verification evidence
-        if: always()
+        if: always() && steps.native_verification.outcome != 'skipped'
         uses: actions/upload-artifact@v4
         with:
           name: iPhone-native-verification

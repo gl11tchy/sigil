@@ -33,7 +33,14 @@ test('native result uploads are isolated from build caches and other run attempt
   const path = upload.match(/\n          path: (.+)\n/)?.[1];
   assert.ok(output);
   assert.ok(path);
-  assert.match(upload, /\n        if: always\(\)\n/);
+  assert.match(producerStep, /\n        id: native_verification\n/);
+  assert.match(upload, /\n        if: always\(\) && steps\.native_verification\.outcome != 'skipped'\n/);
+  assert.match(upload, /\n          if-no-files-found: error\n/);
+  const condition = upload.match(/\n        if: (.+)\n/)?.[1];
+  const runs = new Function('steps', 'always', `return (${condition})`);
+  for (const outcome of ['success', 'failure', 'cancelled', 'skipped']) {
+    assert.equal(runs({ native_verification: { outcome } }, () => true), outcome !== 'skipped');
+  }
   assert.match(upload, /\n          retention-days: 7\n/);
   const render = (value, run, attempt) => value.replace(/\$\{\{ ([^}]+) \}\}/g, (_, context) => {
     const contexts = { 'runner.temp': '/tmp/sigil-ci-results', 'github.run_id': run, 'github.run_attempt': attempt };

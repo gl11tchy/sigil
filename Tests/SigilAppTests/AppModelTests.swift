@@ -10,6 +10,135 @@ import Testing
 struct AppModelTests {
 
     @Test @MainActor
+    func savedDisplayCannotPruneMigrateOrRestoreWithoutFreshSourceIdentity() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("generated-project")
+        let id = "11111111-1111-4111-8111-111111111111"
+        try fixture.writeListedSession(id: id, cwd: cwd.path)
+        let root = fixture.store.root.resolvingSymlinksInPath()
+        let file = SessionIndexFile(
+            url: fixture.root.resolvingSymlinksInPath().appendingPathComponent("private/history-index.json"))
+        let roots = SessionIndexFile.roots(grok: root, native: [])
+        #expect(file.save(.init(roots: roots, entries: SessionScanner.scan(root: root, cache: [:]).cache)))
+        // Replace the source with malformed bytes while retaining the saved display row.
+        let directory = root.appendingPathComponent(
+            GrokPaths.sessionFolderName(forCanonicalPath: GrokPaths.canonicalPath(cwd.path))
+        )
+        .appendingPathComponent(id)
+        try Data("{".utf8).write(to: directory.appendingPathComponent("summary.json"))
+        let store = SessionStore(root: root, timing: SessionStoreTiming(), indexFile: file)
+        defer { store.stop() }
+        store.start()
+        #expect(await waitUntil { store.appliedScanSequence > 0 && !store.isLoading })
+        let displayed = try #require(store.sessions.first)
+        #expect(!displayed.isHistoryValidated)
+        fixture.settings.pinnedConversations = [.init(sessionID: "missing-pin", cwd: cwd.path)]
+        fixture.defaults.set(try JSONEncoder().encode([cwd.path: "kept legacy note"]), forKey: "panel.notes")
+        fixture.settings.openTabs = OpenTabsSnapshot(tabs: [.init(sessionID: id, cwd: cwd.path)], selectedSessionID: id)
+        let error = ErrorBox()
+        let model = fixture.model(store: store, presentError: { error.error = $0 })
+        defer { model.closeAllTabsAndWait() }
+        model.pruneMissingPins()
+        model.seedSigilConversations()
+        model.migrateLegacyPanelNotes()
+        #expect(fixture.settings.pinnedConversations.map(\.sessionID) == ["missing-pin"])
+        #expect(!fixture.settings.sigilConversationsSeeded)
+        #expect(model.panel.legacyFolderNotes[cwd.path] == "kept legacy note")
+        #expect(!model.deleteConversation(displayed))
+        #expect(error.error != nil)
+        error.error = nil
+        model.open(displayed)
+        #expect(await waitUntil { error.error != nil && !store.isLoading })
+        #expect(model.tabs.isEmpty)
+        #expect(try Data(contentsOf: directory.appendingPathComponent("summary.json")) == Data("{".utf8))
+        #expect(fixture.settings.openTabs.tabs.map(\.sessionID) == [id])
+        // The failed envelope is attempted once; restoration/observation cannot spin a fresh traversal.
+        #expect(await waitUntil { !store.hasPendingHistoryValidation })
+        let failedSequence = store.scanSequence
+        for _ in 0..<3 { model.restoreOpenTabs() }
+        try await Task.sleep(for: .milliseconds(350))
+        #expect(store.scanSequence == failedSequence && model.tabs.isEmpty)
+        // Source repair, rather than saved metadata, unlocks the deferred saved tab.
+        try fixture.writeListedSession(id: id, cwd: cwd.path)
+        await store.reload()
+        model.restoreOpenTabs()
+        #expect(model.tabs.count == 1)
+        #expect(model.tabs.first?.nativeSessionID == id)
+    }
+
+    @Test @MainActor
+    func savedHistoryEventuallyUnlocksHousekeepingAndRemoteOpenWaitsForTheSameValidationPass() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("generated-project")
+        // Temporary fixture projects are hidden worktrees by default. This launch checks
+        // migration for listed conversations, before deferred tabs make them visible.
+        fixture.settings.showWorktreeSessions = true
+        try fixture.writeListedSession(id: "saved-tab", cwd: cwd.path)
+        try fixture.writeListedSession(id: "remote-tab", cwd: cwd.path)
+        let root = fixture.store.root
+        let file = SessionIndexFile(url: fixture.root.appendingPathComponent("private/history-index.json"))
+        #expect(
+            file.save(
+                .init(
+                    roots: SessionIndexFile.roots(grok: root, native: []),
+                    entries: SessionScanner.scan(root: root, cache: [:]).cache)))
+        fixture.settings.pinnedConversations = [.init(sessionID: "missing-pin", cwd: cwd.path)]
+        fixture.defaults.set(try JSONEncoder().encode([cwd.path: "kept legacy note"]), forKey: "panel.notes")
+        fixture.settings.openTabs = OpenTabsSnapshot(
+            tabs: [.init(sessionID: "saved-tab", cwd: cwd.path)], selectedSessionID: "saved-tab")
+        fixture.settings.isTabMessagingEnabled = false
+        // Watcher installation schedules a catch-up scan. Keep that unrelated debounce outside
+        // this launch/restoration check so the exact count measures the shared validation pass.
+        let store = SessionStore(
+            root: root,
+            timing: SessionStoreTiming(
+                debounceDelay: .seconds(30), maximumDebounceDelay: .seconds(30),
+                historyValidationDelay: .milliseconds(500)),
+            indexFile: file)
+        defer { store.stop() }
+        store.start()
+        #expect(await waitUntil { store.appliedScanSequence == 1 && !store.isLoading })
+        #expect(store.hasUnvalidatedHistory)
+        let error = ErrorBox()
+        let model = fixture.model(store: store, presentError: { error.error = $0 })
+        defer { model.closeAllTabsAndWait() }
+        #expect(Set(model.sidebarSessions.map(\.nativeSessionID)) == ["saved-tab", "remote-tab"])
+        await model.onAppear()
+        let reply = await RemoteCommands.execute(
+            RemoteRequest(challenge: "test", sequence: 1, action: "open", text: cwd.path, name: "remote-tab"),
+            model: model)
+        #expect(reply.ok && error.error == nil)
+        let housekeepingSettled = await waitUntil {
+            model.tabs.count == 2 && fixture.settings.sigilConversationsSeeded
+                && fixture.settings.pinnedConversations.isEmpty && model.panel.legacyFolderNotes.isEmpty
+        }
+        #expect(
+            housekeepingSettled,
+            """
+            tabs=\(model.tabs.map(\.nativeSessionID)), seeded=\(fixture.settings.sigilConversationsSeeded),
+            pins=\(fixture.settings.pinnedConversations.map(\.sessionID)),
+            legacyFolders=\(model.panel.legacyFolderNotes.keys.sorted()),
+            scan=\(store.appliedScanSequence), loading=\(store.isLoading),
+            unvalidated=\(store.hasUnvalidatedHistory), canPrune=\(store.canPruneMissingProjects),
+            noteSaved=\(store.sessions.map { model.panel.notesStore.isSaved(for: $0.id, cwd: $0.cwd) })
+            """)
+        #expect(model.tabs.count == 2)
+        #expect(fixture.settings.sigilConversationsSeeded)
+        #expect(fixture.settings.pinnedConversations.isEmpty)
+        #expect(model.panel.legacyFolderNotes.isEmpty)
+        #expect(
+            store.sessions.filter {
+                model.panel.notes(forSessionID: $0.id, cwd: $0.cwd) == "kept legacy note"
+            }.count == 1)
+        #expect(store.scanSequence == 2)
+        #expect(!store.hasUnvalidatedHistory)
+        #expect(store.canPruneMissingProjects)
+        #expect(Set(model.tabs.map(\.nativeSessionID)) == ["saved-tab", "remote-tab"])
+    }
+
+    @Test @MainActor
     func requestingAndCancellingAProviderDoesNotStartAProcess() throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
