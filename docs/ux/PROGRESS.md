@@ -26,6 +26,12 @@ fixture require normal PR CI; the PR and Linear comment will record exact-head
 results before parent review. No daily app install, live provider behavior or
 Settings native accessibility proof is claimed.
 
+The first full review-fix run compiled store/app macros and ran 1,114 tests. The
+equal-notice-count regression failed because its fixture did not invoke the app
+appearance path that starts observation. The fixture now does so before the
+controlled scan; all assertions remain. Final-head CI and the hosted accessibility
+gate remain required, with the earlier failure retained in the verification record.
+
 ## REA-1214: Codex version compatibility
 
 The Codex minor-version cap and installed-versus-checked notices are recorded in

@@ -4134,6 +4134,13 @@ struct AppModelTests {
         await fixture.store.reload()
         let model = fixture.model()
         defer { model.closeAllTabsAndWait() }
+        fixture.settings.isTabMessagingEnabled = false
+        // Housekeeping observation starts with the app's appearance, not model construction.
+        await model.onAppear()
+        fixture.store.stop()
+        await fixture.store.reload()
+        // Let the initial scan's observation rearm before the controlled cached scan.
+        try await Task.sleep(for: .milliseconds(20))
         let entries: [OpenTabsSnapshot.Entry] = [
             .init(sessionID: "previous-pending", cwd: project.path),
             .init(sessionID: "next-pending", cwd: project.path),
