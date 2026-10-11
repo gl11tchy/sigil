@@ -5,7 +5,7 @@ import os
 struct SessionCacheEntry: Sendable, Equatable {
     var modificationDate: Date
     var size: Int
-    /// POSIX inode of `summary.json`. With `device`, an atomic replace cannot reuse this entry.
+    /// POSIX inode of the source file. With `device`, an atomic replace cannot reuse this entry.
     var inode: UInt64? = nil
     var device: UInt64? = nil
     /// Attribute-change time (`ctime`). Catches in-place rewrites that restore mtime.
@@ -13,6 +13,8 @@ struct SessionCacheEntry: Sendable, Equatable {
     /// Bytes used to build `session`. A metadata miss can skip JSON decoding when the body matches.
     var contents: Data
     var session: GrokSession
+    /// Claude JSONL progress only; Grok summaries and Codex samples keep their existing paths.
+    var claudeScan: NativeSessionScanner.ClaudeScanState? = nil
 }
 
 enum SessionTimestamp {

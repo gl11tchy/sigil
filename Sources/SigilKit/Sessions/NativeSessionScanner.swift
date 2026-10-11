@@ -1,12 +1,25 @@
+import Darwin
 import Foundation
 
 /// Read-only, version-sensitive adapters for provider-owned JSONL history.
 /// Never edits a transcript or guesses that an unrecognized record is a session.
-/// Prefix/tail reads bound memory independently of transcript size. Search uses
+/// Claude records stream with bounded buffers; Codex keeps its prefix/tail reads. Search uses
 /// cached names and paths, never synchronous full-transcript reads.
 enum NativeSessionScanner {
     static let prefixLimit = 512 * 1024
     static let tailLimit = 128 * 1024
+    static let chunkLimit = 64 * 1024
+    static let anchorLimit = 4096
+
+    struct ContentReader: Sendable {
+        var read: @Sendable (FileHandle, UInt64, Int) throws -> Data
+        var isCancelled: @Sendable () -> Bool = { Task.isCancelled }
+
+        static let disk = ContentReader { handle, offset, count in
+            try handle.seek(toOffset: offset)
+            return try handle.read(upToCount: count) ?? Data()
+        }
+    }
 
     static var roots: [(CLIProvider, URL)] {
         let env = ProcessInfo.processInfo.environment
@@ -26,7 +39,8 @@ enum NativeSessionScanner {
     static func scan(
         provider: CLIProvider, root: URL, cache: [String: SessionCacheEntry], ignoringCache: Bool,
         wasAvailable: Bool = false,
-        rootAvailability: SessionScanner.RootAvailability? = nil
+        rootAvailability: SessionScanner.RootAvailability? = nil,
+        contentReader: ContentReader = .disk
     ) -> SessionScanner.Result {
         let previous = cache.filter { $0.value.session.provider == provider }
         let fm = FileManager()
@@ -71,6 +85,10 @@ enum NativeSessionScanner {
         var unrecognized = 0
         var unsupportedVersions: Set<String> = []
         for case let file as URL in walker {
+            if contentReader.isCancelled() {
+                readFailed = true
+                break
+            }
             if file.lastPathComponent == "subagents" || file.lastPathComponent == "tool-results" {
                 walker.skipDescendants()
                 continue
@@ -102,11 +120,24 @@ enum NativeSessionScanner {
                     var cached = old
                     cached.session = named(old.session, names: names)
                     next[key] = cached
+                    if old.claudeScan?.incomplete == true { unrecognized += 1 }
                     continue
                 }
-                let data = try boundedContents(file, size: size.uint64Value)
+                let claude: ClaudeRead?
+                let parsed: ParseResult
+                if provider == .claudeCode {
+                    let read = try readClaude(
+                        file, size: size.uint64Value, inode: inode.uint64Value, device: device.uint64Value,
+                        modified: modified, cached: ignoringCache ? nil : previous[key], reader: contentReader)
+                    claude = read
+                    parsed = read.result
+                } else {
+                    claude = nil
+                    let data = try boundedContents(file, size: size.uint64Value)
+                    parsed = parseResult(provider: provider, data: data, file: file, modified: modified)
+                }
                 let session: GrokSession
-                switch parseResult(provider: provider, data: data, file: file, modified: modified) {
+                switch parsed {
                 case .session(let recognized):
                     session = recognized
                 case .unsupportedVersion(let version):
@@ -120,10 +151,11 @@ enum NativeSessionScanner {
                     if let old = previous[key] { next[key] = old }
                     continue
                 }
+                if claude?.state.incomplete == true { unrecognized += 1 }
                 next[key] = SessionCacheEntry(
                     modificationDate: modified, size: size.intValue,
                     inode: inode.uint64Value, device: device.uint64Value, changeDate: changed,
-                    contents: Data(), session: named(session, names: names))
+                    contents: Data(), session: named(session, names: names), claudeScan: claude?.state)
             } catch {
                 readFailed = true
                 if let old = previous[key] { next[key] = old }
@@ -145,6 +177,286 @@ enum NativeSessionScanner {
             sessions: next.values.map(\.session).sorted(by: SessionScanner.isNewer), cache: next,
             loadError: readFailed ? "Some \(provider.name) history could not be read. Saved sessions are kept." : nil,
             coverage: coverage)
+    }
+
+    enum ClaudeField: Sendable, Hashable {
+        case identity, fallback, prompt, title, model
+    }
+
+    /// Only bounded display fields survive a scan; transcript messages are not retained.
+    struct ClaudeMetadata: Sendable, Equatable {
+        var nativeID: String?
+        var cwd: String?
+        var fallback = ""
+        var firstPrompt = ""
+        /// nil means no rename; an empty string is an explicit reset to the first prompt.
+        var explicitTitle: String?
+        var model: String?
+        var created: Date?
+        var isSubagent = false
+        var hasObservedMessages = false
+        var unsupportedVersion: String?
+        var ambiguous = false
+
+        @discardableResult
+        mutating func consume(_ line: Data) -> [ClaudeField]? {
+            guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+                let type = object["type"] as? String
+            else { return nil }
+            var fields: [ClaudeField] = []
+            if let version = object["version"] as? String, !version.hasPrefix("2."), CLIVersion(version) != nil {
+                unsupportedVersion = String(version.prefix(64))
+            }
+            if let id = object["sessionId"] as? String, UUID(uuidString: id) != nil,
+                let path = object["cwd"] as? String, path.hasPrefix("/"),
+                let version = object["version"] as? String, version.hasPrefix("2.")
+            {
+                if let nativeID, nativeID != id { ambiguous = true }
+                if let cwd, cwd != path { ambiguous = true }
+                if nativeID == nil || (created == nil && object["timestamp"] is String)
+                    || (!isSubagent && object["isSidechain"] as? Bool == true)
+                {
+                    fields.append(.identity)
+                }
+                nativeID = id
+                cwd = path
+                created = created ?? SessionTimestamp.parse(object["timestamp"] as? String)
+                isSubagent = isSubagent || object["isSidechain"] as? Bool == true
+            }
+            if ["user", "assistant"].contains(type), object["isMeta"] as? Bool != true,
+                let message = object["message"] as? [String: Any]
+            {
+                if let text = message["content"] as? String {
+                    hasObservedMessages = hasObservedMessages || !text.isEmpty
+                } else if let blocks = message["content"] as? [[String: Any]] {
+                    hasObservedMessages = hasObservedMessages || !blocks.isEmpty
+                }
+            }
+            if type == "custom-title", let title = object["customTitle"] as? String {
+                explicitTitle = displayTitle(title)
+                fields.append(.title)
+            } else if type == "summary", fallback.isEmpty, let summary = object["summary"] as? String {
+                fallback = displayTitle(summary)
+                fields.append(.fallback)
+            } else if type == "user", firstPrompt.isEmpty, object["isMeta"] as? Bool != true,
+                let message = object["message"] as? [String: Any]
+            {
+                let blocks = message["content"] as? [[String: Any]] ?? []
+                let text =
+                    message["content"] as? String ?? blocks.compactMap { block -> String? in
+                        guard block["type"] as? String == "text" else { return nil }
+                        return block["text"] as? String
+                    }.first ?? ""
+                if !text.hasPrefix("<") {
+                    firstPrompt = displayTitle(text)
+                    fields.append(.prompt)
+                    if fallback.isEmpty {
+                        fallback = firstPrompt
+                        fields.append(.fallback)
+                    }
+                }
+            }
+            if type == "assistant", let message = object["message"] as? [String: Any],
+                let model = message["model"] as? String
+            {
+                self.model = model
+                fields.append(.model)
+            }
+            return fields
+        }
+
+        func result(file: URL, modified: Date, fallbackCreated: Date) -> ParseResult {
+            guard !ambiguous, let nativeID, let cwd, !cwd.contains("\0") else {
+                return ambiguous
+                    ? .unrecognized : unsupportedVersion.map(ParseResult.unsupportedVersion) ?? .unrecognized
+            }
+            let title = explicitTitle == "" ? (firstPrompt.isEmpty ? fallback : firstPrompt) : explicitTitle ?? fallback
+            return .session(
+                GrokSession(
+                    id: nativeID, cwd: cwd, summary: title, createdAt: created ?? fallbackCreated,
+                    updatedAt: modified, messageCount: 0, modelID: model, agentName: nil, reasoningEffort: nil,
+                    kind: isSubagent ? "subagent" : nil, directory: file, provider: .claudeCode,
+                    hasObservedMessages: hasObservedMessages))
+        }
+
+        private func displayTitle(_ text: String) -> String {
+            String(text.prefix(240)).replacingOccurrences(of: "\n", with: " ")
+        }
+    }
+
+    struct RecordAnchor: Sendable, Hashable {
+        var offset: UInt64
+        var count: Int
+        var digest: [UInt8]
+    }
+
+    struct FileSnapshot: Sendable, Equatable {
+        var inode: UInt64
+        var device: Int32
+        var size: Int64
+        var modifiedSeconds: Int
+        var modifiedNanos: Int
+        var changedSeconds: Int
+        var changedNanos: Int
+        var bornSeconds: Int
+        var bornNanos: Int
+
+        init(_ info: stat) {
+            inode = info.st_ino
+            device = info.st_dev
+            size = info.st_size
+            modifiedSeconds = info.st_mtimespec.tv_sec
+            modifiedNanos = info.st_mtimespec.tv_nsec
+            changedSeconds = info.st_ctimespec.tv_sec
+            changedNanos = info.st_ctimespec.tv_nsec
+            bornSeconds = info.st_birthtimespec.tv_sec
+            bornNanos = info.st_birthtimespec.tv_nsec
+        }
+
+        func isSameFile(as other: FileSnapshot) -> Bool {
+            inode == other.inode && device == other.device
+                && bornSeconds == other.bornSeconds && bornNanos == other.bornNanos
+        }
+    }
+
+    struct ClaudeScanState: Sendable, Equatable {
+        var identity: FileSnapshot
+        var fallbackCreated: Date
+        var metadata = ClaudeMetadata()
+        /// Physical EOF already read, including any carried partial record.
+        var offset: UInt64 = 0
+        var remainder = Data()
+        var discardingOversized = false
+        var skippedOversized = false
+        var incomplete = false
+        var prefix = Data()
+        var tail = Data()
+        /// Constant-count anchors cover records supplying retained display/identity fields.
+        var anchors: [ClaudeField: RecordAnchor] = [:]
+    }
+
+    private struct ClaudeRead {
+        var state: ClaudeScanState
+        var result: ParseResult
+    }
+
+    private static func readClaude(
+        _ file: URL, size: UInt64, inode: UInt64, device: UInt64, modified: Date,
+        cached: SessionCacheEntry?, reader: ContentReader
+    ) throws -> ClaudeRead {
+        let handle = try FileHandle(forReadingFrom: file)
+        defer { try? handle.close() }
+        func snapshot() throws -> FileSnapshot {
+            var info = stat()
+            guard fstat(handle.fileDescriptor, &info) == 0 else { throw CocoaError(.fileReadUnknown) }
+            return FileSnapshot(info)
+        }
+        let before = try snapshot()
+        guard before.size >= 0, UInt64(before.size) == size, before.inode == inode,
+            UInt64(bitPattern: Int64(before.device)) == device
+        else { throw CocoaError(.fileReadUnknown) }
+        var state = ClaudeScanState(identity: before, fallbackCreated: modified)
+        if let cached, let old = cached.claudeScan, before.isSameFile(as: old.identity),
+            old.offset == UInt64(cached.size), size > old.offset,
+            try hasContinuity(old, handle: handle, reader: reader)
+        {
+            state = old
+        }
+        while state.offset < size {
+            try checkCancellation(reader)
+            let requested = min(chunkLimit, Int(size - state.offset))
+            let chunk = try reader.read(handle, state.offset, requested)
+            guard !chunk.isEmpty, chunk.count <= requested else { throw CocoaError(.fileReadUnknown) }
+            state.prefix.append(chunk.prefix(max(0, anchorLimit - state.prefix.count)))
+            state.tail.append(chunk)
+            state.tail = Data(state.tail.suffix(anchorLimit))
+            var cursor = chunk.startIndex
+            while cursor < chunk.endIndex {
+                try checkCancellation(reader)
+                let newline = chunk[cursor...].firstIndex(of: 0x0A)
+                let end = newline ?? chunk.endIndex
+                if !state.discardingOversized {
+                    if state.remainder.count + chunk.distance(from: cursor, to: end) > prefixLimit {
+                        state.remainder = Data()
+                        state.discardingOversized = true
+                        state.skippedOversized = true
+                    } else {
+                        state.remainder.append(chunk[cursor..<end])
+                    }
+                }
+                if let newline {
+                    if !state.discardingOversized, let fields = state.metadata.consume(state.remainder), !fields.isEmpty
+                    {
+                        let lineEnd = state.offset + UInt64(chunk.distance(from: chunk.startIndex, to: newline))
+                        let anchor = RecordAnchor(
+                            offset: lineEnd - UInt64(state.remainder.count), count: state.remainder.count,
+                            digest: BLAKE3.hash(Array(state.remainder)))
+                        for field in fields { state.anchors[field] = anchor }
+                    }
+                    state.remainder = Data()
+                    state.discardingOversized = false
+                    cursor = chunk.index(after: newline)
+                } else {
+                    cursor = end
+                }
+            }
+            state.offset += UInt64(chunk.count)
+        }
+        try checkCancellation(reader)
+        var pathInfo = stat()
+        guard try snapshot() == before, stat(file.path, &pathInfo) == 0, FileSnapshot(pathInfo) == before else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        state.identity = before
+        // Legacy files may end with a complete JSON object but no newline. Project it
+        // without committing it, so an appended delimiter/JSON/UTF-8 fragment is reparsed once.
+        var projected = state.metadata
+        let unfinished = !state.remainder.isEmpty && projected.consume(state.remainder) == nil
+        state.incomplete = unfinished || state.skippedOversized || state.discardingOversized
+        return ClaudeRead(
+            state: state,
+            result: projected.result(file: file, modified: modified, fallbackCreated: state.fallbackCreated))
+    }
+
+    private static func hasContinuity(
+        _ state: ClaudeScanState, handle: FileHandle, reader: ContentReader
+    ) throws -> Bool {
+        guard try readExactly(handle, offset: 0, count: state.prefix.count, reader: reader) == state.prefix,
+            try readExactly(
+                handle, offset: state.offset - UInt64(state.tail.count), count: state.tail.count, reader: reader)
+                == state.tail
+        else { return false }
+        if !state.remainder.isEmpty,
+            try readExactly(
+                handle, offset: state.offset - UInt64(state.remainder.count), count: state.remainder.count,
+                reader: reader)
+                != state.remainder
+        {
+            return false
+        }
+        for anchor in Set(state.anchors.values) {
+            let data = try readExactly(handle, offset: anchor.offset, count: anchor.count, reader: reader)
+            if BLAKE3.hash(Array(data)) != anchor.digest { return false }
+        }
+        return true
+    }
+
+    private static func readExactly(
+        _ handle: FileHandle, offset: UInt64, count: Int, reader: ContentReader
+    ) throws -> Data {
+        var data = Data()
+        while data.count < count {
+            try checkCancellation(reader)
+            let requested = count - data.count
+            let chunk = try reader.read(handle, offset + UInt64(data.count), requested)
+            guard !chunk.isEmpty, chunk.count <= requested else { throw CocoaError(.fileReadUnknown) }
+            data.append(chunk)
+        }
+        return data
+    }
+
+    private static func checkCancellation(_ reader: ContentReader) throws {
+        if reader.isCancelled() { throw CancellationError() }
     }
 
     private static func boundedContents(_ file: URL, size: UInt64) throws -> Data {
@@ -181,6 +493,13 @@ enum NativeSessionScanner {
 
     static func parseResult(provider: CLIProvider, data: Data, file: URL, modified: Date) -> ParseResult {
         guard provider == .claudeCode || provider == .codex else { return .unrecognized }
+        if provider == .claudeCode {
+            var metadata = ClaudeMetadata()
+            for line in data.split(separator: 0x0A) where line.count <= prefixLimit {
+                metadata.consume(Data(line))
+            }
+            return metadata.result(file: file, modified: modified, fallbackCreated: modified)
+        }
         var nativeID: String?
         var cwd: String?
         var title = ""
@@ -189,7 +508,6 @@ enum NativeSessionScanner {
         var supported = false
         var isSubagent = false
         var hasObservedMessages = false
-        var unsupportedVersion: String?
         for line in data.split(separator: 0x0A) where line.count <= prefixLimit {
             guard let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
                 let type = object["type"] as? String
@@ -253,53 +571,10 @@ enum NativeSessionScanner {
                             return text
                         }.first ?? ""
                 }
-            } else {
-                if let version = object["version"] as? String, !version.hasPrefix("2."), CLIVersion(version) != nil {
-                    unsupportedVersion = String(version.prefix(64))
-                }
-                if ["user", "assistant"].contains(type), object["isMeta"] as? Bool != true,
-                    let message = object["message"] as? [String: Any]
-                {
-                    if let text = message["content"] as? String {
-                        hasObservedMessages = hasObservedMessages || !text.isEmpty
-                    } else if let blocks = message["content"] as? [[String: Any]] {
-                        hasObservedMessages = hasObservedMessages || !blocks.isEmpty
-                    }
-                }
-                if let id = object["sessionId"] as? String, UUID(uuidString: id) != nil,
-                    let path = object["cwd"] as? String, path.hasPrefix("/"),
-                    let version = object["version"] as? String, version.hasPrefix("2.")
-                {
-                    if let nativeID, nativeID != id { return .unrecognized }
-                    if let cwd, cwd != path { return .unrecognized }
-                    nativeID = id
-                    cwd = path
-                    supported = true
-                    created = created ?? SessionTimestamp.parse(object["timestamp"] as? String)
-                    isSubagent = isSubagent || object["isSidechain"] as? Bool == true
-                }
-                if type == "custom-title", let custom = object["customTitle"] as? String {
-                    title = custom
-                } else if type == "summary", title.isEmpty {
-                    title = object["summary"] as? String ?? ""
-                } else if type == "user", title.isEmpty, object["isMeta"] as? Bool != true,
-                    let message = object["message"] as? [String: Any]
-                {
-                    let blocks = message["content"] as? [[String: Any]] ?? []
-                    let text =
-                        message["content"] as? String ?? blocks.compactMap { block -> String? in
-                            guard block["type"] as? String == "text" else { return nil }
-                            return block["text"] as? String
-                        }.first ?? ""
-                    if !text.hasPrefix("<") { title = text }
-                }
-                if type == "assistant", let message = object["message"] as? [String: Any] {
-                    model = message["model"] as? String ?? model
-                }
             }
         }
         guard supported, let nativeID, let cwd, !cwd.contains("\0") else {
-            return unsupportedVersion.map(ParseResult.unsupportedVersion) ?? .unrecognized
+            return .unrecognized
         }
         return .session(
             GrokSession(

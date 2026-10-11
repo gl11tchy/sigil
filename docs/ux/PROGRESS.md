@@ -514,3 +514,19 @@ the cleanup does not scan arguments/files or unrelated processes. Updated
 regressions include restarted peers, exhausted entry/options, Settings-only
 activation and synchronous/asynchronous child cleanup. Final evidence stays in
 the PR; parent reviews the revised exact diff. No merge, install or next ticket.
+
+## REA-1266: long Claude transcript titles
+
+The isolated scanner candidate reads complete Claude JSONL records with bounded
+chunks and retains the newest explicit rename across append rescans. Empty names
+reset to the first prompt. File identity, prefix/tail and retained-field anchors
+guard append reuse; replacement, truncation, changed anchors and read races
+invalidate or preserve earlier evidence. Partial JSON/UTF-8, oversized records and
+cancellation retain bounded state and incomplete-history protection. Codex indexing
+and parked PR150's provider UI are separate.
+
+[The verification record](../qa/rea-1266.md) records the generated baseline, direct
+production-source cases and the anchor-validation limitation: fixed samples cannot
+prove every old byte is unchanged. The parent must review that limit alongside
+the final code and ordinary exact-head CI. No personal transcript, live CLI
+incident, local AppTests, native UI screenshot, merge or daily-app action is claimed.

@@ -144,9 +144,29 @@ it. Codex 0.0.x, Codex 1.x, malformed metadata and unsupported envelopes produce
 visible compatibility notice without inventing conversations. The checked Codex contract stays **0.157.1**; accepting
 a synthetic newer-version envelope is not a claim that a newer CLI was fully checked.
 
-Each changed file contributes at most a 512 KiB prefix and 128 KiB tail. The
-scanner keeps metadata and display fields, not full transcripts. Large history
-files may therefore use a folder fallback instead of an inaccessible title.
+Claude cold scans stream the whole JSONL file in 64 KiB chunks. Complete records
+up to 512 KiB are parsed, with a carried partial JSON/UTF-8 record; larger records
+are discarded through their newline and retain an incomplete-history notice.
+The newest explicit `custom-title` wins even in the middle of a long transcript.
+An explicit empty title resets to the first prompt. A complete legacy final JSON
+object without a newline is projected without committing the unfinished line.
+
+Claude's in-memory cache holds display/identity fields, a scan offset, bounded
+partial-record bytes and continuity anchors. A growing file resumes at the prior
+offset only after its inode/device/birth identity, 4 KiB prefix/tail anchors,
+retained-field record digests and any partial record match. Validation rereads
+those bounded anchors; transcript parsing then reads only appended bytes.
+Replacement, truncation, a changed same-size file, or changed anchors triggers a
+cold scan. Identity/timestamps are checked again before publishing a result, and
+cancellation or a concurrent write preserves cached rows with uncertain coverage.
+These fixed anchors detect rewrites of the retained fields and sampled regions;
+they cannot prove every old byte is unchanged. An arbitrary in-place rewrite
+outside them can evade detection. An `ignoringCache` scan revalidates the full file.
+
+Codex retains its 512 KiB prefix/128 KiB tail transcript samples and latest 2 MiB
+name-index window; incremental Codex indexing belongs to REA-1268. The scanner
+keeps metadata and display fields, not full transcripts. Oversized or unsupported
+records can still require a folder fallback.
 Search covers discovered titles and project paths, not every transcript message.
 Subagent directories are excluded. Cached entries survive read errors and
 unrecognized rewrites. Native transcripts are never rewritten or deleted.
