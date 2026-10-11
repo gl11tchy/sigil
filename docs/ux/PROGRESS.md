@@ -4,6 +4,22 @@ The resumable record for the [experience contract](EXPERIENCE.md). Each entry
 says what was built, how it was checked, what the check showed, and what is
 still open. Nothing here is a timing; counts are counted actions.
 
+## REA-1272: find conversations by note text
+
+The Mac sidebar searches the first 64 KiB of eligible conversation notes after
+all title/path hits. A serial background index uses provider/native ID/canonical
+workspace keys, metadata reuse and stale-scan fences; queries read folded memory.
+Ambiguous flat notes and conflict copies are excluded, and indexing never moves
+legacy files. Unsaved edits and publication invalidate the cached sidebar. Phone
+search keeps its existing title/path input. Search help states the prefix limit.
+
+[The verification record](../qa/rea-1272.md) records the generated main reproduction
+and passing direct Swift 6/Address Sanitizer checks, including 900 sessions/100
+notes with no reads during queries. Real store/Observation/app-host validation
+awaits the normal exact-head CI gate. Existing local build/process denials remain
+binding; no local UI, daily app install or personal data inspection. Parent
+personal final-diff review remains required before merge.
+
 ## REA-1261: six-provider availability and first-run choice
 
 New Session and Options expose the checked state of all six CLIs. Settings lists

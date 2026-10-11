@@ -9,6 +9,52 @@ import os
 @Suite(.serialized)
 @MainActor
 struct SidebarSnapshotTests {
+    @Test func notesPublicationAndUnsavedEditsInvalidateTheCachedSidebar() async throws {
+        let fixture = try ModelFixture()
+        defer {
+            fixture.store.stop()
+            fixture.cleanup()
+        }
+        fixture.settings.showWorktreeSessions = true
+        let folder = try fixture.directory("note-search")
+        try fixture.writeListedSession(
+            id: "title", cwd: folder.path, summary: "Zirconia", updatedAt: "2026-01-01T00:00:00Z")
+        try fixture.writeListedSession(
+            id: "note", cwd: folder.path, summary: "Weekly", updatedAt: "2026-06-01T00:00:00Z")
+        await fixture.store.reload()
+        let note = try #require(fixture.store.sessions.first { $0.id == "note" })
+        let writer = ConversationNotesStore(root: fixture.notesRoot)
+        writer.setNote("zirconia", for: note.id, cwd: note.cwd)
+        writer.flushNow()
+        let model = snapshotModel(fixture, clock: SnapshotClock())
+        defer { model.closeAllTabsAndWait() }
+        model.openRecents()
+        model.searchText = "zirconia"
+        _ = model.eventSidebarSnapshot()
+        let deadline = ContinuousClock.now + .seconds(4)
+        while model.panel.notesStore.foldedNote(for: note.reference) != "zirconia", ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(model.eventSidebarSnapshot().listed.map(\.id) == ["title", "note"])
+        let count = model.sidebarSnapshotBuildCount
+        model.panel.notesStore.setNote("sapphire", for: note.id, cwd: note.cwd)
+        #expect(model.eventSidebarSnapshot().listed.map(\.id) == ["title"])
+        #expect(model.sidebarSnapshotBuildCount == count + 1)
+        model.searchText = "sapphire"
+        #expect(model.eventSidebarSnapshot().listed == [note])
+        model.archive(note)
+        // Search remains global and includes archived conversations.
+        #expect(model.eventSidebarSnapshot().listed == [note])
+        model.searchText = " \n "
+        #expect(model.eventSidebarSnapshot().sessions.map(\.id) == ["title"])
+        model.openArchived()
+        #expect(model.eventSidebarSnapshot().sessions == [note])
+        model.unarchive(note)
+        model.openRecents()
+        #expect(model.eventSidebarSnapshot().sessions == fixture.store.sessions)
+        model.panel.notesStore.flushNow()
+    }
+
     @Test func searchCategoriesAndTheirCacheInputsChangeOrderImmediately() async throws {
         let fixture = try ModelFixture()
         defer {

@@ -58,6 +58,21 @@ public final class ConversationNotesStore {
     }
 
     private var entries: [String: Entry] = [:]
+    /// Read by sidebar snapshots; all index/overlay publication is observable.
+    public private(set) var searchGeneration: UInt64 = 0
+    @ObservationIgnored private var searchReferences: Set<ProviderSessionReference> = []
+    @ObservationIgnored private var searchSnapshot: ConversationNotesIndex.Snapshot?
+    @ObservationIgnored private var searchCache: [String: ConversationNotesIndex.Cached] = [:]
+    @ObservationIgnored private var searchOverlays: [String: String] = [:]
+    @ObservationIgnored private var searchRequest: UInt64 = 0
+    @ObservationIgnored private var searchBusy = false
+    @ObservationIgnored private var searchPending = false
+    @ObservationIgnored private var searchRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var searchCancellation: OSAllocatedUnfairLock<Bool>?
+    @ObservationIgnored private let searchReader: ConversationNotesIndex.Reader
+    @ObservationIgnored private let searchQueue = DispatchQueue(label: "com.gl11tchy.sigil.notes-search", qos: .utility)
+    @ObservationIgnored private(set) var searchScanCount = 0
+    @ObservationIgnored private(set) var searchPublishedCount = 0
     @ObservationIgnored private var flushTask: Task<Void, Never>?
     @ObservationIgnored private let watcher = SessionDirectoryWatcher()
     @ObservationIgnored private var watching = false
@@ -73,11 +88,116 @@ public final class ConversationNotesStore {
     public init(root: URL? = nil) {
         self.root = root ?? Self.defaultRoot
         self.conflictTimestamp = { Int64(Date().timeIntervalSince1970 * 1000) }
+        self.searchReader = .disk
     }
 
     init(root: URL, conflictTimestamp: @escaping @Sendable () -> Int64) {
         self.root = root
         self.conflictTimestamp = conflictTimestamp
+        self.searchReader = .disk
+    }
+
+    init(root: URL, searchReader: ConversationNotesIndex.Reader) {
+        self.root = root
+        self.conflictTimestamp = { Int64(Date().timeIntervalSince1970 * 1000) }
+        self.searchReader = searchReader
+    }
+
+    deinit {
+        searchRefreshTask?.cancel()
+        searchCancellation?.withLock { $0 = true }
+    }
+
+    /// Membership checks are memory-only. Canonicalization and exact-path
+    /// discovery happen once off-main when the captured identity set changes.
+    public func prepareSearch(for sessions: [GrokSession]) {
+        let references = Set(sessions.map(\.reference))
+        guard references != searchReferences else { return }
+        searchReferences = references
+        // Adding a same-ID folder can make a former flat-note match ambiguous.
+        searchSnapshot = nil
+        searchGeneration &+= 1
+        startWatching()
+        requestSearchRefresh(immediate: true)
+    }
+
+    /// No filesystem access, decoding or folding per search keystroke.
+    public func foldedNote(for reference: ProviderSessionReference) -> String? {
+        _ = searchGeneration
+        guard searchReferences.contains(reference) else { return nil }
+        return searchSnapshot?.foldedNote(for: reference, overlays: searchOverlays)
+    }
+
+    /// Project aliases can retarget without changing a raw session reference.
+    public func invalidateSearchPaths() {
+        guard !searchReferences.isEmpty else { return }
+        requestSearchRefresh()
+    }
+
+    private func publishSearchOverlay(_ url: URL) {
+        guard let entry = entries[url.path] else { return }
+        let folded = ConversationNotesIndex.foldedPrefix(entry.text)
+        guard searchOverlays[url.path] != folded else { return }
+        searchOverlays[url.path] = folded
+        searchGeneration &+= 1
+    }
+
+    private func requestSearchRefresh(immediate: Bool = false) {
+        searchRequest &+= 1
+        searchCancellation?.withLock { $0 = true }
+        searchRefreshTask?.cancel()
+        guard !searchReferences.isEmpty else { return }
+        if immediate {
+            startSearchScan()
+            return
+        }
+        searchRefreshTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+            guard !Task.isCancelled, let self else { return }
+            self.startSearchScan()
+        }
+    }
+
+    private func startSearchScan() {
+        guard !searchBusy else {
+            searchPending = true
+            return
+        }
+        guard !searchReferences.isEmpty else { return }
+        searchBusy = true
+        searchScanCount += 1
+        let request = searchRequest
+        let references = searchReferences
+        let root = self.root
+        let cache = searchCache
+        let reader = searchReader
+        let cancelled = OSAllocatedUnfairLock(initialState: false)
+        searchCancellation = cancelled
+        searchQueue.async { [weak self] in
+            let catalog = ConversationNotesIndex.catalog(
+                root: root, references: references, isCancelled: { cancelled.withLock { $0 } })
+            let snapshot = ConversationNotesIndex.scan(
+                catalog: catalog, cache: cache, reader: reader, isCancelled: { cancelled.withLock { $0 } })
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.searchBusy = false
+                self.searchCancellation = nil
+                if request == self.searchRequest, let snapshot {
+                    self.searchPublishedCount += 1
+                    let changed =
+                        self.searchSnapshot?.folded != snapshot.folded
+                        || self.searchSnapshot?.catalog.references != snapshot.catalog.references
+                        || self.searchSnapshot?.origins != snapshot.origins
+                    self.searchSnapshot = snapshot
+                    self.searchCache = snapshot.cache
+                    if changed { self.searchGeneration &+= 1 }
+                }
+                if self.searchPending {
+                    self.searchPending = false
+                    self.startSearchScan()
+                }
+            }
+        }
     }
 
     public static var defaultRoot: URL {
@@ -106,6 +226,7 @@ public final class ConversationNotesStore {
         entries[url.path]?.text = text
         entries[url.path]?.generation &+= 1
         entries[url.path]?.dirty = true
+        publishSearchOverlay(url)
         scheduleFlush()
     }
 
@@ -126,6 +247,7 @@ public final class ConversationNotesStore {
         entries[url.path]?.text = ""
         entries[url.path]?.generation &+= 1
         entries[url.path]?.dirty = true
+        publishSearchOverlay(url)
         scheduleFlush()
     }
 
@@ -156,6 +278,7 @@ public final class ConversationNotesStore {
         } catch {
             entries[url.path] = Entry(text: "", baseline: nil, notice: .saveFailed)
         }
+        publishSearchOverlay(url)
     }
 
     private func startWatching() {
@@ -180,6 +303,7 @@ public final class ConversationNotesStore {
     }
 
     private func refresh() {
+        requestSearchRefresh()
         guard !refreshing else {
             refreshAgain = true
             return
@@ -226,6 +350,7 @@ public final class ConversationNotesStore {
                         entry.notice = entry.dirty ? .conflictUnsaved : .saveFailed
                     }
                     self.entries[url.path] = entry
+                    self.publishSearchOverlay(url)
                 }
                 self.refreshing = false
                 if self.refreshAgain {

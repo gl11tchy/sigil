@@ -378,8 +378,20 @@ public final class SessionStore {
         boost: ((GrokSession) -> Int)?,
         displayedTitle: ((GrokSession) -> String)? = nil
     ) -> [GrokSession] {
+        search(query, boost: boost, foldedNotes: nil, displayedTitle: displayedTitle)
+    }
+
+    /// Pre-folded, bounded note text is inspected only after title/path miss.
+    /// Both labels are required to retain existing trailing-title call forms.
+    public func search(
+        _ query: String,
+        boost: ((GrokSession) -> Int)?,
+        foldedNotes: ((GrokSession) -> String?)?,
+        displayedTitle: ((GrokSession) -> String)? = nil
+    ) -> [GrokSession] {
         SessionScanner.search(
-            query, sessions: sessions, keys: searchKeys, boost: boost, displayedTitle: displayedTitle)
+            query, sessions: sessions, keys: searchKeys, boost: boost, displayedTitle: displayedTitle,
+            foldedNotes: foldedNotes)
     }
 
     /// Walks `root` off the main actor. Cache hits skip JSON decoding.

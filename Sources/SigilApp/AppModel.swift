@@ -179,6 +179,7 @@ final class AppModel {
         self.kimiKeyStore =
             kimiKeyStore ?? (Self.isRunningAutomatedTests ? InMemoryKimiKeyStore() : KeychainKimiKeyStore())
         hasKimiAPIKey = self.kimiKeyStore.load() != nil
+        self.panel.notesStore.prepareSearch(for: store.sessions)
         chooseInitialProviderIfReady()
         providerChecks.didFinishChecks = { [weak self] in
             guard let self, self.checkingProviders.isEmpty else { return }
@@ -353,6 +354,7 @@ final class AppModel {
     }
 
     private func sidebarSessions(index: SidebarIndex) -> [GrokSession] {
+        panel.notesStore.prepareSearch(for: store.sessions)
         let boost: ((GrokSession) -> Int)?
         if SidebarOrganization.isSearching(searchText) {
             let openKeys = Set(
@@ -373,8 +375,12 @@ final class AppModel {
         } else {
             boost = nil
         }
-        var result = store.search(searchText, boost: boost) { self.title(for: $0, in: index) }
-            .filter { passesSidebarFilters($0, in: index) }
+        var result = store.search(
+            searchText, boost: boost, foldedNotes: { self.panel.notesStore.foldedNote(for: $0.reference) }
+        ) {
+            self.title(for: $0, in: index)
+        }
+        .filter { passesSidebarFilters($0, in: index) }
         if !SidebarOrganization.isSearching(searchText) {
             if sidebarSurface == .archived {
                 result = result.filter { isArchived($0, in: index) }
@@ -903,6 +909,7 @@ final class AppModel {
         var showOtherAppSessions: Bool
         var sigilConversations: [String]
         var tabs: [SidebarTabIdentity]
+        var notesGeneration: UInt64
     }
 
     private struct SidebarTabIdentity: Equatable {
@@ -912,7 +919,8 @@ final class AppModel {
     }
 
     private func sidebarInputs() -> SidebarInputs {
-        SidebarInputs(
+        panel.notesStore.prepareSearch(for: store.sessions)
+        return SidebarInputs(
             sessions: store.sessions,
             searchText: searchText,
             focusedProjectPath: settings.focusedProjectPath,
@@ -926,7 +934,8 @@ final class AppModel {
             showSubagentSessions: settings.showSubagentSessions,
             showOtherAppSessions: settings.showOtherAppSessions,
             sigilConversations: settings.sigilConversations,
-            tabs: tabs.map { SidebarTabIdentity(id: $0.id, sessionID: $0.sessionID, cwd: $0.workingDirectory.path) }
+            tabs: tabs.map { SidebarTabIdentity(id: $0.id, sessionID: $0.sessionID, cwd: $0.workingDirectory.path) },
+            notesGeneration: panel.notesStore.searchGeneration
         )
     }
 
@@ -1063,6 +1072,7 @@ final class AppModel {
         canonicalPathCache.removeAll(keepingCapacity: true)
         invalidateEphemeralPathCache()
         sidebarFilesystemGeneration &+= 1
+        panel.notesStore.invalidateSearchPaths()
     }
 
     private func buildSidebarSnapshot() -> SidebarSnapshot {
@@ -1233,6 +1243,7 @@ final class AppModel {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 if !self.store.isLoading {
+                    self.panel.notesStore.prepareSearch(for: self.store.sessions)
                     self.seedSigilConversations()
                     self.recordStartedCodexSessions()
                     self.pruneMissingPins()

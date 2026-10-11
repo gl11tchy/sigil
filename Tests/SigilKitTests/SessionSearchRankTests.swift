@@ -81,8 +81,48 @@ struct SessionSearchRankTests {
             displayedTitle: { _ in
                 Issue.record("Empty query evaluated title")
                 return "Lim"
+            },
+            foldedNotes: { _ in
+                Issue.record("Empty query evaluated note")
+                return "lim"
             })
         #expect(found == rows)
+    }
+
+    @Test func everyTitleAndPathRankBeatsBoostedNotesAndNoteTiesKeepTheSharedOrder() {
+        let rows = [
+            rankedSession("note", "Weekly", updated: 100),
+            rankedSession("pin", "Weekly", updated: 90),
+            rankedSession("open", "Weekly", updated: 1),
+            rankedSession("path", "Weekly", updated: 2, cwd: "/generated/lim"),
+            rankedSession("middle", "Climbing", updated: 3),
+            rankedSession("word", "Rate limiter", updated: 4),
+            rankedSession("prefix", "Limiter", updated: 5),
+            rankedSession("exact", "Lim", updated: 6),
+        ]
+        let boosts = ["open": 3, "pin": 2]
+        let found = SessionScanner.search(
+            "lim", sessions: rows, keys: SessionScanner.searchKeys(for: rows),
+            boost: { boosts[$0.id] ?? 0 }, foldedNotes: { _ in "lim" })
+        #expect(found.map(\.id) == ["exact", "prefix", "word", "middle", "path", "open", "pin", "note"])
+        let withoutNotes = SessionScanner.search("lim", sessions: rows, keys: SessionScanner.searchKeys(for: rows))
+        #expect(withoutNotes == Array(found.prefix(5)))
+        let partial = SessionScanner.search(
+            "lim zirconia", sessions: rows, keys: SessionScanner.searchKeys(for: rows),
+            foldedNotes: { _ in "lim" })
+        #expect(partial.isEmpty)
+    }
+
+    @Test func storeNotesOverloadPreservesTrailingTitleAndPhoneTitlePathOnlySearch() async throws {
+        let harness = try RankHarness()
+        defer { harness.tearDown() }
+        try harness.write(id: "note", cwd: "/work/project", title: "Weekly", updated: "2026-01-01T00:00:00Z")
+        await harness.store.scan(ignoringCache: false)
+        #expect(harness.store.search("zirconia").isEmpty)
+        let noteText: (GrokSession) -> String? = { _ in "zirconia" }
+        let found = harness.store.search("zirconia", boost: nil, foldedNotes: noteText) { $0.summary }
+        #expect(found.count == 1)
+        #expect(harness.store.search("weekly") { $0.summary }.count == 1)
     }
 
     @Test func wordStartBeatsANewerMiddleHitThroughTheStore() async throws {
