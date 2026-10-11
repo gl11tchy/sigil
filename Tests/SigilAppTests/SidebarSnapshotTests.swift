@@ -9,6 +9,83 @@ import os
 @Suite(.serialized)
 @MainActor
 struct SidebarSnapshotTests {
+    @Test func searchCategoriesAndTheirCacheInputsChangeOrderImmediately() async throws {
+        let fixture = try ModelFixture()
+        defer {
+            fixture.store.stop()
+            fixture.cleanup()
+        }
+        fixture.settings.showWorktreeSessions = true
+        let openFolder = try fixture.directory("search-open")
+        let focusedFolder = try fixture.directory("search-focused")
+        let otherFolder = try fixture.directory("search-other")
+        for (id, folder, month) in [
+            ("open", openFolder, "01"), ("pin", otherFolder, "02"),
+            ("project", focusedFolder, "03"), ("other", otherFolder, "06"),
+        ] {
+            try fixture.writeListedSession(
+                id: id, cwd: folder.path, summary: "Lim", updatedAt: "2026-\(month)-01T00:00:00Z")
+        }
+        await fixture.store.reload()
+        let model = snapshotModel(fixture, clock: SnapshotClock())
+        defer { model.closeAllTabsAndWait() }
+        let open = try #require(fixture.store.sessions.first { $0.id == "open" })
+        let pin = try #require(fixture.store.sessions.first { $0.id == "pin" })
+        let project = try #require(model.sidebarProjects.first { $0.name == "search-focused" })
+        model.openRecents()
+        model.searchText = "lim"
+
+        func expectRows(_ ids: [String]) {
+            let snapshot = model.eventSidebarSnapshot()
+            #expect(snapshot.listKind == .search)
+            #expect(snapshot.listed.map(\.id) == ids)
+            #expect(snapshot.rowIDs == snapshot.listed.map(model.sessionKey))
+            _ = model.sidebarSnapshot()
+        }
+        func change(_ mutation: () -> Void, expecting ids: [String]) {
+            let count = model.sidebarSnapshotBuildCount
+            mutation()
+            expectRows(ids)
+            #expect(model.sidebarSnapshotBuildCount == count + 1)
+        }
+
+        expectRows(["other", "project", "pin", "open"])
+        change({ model.openProject(project) }, expecting: ["project", "other", "pin", "open"])
+        change({ model.pin(pin) }, expecting: ["pin", "project", "other", "open"])
+        let count = model.sidebarSnapshotBuildCount
+        let tab = try #require(model.newTab(in: openFolder))
+        // Cwd alone is never an open-conversation identity.
+        expectRows(["pin", "project", "other", "open"])
+        #expect(model.sidebarSnapshotBuildCount == count + 1)
+        change(
+            {
+                tab.learnedSessionReference = .init(provider: .codex, sessionID: "open", cwd: openFolder.path)
+            }, expecting: ["pin", "project", "other", "open"])
+        change(
+            {
+                tab.learnedSessionReference = .init(provider: .grokBuild, sessionID: "open", cwd: openFolder.path)
+            }, expecting: ["open", "pin", "project", "other"])
+        change({ model.pin(open) }, expecting: ["open", "pin", "project", "other"])
+
+        let second = try #require(model.newTab(in: otherFolder))
+        expectRows(["open", "pin", "project", "other"])
+        // Both are open: the older one's pin adds nothing to that category.
+        change(
+            {
+                second.learnedSessionReference = .init(provider: .grokBuild, sessionID: "other", cwd: otherFolder.path)
+            }, expecting: ["other", "open", "pin", "project"])
+        change({ model.leaveProject() }, expecting: ["other", "open", "pin", "project"])
+        change({ tab.learnedSessionReference = nil }, expecting: ["other", "pin", "open", "project"])
+        change({ model.unpin(open) }, expecting: ["other", "pin", "project", "open"])
+        let beforeEmpty = model.sidebarSnapshotBuildCount
+        model.openRecents()
+        model.searchText = " \n "
+        let empty = model.eventSidebarSnapshot()
+        #expect(empty.listKind == .recents)
+        #expect(empty.sessions.map(\.id) == ["other", "project", "pin", "open"])
+        #expect(model.sidebarSnapshotBuildCount == beforeEmpty + 1)
+    }
+
     @Test func rendersAndEventsReuseOneSnapshotUntilTheInjectedDeadline() async throws {
         let fixture = try ModelFixture()
         defer {

@@ -353,7 +353,27 @@ final class AppModel {
     }
 
     private func sidebarSessions(index: SidebarIndex) -> [GrokSession] {
-        var result = store.search(searchText) { self.title(for: $0, in: index) }
+        let boost: ((GrokSession) -> Int)?
+        if SidebarOrganization.isSearching(searchText) {
+            let openKeys = Set(
+                tabs.compactMap { tab -> String? in
+                    guard let sessionID = tab.sessionID else { return nil }
+                    return sessionID + "\u{0}" + canonicalPath(tab.workingDirectory.path)
+                })
+            let pins = ConversationIndex(settings.pinnedConversations, sessionID: \.sessionID, cwd: \.cwd)
+            let path = settings.focusedProjectPath
+            let focused = path.hasPrefix("/") ? canonicalPath(path) : nil
+            boost = { session in
+                // One category wins; an open pinned chat gets no additive boost.
+                if openKeys.contains(self.sessionKey(session)) { return 3 }
+                if pins.contains(sessionID: session.id, cwd: session.cwd, samePath: self.samePath) { return 2 }
+                if let focused, self.inProject(session.cwd, focused) { return 1 }
+                return 0
+            }
+        } else {
+            boost = nil
+        }
+        var result = store.search(searchText, boost: boost) { self.title(for: $0, in: index) }
             .filter { passesSidebarFilters($0, in: index) }
         if !SidebarOrganization.isSearching(searchText) {
             if sidebarSurface == .archived {

@@ -268,6 +268,14 @@ only when an isolated index location is explicitly injected.
 The scanner keeps metadata and display fields, not full transcripts. Oversized or
 unsupported records can still require a folder fallback.
 Search covers discovered titles and project paths, not every transcript message.
+For a nonempty query, results rank exact title, title prefix, every query term at
+a folded Unicode word start, title contains, then folder/path. Within that rank,
+one category wins: open conversation, pinned, focused project, then other; newer
+activity follows, with provider, native ID and cwd breaking final ties. A stronger
+match always beats a weaker boosted match. Search remains global inside a project;
+substring highlighting is unchanged. Empty queries keep the published newest-first
+list without evaluating titles or boosts. This is the shared search contract for
+the [workbench rail search (REA-1256)](https://linear.app/reasonable-glyph/issue/REA-1256/give-the-workbench-rail-a-search-field-before-it-replaces-the-sidebar).
 Subagent directories are excluded. Cached entries survive read errors and
 unrecognized rewrites. Native transcripts are never rewritten or deleted.
 

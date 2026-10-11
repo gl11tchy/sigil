@@ -359,31 +359,18 @@ public final class SessionStore {
     }
 
     /// Sessions whose title, project name, `~` path, or cwd match `query`.
-    /// Closest title first, then newer activity. An empty or whitespace-only
+    /// Closest title first, then higher `boost`, then newer activity. An empty or whitespace-only
     /// query returns every session, newest first, without evaluating
-    /// `displayedTitle`. Pass `displayedTitle` so a user-chosen name is
+    /// `displayedTitle` or `boost`. Pass `displayedTitle` so a user-chosen name is
     /// searched; the CLI summary still matches after a rename.
     /// Does not read a transcript.
     public func search(
         _ query: String,
+        boost: ((GrokSession) -> Int)? = nil,
         displayedTitle: ((GrokSession) -> String)? = nil
     ) -> [GrokSession] {
-        guard let query = SessionScanner.SearchQuery(query) else { return sessions }
-        return zip(sessions, searchKeys).compactMap { session, key -> (GrokSession, SessionScanner.SearchRank)? in
-            guard
-                let rank = SessionScanner.searchRank(
-                    key,
-                    query: query,
-                    displayedTitle: displayedTitle?(session)
-                )
-            else { return nil }
-            return (session, rank)
-        }
-        .sorted { lhs, rhs in
-            if lhs.1.rawValue != rhs.1.rawValue { return lhs.1.rawValue < rhs.1.rawValue }
-            return SessionScanner.isNewer(lhs.0, rhs.0)
-        }
-        .map(\.0)
+        SessionScanner.search(
+            query, sessions: sessions, keys: searchKeys, boost: boost, displayedTitle: displayedTitle)
     }
 
     /// Walks `root` off the main actor. Cache hits skip JSON decoding.
