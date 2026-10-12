@@ -708,3 +708,28 @@ bound existing title closures to the defaulted boost parameter. The fix retains
 the original public search signature and adds a required-label boost overload;
 all original callers and assertions stay intact. Real Store/AppTests await the
 corrected exact-head run. No denied local build or extra worker was used.
+
+## REA-1350: sidebar divider capture and background dragging
+
+The current-main generated fixture reproduced moving local-coordinate feedback
+and competing server-side window dragging. The shared 9-point seam now captures
+on mouse-down with stable screen-coordinate NSEvent deltas and immediate reversal
+at physical width caps. The existing geometry solver, persisted width, keyboard
+and AX steps remain. Native background gestures preserve window movement outside
+the seams without the server-side capture that competed with them.
+
+The final current-source native run passed all 66 drag samples across the first
+trace and nine matrix cases, with stationary windows. Both hit-target edges,
+bounds, utility panel, 900/760 window sizes, hide/show, focused keyboard input,
+AX adjustment and verified fresh-process width 220 persistence passed. All three
+background regions moved: header 30 and sidebar text regions 20 for a 30-point
+pointer path. [The QA record](../qa/rea-1350.md) includes this difference, source
+provenance, screenshots and limits; earlier prototypes are not final evidence.
+
+The app-only debug build, strict signature verification, four-file strict Swift
+formatting and diff check passed. Nine AppTests are written for CI only; the
+previous local compilation rejection was honored. Exact-head CI and parent
+personal diff/native review remain required before merge. No personal histories,
+process enumeration, denied process reads, daily-app replacement or next-ticket
+work occurred. Retired task debug apps received normal quit requests only after
+fresh matching LaunchServices callbacks. REA-1351 remains separate.

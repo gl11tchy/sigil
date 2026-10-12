@@ -221,12 +221,14 @@ private struct ShellEndedRow: View {
 /// focus shows an accent bar.
 struct PanelDivider: View {
     @Binding var width: Double
+    var maximumWidth: Double = RightPanel.maxWidth
     @Environment(\.palette) private var palette
-    @State private var widthAtDragStart: Double?
     @FocusState private var isFocused: Bool
 
+    private var limits: ClosedRange<Double> { min(RightPanel.minWidth, maximumWidth)...maximumWidth }
+
     private func clamp(_ value: Double) -> Double {
-        min(RightPanel.maxWidth, max(RightPanel.minWidth, value))
+        min(limits.upperBound, max(limits.lowerBound, value))
     }
 
     var body: some View {
@@ -240,23 +242,11 @@ struct PanelDivider: View {
                 }
             }
             .overlay {
-                Color.clear
+                DividerDragHandle(width: $width, limits: limits, direction: .left) { isFocused = true }
                     .frame(width: 9)
-                    .contentShape(Rectangle())
-                    .onHover { inside in
-                        if inside { NSCursor.resizeLeftRight.set() } else { NSCursor.arrow.set() }
-                    }
-                    .gesture(
-                        DragGesture(minimumDistance: 1)
-                            .onChanged { value in
-                                let base = widthAtDragStart ?? width
-                                widthAtDragStart = base
-                                width = clamp(base - value.translation.width)
-                            }
-                            .onEnded { _ in widthAtDragStart = nil }
-                    )
+                    .accessibilityHidden(true)
             }
-            .focusable(interactions: .activate)
+            .focusable(interactions: .edit)
             .focused($isFocused)
             .onKeyPress(.leftArrow) {
                 width = clamp(width + 20)
