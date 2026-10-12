@@ -1,0 +1,500 @@
+{"executable":"\/Users\/exec\/Documents\/Codex\/2026-10-09\/task\/rea-1351-native-routing\/SigilR1351Routing.app\/Contents\/MacOS\/SigilR1351Routing","bundleID":"com.gl11tchy.sigil.rea1351.routing","ownedPID":38406}
+{"AXWindowRead":0}
+{"snapshot":"after-three-dark.png","disclosure":1}
+{"x":80,"height":640,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1351Routing","value":""}
+{"x":80,"height":640,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":318,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":955,"height":16,"id":"","role":"AXStaticText","y":104,"width":245,"label":"","value":"sigil-rea1351-routing-home\/project"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":214,"label":"Search conversations","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":272,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":272,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":272,"label":"Recents","value":"8 chats"}
+{"x":80,"height":422,"id":"","role":"AXScrollArea","y":264,"width":272,"label":"","value":""}
+{"x":80,"height":349,"id":"","role":"AXOpaqueProviderGroup","y":264,"width":272,"label":"","value":""}
+{"x":92,"height":30,"id":"sidebar-history-compatibility-notice","role":"AXStaticText","y":264,"width":216.5,"label":"","value":"Some history files are incomplete or unsupported. Details in Settings."}
+{"x":92,"height":24,"id":"sidebar-history-compatibility-notice","role":"AXButton","y":298,"width":179,"label":"History details in Settings","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":357,"width":272,"label":"Generated conversation 08, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":389,"width":272,"label":"Generated conversation 07, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":421,"width":272,"label":"Generated conversation 06, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":453,"width":272,"label":"Generated conversation 05, project, 10 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":485,"width":272,"label":"Generated conversation 04, project, 10 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":517,"width":272,"label":"Generated conversation 03, project, 10 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":549,"width":272,"label":"Generated conversation 02, project, 10 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":581,"width":272,"label":"Generated conversation 01, project, 10 hours ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":338,"width":37,"label":"Today, 8","value":""}
+{"x":471.5,"height":139,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":313,"width":680,"label":"","value":""}
+{"x":471.5,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":313,"width":103.5,"label":"Claude Code","value":"Available"}
+{"x":587,"height":139,"id":"new-session-codex","role":"AXButton","y":313,"width":103,"label":"Codex","value":"Available"}
+{"x":702,"height":139,"id":"new-session-devin","role":"AXButton","y":313,"width":103.5,"label":"Devin","value":"Unavailable"}
+{"x":817.5,"height":139,"id":"new-session-cursor","role":"AXButton","y":313,"width":103.5,"label":"Cursor","value":"Unavailable"}
+{"x":933,"height":139,"id":"new-session-kimi","role":"AXButton","y":313,"width":103,"label":"Kimi Code","value":"Unavailable"}
+{"x":1048,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":313,"width":103.5,"label":"Grok Build","value":"Available"}
+{"x":697.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":485,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":784.25,"height":15,"id":"new-session-surface","role":"AXButton","y":508,"width":54.5,"label":"Options…","value":""}
+{"x":88,"height":26,"id":"sidebar-compatibility-disclosure","role":"AXButton","y":686,"width":256,"label":"Compatibility details","value":"3 CLIs are newer than checked versions. Details hidden."}
+{"x":348,"height":640,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":585.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":606,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":1074.5,"height":20,"id":"","role":"AXButton","y":606,"width":85,"label":"one (fixture)","value":""}
+{"x":1167.5,"height":20,"id":"","role":"AXButton","y":606,"width":90.5,"label":"three (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":632,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":1110,"height":20,"id":"","role":"AXButton","y":632,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":658,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":658,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":14,"id":"","role":"AXCheckBox","y":684,"width":142,"label":"Reduce Motion (fixture)","value":0}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"after-three-dark.png","windowID":3393,"exit":0}
+{"flags":1048576,"ownedKeyCode":43}
+{"snapshot":"ordinary-settings-appearance.png","disclosure":0}
+{"x":486,"height":708,"id":"com_apple_SwiftUI_Settings_window","role":"AXWindow","y":154,"width":540,"label":"Appearance","value":""}
+{"x":486,"height":708,"id":"","role":"AXGroup","y":154,"width":540,"label":"","value":""}
+{"x":486,"height":620,"id":"","role":"AXScrollArea","y":242,"width":540,"label":"","value":""}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":262,"width":41.5,"label":"Theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":297,"width":111.5,"label":"Sigil Dark theme","value":""}
+{"x":639.5,"height":65,"id":"","role":"AXButton","y":297,"width":111.5,"label":"Sigil Light theme","value":""}
+{"x":761,"height":65,"id":"","role":"AXButton","y":297,"width":111.5,"label":"Grok Night theme","value":""}
+{"x":882.5,"height":65,"id":"","role":"AXButton","y":297,"width":111.5,"label":"Grok Day theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":372,"width":111.5,"label":"Grok Ember theme","value":""}
+{"x":639.5,"height":65,"id":"","role":"AXButton","y":372,"width":111.5,"label":"GitHub theme","value":""}
+{"x":761,"height":65,"id":"","role":"AXButton","y":372,"width":111.5,"label":"Linear theme","value":""}
+{"x":882.5,"height":65,"id":"","role":"AXButton","y":372,"width":111.5,"label":"Notion theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":447,"width":111.5,"label":"Discord theme","value":""}
+{"x":639.5,"height":65,"id":"","role":"AXButton","y":447,"width":111.5,"label":"Slack theme","value":""}
+{"x":761,"height":65,"id":"","role":"AXButton","y":447,"width":111.5,"label":"Spotify theme","value":""}
+{"x":882.5,"height":65,"id":"","role":"AXButton","y":447,"width":111.5,"label":"VS Code theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":522,"width":111.5,"label":"Cursor theme","value":""}
+{"x":639.5,"height":65,"id":"","role":"AXButton","y":522,"width":111.5,"label":"X theme","value":""}
+{"x":761,"height":65,"id":"","role":"AXButton","y":522,"width":111.5,"label":"Raycast theme","value":""}
+{"x":882.5,"height":65,"id":"","role":"AXButton","y":522,"width":111.5,"label":"ChatGPT theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":597,"width":111.5,"label":"Figma theme","value":""}
+{"x":639.5,"height":65,"id":"","role":"AXButton","y":597,"width":111.5,"label":"macOS theme","value":""}
+{"x":761,"height":65,"id":"","role":"AXButton","y":597,"width":111.5,"label":"Obsidian theme","value":""}
+{"x":882.5,"height":65,"id":"","role":"AXButton","y":597,"width":111.5,"label":"Telegram theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":672,"width":111.5,"label":"Twitch theme","value":""}
+{"x":510,"height":32,"id":"","role":"AXStaticText","y":757,"width":492,"label":"","value":"Terminal themes apply to the window. Installed Grok keeps its own CLI appearance; an optional themed Grok build also receives the window palette."}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":809,"width":52,"label":"Terminal","value":""}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":844,"width":54,"label":"","value":"Font size"}
+{"x":764,"height":16,"id":"","role":"AXSlider","y":844,"width":180,"label":"","value":0.20833333333333334}
+{"x":797.5,"height":16,"id":"","role":"AXValueIndicator","y":844,"width":20,"label":"","value":0.20833333333333334}
+{"x":958,"height":16,"id":"","role":"AXStaticText","y":844,"width":36,"label":"","value":"13 pt"}
+{"x":1008,"height":614.5,"id":"","role":"AXScrollBar","y":241,"width":19,"label":"","value":0}
+{"x":1017,"height":581.5,"id":"","role":"AXValueIndicator","y":245,"width":6,"label":"","value":0}
+{"x":1009,"height":0,"id":"","role":"AXButton","y":242,"width":0,"label":"","value":""}
+{"x":1009,"height":0,"id":"","role":"AXButton","y":242,"width":0,"label":"","value":""}
+{"x":1017,"height":24.5,"id":"","role":"AXButton","y":827,"width":6,"label":"","value":""}
+{"x":1017,"height":0,"id":"","role":"AXButton","y":245,"width":6,"label":"","value":""}
+{"x":486,"height":56,"id":"","role":"AXToolbar","y":186,"width":540,"label":"","value":""}
+{"x":662.5,"height":56,"id":"","role":"AXButton","y":186,"width":75,"label":"Appearance","value":""}
+{"x":738.5,"height":56,"id":"","role":"AXButton","y":186,"width":55,"label":"General","value":""}
+{"x":794.5,"height":56,"id":"","role":"AXButton","y":186,"width":55,"label":"Remote","value":""}
+{"x":494,"height":16,"id":"","role":"AXButton","y":162,"width":16,"label":"","value":""}
+{"x":540,"height":16,"id":"","role":"AXButton","y":162,"width":16,"label":"","value":""}
+{"x":541,"height":14,"id":"","role":"AXGroup","y":163,"width":14,"label":"","value":""}
+{"x":541,"height":14,"id":"","role":"AXGroup","y":163,"width":14,"label":"","value":""}
+{"x":517,"height":16,"id":"","role":"AXButton","y":162,"width":16,"label":"","value":""}
+{"x":715,"height":16,"id":"","role":"AXStaticText","y":161,"width":82,"label":"","value":"Appearance"}
+{"capture":"ordinary-settings-appearance.png","windowID":3402,"exit":0}
+{"ordinaryFirstOpenAppearance":true}
+{"closeOwnedWindow":0}
+{"press":"History details in Settings","result":0}
+{"settingsStage":"incomplete-history-link","GeneralSelected":true,"GeneralContentExported":true}
+{"snapshot":"history-settings-general.png","disclosure":0}
+{"x":486,"height":708,"id":"com_apple_SwiftUI_Settings_window","role":"AXWindow","y":154,"width":540,"label":"General","value":""}
+{"x":486,"height":708,"id":"","role":"AXGroup","y":154,"width":540,"label":"","value":""}
+{"x":486,"height":620,"id":"settings-general","role":"AXScrollArea","y":242,"width":540,"label":"","value":""}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":262,"width":83,"label":"New sessions","value":""}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":297,"width":67,"label":"","value":"Default CLI"}
+{"x":868.5,"height":24,"id":"","role":"AXPopUpButton","y":293,"width":125.5,"label":"Default CLI","value":"Claude Code"}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":338,"width":139.5,"label":"","value":"Start in a new worktree"}
+{"x":950,"height":20,"id":"","role":"AXCheckBox","y":336,"width":44,"label":"Start in a new worktree","value":1}
+{"x":510,"height":32,"id":"","role":"AXStaticText","y":374,"width":471.5,"label":"","value":"In a git repository, a new session gets its own worktree and branch. Turn this off to work in the project folder."}
+{"x":510,"height":15,"id":"settings-clis","role":"AXHeading","y":426,"width":26.5,"label":"CLIs","value":""}
+{"x":518,"height":15,"id":"settings-clis","role":"AXStaticText","y":467.5,"width":62,"label":"","value":"Availability"}
+{"x":892.5,"height":28,"id":"settings-clis","role":"AXButton","y":461,"width":101.5,"label":"Check Again","value":""}
+{"x":518,"height":68,"id":"settings-clis","role":"AXUnknown","y":514,"width":461,"label":"Claude Code, \/tmp\/sigil-rea1351-routing-home\/bin\/claude, 2.1.296, Claude Code 2.1.296 is newer than Sigil checked (2.1.283). History and turn state are best effort.","value":""}
+{"x":518,"height":68,"id":"settings-clis","role":"AXUnknown","y":607,"width":461.5,"label":"Codex, \/tmp\/sigil-rea1351-routing-home\/bin\/codex, 0.160.0, Codex 0.160.0 is newer than Sigil checked (0.157.1). History and turn state are best effort.","value":""}
+{"x":518,"height":34,"id":"settings-clis","role":"AXStaticText","y":700,"width":241.5,"label":"","value":"Devin, Unavailable, Not installed in fixture"}
+{"x":518,"height":34,"id":"settings-clis","role":"AXStaticText","y":759,"width":241.5,"label":"","value":"Cursor, Unavailable, Not installed in fixture"}
+{"x":518,"height":34,"id":"settings-clis","role":"AXStaticText","y":818,"width":241.5,"label":"","value":"Kimi Code, Unavailable, Not installed in fixture"}
+{"x":518,"height":68,"id":"settings-clis","role":"AXUnknown","y":877,"width":476,"label":"Grok Build, \/tmp\/sigil-rea1351-routing-home\/bin\/grok, 1.0.50, Grok Build 1.0.50 is newer than Sigil checked (1.0.40). History and turn state are best effort.","value":""}
+{"x":510,"height":32,"id":"settings-clis","role":"AXStaticText","y":965,"width":471.5,"label":"","value":"Checks paths and versions. Kimi API keys are configured below; other sign-ins are managed by each CLI."}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":1017,"width":51.5,"label":"Grok CLI","value":""}
+{"x":518,"height":15,"id":"","role":"AXStaticText","y":1058.5,"width":110.5,"label":"","value":"Custom executable"}
+{"x":859,"height":28,"id":"","role":"AXButton","y":1052,"width":135,"label":"Use Installed Grok","value":""}
+{"x":528,"height":16,"id":"","role":"AXTextField","y":1092,"width":365,"label":"Grok CLI path","value":"\/tmp\/sigil-rea1351-routing-home\/bin\/grok"}
+{"x":911,"height":28,"id":"","role":"AXButton","y":1086,"width":83,"label":"Choose…","value":""}
+{"x":519,"height":11,"id":"checkmark.circle.fill","role":"AXImage","y":1122,"width":11,"label":"Selected","value":""}
+{"x":537,"height":15,"id":"","role":"AXStaticText","y":1120,"width":34.5,"label":"","value":"1.0.50"}
+{"x":518,"height":30,"id":"","role":"AXStaticText","y":1141,"width":437.5,"label":"","value":"This choice stays until you change it. Use Installed Grok returns to your login shell's grok."}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1196,"width":84,"label":"","value":"Default model"}
+{"x":831,"height":24,"id":"","role":"AXPopUpButton","y":1192,"width":163,"label":"Default model","value":"CLI default"}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1237,"width":79.5,"label":"","value":"Default effort"}
+{"x":880.5,"height":24,"id":"","role":"AXPopUpButton","y":1233,"width":113.5,"label":"Default effort","value":"CLI default"}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":1285,"width":61.5,"label":"Kimi Code","value":""}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1320,"width":69.5,"label":"","value":"Sign in with"}
+{"x":797,"height":24,"id":"","role":"AXRadioGroup","y":1316,"width":197,"label":"Sign in with","value":""}
+{"x":797,"height":24,"id":"","role":"AXRadioButton","y":1316,"width":98.5,"label":"Kimi account","value":1}
+{"x":896.5,"height":24,"id":"","role":"AXRadioButton","y":1316,"width":97.5,"label":"API key","value":0}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1361,"width":50.5,"label":"","value":"Account"}
+{"x":814.5,"height":11,"id":"circle.dashed","role":"AXImage","y":1363.5,"width":11,"label":"Circular Selection","value":""}
+{"x":832.5,"height":15,"id":"","role":"AXStaticText","y":1361.5,"width":76,"label":"","value":"Not signed in"}
+{"x":916.5,"height":26,"id":"","role":"AXButton","y":1356,"width":77.5,"label":"Sign In…","value":""}
+{"x":510,"height":32,"id":"","role":"AXStaticText","y":1397,"width":490.5,"label":"","value":"A Kimi account uses your Kimi Code plan. An API key comes from platform.kimi.ai and stays in the Keychain. Applies to Kimi tabs opened after this change."}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":1449,"width":46.5,"label":"Sidebar","value":""}
+{"x":518,"height":30,"id":"settings-history-compatibility-notice","role":"AXStaticText","y":1484,"width":474,"label":"","value":"Grok history: 1 session summary file(s) are missing, incomplete or unsupported. Saved conversations are kept."}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1539,"width":177,"label":"","value":"Show one-message sessions"}
+{"x":950,"height":20,"id":"","role":"AXCheckBox","y":1537,"width":44,"label":"Show one-message sessions","value":0}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1580,"width":147,"label":"","value":"Show worktree sessions"}
+{"x":950,"height":20,"id":"","role":"AXCheckBox","y":1578,"width":44,"label":"Show worktree sessions","value":1}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1621,"width":150,"label":"","value":"Show subagent sessions"}
+{"x":950,"height":20,"id":"","role":"AXCheckBox","y":1619,"width":44,"label":"Show subagent sessions","value":0}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1662,"width":170,"label":"","value":"Show chats from other apps"}
+{"x":950,"height":20,"id":"","role":"AXCheckBox","y":1660,"width":44,"label":"Show chats from other apps","value":1}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":1710,"width":57.5,"label":"Keyboard","value":""}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1745,"width":143.5,"label":"","value":"Use Option as Meta key"}
+{"x":950,"height":20,"id":"","role":"AXCheckBox","y":1743,"width":44,"label":"Use Option as Meta key","value":0}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":1793,"width":29,"label":"Tabs","value":""}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1828,"width":175,"label":"","value":"Let tabs message each other"}
+{"x":950,"height":20,"id":"","role":"AXCheckBox","y":1826,"width":44,"label":"Let tabs message each other","value":0}
+{"x":510,"height":15,"id":"","role":"AXStaticText","y":1864,"width":233,"label":"","value":"Applies to tabs opened after this change."}
+{"x":1008,"height":614.5,"id":"","role":"AXScrollBar","y":241,"width":19,"label":"","value":0}
+{"x":1017,"height":246,"id":"","role":"AXValueIndicator","y":245,"width":6,"label":"","value":0}
+{"x":1009,"height":0,"id":"","role":"AXButton","y":242,"width":0,"label":"","value":""}
+{"x":1009,"height":0,"id":"","role":"AXButton","y":242,"width":0,"label":"","value":""}
+{"x":1017,"height":360,"id":"","role":"AXButton","y":491.5,"width":6,"label":"","value":""}
+{"x":1017,"height":0,"id":"","role":"AXButton","y":245,"width":6,"label":"","value":""}
+{"x":486,"height":56,"id":"","role":"AXToolbar","y":186,"width":540,"label":"","value":""}
+{"x":662.5,"height":56,"id":"","role":"AXButton","y":186,"width":75,"label":"Appearance","value":""}
+{"x":738.5,"height":56,"id":"","role":"AXButton","y":186,"width":55,"label":"General","value":""}
+{"x":794.5,"height":56,"id":"","role":"AXButton","y":186,"width":55,"label":"Remote","value":""}
+{"x":494,"height":16,"id":"","role":"AXButton","y":162,"width":16,"label":"","value":""}
+{"x":540,"height":16,"id":"","role":"AXButton","y":162,"width":16,"label":"","value":""}
+{"x":541,"height":14,"id":"","role":"AXGroup","y":163,"width":14,"label":"","value":""}
+{"x":541,"height":14,"id":"","role":"AXGroup","y":163,"width":14,"label":"","value":""}
+{"x":517,"height":16,"id":"","role":"AXButton","y":162,"width":16,"label":"","value":""}
+{"x":729,"height":16,"id":"","role":"AXStaticText","y":161,"width":55,"label":"","value":"General"}
+{"capture":"history-settings-general.png","windowID":3402,"exit":0}
+{"press":"Appearance","result":0}
+{"snapshot":"manually-selected-appearance.png","disclosure":0}
+{"x":486,"height":708,"id":"com_apple_SwiftUI_Settings_window","role":"AXWindow","y":154,"width":540,"label":"Appearance","value":""}
+{"x":486,"height":708,"id":"","role":"AXGroup","y":154,"width":540,"label":"","value":""}
+{"x":486,"height":620,"id":"","role":"AXScrollArea","y":242,"width":540,"label":"","value":""}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":262,"width":41.5,"label":"Theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":297,"width":111.5,"label":"Sigil Dark theme","value":""}
+{"x":639.5,"height":65,"id":"","role":"AXButton","y":297,"width":111.5,"label":"Sigil Light theme","value":""}
+{"x":761,"height":65,"id":"","role":"AXButton","y":297,"width":111.5,"label":"Grok Night theme","value":""}
+{"x":882.5,"height":65,"id":"","role":"AXButton","y":297,"width":111.5,"label":"Grok Day theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":372,"width":111.5,"label":"Grok Ember theme","value":""}
+{"x":639.5,"height":65,"id":"","role":"AXButton","y":372,"width":111.5,"label":"GitHub theme","value":""}
+{"x":761,"height":65,"id":"","role":"AXButton","y":372,"width":111.5,"label":"Linear theme","value":""}
+{"x":882.5,"height":65,"id":"","role":"AXButton","y":372,"width":111.5,"label":"Notion theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":447,"width":111.5,"label":"Discord theme","value":""}
+{"x":639.5,"height":65,"id":"","role":"AXButton","y":447,"width":111.5,"label":"Slack theme","value":""}
+{"x":761,"height":65,"id":"","role":"AXButton","y":447,"width":111.5,"label":"Spotify theme","value":""}
+{"x":882.5,"height":65,"id":"","role":"AXButton","y":447,"width":111.5,"label":"VS Code theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":522,"width":111.5,"label":"Cursor theme","value":""}
+{"x":639.5,"height":65,"id":"","role":"AXButton","y":522,"width":111.5,"label":"X theme","value":""}
+{"x":761,"height":65,"id":"","role":"AXButton","y":522,"width":111.5,"label":"Raycast theme","value":""}
+{"x":882.5,"height":65,"id":"","role":"AXButton","y":522,"width":111.5,"label":"ChatGPT theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":597,"width":111.5,"label":"Figma theme","value":""}
+{"x":639.5,"height":65,"id":"","role":"AXButton","y":597,"width":111.5,"label":"macOS theme","value":""}
+{"x":761,"height":65,"id":"","role":"AXButton","y":597,"width":111.5,"label":"Obsidian theme","value":""}
+{"x":882.5,"height":65,"id":"","role":"AXButton","y":597,"width":111.5,"label":"Telegram theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":672,"width":111.5,"label":"Twitch theme","value":""}
+{"x":510,"height":32,"id":"","role":"AXStaticText","y":757,"width":492,"label":"","value":"Terminal themes apply to the window. Installed Grok keeps its own CLI appearance; an optional themed Grok build also receives the window palette."}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":809,"width":52,"label":"Terminal","value":""}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":844,"width":54,"label":"","value":"Font size"}
+{"x":764,"height":16,"id":"","role":"AXSlider","y":844,"width":180,"label":"","value":0.20833333333333334}
+{"x":797.5,"height":16,"id":"","role":"AXValueIndicator","y":844,"width":20,"label":"","value":0.20833333333333334}
+{"x":958,"height":16,"id":"","role":"AXStaticText","y":844,"width":36,"label":"","value":"13 pt"}
+{"x":1008,"height":614.5,"id":"","role":"AXScrollBar","y":241,"width":19,"label":"","value":0}
+{"x":1017,"height":581.5,"id":"","role":"AXValueIndicator","y":245,"width":6,"label":"","value":0}
+{"x":1009,"height":0,"id":"","role":"AXButton","y":242,"width":0,"label":"","value":""}
+{"x":1009,"height":0,"id":"","role":"AXButton","y":242,"width":0,"label":"","value":""}
+{"x":1017,"height":24.5,"id":"","role":"AXButton","y":827,"width":6,"label":"","value":""}
+{"x":1017,"height":0,"id":"","role":"AXButton","y":245,"width":6,"label":"","value":""}
+{"x":486,"height":56,"id":"","role":"AXToolbar","y":186,"width":540,"label":"","value":""}
+{"x":662.5,"height":56,"id":"","role":"AXButton","y":186,"width":75,"label":"Appearance","value":""}
+{"x":738.5,"height":56,"id":"","role":"AXButton","y":186,"width":55,"label":"General","value":""}
+{"x":794.5,"height":56,"id":"","role":"AXButton","y":186,"width":55,"label":"Remote","value":""}
+{"x":494,"height":16,"id":"","role":"AXButton","y":162,"width":16,"label":"","value":""}
+{"x":540,"height":16,"id":"","role":"AXButton","y":162,"width":16,"label":"","value":""}
+{"x":541,"height":14,"id":"","role":"AXGroup","y":163,"width":14,"label":"","value":""}
+{"x":541,"height":14,"id":"","role":"AXGroup","y":163,"width":14,"label":"","value":""}
+{"x":517,"height":16,"id":"","role":"AXButton","y":162,"width":16,"label":"","value":""}
+{"x":715,"height":16,"id":"","role":"AXStaticText","y":161,"width":82,"label":"","value":"Appearance"}
+{"capture":"manually-selected-appearance.png","windowID":3402,"exit":0}
+{"closeOwnedWindow":0}
+{"press":"History details in Settings","result":0}
+{"settingsStage":"repeated-history-link","GeneralSelected":true,"GeneralContentExported":true}
+{"snapshot":"repeated-history-settings-general.png","disclosure":0}
+{"x":486,"height":708,"id":"com_apple_SwiftUI_Settings_window","role":"AXWindow","y":154,"width":540,"label":"General","value":""}
+{"x":486,"height":708,"id":"","role":"AXGroup","y":154,"width":540,"label":"","value":""}
+{"x":486,"height":620,"id":"settings-general","role":"AXScrollArea","y":242,"width":540,"label":"","value":""}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":262,"width":83,"label":"New sessions","value":""}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":297,"width":67,"label":"","value":"Default CLI"}
+{"x":868.5,"height":24,"id":"","role":"AXPopUpButton","y":293,"width":125.5,"label":"Default CLI","value":"Claude Code"}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":338,"width":139.5,"label":"","value":"Start in a new worktree"}
+{"x":950,"height":20,"id":"","role":"AXCheckBox","y":336,"width":44,"label":"Start in a new worktree","value":1}
+{"x":510,"height":32,"id":"","role":"AXStaticText","y":374,"width":471.5,"label":"","value":"In a git repository, a new session gets its own worktree and branch. Turn this off to work in the project folder."}
+{"x":510,"height":15,"id":"settings-clis","role":"AXHeading","y":426,"width":26.5,"label":"CLIs","value":""}
+{"x":518,"height":15,"id":"settings-clis","role":"AXStaticText","y":467.5,"width":62,"label":"","value":"Availability"}
+{"x":892.5,"height":28,"id":"settings-clis","role":"AXButton","y":461,"width":101.5,"label":"Check Again","value":""}
+{"x":518,"height":68,"id":"settings-clis","role":"AXUnknown","y":514,"width":461,"label":"Claude Code, \/tmp\/sigil-rea1351-routing-home\/bin\/claude, 2.1.296, Claude Code 2.1.296 is newer than Sigil checked (2.1.283). History and turn state are best effort.","value":""}
+{"x":518,"height":68,"id":"settings-clis","role":"AXUnknown","y":607,"width":461.5,"label":"Codex, \/tmp\/sigil-rea1351-routing-home\/bin\/codex, 0.160.0, Codex 0.160.0 is newer than Sigil checked (0.157.1). History and turn state are best effort.","value":""}
+{"x":518,"height":34,"id":"settings-clis","role":"AXStaticText","y":700,"width":241.5,"label":"","value":"Devin, Unavailable, Not installed in fixture"}
+{"x":518,"height":34,"id":"settings-clis","role":"AXStaticText","y":759,"width":241.5,"label":"","value":"Cursor, Unavailable, Not installed in fixture"}
+{"x":518,"height":34,"id":"settings-clis","role":"AXStaticText","y":818,"width":241.5,"label":"","value":"Kimi Code, Unavailable, Not installed in fixture"}
+{"x":518,"height":68,"id":"settings-clis","role":"AXUnknown","y":877,"width":476,"label":"Grok Build, \/tmp\/sigil-rea1351-routing-home\/bin\/grok, 1.0.50, Grok Build 1.0.50 is newer than Sigil checked (1.0.40). History and turn state are best effort.","value":""}
+{"x":510,"height":32,"id":"settings-clis","role":"AXStaticText","y":965,"width":471.5,"label":"","value":"Checks paths and versions. Kimi API keys are configured below; other sign-ins are managed by each CLI."}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":1017,"width":51.5,"label":"Grok CLI","value":""}
+{"x":518,"height":15,"id":"","role":"AXStaticText","y":1058.5,"width":110.5,"label":"","value":"Custom executable"}
+{"x":859,"height":28,"id":"","role":"AXButton","y":1052,"width":135,"label":"Use Installed Grok","value":""}
+{"x":528,"height":16,"id":"","role":"AXTextField","y":1092,"width":365,"label":"Grok CLI path","value":"\/tmp\/sigil-rea1351-routing-home\/bin\/grok"}
+{"x":911,"height":28,"id":"","role":"AXButton","y":1086,"width":83,"label":"Choose…","value":""}
+{"x":519,"height":11,"id":"checkmark.circle.fill","role":"AXImage","y":1122,"width":11,"label":"Selected","value":""}
+{"x":537,"height":15,"id":"","role":"AXStaticText","y":1120,"width":34.5,"label":"","value":"1.0.50"}
+{"x":518,"height":30,"id":"","role":"AXStaticText","y":1141,"width":437.5,"label":"","value":"This choice stays until you change it. Use Installed Grok returns to your login shell's grok."}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1196,"width":84,"label":"","value":"Default model"}
+{"x":831,"height":24,"id":"","role":"AXPopUpButton","y":1192,"width":163,"label":"Default model","value":"CLI default"}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1237,"width":79.5,"label":"","value":"Default effort"}
+{"x":880.5,"height":24,"id":"","role":"AXPopUpButton","y":1233,"width":113.5,"label":"Default effort","value":"CLI default"}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":1285,"width":61.5,"label":"Kimi Code","value":""}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1320,"width":69.5,"label":"","value":"Sign in with"}
+{"x":797,"height":24,"id":"","role":"AXRadioGroup","y":1316,"width":197,"label":"Sign in with","value":""}
+{"x":797,"height":24,"id":"","role":"AXRadioButton","y":1316,"width":98.5,"label":"Kimi account","value":1}
+{"x":896.5,"height":24,"id":"","role":"AXRadioButton","y":1316,"width":97.5,"label":"API key","value":0}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1361,"width":50.5,"label":"","value":"Account"}
+{"x":814.5,"height":11,"id":"circle.dashed","role":"AXImage","y":1363.5,"width":11,"label":"Circular Selection","value":""}
+{"x":832.5,"height":15,"id":"","role":"AXStaticText","y":1361.5,"width":76,"label":"","value":"Not signed in"}
+{"x":916.5,"height":26,"id":"","role":"AXButton","y":1356,"width":77.5,"label":"Sign In…","value":""}
+{"x":510,"height":32,"id":"","role":"AXStaticText","y":1397,"width":490.5,"label":"","value":"A Kimi account uses your Kimi Code plan. An API key comes from platform.kimi.ai and stays in the Keychain. Applies to Kimi tabs opened after this change."}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":1449,"width":46.5,"label":"Sidebar","value":""}
+{"x":518,"height":30,"id":"settings-history-compatibility-notice","role":"AXStaticText","y":1484,"width":474,"label":"","value":"Grok history: 1 session summary file(s) are missing, incomplete or unsupported. Saved conversations are kept."}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1539,"width":177,"label":"","value":"Show one-message sessions"}
+{"x":950,"height":20,"id":"","role":"AXCheckBox","y":1537,"width":44,"label":"Show one-message sessions","value":0}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1580,"width":147,"label":"","value":"Show worktree sessions"}
+{"x":950,"height":20,"id":"","role":"AXCheckBox","y":1578,"width":44,"label":"Show worktree sessions","value":1}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1621,"width":150,"label":"","value":"Show subagent sessions"}
+{"x":950,"height":20,"id":"","role":"AXCheckBox","y":1619,"width":44,"label":"Show subagent sessions","value":0}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1662,"width":170,"label":"","value":"Show chats from other apps"}
+{"x":950,"height":20,"id":"","role":"AXCheckBox","y":1660,"width":44,"label":"Show chats from other apps","value":1}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":1710,"width":57.5,"label":"Keyboard","value":""}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1745,"width":143.5,"label":"","value":"Use Option as Meta key"}
+{"x":950,"height":20,"id":"","role":"AXCheckBox","y":1743,"width":44,"label":"Use Option as Meta key","value":0}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":1793,"width":29,"label":"Tabs","value":""}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1828,"width":175,"label":"","value":"Let tabs message each other"}
+{"x":950,"height":20,"id":"","role":"AXCheckBox","y":1826,"width":44,"label":"Let tabs message each other","value":0}
+{"x":510,"height":15,"id":"","role":"AXStaticText","y":1864,"width":233,"label":"","value":"Applies to tabs opened after this change."}
+{"x":1008,"height":614.5,"id":"","role":"AXScrollBar","y":241,"width":19,"label":"","value":0}
+{"x":1017,"height":246,"id":"","role":"AXValueIndicator","y":245,"width":6,"label":"","value":0}
+{"x":1009,"height":0,"id":"","role":"AXButton","y":242,"width":0,"label":"","value":""}
+{"x":1009,"height":0,"id":"","role":"AXButton","y":242,"width":0,"label":"","value":""}
+{"x":1017,"height":360,"id":"","role":"AXButton","y":491.5,"width":6,"label":"","value":""}
+{"x":1017,"height":0,"id":"","role":"AXButton","y":245,"width":6,"label":"","value":""}
+{"x":486,"height":56,"id":"","role":"AXToolbar","y":186,"width":540,"label":"","value":""}
+{"x":662.5,"height":56,"id":"","role":"AXButton","y":186,"width":75,"label":"Appearance","value":""}
+{"x":738.5,"height":56,"id":"","role":"AXButton","y":186,"width":55,"label":"General","value":""}
+{"x":794.5,"height":56,"id":"","role":"AXButton","y":186,"width":55,"label":"Remote","value":""}
+{"x":494,"height":16,"id":"","role":"AXButton","y":162,"width":16,"label":"","value":""}
+{"x":540,"height":16,"id":"","role":"AXButton","y":162,"width":16,"label":"","value":""}
+{"x":541,"height":14,"id":"","role":"AXGroup","y":163,"width":14,"label":"","value":""}
+{"x":541,"height":14,"id":"","role":"AXGroup","y":163,"width":14,"label":"","value":""}
+{"x":517,"height":16,"id":"","role":"AXButton","y":162,"width":16,"label":"","value":""}
+{"x":729,"height":16,"id":"","role":"AXStaticText","y":161,"width":55,"label":"","value":"General"}
+{"capture":"repeated-history-settings-general.png","windowID":3402,"exit":0}
+{"closeOwnedWindow":0}
+{"press":"unsupported (fixture)","result":0}
+{"snapshot":"unsupported-installed-major.png","disclosure":0}
+{"x":80,"height":640,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1351Routing","value":""}
+{"x":80,"height":640,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":318,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":955,"height":16,"id":"","role":"AXStaticText","y":104,"width":245,"label":"","value":"sigil-rea1351-routing-home\/project"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"ellipsis","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":214,"label":"Search conversations","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":272,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":272,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":272,"label":"Recents","value":"8 chats"}
+{"x":80,"height":456,"id":"","role":"AXScrollArea","y":264,"width":272,"label":"","value":""}
+{"x":80,"height":415,"id":"","role":"AXOpaqueProviderGroup","y":264,"width":272,"label":"","value":""}
+{"x":92,"height":30,"id":"sidebar-history-compatibility-notice","role":"AXStaticText","y":264,"width":216.5,"label":"","value":"Some history files are incomplete or unsupported. Details in Settings."}
+{"x":92,"height":24,"id":"sidebar-history-compatibility-notice","role":"AXButton","y":298,"width":179,"label":"History details in Settings","value":""}
+{"x":92,"height":30,"id":"sidebar-codex-version-notice","role":"AXStaticText","y":330,"width":230.5,"label":"","value":"Codex 1.0.0 is newer than Sigil checked (0.157.1). History format is not supported."}
+{"x":92,"height":24,"id":"sidebar-codex-version-notice","role":"AXButton","y":364,"width":84.5,"label":"Settings…","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":423,"width":272,"label":"Generated conversation 08, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":455,"width":272,"label":"Generated conversation 07, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":487,"width":272,"label":"Generated conversation 06, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":519,"width":272,"label":"Generated conversation 05, project, 10 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":551,"width":272,"label":"Generated conversation 04, project, 10 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":583,"width":272,"label":"Generated conversation 03, project, 10 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":615,"width":272,"label":"Generated conversation 02, project, 10 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":647,"width":272,"label":"Generated conversation 01, project, 10 hours ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":404,"width":37,"label":"Today, 8","value":""}
+{"x":348,"height":640,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":471.5,"height":139,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":313,"width":680,"label":"","value":""}
+{"x":471.5,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":313,"width":103.5,"label":"Claude Code","value":"Available"}
+{"x":587,"height":139,"id":"new-session-codex","role":"AXButton","y":313,"width":103,"label":"Codex","value":"Available"}
+{"x":702,"height":139,"id":"new-session-devin","role":"AXButton","y":313,"width":103.5,"label":"Devin","value":"Unavailable"}
+{"x":817.5,"height":139,"id":"new-session-cursor","role":"AXButton","y":313,"width":103.5,"label":"Cursor","value":"Unavailable"}
+{"x":933,"height":139,"id":"new-session-kimi","role":"AXButton","y":313,"width":103,"label":"Kimi Code","value":"Unavailable"}
+{"x":1048,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":313,"width":103.5,"label":"Grok Build","value":"Available"}
+{"x":697.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":485,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":784.25,"height":15,"id":"new-session-surface","role":"AXButton","y":508,"width":54.5,"label":"Options…","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":585.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":606,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":1074.5,"height":20,"id":"","role":"AXButton","y":606,"width":85,"label":"one (fixture)","value":""}
+{"x":1167.5,"height":20,"id":"","role":"AXButton","y":606,"width":90.5,"label":"three (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":632,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":1110,"height":20,"id":"","role":"AXButton","y":632,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":658,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":658,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":14,"id":"","role":"AXCheckBox","y":684,"width":142,"label":"Reduce Motion (fixture)","value":0}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"unsupported-installed-major.png","windowID":3393,"exit":0}
+{"press":"Settings…","result":0}
+{"settingsStage":"unsupported-major-link","GeneralSelected":true,"GeneralContentExported":true}
+{"snapshot":"unsupported-settings-general.png","disclosure":0}
+{"x":486,"height":708,"id":"com_apple_SwiftUI_Settings_window","role":"AXWindow","y":154,"width":540,"label":"General","value":""}
+{"x":486,"height":708,"id":"","role":"AXGroup","y":154,"width":540,"label":"","value":""}
+{"x":486,"height":620,"id":"settings-general","role":"AXScrollArea","y":242,"width":540,"label":"","value":""}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":262,"width":83,"label":"New sessions","value":""}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":297,"width":67,"label":"","value":"Default CLI"}
+{"x":868.5,"height":24,"id":"","role":"AXPopUpButton","y":293,"width":125.5,"label":"Default CLI","value":"Claude Code"}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":338,"width":139.5,"label":"","value":"Start in a new worktree"}
+{"x":950,"height":20,"id":"","role":"AXCheckBox","y":336,"width":44,"label":"Start in a new worktree","value":1}
+{"x":510,"height":32,"id":"","role":"AXStaticText","y":374,"width":471.5,"label":"","value":"In a git repository, a new session gets its own worktree and branch. Turn this off to work in the project folder."}
+{"x":510,"height":15,"id":"settings-clis","role":"AXHeading","y":426,"width":26.5,"label":"CLIs","value":""}
+{"x":518,"height":15,"id":"settings-clis","role":"AXStaticText","y":467.5,"width":62,"label":"","value":"Availability"}
+{"x":892.5,"height":28,"id":"settings-clis","role":"AXButton","y":461,"width":101.5,"label":"Check Again","value":""}
+{"x":518,"height":34,"id":"settings-clis","role":"AXUnknown","y":514,"width":402,"label":"Claude Code, \/tmp\/sigil-rea1351-routing-home\/bin\/claude, 2.1.283","value":""}
+{"x":518,"height":68,"id":"settings-clis","role":"AXUnknown","y":573,"width":447,"label":"Codex, \/tmp\/sigil-rea1351-routing-home\/bin\/codex, 1.0.0, Codex 1.0.0 is newer than Sigil checked (0.157.1). History format is not supported.","value":""}
+{"x":518,"height":34,"id":"settings-clis","role":"AXStaticText","y":666,"width":241.5,"label":"","value":"Devin, Unavailable, Not installed in fixture"}
+{"x":518,"height":34,"id":"settings-clis","role":"AXStaticText","y":725,"width":241.5,"label":"","value":"Cursor, Unavailable, Not installed in fixture"}
+{"x":518,"height":34,"id":"settings-clis","role":"AXStaticText","y":784,"width":241.5,"label":"","value":"Kimi Code, Unavailable, Not installed in fixture"}
+{"x":518,"height":34,"id":"settings-clis","role":"AXUnknown","y":843,"width":388.5,"label":"Grok Build, \/tmp\/sigil-rea1351-routing-home\/bin\/grok, 1.0.40","value":""}
+{"x":510,"height":32,"id":"settings-clis","role":"AXStaticText","y":897,"width":471.5,"label":"","value":"Checks paths and versions. Kimi API keys are configured below; other sign-ins are managed by each CLI."}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":949,"width":51.5,"label":"Grok CLI","value":""}
+{"x":518,"height":15,"id":"","role":"AXStaticText","y":990.5,"width":110.5,"label":"","value":"Custom executable"}
+{"x":859,"height":28,"id":"","role":"AXButton","y":984,"width":135,"label":"Use Installed Grok","value":""}
+{"x":528,"height":16,"id":"","role":"AXTextField","y":1024,"width":365,"label":"Grok CLI path","value":"\/tmp\/sigil-rea1351-routing-home\/bin\/grok"}
+{"x":911,"height":28,"id":"","role":"AXButton","y":1018,"width":83,"label":"Choose…","value":""}
+{"x":519,"height":11,"id":"checkmark.circle.fill","role":"AXImage","y":1054,"width":11,"label":"Selected","value":""}
+{"x":537,"height":15,"id":"","role":"AXStaticText","y":1052,"width":35,"label":"","value":"1.0.40"}
+{"x":518,"height":30,"id":"","role":"AXStaticText","y":1073,"width":437.5,"label":"","value":"This choice stays until you change it. Use Installed Grok returns to your login shell's grok."}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1128,"width":84,"label":"","value":"Default model"}
+{"x":831,"height":24,"id":"","role":"AXPopUpButton","y":1124,"width":163,"label":"Default model","value":"CLI default"}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1169,"width":79.5,"label":"","value":"Default effort"}
+{"x":880.5,"height":24,"id":"","role":"AXPopUpButton","y":1165,"width":113.5,"label":"Default effort","value":"CLI default"}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":1217,"width":61.5,"label":"Kimi Code","value":""}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1252,"width":69.5,"label":"","value":"Sign in with"}
+{"x":797,"height":24,"id":"","role":"AXRadioGroup","y":1248,"width":197,"label":"Sign in with","value":""}
+{"x":797,"height":24,"id":"","role":"AXRadioButton","y":1248,"width":98.5,"label":"Kimi account","value":1}
+{"x":896.5,"height":24,"id":"","role":"AXRadioButton","y":1248,"width":97.5,"label":"API key","value":0}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1293,"width":50.5,"label":"","value":"Account"}
+{"x":814.5,"height":11,"id":"circle.dashed","role":"AXImage","y":1295.5,"width":11,"label":"Circular Selection","value":""}
+{"x":832.5,"height":15,"id":"","role":"AXStaticText","y":1293.5,"width":76,"label":"","value":"Not signed in"}
+{"x":916.5,"height":26,"id":"","role":"AXButton","y":1288,"width":77.5,"label":"Sign In…","value":""}
+{"x":510,"height":32,"id":"","role":"AXStaticText","y":1329,"width":490.5,"label":"","value":"A Kimi account uses your Kimi Code plan. An API key comes from platform.kimi.ai and stays in the Keychain. Applies to Kimi tabs opened after this change."}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":1381,"width":46.5,"label":"Sidebar","value":""}
+{"x":518,"height":30,"id":"settings-history-compatibility-notice","role":"AXStaticText","y":1416,"width":474,"label":"","value":"Grok history: 1 session summary file(s) are missing, incomplete or unsupported. Saved conversations are kept."}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1471,"width":177,"label":"","value":"Show one-message sessions"}
+{"x":950,"height":20,"id":"","role":"AXCheckBox","y":1469,"width":44,"label":"Show one-message sessions","value":0}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1512,"width":147,"label":"","value":"Show worktree sessions"}
+{"x":950,"height":20,"id":"","role":"AXCheckBox","y":1510,"width":44,"label":"Show worktree sessions","value":1}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1553,"width":150,"label":"","value":"Show subagent sessions"}
+{"x":950,"height":20,"id":"","role":"AXCheckBox","y":1551,"width":44,"label":"Show subagent sessions","value":0}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1594,"width":170,"label":"","value":"Show chats from other apps"}
+{"x":950,"height":20,"id":"","role":"AXCheckBox","y":1592,"width":44,"label":"Show chats from other apps","value":1}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":1642,"width":57.5,"label":"Keyboard","value":""}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1677,"width":143.5,"label":"","value":"Use Option as Meta key"}
+{"x":950,"height":20,"id":"","role":"AXCheckBox","y":1675,"width":44,"label":"Use Option as Meta key","value":0}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":1725,"width":29,"label":"Tabs","value":""}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":1760,"width":175,"label":"","value":"Let tabs message each other"}
+{"x":950,"height":20,"id":"","role":"AXCheckBox","y":1758,"width":44,"label":"Let tabs message each other","value":0}
+{"x":510,"height":15,"id":"","role":"AXStaticText","y":1796,"width":233,"label":"","value":"Applies to tabs opened after this change."}
+{"x":1008,"height":614.5,"id":"","role":"AXScrollBar","y":241,"width":19,"label":"","value":0}
+{"x":1017,"height":256,"id":"","role":"AXValueIndicator","y":245,"width":6,"label":"","value":0}
+{"x":1009,"height":0,"id":"","role":"AXButton","y":242,"width":0,"label":"","value":""}
+{"x":1009,"height":0,"id":"","role":"AXButton","y":242,"width":0,"label":"","value":""}
+{"x":1017,"height":350,"id":"","role":"AXButton","y":501.5,"width":6,"label":"","value":""}
+{"x":1017,"height":0,"id":"","role":"AXButton","y":245,"width":6,"label":"","value":""}
+{"x":486,"height":56,"id":"","role":"AXToolbar","y":186,"width":540,"label":"","value":""}
+{"x":662.5,"height":56,"id":"","role":"AXButton","y":186,"width":75,"label":"Appearance","value":""}
+{"x":738.5,"height":56,"id":"","role":"AXButton","y":186,"width":55,"label":"General","value":""}
+{"x":794.5,"height":56,"id":"","role":"AXButton","y":186,"width":55,"label":"Remote","value":""}
+{"x":494,"height":16,"id":"","role":"AXButton","y":162,"width":16,"label":"","value":""}
+{"x":540,"height":16,"id":"","role":"AXButton","y":162,"width":16,"label":"","value":""}
+{"x":541,"height":14,"id":"","role":"AXGroup","y":163,"width":14,"label":"","value":""}
+{"x":541,"height":14,"id":"","role":"AXGroup","y":163,"width":14,"label":"","value":""}
+{"x":517,"height":16,"id":"","role":"AXButton","y":162,"width":16,"label":"","value":""}
+{"x":729,"height":16,"id":"","role":"AXStaticText","y":161,"width":55,"label":"","value":"General"}
+{"capture":"unsupported-settings-general.png","windowID":3402,"exit":0}
+{"press":"Appearance","result":0}
+{"closeOwnedWindow":0}
+{"flags":1048576,"ownedKeyCode":43}
+{"snapshot":"ordinary-settings-after-targeted-routes.png","disclosure":0}
+{"x":486,"height":708,"id":"com_apple_SwiftUI_Settings_window","role":"AXWindow","y":154,"width":540,"label":"Appearance","value":""}
+{"x":486,"height":708,"id":"","role":"AXGroup","y":154,"width":540,"label":"","value":""}
+{"x":486,"height":620,"id":"","role":"AXScrollArea","y":242,"width":540,"label":"","value":""}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":262,"width":41.5,"label":"Theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":297,"width":111.5,"label":"Sigil Dark theme","value":""}
+{"x":639.5,"height":65,"id":"","role":"AXButton","y":297,"width":111.5,"label":"Sigil Light theme","value":""}
+{"x":761,"height":65,"id":"","role":"AXButton","y":297,"width":111.5,"label":"Grok Night theme","value":""}
+{"x":882.5,"height":65,"id":"","role":"AXButton","y":297,"width":111.5,"label":"Grok Day theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":372,"width":111.5,"label":"Grok Ember theme","value":""}
+{"x":639.5,"height":65,"id":"","role":"AXButton","y":372,"width":111.5,"label":"GitHub theme","value":""}
+{"x":761,"height":65,"id":"","role":"AXButton","y":372,"width":111.5,"label":"Linear theme","value":""}
+{"x":882.5,"height":65,"id":"","role":"AXButton","y":372,"width":111.5,"label":"Notion theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":447,"width":111.5,"label":"Discord theme","value":""}
+{"x":639.5,"height":65,"id":"","role":"AXButton","y":447,"width":111.5,"label":"Slack theme","value":""}
+{"x":761,"height":65,"id":"","role":"AXButton","y":447,"width":111.5,"label":"Spotify theme","value":""}
+{"x":882.5,"height":65,"id":"","role":"AXButton","y":447,"width":111.5,"label":"VS Code theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":522,"width":111.5,"label":"Cursor theme","value":""}
+{"x":639.5,"height":65,"id":"","role":"AXButton","y":522,"width":111.5,"label":"X theme","value":""}
+{"x":761,"height":65,"id":"","role":"AXButton","y":522,"width":111.5,"label":"Raycast theme","value":""}
+{"x":882.5,"height":65,"id":"","role":"AXButton","y":522,"width":111.5,"label":"ChatGPT theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":597,"width":111.5,"label":"Figma theme","value":""}
+{"x":639.5,"height":65,"id":"","role":"AXButton","y":597,"width":111.5,"label":"macOS theme","value":""}
+{"x":761,"height":65,"id":"","role":"AXButton","y":597,"width":111.5,"label":"Obsidian theme","value":""}
+{"x":882.5,"height":65,"id":"","role":"AXButton","y":597,"width":111.5,"label":"Telegram theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":672,"width":111.5,"label":"Twitch theme","value":""}
+{"x":510,"height":32,"id":"","role":"AXStaticText","y":757,"width":492,"label":"","value":"Terminal themes apply to the window. Installed Grok keeps its own CLI appearance; an optional themed Grok build also receives the window palette."}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":809,"width":52,"label":"Terminal","value":""}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":844,"width":54,"label":"","value":"Font size"}
+{"x":764,"height":16,"id":"","role":"AXSlider","y":844,"width":180,"label":"","value":0.20833333333333334}
+{"x":797.5,"height":16,"id":"","role":"AXValueIndicator","y":844,"width":20,"label":"","value":0.20833333333333334}
+{"x":958,"height":16,"id":"","role":"AXStaticText","y":844,"width":36,"label":"","value":"13 pt"}
+{"x":1008,"height":614.5,"id":"","role":"AXScrollBar","y":241,"width":19,"label":"","value":0}
+{"x":1017,"height":581.5,"id":"","role":"AXValueIndicator","y":245,"width":6,"label":"","value":0}
+{"x":1009,"height":0,"id":"","role":"AXButton","y":242,"width":0,"label":"","value":""}
+{"x":1009,"height":0,"id":"","role":"AXButton","y":242,"width":0,"label":"","value":""}
+{"x":1017,"height":24.5,"id":"","role":"AXButton","y":827,"width":6,"label":"","value":""}
+{"x":1017,"height":0,"id":"","role":"AXButton","y":245,"width":6,"label":"","value":""}
+{"x":486,"height":56,"id":"","role":"AXToolbar","y":186,"width":540,"label":"","value":""}
+{"x":662.5,"height":56,"id":"","role":"AXButton","y":186,"width":75,"label":"Appearance","value":""}
+{"x":738.5,"height":56,"id":"","role":"AXButton","y":186,"width":55,"label":"General","value":""}
+{"x":794.5,"height":56,"id":"","role":"AXButton","y":186,"width":55,"label":"Remote","value":""}
+{"x":494,"height":16,"id":"","role":"AXButton","y":162,"width":16,"label":"","value":""}
+{"x":540,"height":16,"id":"","role":"AXButton","y":162,"width":16,"label":"","value":""}
+{"x":541,"height":14,"id":"","role":"AXGroup","y":163,"width":14,"label":"","value":""}
+{"x":541,"height":14,"id":"","role":"AXGroup","y":163,"width":14,"label":"","value":""}
+{"x":517,"height":16,"id":"","role":"AXButton","y":162,"width":16,"label":"","value":""}
+{"x":715,"height":16,"id":"","role":"AXStaticText","y":161,"width":82,"label":"","value":"Appearance"}
+{"capture":"ordinary-settings-after-targeted-routes.png","windowID":3402,"exit":0}
+{"ordinaryOpenDoesNotReplayGeneralRoute":true}
+{"spokenVoiceOverValidation":"not performed; exported labels and roles inspected","VoiceOverEnabled":false}
+{"normalOwnedQuitRequested":true}
+{"ownedAppTerminated":true}
+{"ownedAppTerminated":true}

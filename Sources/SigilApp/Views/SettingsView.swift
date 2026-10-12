@@ -29,6 +29,9 @@ struct SettingsView: View {
         .tint(palette.accent)
         .environment(\.palette, palette)
         .frame(width: 540)
+        .onChange(of: model.generalSettingsRequest, initial: true) { _, _ in
+            if model.consumeGeneralSettingsRequest() { selectedTab = .general }
+        }
     }
 
     private var appearance: some View {
@@ -323,6 +326,8 @@ struct SettingsView: View {
                     .padding(.horizontal, 4)
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("settings-general")
         .onAppear { normalizeStoredModel() }
         .onChange(of: model.settings.executablePath) { _, path in pathDraft.text = path }
         .task(id: model.grokExecutableURL) {

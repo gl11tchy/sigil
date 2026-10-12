@@ -108,7 +108,7 @@ struct SidebarVersionNoticeTests {
         defer { nativeControl.window.close() }
         let baseline = host(checked)
         defer { baseline.window.close() }
-        let notices = host(newer)
+        let notices = host(newer, interactive: true)
         defer { notices.window.close() }
         // Request the generated host's AX hierarchy before reading SwiftUI's public getters.
         // Query only this generated host, off its main event loop; no trust or environment override.
@@ -130,8 +130,16 @@ struct SidebarVersionNoticeTests {
         let noticeScroll = try #require(scrollView(in: notices.view))
         let baselineViewport = baseline.view.convert(baselineScroll.bounds, from: baselineScroll)
         let noticeViewport = notices.view.convert(noticeScroll.bounds, from: noticeScroll)
-        #expect(abs(noticeViewport.minY - baselineViewport.minY) < 1)
-        #expect(abs(noticeViewport.height - baselineViewport.height) < 1)
+        #expect(notices.view.isFlipped == baseline.view.isFlipped)
+        let baselineTop = baseline.view.isFlipped ? baselineViewport.minY : baselineViewport.maxY
+        let noticeTop = notices.view.isFlipped ? noticeViewport.minY : noticeViewport.maxY
+        #expect(abs(noticeTop - baselineTop) < 1)
+        print(
+            "REA-1351 viewport: flipped=\(notices.view.isFlipped), baseline=\(baselineViewport), notices=\(noticeViewport)"
+        )
+        #expect(
+            abs(baselineViewport.height - noticeViewport.height - 34) < 1,
+            "All nonblocking versions share one 26-point control and eight points of bottom spacing")
         try #require(noticeViewport.height >= 200)
 
         let document = try #require(noticeScroll.documentView)
@@ -180,11 +188,87 @@ struct SidebarVersionNoticeTests {
         for identifier in ["diagnostic-swiftui-text", "diagnostic-swiftui-button"] {
             #expect(controlIdentifiers.contains(identifier), "\(diagnostic)")
         }
-        for provider in [CLIProvider.claudeCode, .codex, .grokBuild] {
+        #expect(identifiers.contains("sidebar-compatibility-disclosure"), "\(tree). \(diagnostic)")
+        let providers: [CLIProvider] = [.claudeCode, .codex, .grokBuild]
+        for provider in providers {
             #expect(
-                identifiers.contains("sidebar-\(provider.rawValue)-version-notice"),
-                "Exported accessibility tree: \(tree). \(diagnostic)")
+                !identifiers.contains("sidebar-\(provider.rawValue)-version-notice"),
+                "Nonblocking paragraphs must be absent from the collapsed history list")
         }
+        trace("collapsed checks complete; opening compatibility details")
+        let offsetBeforeDetails = noticeScroll.contentView.bounds.origin
+        let destinationsBeforeDetails = newer.sidebarSnapshot().destinations
+        try #require(
+            pressOwnedAccessibility("sidebar-compatibility-disclosure", in: notices.window) == AXError.success.rawValue)
+        try await Task.sleep(for: .milliseconds(100))
+        trace("compatibility AX press complete; reading details")
+        let details = ownedAccessibilityValues()
+        for provider in providers {
+            let expected = try #require(provider.versionNotice(for: newer.providerInstallations[provider]))
+            #expect(
+                details["sidebar-\(provider.rawValue)-version-notice"] == expected,
+                "The native popover must export each complete installed/checked version and limitation")
+        }
+        #expect(noticeScroll.contentView.bounds.origin == offsetBeforeDetails)
+        #expect(newer.sidebarSnapshot().destinations == destinationsBeforeDetails)
+        #expect(noticeScroll.contentView.bounds.height == noticeViewport.height)
+        trace("version/scroll checks complete; closing details")
+        try #require(
+            pressOwnedAccessibility("sidebar-compatibility-close", in: notices.window) == AXError.success.rawValue)
+        try await Task.sleep(for: .milliseconds(100))
+        trace("close AX press complete; reading closed state")
+        let closedDetails = ownedAccessibilityValues()
+        #expect(!closedDetails.keys.contains("sidebar-compatibility-close"))
+        #expect(closedDetails["sidebar-compatibility-disclosure"]?.contains("Details hidden.") == true)
+        #expect(noticeScroll.contentView.bounds.origin == offsetBeforeDetails)
+        // A single newer provider consumes the same bounded footprint; zero consumes none.
+        trace("closed state checks complete; hosting one-version sidebar")
+        let one = model(versions: [.codex: "0.160.0"])
+        let single = host(one)
+        defer { single.window.close() }
+        try await Task.sleep(for: .milliseconds(50))
+        let singleScroll = try #require(scrollView(in: single.view))
+        #expect(abs(singleScroll.contentView.bounds.height - noticeViewport.height) < 1)
+        var baselineVisited: Set<ObjectIdentifier> = []
+        var baselineTree: [String] = []
+        let baselineIdentifiers = accessibilityIdentifiers(
+            in: baseline.window, visited: &baselineVisited, tree: &baselineTree)
+        #expect(!baselineIdentifiers.contains("sidebar-compatibility-disclosure"))
+        // A targeted request works both before first appearance and on an existing Settings window.
+        trace("one/zero checks complete; hosting default Appearance settings")
+        let preferences = host(
+            NSHostingView(rootView: SettingsView(model: newer)), size: .init(width: 540, height: 660))
+        defer { preferences.window.close() }
+        try await Task.sleep(for: .milliseconds(50))
+        trace("Appearance settings hosted; reading initial pane")
+        #expect(!(ownedAccessibilityValues()).keys.contains("settings-general"))
+        trace("requesting General on existing Settings window")
+        newer.requestGeneralSettings()
+        try await Task.sleep(for: .milliseconds(100))
+        trace("reading routed General pane")
+        #expect((ownedAccessibilityValues()).keys.contains("settings-general"))
+        #expect(newer.generalSettingsRequest == nil, "A targeted route is consumed, not replayed on ordinary opens")
+        trace("requesting General on existing Settings window")
+        newer.requestGeneralSettings()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(newer.generalSettingsRequest == nil)
+        trace("reading routed General pane")
+        #expect((ownedAccessibilityValues()).keys.contains("settings-general"))
+        trace("existing/repeated route checks complete; hosting first-open request")
+        let firstOpen = model(versions: [:])
+        firstOpen.requestGeneralSettings()
+        let routed = host(
+            NSHostingView(rootView: SettingsView(model: firstOpen)), size: .init(width: 540, height: 660))
+        defer { routed.window.close() }
+        try await Task.sleep(for: .milliseconds(50))
+        trace("first-open settings hosted; checking consumption and exported pane")
+        #expect(firstOpen.generalSettingsRequest == nil)
+        var routedVisited: Set<ObjectIdentifier> = []
+        var routedTree: [String] = []
+        #expect(
+            accessibilityIdentifiers(in: routed.window, visited: &routedVisited, tree: &routedTree)
+                .contains("settings-general"))
+        trace("all routing checks complete; retained history notice check")
         #expect(
             identifiers.contains("sidebar-history-compatibility-notice"),
             "Exported compatibility notice: \(tree). \(diagnostic)")
@@ -510,20 +594,106 @@ struct SidebarVersionNoticeTests {
         return false
     }
 
-    private func host(_ model: AppModel) -> (window: NSWindow, view: NSView) {
-        host(
-            NSHostingView(
-                rootView: SidebarView(model: model).environment(\.palette, Palette(theme: .sigilDark))))
+    private func trace(_ stage: String) {
+        FileHandle.standardError.write(Data("REA-1351 hosted stage: \(stage)\n".utf8))
     }
 
-    private func host(_ view: NSView) -> (window: NSWindow, view: NSView) {
+    /// In-process accessibility uses AppKit's main-actor getters and press method.
+    /// Self-AXUIElement tree lookup trapped in CI before reaching the actual action.
+    /// The root is the owned fixture window; no posted input or permission override.
+    private func pressOwnedAccessibility(_ identifier: String, in window: NSWindow) -> Int32 {
+        var visited: Set<ObjectIdentifier> = []
+        var matches: [NSObject] = []
+        var roots: [NSWindow] = []
+        func collect(_ root: NSWindow) {
+            guard !roots.contains(where: { $0 === root }), roots.count < 16 else { return }
+            roots.append(root)
+            for child in root.childWindows ?? [] where child.isVisible { collect(child) }
+        }
+        collect(window)
+        trace("owned parent/child accessibility roots: \(roots.map { String(describing: type(of: $0)) })")
+        for root in roots {
+            visitAccessibility(root, visited: &visited) { element in
+                if accessibilityValue(in: element, selector: #selector(NSAccessibilityProtocol.accessibilityIdentifier))
+                    as? String
+                    == identifier, let object = element as? NSObject
+                {
+                    matches.append(object)
+                }
+            }
+        }
+        trace("AppKit accessibility matches for \(identifier): \(matches.count)")
+        guard matches.count == 1 else { return AXError.noValue.rawValue }
+        let object = matches[0]
+        let action = #selector(NSAccessibilityProtocol.accessibilityPerformPress)
+        guard object.responds(to: action), let implementation = object.method(for: action) else {
+            return AXError.actionUnsupported.rawValue
+        }
+        // SwiftUI's exported nodes support the public Objective-C method without
+        // necessarily declaring the full NSAccessibilityProtocol. Preserve its BOOL
+        // result with the declared C ABI rather than treating it as an object return.
+        typealias Press = @convention(c) (AnyObject, Selector) -> Bool
+        let press = unsafeBitCast(implementation, to: Press.self)
+        let accepted = press(object, action)
+        trace("AppKit accessibility press returned \(accepted)")
+        return accepted ? AXError.success.rawValue : AXError.failure.rawValue
+    }
+
+    private func ownedAccessibilityValues() -> [String: String] {
+        var values: [String: String] = [:]
+        var visited: Set<ObjectIdentifier> = []
+        for window in NSApp.windows where window.isVisible {
+            visitAccessibility(window, visited: &visited) { element in
+                guard
+                    let identifier = accessibilityValue(
+                        in: element, selector: #selector(NSAccessibilityProtocol.accessibilityIdentifier)) as? String
+                else { return }
+                values[identifier] =
+                    accessibilityValue(
+                        in: element, selector: #selector(NSAccessibilityProtocol.accessibilityValue)) as? String ?? ""
+            }
+        }
+        return values
+    }
+
+    private func visitAccessibility(
+        _ element: any NSObjectProtocol, visited: inout Set<ObjectIdentifier>,
+        inspect: (any NSObjectProtocol) -> Void
+    ) {
+        guard visited.count < 1_024, visited.insert(ObjectIdentifier(element)).inserted else { return }
+        inspect(element)
+        let children =
+            accessibilityValue(
+                in: element, selector: #selector(NSAccessibilityProtocol.accessibilityChildren)) as? [Any] ?? []
+        for child in NSAccessibility.unignoredChildren(from: children) {
+            if let child = child as? any NSObjectProtocol {
+                visitAccessibility(child, visited: &visited, inspect: inspect)
+            }
+        }
+    }
+
+    private func host(_ model: AppModel, interactive: Bool = false) -> (window: NSWindow, view: NSView) {
+        host(
+            NSHostingView(
+                rootView: SidebarView(model: model).environment(\.palette, Palette(theme: .sigilDark))),
+            interactive: interactive)
+    }
+
+    private func host(_ view: NSView, size: NSSize = .init(width: 200, height: 460), interactive: Bool = false) -> (
+        window: NSWindow, view: NSView
+    ) {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 200, height: 460),
-            styleMask: [.borderless], backing: .buffered, defer: false)
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: interactive ? [.titled] : [.borderless], backing: .buffered, defer: false)
         window.animationBehavior = .none
         window.isReleasedWhenClosed = false
         window.contentView = view
-        window.orderFront(nil)
+        if interactive {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate()
+        } else {
+            window.orderFront(nil)
+        }
         view.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
         return (window, view)

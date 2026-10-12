@@ -1,0 +1,179 @@
+{
+  "head": "0902bc0147847709c3eb124b151ad42dbfc7fa9e",
+  "run": "https://github.com/gl11tchy-team/sigil/actions/runs/38288252501",
+  "summary": {
+    "devicesAndConfigurations": [
+      {
+        "device": {
+          "architecture": "arm64",
+          "deviceId": "9fe5a9696ebd03066692a9274f714f7645dbd580",
+          "deviceName": "My Mac",
+          "modelName": "Apple Virtual Machine 1",
+          "osBuildNumber": "25G83",
+          "osVersion": "26.6.2",
+          "platform": "macOS"
+        },
+        "expectedFailures": 0,
+        "failedTests": 1,
+        "passedTests": 1,
+        "skippedTests": 4,
+        "testPlanConfiguration": {
+          "configurationId": "1",
+          "configurationName": "Test Scheme Action"
+        }
+      }
+    ],
+    "environmentDescription": "SigilSidebarHost \u00b7 Built with macOS 26.6.2",
+    "expectedFailures": 0,
+    "failedTests": 1,
+    "finishTime": 1791828868.898,
+    "passedTests": 1,
+    "result": "Failed",
+    "skippedTests": 4,
+    "startTime": 1791828842.612,
+    "statistics": [],
+    "testFailures": [
+      {
+        "failureText": "Test crashed with signal trap.",
+        "targetName": "SigilSidebarHostTests",
+        "testIdentifier": 2,
+        "testIdentifierString": "SidebarVersionNoticeTests/threeNoticesPreserveTheListViewportInANarrowShortSidebar()",
+        "testIdentifierURL": "test://com.apple.xcode/SigilSidebarHost/SigilSidebarHostTests/SidebarVersionNoticeTests/threeNoticesPreserveTheListViewportInANarrowShortSidebar()",
+        "testName": "threeNoticesPreserveTheListViewportInANarrowShortSidebar()"
+      }
+    ],
+    "title": "Test - SigilSidebarHost",
+    "topInsights": [],
+    "totalTestCount": 6
+  },
+  "tree": {
+    "devices": [
+      {
+        "architecture": "arm64",
+        "deviceId": "9fe5a9696ebd03066692a9274f714f7645dbd580",
+        "deviceName": "My Mac",
+        "modelName": "Apple Virtual Machine 1",
+        "osBuildNumber": "25G83",
+        "osVersion": "26.6.2",
+        "platform": "macOS"
+      }
+    ],
+    "testNodes": [
+      {
+        "children": [
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "duration": "0.92s",
+                    "durationInSeconds": 0.9195399284362793,
+                    "name": "thousandSessionTwentyRowHoverSweep()",
+                    "nodeIdentifier": "SidebarVersionNoticeTests/thousandSessionTwentyRowHoverSweep()",
+                    "nodeIdentifierURL": "test://com.apple.xcode/SigilSidebarHost/SigilSidebarHostTests/SidebarVersionNoticeTests/thousandSessionTwentyRowHoverSweep()",
+                    "nodeType": "Test Case",
+                    "result": "Passed"
+                  },
+                  {
+                    "children": [
+                      {
+                        "name": "Test crashed with signal trap.",
+                        "nodeType": "Failure Message"
+                      }
+                    ],
+                    "name": "threeNoticesPreserveTheListViewportInANarrowShortSidebar()",
+                    "nodeIdentifier": "SidebarVersionNoticeTests/threeNoticesPreserveTheListViewportInANarrowShortSidebar()",
+                    "nodeIdentifierURL": "test://com.apple.xcode/SigilSidebarHost/SigilSidebarHostTests/SidebarVersionNoticeTests/threeNoticesPreserveTheListViewportInANarrowShortSidebar()",
+                    "nodeType": "Test Case",
+                    "result": "Failed"
+                  },
+                  {
+                    "children": [
+                      {
+                        "name": "Test skipped: REA-1350 owner manual verification: native pointer input skipped because event-posting permission is unavailable",
+                        "nodeType": "Failure Message"
+                      }
+                    ],
+                    "duration": "0.00004s",
+                    "durationInSeconds": 4.00543212890625e-05,
+                    "name": "theRenderedSeamReceivesRealMouseEventsAtBothEdges()",
+                    "nodeIdentifier": "SidebarVersionNoticeTests/theRenderedSeamReceivesRealMouseEventsAtBothEdges()",
+                    "nodeIdentifierURL": "test://com.apple.xcode/SigilSidebarHost/SigilSidebarHostTests/SidebarVersionNoticeTests/theRenderedSeamReceivesRealMouseEventsAtBothEdges()",
+                    "nodeType": "Test Case",
+                    "result": "Skipped"
+                  },
+                  {
+                    "children": [
+                      {
+                        "name": "Test skipped: REA-1350 owner manual verification: native pointer input skipped because event-posting permission is unavailable",
+                        "nodeType": "Failure Message"
+                      }
+                    ],
+                    "duration": "0.000016s",
+                    "durationInSeconds": 1.5974044799804688e-05,
+                    "name": "clickingACappedRenderedSeamPreservesThePreferenceAndFocusesIt()",
+                    "nodeIdentifier": "SidebarVersionNoticeTests/clickingACappedRenderedSeamPreservesThePreferenceAndFocusesIt()",
+                    "nodeIdentifierURL": "test://com.apple.xcode/SigilSidebarHost/SigilSidebarHostTests/SidebarVersionNoticeTests/clickingACappedRenderedSeamPreservesThePreferenceAndFocusesIt()",
+                    "nodeType": "Test Case",
+                    "result": "Skipped"
+                  },
+                  {
+                    "children": [
+                      {
+                        "name": "Test skipped: REA-1350 owner manual verification: native pointer input skipped because event-posting permission is unavailable",
+                        "nodeType": "Failure Message"
+                      }
+                    ],
+                    "duration": "0.000013s",
+                    "durationInSeconds": 1.3113021850585938e-05,
+                    "name": "terminalSelectionKeepsTheWindowStationary()",
+                    "nodeIdentifier": "SidebarVersionNoticeTests/terminalSelectionKeepsTheWindowStationary()",
+                    "nodeIdentifierURL": "test://com.apple.xcode/SigilSidebarHost/SigilSidebarHostTests/SidebarVersionNoticeTests/terminalSelectionKeepsTheWindowStationary()",
+                    "nodeType": "Test Case",
+                    "result": "Skipped"
+                  },
+                  {
+                    "children": [
+                      {
+                        "name": "Test skipped: REA-1350 owner manual verification: native pointer input skipped because event-posting permission is unavailable",
+                        "nodeType": "Failure Message"
+                      }
+                    ],
+                    "duration": "0.00012s",
+                    "durationInSeconds": 0.00011897087097167969,
+                    "name": "notesEditorSelectionKeepsTheWindowStationary()",
+                    "nodeIdentifier": "SidebarVersionNoticeTests/notesEditorSelectionKeepsTheWindowStationary()",
+                    "nodeIdentifierURL": "test://com.apple.xcode/SigilSidebarHost/SigilSidebarHostTests/SidebarVersionNoticeTests/notesEditorSelectionKeepsTheWindowStationary()",
+                    "nodeType": "Test Case",
+                    "result": "Skipped"
+                  }
+                ],
+                "name": "SidebarVersionNoticeTests",
+                "nodeIdentifierURL": "test://com.apple.xcode/SigilSidebarHost/SigilSidebarHostTests/SidebarVersionNoticeTests",
+                "nodeType": "Test Suite",
+                "result": "Failed"
+              }
+            ],
+            "name": "SigilSidebarHostTests",
+            "nodeIdentifierURL": "test://com.apple.xcode/SigilSidebarHost/SigilSidebarHostTests",
+            "nodeType": "Unit test bundle",
+            "result": "Failed"
+          }
+        ],
+        "name": "SigilSidebarHost",
+        "nodeType": "Test Plan",
+        "result": "Failed"
+      }
+    ],
+    "testPlanConfigurations": [
+      {
+        "configurationId": "1",
+        "configurationName": "Test Scheme Action"
+      }
+    ]
+  },
+  "stages": "REA-1351 viewport: flipped=true, baseline=(0.0, 216.0, 200.0, 244.0), notices=(0.0, 216.0, 200.0, 210.0)\nREA-1351 hosted stage: collapsed checks complete; opening compatibility details\n",
+  "observation": "The self-owned AX press that opens Compatibility did not return; no General-pane assertion was reached",
+  "hypothesis": "fixture host lacks the Settings scene provided by production; add inert scene to match openSettings environment contract",
+  "causeConfirmed": false
+}

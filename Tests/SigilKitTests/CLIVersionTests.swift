@@ -52,6 +52,41 @@ struct CLIVersionTests {
             CLIProvider.codex.versionNotice(for: .init(executable: nil, version: "0.160.0", problem: "Missing")) == nil)
     }
 
+    @Test func disclosureFactsPreserveAllThreeVersionsAndExistingNoticeText() throws {
+        let cases: [(CLIProvider, String, String)] = [
+            (.claudeCode, "2.1.296", "2.1.283"), (.codex, "0.160.0", "0.157.1"),
+            (.grokBuild, "1.0.50", "1.0.40"),
+        ]
+        for (provider, version, checked) in cases {
+            let installation = installed(version)
+            let details = try #require(provider.versionNoticeDetails(for: installation))
+            #expect(details.provider == provider)
+            #expect(details.installedVersion == version)
+            #expect(details.checkedVersion == checked)
+            #expect(details.impact == .bestEffort)
+            #expect(details.consequence == "History and turn state are best effort.")
+            #expect(details.text == provider.versionNotice(for: installation))
+        }
+        #expect(
+            CLIProvider.codex.versionNoticeDetails(for: installed("0.160.0-alpha.2"))?.installedVersion
+                == "0.160.0-alpha.2")
+    }
+
+    @Test func actionableMajorAndUnavailableStatesCannotBecomeNonblockingDetails() throws {
+        for (provider, version) in [(CLIProvider.codex, "1.0.0"), (.claudeCode, "3.0.0")] {
+            let details = try #require(provider.versionNoticeDetails(for: installed(version)))
+            #expect(details.impact == .unsupportedHistory)
+            #expect(details.consequence == "History format is not supported.")
+        }
+        let absent: [ProviderInstallation?] = [
+            nil, installed("unknown"), installed("0.157.1"),
+            .init(executable: nil, version: "0.160.0", problem: "Not installed"),
+            .init(executable: URL(fileURLWithPath: "/tmp/fake-cli"), version: "0.160.0", problem: "Read failed"),
+            .init(executable: URL(fileURLWithPath: "/tmp/fake-cli"), version: "0.160.0", problem: nil, timedOut: true),
+        ]
+        for installation in absent { #expect(CLIProvider.codex.versionNoticeDetails(for: installation) == nil) }
+    }
+
     private func installed(_ version: String) -> ProviderInstallation {
         .init(executable: URL(fileURLWithPath: "/tmp/fake-cli"), version: version, problem: nil)
     }

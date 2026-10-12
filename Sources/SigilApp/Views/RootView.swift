@@ -21,8 +21,17 @@ struct RootView: View {
     @ViewBuilder
     private var window: some View {
         if let model = launch.model {
-            WindowContent(model: model)
-                .background(FirstKeyView())
+            #if DEBUG
+                WindowContent(model: model)
+                    .background(FirstKeyView())
+                    .overlay(alignment: .bottomTrailing) {
+                        if SidebarNoticeFixture.requested { SidebarNoticeFixtureControls(model: model) }
+                    }
+
+            #else
+                WindowContent(model: model)
+                    .background(FirstKeyView())
+            #endif
         } else {
             LaunchCanvas(isSlow: launch.isSlow)
         }

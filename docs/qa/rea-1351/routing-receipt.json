@@ -1,0 +1,61 @@
+{
+  "reviewedBaseHead": "a82acc427d417a099197c0c4a438d85a93b22666",
+  "reviewFinding": "https://github.com/gl11tchy-team/sigil/pull/160#discussion_r4250633055",
+  "bundleID": "com.gl11tchy.sigil.rea1351.routing",
+  "executableSHA256": "9b99289a3e8e0194efc9100fc8e0116d5f0702ad2f747bb3ef4ab28816df195d",
+  "sourceSHA256": {
+    "Sources/SigilApp/AppModel.swift": "56e4da5b91ff2bf2d2bf549e7644a0aac3949bb96a3ec2260a250788dc60fa8b",
+    "Sources/SigilApp/Views/SettingsView.swift": "f4a050cc3a0739b7ddb7adde0181e03644afbcceb73a515afde2bc11e9b461ab",
+    "Sources/SigilApp/Views/SidebarView.swift": "464fb4de6987f2a2859af0036d02fe30a7891b2bc95de2f14cab7dd0f5a24995",
+    "Sources/SigilApp/Views/SidebarCompatibilityDisclosure.swift": "5d5398921a7a076112b635491eaa8f70301d9bf42044cccb1543fca6eaeb6c26",
+    "Sources/SigilApp/Workbench/SidebarNoticeFixture.swift": "016ce20d15e18052d79ed3abe2b49199f093328463f0ecf581c31a8235c71402",
+    "Sources/SigilApp/SigilApp.swift": "ddac8ca28651ac7de2b5118962aea42692597f4121f6910504225c82ddf099f7",
+    "Sources/SigilApp/Views/RootView.swift": "c6a0a893c48e15a38e2b5cea6d372e715fb42e2b01536f91083439f39e5585e0",
+    "Sources/SigilKit/Terminal/ProviderAdapter.swift": "6bed8556c246ae72aa8eb2f350b647ac1828f2480ff2dc2af90abd3ba5ed9753"
+  },
+  "artifactsSHA256": {
+    "history-settings-general.png": "f7950cbe98c51e7ec6b0fce39ed4c409701f9fd69012e07f3891271030224c6f",
+    "unsupported-settings-general.png": "305ff94375eb79e7c8e285152f750a5686b8d86b4ce10f4e4b79bdf1e31ebdaf",
+    "ordinary-settings-appearance.png": "5b9f48438357a94b9600ead72abe80d0af9dfb57b4b5c4353b4f02d312cacdd5",
+    "ordinary-settings-after-targeted-routes.png": "61f7885f585650193d47270d3b2fd0d6a8ebe31ba695cbe0a6d470dbbf8be5bc",
+    "routing.jsonl": "66c25704153e517dafcd211d16a29b3864adfd225e175a504c80fdfede3aa5df"
+  },
+  "observed": [
+    {
+      "ordinaryFirstOpenAppearance": true
+    },
+    {
+      "settingsStage": "incomplete-history-link",
+      "GeneralSelected": true,
+      "GeneralContentExported": true
+    },
+    {
+      "settingsStage": "repeated-history-link",
+      "GeneralSelected": true,
+      "GeneralContentExported": true
+    },
+    {
+      "settingsStage": "unsupported-major-link",
+      "GeneralSelected": true,
+      "GeneralContentExported": true
+    },
+    {
+      "ordinaryOpenDoesNotReplayGeneralRoute": true
+    },
+    {
+      "ownedAppTerminated": true
+    },
+    {
+      "ownedAppTerminated": true
+    }
+  ],
+  "strictSignatureVerification": "exit 0",
+  "scope": "app-only build, fake home/providers/memory credentials; live launch callback, exact owned window IDs, public AX actions; normal owned quit",
+  "limits": [
+    "Actual native check is macOS 26.5.1; no spoken VoiceOver, macOS 14 or multi-display claim",
+    "Earlier Appearance capture only proved opening Settings and is superseded for route acceptance by this receipt",
+    "One observer expected radio-tab values but macOS exports toolbar buttons with empty values; preserved earlier log/capture, corrected observer uses actual window title plus General content ID",
+    "Original native control/keyboard/search evidence remains at a82; compatibility disclosure source hash unchanged",
+    "No local AppTests compilation/execution, daily app action, security setting changes or merge"
+  ]
+}

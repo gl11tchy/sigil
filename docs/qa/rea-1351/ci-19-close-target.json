@@ -1,0 +1,180 @@
+{
+  "head": "19bc88156e3f72a88d1cac192996a169cd54746a",
+  "run": "https://github.com/gl11tchy-team/sigil/actions/runs/38293624036",
+  "summary": {
+    "devicesAndConfigurations": [
+      {
+        "device": {
+          "architecture": "arm64",
+          "deviceId": "9fe5a9696ebd03066692a9274f714f7645dbd580",
+          "deviceName": "My Mac",
+          "modelName": "Apple Virtual Machine 1",
+          "osBuildNumber": "25G83",
+          "osVersion": "26.6.2",
+          "platform": "macOS"
+        },
+        "expectedFailures": 0,
+        "failedTests": 1,
+        "passedTests": 1,
+        "skippedTests": 4,
+        "testPlanConfiguration": {
+          "configurationId": "1",
+          "configurationName": "Test Scheme Action"
+        }
+      }
+    ],
+    "environmentDescription": "SigilSidebarHost \u00b7 Built with macOS 26.6.2",
+    "expectedFailures": 0,
+    "failedTests": 1,
+    "finishTime": 1791831709.014,
+    "passedTests": 1,
+    "result": "Failed",
+    "skippedTests": 4,
+    "startTime": 1791831703.642,
+    "statistics": [],
+    "testFailures": [
+      {
+        "failureText": "Expectation failed: (pressOwnedAccessibility(\"sidebar-compatibility-close\", in: notices.window) \u2192 -25212) == (AXError.success.rawValue \u2192 0)",
+        "targetName": "SigilSidebarHostTests",
+        "testIdentifier": 2,
+        "testIdentifierString": "SidebarVersionNoticeTests/threeNoticesPreserveTheListViewportInANarrowShortSidebar()",
+        "testIdentifierURL": "test://com.apple.xcode/SigilSidebarHost/SigilSidebarHostTests/SidebarVersionNoticeTests/threeNoticesPreserveTheListViewportInANarrowShortSidebar()",
+        "testName": "threeNoticesPreserveTheListViewportInANarrowShortSidebar()"
+      }
+    ],
+    "title": "Test - SigilSidebarHost",
+    "topInsights": [],
+    "totalTestCount": 6
+  },
+  "tree": {
+    "devices": [
+      {
+        "architecture": "arm64",
+        "deviceId": "9fe5a9696ebd03066692a9274f714f7645dbd580",
+        "deviceName": "My Mac",
+        "modelName": "Apple Virtual Machine 1",
+        "osBuildNumber": "25G83",
+        "osVersion": "26.6.2",
+        "platform": "macOS"
+      }
+    ],
+    "testNodes": [
+      {
+        "children": [
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "duration": "0.89s",
+                    "durationInSeconds": 0.8875458240509033,
+                    "name": "thousandSessionTwentyRowHoverSweep()",
+                    "nodeIdentifier": "SidebarVersionNoticeTests/thousandSessionTwentyRowHoverSweep()",
+                    "nodeIdentifierURL": "test://com.apple.xcode/SigilSidebarHost/SigilSidebarHostTests/SidebarVersionNoticeTests/thousandSessionTwentyRowHoverSweep()",
+                    "nodeType": "Test Case",
+                    "result": "Passed"
+                  },
+                  {
+                    "children": [
+                      {
+                        "name": "SidebarVersionNoticeTests.swift:216: Expectation failed: (pressOwnedAccessibility(\"sidebar-compatibility-close\", in: notices.window) \u2192 -25212) == (AXError.success.rawValue \u2192 0)",
+                        "nodeType": "Failure Message"
+                      }
+                    ],
+                    "duration": "0.44s",
+                    "durationInSeconds": 0.4414229393005371,
+                    "name": "threeNoticesPreserveTheListViewportInANarrowShortSidebar()",
+                    "nodeIdentifier": "SidebarVersionNoticeTests/threeNoticesPreserveTheListViewportInANarrowShortSidebar()",
+                    "nodeIdentifierURL": "test://com.apple.xcode/SigilSidebarHost/SigilSidebarHostTests/SidebarVersionNoticeTests/threeNoticesPreserveTheListViewportInANarrowShortSidebar()",
+                    "nodeType": "Test Case",
+                    "result": "Failed"
+                  },
+                  {
+                    "children": [
+                      {
+                        "name": "Test skipped: REA-1350 owner manual verification: native pointer input skipped because event-posting permission is unavailable",
+                        "nodeType": "Failure Message"
+                      }
+                    ],
+                    "duration": "0.000062s",
+                    "durationInSeconds": 6.198883056640625e-05,
+                    "name": "theRenderedSeamReceivesRealMouseEventsAtBothEdges()",
+                    "nodeIdentifier": "SidebarVersionNoticeTests/theRenderedSeamReceivesRealMouseEventsAtBothEdges()",
+                    "nodeIdentifierURL": "test://com.apple.xcode/SigilSidebarHost/SigilSidebarHostTests/SidebarVersionNoticeTests/theRenderedSeamReceivesRealMouseEventsAtBothEdges()",
+                    "nodeType": "Test Case",
+                    "result": "Skipped"
+                  },
+                  {
+                    "children": [
+                      {
+                        "name": "Test skipped: REA-1350 owner manual verification: native pointer input skipped because event-posting permission is unavailable",
+                        "nodeType": "Failure Message"
+                      }
+                    ],
+                    "duration": "0.000018s",
+                    "durationInSeconds": 1.7881393432617188e-05,
+                    "name": "clickingACappedRenderedSeamPreservesThePreferenceAndFocusesIt()",
+                    "nodeIdentifier": "SidebarVersionNoticeTests/clickingACappedRenderedSeamPreservesThePreferenceAndFocusesIt()",
+                    "nodeIdentifierURL": "test://com.apple.xcode/SigilSidebarHost/SigilSidebarHostTests/SidebarVersionNoticeTests/clickingACappedRenderedSeamPreservesThePreferenceAndFocusesIt()",
+                    "nodeType": "Test Case",
+                    "result": "Skipped"
+                  },
+                  {
+                    "children": [
+                      {
+                        "name": "Test skipped: REA-1350 owner manual verification: native pointer input skipped because event-posting permission is unavailable",
+                        "nodeType": "Failure Message"
+                      }
+                    ],
+                    "duration": "0.000015s",
+                    "durationInSeconds": 1.5020370483398438e-05,
+                    "name": "terminalSelectionKeepsTheWindowStationary()",
+                    "nodeIdentifier": "SidebarVersionNoticeTests/terminalSelectionKeepsTheWindowStationary()",
+                    "nodeIdentifierURL": "test://com.apple.xcode/SigilSidebarHost/SigilSidebarHostTests/SidebarVersionNoticeTests/terminalSelectionKeepsTheWindowStationary()",
+                    "nodeType": "Test Case",
+                    "result": "Skipped"
+                  },
+                  {
+                    "children": [
+                      {
+                        "name": "Test skipped: REA-1350 owner manual verification: native pointer input skipped because event-posting permission is unavailable",
+                        "nodeType": "Failure Message"
+                      }
+                    ],
+                    "duration": "0.00016s",
+                    "durationInSeconds": 0.000164031982421875,
+                    "name": "notesEditorSelectionKeepsTheWindowStationary()",
+                    "nodeIdentifier": "SidebarVersionNoticeTests/notesEditorSelectionKeepsTheWindowStationary()",
+                    "nodeIdentifierURL": "test://com.apple.xcode/SigilSidebarHost/SigilSidebarHostTests/SidebarVersionNoticeTests/notesEditorSelectionKeepsTheWindowStationary()",
+                    "nodeType": "Test Case",
+                    "result": "Skipped"
+                  }
+                ],
+                "name": "SidebarVersionNoticeTests",
+                "nodeIdentifierURL": "test://com.apple.xcode/SigilSidebarHost/SigilSidebarHostTests/SidebarVersionNoticeTests",
+                "nodeType": "Test Suite",
+                "result": "Failed"
+              }
+            ],
+            "name": "SigilSidebarHostTests",
+            "nodeIdentifierURL": "test://com.apple.xcode/SigilSidebarHost/SigilSidebarHostTests",
+            "nodeType": "Unit test bundle",
+            "result": "Failed"
+          }
+        ],
+        "name": "SigilSidebarHost",
+        "nodeType": "Test Plan",
+        "result": "Failed"
+      }
+    ],
+    "testPlanConfigurations": [
+      {
+        "configurationId": "1",
+        "configurationName": "Test Scheme Action"
+      }
+    ]
+  },
+  "stages": "REA-1351 viewport: flipped=true, baseline=(0.0, 216.0, 200.0, 244.0), notices=(0.0, 216.0, 200.0, 210.0)\nREA-1351 hosted stage: collapsed checks complete; opening compatibility details\nREA-1351 hosted stage: AppKit accessibility matches for sidebar-compatibility-disclosure: 1\nREA-1351 hosted stage: AppKit accessibility press returned true\nREA-1351 hosted stage: compatibility AX press complete; reading details\nREA-1351 hosted stage: version/scroll checks complete; closing details\nREA-1351 hosted stage: AppKit accessibility matches for sidebar-compatibility-close: 0\n\u2718 Test threeNoticesPreserveTheListViewportInANarrowShortSidebar() recorded an issue at SidebarVersionNoticeTests.swift:216:13: Expectation failed: (pressOwnedAccessibility(\"sidebar-compatibility-close\", in: notices.window) \u2192 -25212) == (AXError.success.rawValue \u2192 0)\n",
+  "newProgress": "no trap; actual opening BOOL press true; full version/scroll checks passed; explicit close noValue because parent subtree lacks exported control",
+  "remediation": "lookup within owned parent and its visible child-window hierarchy, bounded roots and unique target, actual press/closed-state retained"
+}

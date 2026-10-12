@@ -40,6 +40,27 @@ public struct ProviderCapabilities: Codable, Equatable, Sendable {
     }
 }
 
+/// Presentation facts for a newer CLI. This does not authorize a history format
+/// or change any reader, lifecycle or identity validation.
+public struct ProviderVersionNotice: Equatable, Identifiable, Sendable {
+    public enum Impact: Equatable, Sendable {
+        case bestEffort
+        case unsupportedHistory
+    }
+
+    public let provider: CLIProvider
+    public let installedVersion: String
+    public let checkedVersion: String
+    public let impact: Impact
+    public var id: CLIProvider { provider }
+    public var consequence: String {
+        impact == .unsupportedHistory ? "History format is not supported." : "History and turn state are best effort."
+    }
+    public var text: String {
+        "\(provider.name) \(installedVersion) is newer than Sigil checked (\(checkedVersion)). \(consequence)"
+    }
+}
+
 extension CLIProvider {
     /// Reader/launch contracts checked locally; this is a reporting baseline,
     /// not a cap on compatible Codex minor releases.
@@ -53,14 +74,19 @@ extension CLIProvider {
     }
 
     public func versionNotice(for installation: ProviderInstallation?) -> String? {
+        versionNoticeDetails(for: installation)?.text
+    }
+
+    public func versionNoticeDetails(for installation: ProviderInstallation?) -> ProviderVersionNotice? {
         guard let installation, installation.isAvailable, let output = installation.version,
             let installed = CLIVersion.reported(in: output), let checkedVersion,
             let checked = CLIVersion(checkedVersion), installed > checked
         else { return nil }
-        let effect =
+        let unsupported =
             (self == .codex || self == .claudeCode) && installed.major != checked.major
-            ? "History format is not supported." : "History and turn state are best effort."
-        return "\(name) \(installed.text) is newer than Sigil checked (\(checkedVersion)). \(effect)"
+        return ProviderVersionNotice(
+            provider: self, installedVersion: installed.text, checkedVersion: checkedVersion,
+            impact: unsupported ? .unsupportedHistory : .bestEffort)
     }
 
     public var capabilities: ProviderCapabilities {

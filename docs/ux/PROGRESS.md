@@ -4,6 +4,33 @@ The resumable record for the [experience contract](EXPERIENCE.md). Each entry
 says what was built, how it was checked, what the check showed, and what is
 still open. Nothing here is a timing; counts are counted actions.
 
+## REA-1351: quiet compatibility details
+
+Newer compatible CLI notices share one collapsed native popover control in the
+sidebar footer. Installed/checked versions and limitations remain on demand;
+unsupported majors and real history failures retain visible actions. The version,
+parser, lifecycle and binding rules are unchanged.
+
+[The verification record](../qa/rea-1351.md) includes actual generated native
+before/after screenshots, source/executable hashes, passing shortcut/Escape/focus,
+notice counts, availability, search, project navigation, small-window scrolling,
+light/dark and failure actions. Seven focused version and eight palette tests
+passed against real SigilKit objects; no local AppTests compile/run occurred.
+Normal exact-head PR CI and parent personal review remain required. Spoken
+VoiceOver, macOS 14 and multiple-display behavior remain unverified. REA-1350's
+separate owner manual pointer acceptance remains pending; its exact four CI
+exceptions and the six-test gate are unchanged. No daily-app replacement or merge.
+
+Parent review found that the warning Settings links reached Appearance, not the
+General pane containing the promised facts. One-shot General routing now preserves
+ordinary opens and manual tab choices; actual owned native captures prove both
+warning actions and repeated routing. The first exact-head CI run passed 1,222
+Swift tests and 37 XCTest tests but failed the hosted physical-top assertion's
+unflipped-coordinate assumption. The check now honors the host's coordinate
+orientation while retaining the 34-point budget and every other assertion.
+The old failure remains in the verification record. Corrected-head CI and parent
+review of this focused delta remain required; the four pointer exceptions are unchanged.
+
 ## REA-1272: find conversations by note text
 
 The Mac sidebar searches the first 64 KiB of eligible conversation notes after

@@ -60,6 +60,7 @@ struct SidebarView: View {
         var observeHover: ((SidebarGlide) -> Void)? = nil
     #endif
     @Environment(\.palette) private var palette
+    @Environment(\.openSettings) private var openSettings
     @FocusState private var focus: SidebarFocus?
     /// Arrow-key highlight. Separate from open/active so those markers stay
     /// about the tab strip, not about where the keys are.
@@ -92,6 +93,10 @@ struct SidebarView: View {
             navItems(snapshot.destinations)
             modeArea(focusedProject: snapshot.focusedProject)
             list(snapshot)
+            SidebarCompatibilityDisclosure(
+                notices: CLIProvider.allCases.compactMap {
+                    $0.versionNoticeDetails(for: model.providerInstallations[$0])
+                }.filter { $0.impact == .bestEffort })
         }
         .background(palette.canvas)
         .environment(\.sidebarGlide, glide)
@@ -353,17 +358,26 @@ struct SidebarView: View {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                     // Wrapped notices scroll with history so navigation keeps its space at small window sizes.
                     if model.store.historyNotice != nil {
-                        Text("Some history files are incomplete or unsupported. Details in Settings.")
-                            .ui(12.5).foregroundStyle(palette.ink2)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 12)
-                            .padding(.bottom, 8)
-                            .accessibilityIdentifier("sidebar-history-compatibility-notice")
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Some history files are incomplete or unsupported. Details in Settings.")
+                            generalSettingsLink("History details in Settings")
+                                .accessibilityIdentifier("sidebar-history-settings")
+                        }
+                        .ui(12.5).foregroundStyle(palette.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 8)
+                        .accessibilityIdentifier("sidebar-history-compatibility-notice")
                     }
                     ForEach(CLIProvider.allCases) { provider in
-                        if let notice = provider.versionNotice(for: model.providerInstallations[provider]) {
-                            Text(notice).ui(12).foregroundStyle(palette.ink2)
+                        if let notice = provider.versionNoticeDetails(for: model.providerInstallations[provider]),
+                            notice.impact == .unsupportedHistory
+                        {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(notice.text)
+                                generalSettingsLink("Settings…")
+                            }.ui(12).foregroundStyle(palette.redInk)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 12)
@@ -901,6 +915,14 @@ struct SidebarView: View {
                 Text("It shows up here as soon as it has a name.")
             }
         }
+    }
+
+    private func generalSettingsLink(_ title: String) -> some View {
+        Button(title) {
+            model.requestGeneralSettings()
+            openSettings()
+        }
+        .help("Open history and CLI details in General settings")
     }
 
     // MARK: - Keyboard

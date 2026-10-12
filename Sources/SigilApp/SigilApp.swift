@@ -13,7 +13,15 @@ struct SigilApp: App {
         Typeface.registerBundledFonts()
         // A launch without GROK_HOME reads it from the login shell while the
         // window shows. The model is built once it is adopted.
-        _launch = State(initialValue: AppLaunch())
+        #if DEBUG
+            if SidebarNoticeFixture.requested {
+                _launch = State(initialValue: AppLaunch(makeModel: SidebarNoticeFixture.makeModel))
+            } else {
+                _launch = State(initialValue: AppLaunch())
+            }
+        #else
+            _launch = State(initialValue: AppLaunch())
+        #endif
     }
 
     var body: some Scene {

@@ -1,0 +1,1004 @@
+{"executable":"\/Users\/exec\/Documents\/Codex\/2026-10-09\/task\/rea-1351-native-final\/SigilR1351Final.app\/Contents\/MacOS\/SigilR1351Final","bundleID":"com.gl11tchy.sigil.rea1351.final","ownedPID":23784}
+{"AXWindowRead":0}
+{"snapshot":"after-three-dark.png","disclosure":1}
+{"x":80,"height":640,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1351Final","value":""}
+{"x":80,"height":640,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":318,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":969.5,"height":16,"id":"","role":"AXStaticText","y":104,"width":230.5,"label":"","value":"sigil-rea1351-final-home\/project"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":214,"label":"Search conversations","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":272,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":272,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":272,"label":"Recents","value":"8 chats"}
+{"x":80,"height":422,"id":"","role":"AXScrollArea","y":264,"width":272,"label":"","value":""}
+{"x":80,"height":275,"id":"","role":"AXOpaqueProviderGroup","y":272,"width":272,"label":"","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":291,"width":272,"label":"Generated conversation 08, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":323,"width":272,"label":"Generated conversation 07, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":355,"width":272,"label":"Generated conversation 06, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":387,"width":272,"label":"Generated conversation 05, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":419,"width":272,"label":"Generated conversation 04, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":451,"width":272,"label":"Generated conversation 03, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":483,"width":272,"label":"Generated conversation 02, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":515,"width":272,"label":"Generated conversation 01, project, 9 hours ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":272,"width":37,"label":"Today, 8","value":""}
+{"x":471.5,"height":139,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":313,"width":680,"label":"","value":""}
+{"x":471.5,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":313,"width":103.5,"label":"Claude Code","value":"Available"}
+{"x":587,"height":139,"id":"new-session-codex","role":"AXButton","y":313,"width":103,"label":"Codex","value":"Available"}
+{"x":702,"height":139,"id":"new-session-devin","role":"AXButton","y":313,"width":103.5,"label":"Devin","value":"Unavailable"}
+{"x":817.5,"height":139,"id":"new-session-cursor","role":"AXButton","y":313,"width":103.5,"label":"Cursor","value":"Unavailable"}
+{"x":933,"height":139,"id":"new-session-kimi","role":"AXButton","y":313,"width":103,"label":"Kimi Code","value":"Unavailable"}
+{"x":1048,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":313,"width":103.5,"label":"Grok Build","value":"Available"}
+{"x":697.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":485,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":784.25,"height":15,"id":"new-session-surface","role":"AXButton","y":508,"width":54.5,"label":"Options…","value":""}
+{"x":88,"height":26,"id":"sidebar-compatibility-disclosure","role":"AXButton","y":686,"width":256,"label":"Compatibility details","value":"3 CLIs are newer than checked versions. Details hidden."}
+{"x":348,"height":640,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":585.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":606,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":1074.5,"height":20,"id":"","role":"AXButton","y":606,"width":85,"label":"one (fixture)","value":""}
+{"x":1167.5,"height":20,"id":"","role":"AXButton","y":606,"width":90.5,"label":"three (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":632,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":1110,"height":20,"id":"","role":"AXButton","y":632,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":658,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":658,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":14,"id":"","role":"AXCheckBox","y":684,"width":142,"label":"Reduce Motion (fixture)","value":0}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"after-three-dark.png","windowID":3283,"exit":0}
+{"press":"sidebar-compatibility-disclosure","result":0}
+{"x":80,"height":640,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1351Final","value":""}
+{"x":80,"height":640,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":318,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":969.5,"height":16,"id":"","role":"AXStaticText","y":104,"width":230.5,"label":"","value":"sigil-rea1351-final-home\/project"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":178,"label":"Search conversations","value":""}
+{"x":305,"height":18,"id":"","role":"AXStaticText","y":131,"width":29,"label":"","value":"⌘⇧F"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":272,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":272,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":272,"label":"Recents","value":"8 chats"}
+{"x":80,"height":422,"id":"","role":"AXScrollArea","y":264,"width":272,"label":"","value":""}
+{"x":80,"height":275,"id":"","role":"AXOpaqueProviderGroup","y":272,"width":272,"label":"","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":291,"width":272,"label":"Generated conversation 08, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":323,"width":272,"label":"Generated conversation 07, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":355,"width":272,"label":"Generated conversation 06, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":387,"width":272,"label":"Generated conversation 05, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":419,"width":272,"label":"Generated conversation 04, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":451,"width":272,"label":"Generated conversation 03, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":483,"width":272,"label":"Generated conversation 02, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":515,"width":272,"label":"Generated conversation 01, project, 9 hours ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":272,"width":37,"label":"Today, 8","value":""}
+{"x":471.5,"height":139,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":313,"width":680,"label":"","value":""}
+{"x":471.5,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":313,"width":103.5,"label":"Claude Code","value":"Available"}
+{"x":587,"height":139,"id":"new-session-codex","role":"AXButton","y":313,"width":103,"label":"Codex","value":"Available"}
+{"x":702,"height":139,"id":"new-session-devin","role":"AXButton","y":313,"width":103.5,"label":"Devin","value":"Unavailable"}
+{"x":817.5,"height":139,"id":"new-session-cursor","role":"AXButton","y":313,"width":103.5,"label":"Cursor","value":"Unavailable"}
+{"x":933,"height":139,"id":"new-session-kimi","role":"AXButton","y":313,"width":103,"label":"Kimi Code","value":"Unavailable"}
+{"x":1048,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":313,"width":103.5,"label":"Grok Build","value":"Available"}
+{"x":697.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":485,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":784.25,"height":15,"id":"new-session-surface","role":"AXButton","y":508,"width":54.5,"label":"Options…","value":""}
+{"x":88,"height":26,"id":"sidebar-compatibility-disclosure","role":"AXButton","y":686,"width":256,"label":"Compatibility details","value":"3 CLIs are newer than checked versions. Details shown."}
+{"x":344,"height":420,"id":"","role":"AXPopover","y":489,"width":346,"label":"","value":""}
+{"x":344,"height":420,"id":"","role":"AXGroup","y":489,"width":346,"label":"","value":""}
+{"x":344,"height":420,"id":"sidebar-compatibility-details","role":"AXGroup","y":489,"width":346,"label":"","value":""}
+{"x":371,"height":16,"id":"","role":"AXHeading","y":516,"width":124.5,"label":"Newer CLI versions","value":""}
+{"x":371,"height":300,"id":"","role":"AXScrollArea","y":544,"width":292,"label":"","value":""}
+{"x":371,"height":73,"id":"sidebar-claudeCode-version-notice","role":"AXStaticText","y":544,"width":218.5,"label":"","value":"Claude Code 2.1.296 is newer than Sigil checked (2.1.283). History and turn state are best effort."}
+{"x":371,"height":73,"id":"sidebar-codex-version-notice","role":"AXStaticText","y":631,"width":218.5,"label":"","value":"Codex 0.160.0 is newer than Sigil checked (0.157.1). History and turn state are best effort."}
+{"x":371,"height":73,"id":"sidebar-grokBuild-version-notice","role":"AXStaticText","y":718,"width":218.5,"label":"","value":"Grok Build 1.0.50 is newer than Sigil checked (1.0.40). History and turn state are best effort."}
+{"x":606.5,"height":26,"id":"sidebar-compatibility-close","role":"AXButton","y":856,"width":56.5,"label":"Close compatibility details","value":""}
+{"x":348,"height":640,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":585.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":606,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":1074.5,"height":20,"id":"","role":"AXButton","y":606,"width":85,"label":"one (fixture)","value":""}
+{"x":1167.5,"height":20,"id":"","role":"AXButton","y":606,"width":90.5,"label":"three (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":632,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":1110,"height":20,"id":"","role":"AXButton","y":632,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":658,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":658,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":14,"id":"","role":"AXCheckBox","y":684,"width":142,"label":"Reduce Motion (fixture)","value":0}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"details-three-dark.png","windowID":3283,"exit":0}
+{"press":"sidebar-compatibility-close","result":0}
+{"focusedLabel":"Compatibility details","focusedID":"sidebar-compatibility-disclosure","closeExported":0,"focusStage":"afterDone","focusedRole":"AXButton"}
+{"snapshot":"after-done.png","disclosure":1}
+{"x":80,"height":640,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1351Final","value":""}
+{"x":80,"height":640,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":318,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":969.5,"height":16,"id":"","role":"AXStaticText","y":104,"width":230.5,"label":"","value":"sigil-rea1351-final-home\/project"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":178,"label":"Search conversations","value":""}
+{"x":305,"height":18,"id":"","role":"AXStaticText","y":131,"width":29,"label":"","value":"⌘⇧F"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":272,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":272,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":272,"label":"Recents","value":"8 chats"}
+{"x":80,"height":422,"id":"","role":"AXScrollArea","y":264,"width":272,"label":"","value":""}
+{"x":80,"height":275,"id":"","role":"AXOpaqueProviderGroup","y":272,"width":272,"label":"","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":291,"width":272,"label":"Generated conversation 08, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":323,"width":272,"label":"Generated conversation 07, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":355,"width":272,"label":"Generated conversation 06, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":387,"width":272,"label":"Generated conversation 05, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":419,"width":272,"label":"Generated conversation 04, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":451,"width":272,"label":"Generated conversation 03, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":483,"width":272,"label":"Generated conversation 02, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":515,"width":272,"label":"Generated conversation 01, project, 9 hours ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":272,"width":37,"label":"Today, 8","value":""}
+{"x":471.5,"height":139,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":313,"width":680,"label":"","value":""}
+{"x":471.5,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":313,"width":103.5,"label":"Claude Code","value":"Available"}
+{"x":587,"height":139,"id":"new-session-codex","role":"AXButton","y":313,"width":103,"label":"Codex","value":"Available"}
+{"x":702,"height":139,"id":"new-session-devin","role":"AXButton","y":313,"width":103.5,"label":"Devin","value":"Unavailable"}
+{"x":817.5,"height":139,"id":"new-session-cursor","role":"AXButton","y":313,"width":103.5,"label":"Cursor","value":"Unavailable"}
+{"x":933,"height":139,"id":"new-session-kimi","role":"AXButton","y":313,"width":103,"label":"Kimi Code","value":"Unavailable"}
+{"x":1048,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":313,"width":103.5,"label":"Grok Build","value":"Available"}
+{"x":697.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":485,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":784.25,"height":15,"id":"new-session-surface","role":"AXButton","y":508,"width":54.5,"label":"Options…","value":""}
+{"x":88,"height":26,"id":"sidebar-compatibility-disclosure","role":"AXButton","y":686,"width":256,"label":"Compatibility details","value":"3 CLIs are newer than checked versions. Details hidden."}
+{"x":348,"height":640,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":585.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":606,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":1074.5,"height":20,"id":"","role":"AXButton","y":606,"width":85,"label":"one (fixture)","value":""}
+{"x":1167.5,"height":20,"id":"","role":"AXButton","y":606,"width":90.5,"label":"three (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":632,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":1110,"height":20,"id":"","role":"AXButton","y":632,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":658,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":658,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":14,"id":"","role":"AXCheckBox","y":684,"width":142,"label":"Reduce Motion (fixture)","value":0}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"after-done.png","windowID":3283,"exit":0}
+{"flags":1179648,"ownedKeyCode":34}
+{"keyboardShortcutOpened":true}
+{"focusedLabel":"Close compatibility details","focusedID":"sidebar-compatibility-close","closeExported":1,"focusStage":"shortcutOpened","focusedRole":"AXButton"}
+{"x":80,"height":640,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1351Final","value":""}
+{"x":80,"height":640,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":318,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":969.5,"height":16,"id":"","role":"AXStaticText","y":104,"width":230.5,"label":"","value":"sigil-rea1351-final-home\/project"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":178,"label":"Search conversations","value":""}
+{"x":305,"height":18,"id":"","role":"AXStaticText","y":131,"width":29,"label":"","value":"⌘⇧F"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":272,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":272,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":272,"label":"Recents","value":"8 chats"}
+{"x":80,"height":422,"id":"","role":"AXScrollArea","y":264,"width":272,"label":"","value":""}
+{"x":80,"height":275,"id":"","role":"AXOpaqueProviderGroup","y":272,"width":272,"label":"","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":291,"width":272,"label":"Generated conversation 08, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":323,"width":272,"label":"Generated conversation 07, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":355,"width":272,"label":"Generated conversation 06, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":387,"width":272,"label":"Generated conversation 05, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":419,"width":272,"label":"Generated conversation 04, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":451,"width":272,"label":"Generated conversation 03, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":483,"width":272,"label":"Generated conversation 02, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":515,"width":272,"label":"Generated conversation 01, project, 9 hours ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":272,"width":37,"label":"Today, 8","value":""}
+{"x":471.5,"height":139,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":313,"width":680,"label":"","value":""}
+{"x":471.5,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":313,"width":103.5,"label":"Claude Code","value":"Available"}
+{"x":587,"height":139,"id":"new-session-codex","role":"AXButton","y":313,"width":103,"label":"Codex","value":"Available"}
+{"x":702,"height":139,"id":"new-session-devin","role":"AXButton","y":313,"width":103.5,"label":"Devin","value":"Unavailable"}
+{"x":817.5,"height":139,"id":"new-session-cursor","role":"AXButton","y":313,"width":103.5,"label":"Cursor","value":"Unavailable"}
+{"x":933,"height":139,"id":"new-session-kimi","role":"AXButton","y":313,"width":103,"label":"Kimi Code","value":"Unavailable"}
+{"x":1048,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":313,"width":103.5,"label":"Grok Build","value":"Available"}
+{"x":697.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":485,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":784.25,"height":15,"id":"new-session-surface","role":"AXButton","y":508,"width":54.5,"label":"Options…","value":""}
+{"x":88,"height":26,"id":"sidebar-compatibility-disclosure","role":"AXButton","y":686,"width":256,"label":"Compatibility details","value":"3 CLIs are newer than checked versions. Details shown."}
+{"x":344,"height":420,"id":"","role":"AXPopover","y":489,"width":346,"label":"","value":""}
+{"x":344,"height":420,"id":"","role":"AXGroup","y":489,"width":346,"label":"","value":""}
+{"x":344,"height":420,"id":"sidebar-compatibility-details","role":"AXGroup","y":489,"width":346,"label":"","value":""}
+{"x":371,"height":16,"id":"","role":"AXHeading","y":516,"width":124.5,"label":"Newer CLI versions","value":""}
+{"x":371,"height":300,"id":"","role":"AXScrollArea","y":544,"width":292,"label":"","value":""}
+{"x":371,"height":73,"id":"sidebar-claudeCode-version-notice","role":"AXStaticText","y":544,"width":218.5,"label":"","value":"Claude Code 2.1.296 is newer than Sigil checked (2.1.283). History and turn state are best effort."}
+{"x":371,"height":73,"id":"sidebar-codex-version-notice","role":"AXStaticText","y":631,"width":218.5,"label":"","value":"Codex 0.160.0 is newer than Sigil checked (0.157.1). History and turn state are best effort."}
+{"x":371,"height":73,"id":"sidebar-grokBuild-version-notice","role":"AXStaticText","y":718,"width":218.5,"label":"","value":"Grok Build 1.0.50 is newer than Sigil checked (1.0.40). History and turn state are best effort."}
+{"x":606.5,"height":26,"id":"sidebar-compatibility-close","role":"AXButton","y":856,"width":56.5,"label":"Close compatibility details","value":""}
+{"x":348,"height":640,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":585.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":606,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":1074.5,"height":20,"id":"","role":"AXButton","y":606,"width":85,"label":"one (fixture)","value":""}
+{"x":1167.5,"height":20,"id":"","role":"AXButton","y":606,"width":90.5,"label":"three (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":632,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":1110,"height":20,"id":"","role":"AXButton","y":632,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":658,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":658,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":14,"id":"","role":"AXCheckBox","y":684,"width":142,"label":"Reduce Motion (fixture)","value":0}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"details-shortcut.png","windowID":3283,"exit":0}
+{"flags":0,"ownedKeyCode":53}
+{"focusedLabel":"Compatibility details","focusedID":"sidebar-compatibility-disclosure","closeExported":0,"focusStage":"afterEscape","focusedRole":"AXButton"}
+{"snapshot":"after-escape.png","disclosure":1}
+{"x":80,"height":640,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1351Final","value":""}
+{"x":80,"height":640,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":318,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":969.5,"height":16,"id":"","role":"AXStaticText","y":104,"width":230.5,"label":"","value":"sigil-rea1351-final-home\/project"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":178,"label":"Search conversations","value":""}
+{"x":305,"height":18,"id":"","role":"AXStaticText","y":131,"width":29,"label":"","value":"⌘⇧F"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":272,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":272,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":272,"label":"Recents","value":"8 chats"}
+{"x":80,"height":422,"id":"","role":"AXScrollArea","y":264,"width":272,"label":"","value":""}
+{"x":80,"height":275,"id":"","role":"AXOpaqueProviderGroup","y":272,"width":272,"label":"","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":291,"width":272,"label":"Generated conversation 08, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":323,"width":272,"label":"Generated conversation 07, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":355,"width":272,"label":"Generated conversation 06, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":387,"width":272,"label":"Generated conversation 05, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":419,"width":272,"label":"Generated conversation 04, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":451,"width":272,"label":"Generated conversation 03, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":483,"width":272,"label":"Generated conversation 02, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":515,"width":272,"label":"Generated conversation 01, project, 9 hours ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":272,"width":37,"label":"Today, 8","value":""}
+{"x":471.5,"height":139,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":313,"width":680,"label":"","value":""}
+{"x":471.5,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":313,"width":103.5,"label":"Claude Code","value":"Available"}
+{"x":587,"height":139,"id":"new-session-codex","role":"AXButton","y":313,"width":103,"label":"Codex","value":"Available"}
+{"x":702,"height":139,"id":"new-session-devin","role":"AXButton","y":313,"width":103.5,"label":"Devin","value":"Unavailable"}
+{"x":817.5,"height":139,"id":"new-session-cursor","role":"AXButton","y":313,"width":103.5,"label":"Cursor","value":"Unavailable"}
+{"x":933,"height":139,"id":"new-session-kimi","role":"AXButton","y":313,"width":103,"label":"Kimi Code","value":"Unavailable"}
+{"x":1048,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":313,"width":103.5,"label":"Grok Build","value":"Available"}
+{"x":697.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":485,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":784.25,"height":15,"id":"new-session-surface","role":"AXButton","y":508,"width":54.5,"label":"Options…","value":""}
+{"x":88,"height":26,"id":"sidebar-compatibility-disclosure","role":"AXButton","y":686,"width":256,"label":"Compatibility details","value":"3 CLIs are newer than checked versions. Details hidden."}
+{"x":348,"height":640,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":585.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":606,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":1074.5,"height":20,"id":"","role":"AXButton","y":606,"width":85,"label":"one (fixture)","value":""}
+{"x":1167.5,"height":20,"id":"","role":"AXButton","y":606,"width":90.5,"label":"three (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":632,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":1110,"height":20,"id":"","role":"AXButton","y":632,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":658,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":658,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":14,"id":"","role":"AXCheckBox","y":684,"width":142,"label":"Reduce Motion (fixture)","value":0}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"after-escape.png","windowID":3283,"exit":0}
+{"escapeDismissed":true}
+{"press":"one (fixture)","result":0}
+{"snapshot":"after-one-dark.png","disclosure":1}
+{"x":80,"height":640,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1351Final","value":""}
+{"x":80,"height":640,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":318,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":969.5,"height":16,"id":"","role":"AXStaticText","y":104,"width":230.5,"label":"","value":"sigil-rea1351-final-home\/project"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":178,"label":"Search conversations","value":""}
+{"x":305,"height":18,"id":"","role":"AXStaticText","y":131,"width":29,"label":"","value":"⌘⇧F"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":272,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":272,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":272,"label":"Recents","value":"8 chats"}
+{"x":80,"height":422,"id":"","role":"AXScrollArea","y":264,"width":272,"label":"","value":""}
+{"x":80,"height":275,"id":"","role":"AXOpaqueProviderGroup","y":272,"width":272,"label":"","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":291,"width":272,"label":"Generated conversation 08, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":323,"width":272,"label":"Generated conversation 07, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":355,"width":272,"label":"Generated conversation 06, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":387,"width":272,"label":"Generated conversation 05, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":419,"width":272,"label":"Generated conversation 04, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":451,"width":272,"label":"Generated conversation 03, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":483,"width":272,"label":"Generated conversation 02, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":515,"width":272,"label":"Generated conversation 01, project, 9 hours ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":272,"width":37,"label":"Today, 8","value":""}
+{"x":471.5,"height":139,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":313,"width":680,"label":"","value":""}
+{"x":471.5,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":313,"width":103.5,"label":"Claude Code","value":"Available"}
+{"x":587,"height":139,"id":"new-session-codex","role":"AXButton","y":313,"width":103,"label":"Codex","value":"Available"}
+{"x":702,"height":139,"id":"new-session-devin","role":"AXButton","y":313,"width":103.5,"label":"Devin","value":"Unavailable"}
+{"x":817.5,"height":139,"id":"new-session-cursor","role":"AXButton","y":313,"width":103.5,"label":"Cursor","value":"Unavailable"}
+{"x":933,"height":139,"id":"new-session-kimi","role":"AXButton","y":313,"width":103,"label":"Kimi Code","value":"Unavailable"}
+{"x":1048,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":313,"width":103.5,"label":"Grok Build","value":"Available"}
+{"x":697.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":485,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":784.25,"height":15,"id":"new-session-surface","role":"AXButton","y":508,"width":54.5,"label":"Options…","value":""}
+{"x":88,"height":26,"id":"sidebar-compatibility-disclosure","role":"AXButton","y":686,"width":256,"label":"Compatibility details","value":"1 CLI is newer than checked versions. Details hidden."}
+{"x":348,"height":640,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":585.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":606,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":1074.5,"height":20,"id":"","role":"AXButton","y":606,"width":85,"label":"one (fixture)","value":""}
+{"x":1167.5,"height":20,"id":"","role":"AXButton","y":606,"width":90.5,"label":"three (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":632,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":1110,"height":20,"id":"","role":"AXButton","y":632,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":658,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":658,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":14,"id":"","role":"AXCheckBox","y":684,"width":142,"label":"Reduce Motion (fixture)","value":0}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"after-one-dark.png","windowID":3283,"exit":0}
+{"press":"sidebar-compatibility-disclosure","result":0}
+{"x":80,"height":640,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1351Final","value":""}
+{"x":80,"height":640,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":318,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":969.5,"height":16,"id":"","role":"AXStaticText","y":104,"width":230.5,"label":"","value":"sigil-rea1351-final-home\/project"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":178,"label":"Search conversations","value":""}
+{"x":305,"height":18,"id":"","role":"AXStaticText","y":131,"width":29,"label":"","value":"⌘⇧F"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":272,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":272,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":272,"label":"Recents","value":"8 chats"}
+{"x":80,"height":422,"id":"","role":"AXScrollArea","y":264,"width":272,"label":"","value":""}
+{"x":80,"height":275,"id":"","role":"AXOpaqueProviderGroup","y":272,"width":272,"label":"","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":291,"width":272,"label":"Generated conversation 08, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":323,"width":272,"label":"Generated conversation 07, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":355,"width":272,"label":"Generated conversation 06, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":387,"width":272,"label":"Generated conversation 05, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":419,"width":272,"label":"Generated conversation 04, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":451,"width":272,"label":"Generated conversation 03, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":483,"width":272,"label":"Generated conversation 02, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":515,"width":272,"label":"Generated conversation 01, project, 9 hours ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":272,"width":37,"label":"Today, 8","value":""}
+{"x":471.5,"height":139,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":313,"width":680,"label":"","value":""}
+{"x":471.5,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":313,"width":103.5,"label":"Claude Code","value":"Available"}
+{"x":587,"height":139,"id":"new-session-codex","role":"AXButton","y":313,"width":103,"label":"Codex","value":"Available"}
+{"x":702,"height":139,"id":"new-session-devin","role":"AXButton","y":313,"width":103.5,"label":"Devin","value":"Unavailable"}
+{"x":817.5,"height":139,"id":"new-session-cursor","role":"AXButton","y":313,"width":103.5,"label":"Cursor","value":"Unavailable"}
+{"x":933,"height":139,"id":"new-session-kimi","role":"AXButton","y":313,"width":103,"label":"Kimi Code","value":"Unavailable"}
+{"x":1048,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":313,"width":103.5,"label":"Grok Build","value":"Available"}
+{"x":697.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":485,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":784.25,"height":15,"id":"new-session-surface","role":"AXButton","y":508,"width":54.5,"label":"Options…","value":""}
+{"x":88,"height":26,"id":"sidebar-compatibility-disclosure","role":"AXButton","y":686,"width":256,"label":"Compatibility details","value":"1 CLI is newer than checked versions. Details shown."}
+{"x":344,"height":230,"id":"","role":"AXPopover","y":584,"width":346,"label":"","value":""}
+{"x":344,"height":230,"id":"","role":"AXGroup","y":584,"width":346,"label":"","value":""}
+{"x":344,"height":230,"id":"sidebar-compatibility-details","role":"AXGroup","y":584,"width":346,"label":"","value":""}
+{"x":371,"height":16,"id":"","role":"AXHeading","y":611,"width":124.5,"label":"Newer CLI versions","value":""}
+{"x":371,"height":110,"id":"","role":"AXScrollArea","y":639,"width":292,"label":"","value":""}
+{"x":371,"height":73,"id":"sidebar-codex-version-notice","role":"AXStaticText","y":639,"width":218.5,"label":"","value":"Codex 0.160.0 is newer than Sigil checked (0.157.1). History and turn state are best effort."}
+{"x":606.5,"height":26,"id":"sidebar-compatibility-close","role":"AXButton","y":761,"width":56.5,"label":"Close compatibility details","value":""}
+{"x":348,"height":640,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":585.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":606,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":1074.5,"height":20,"id":"","role":"AXButton","y":606,"width":85,"label":"one (fixture)","value":""}
+{"x":1167.5,"height":20,"id":"","role":"AXButton","y":606,"width":90.5,"label":"three (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":632,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":1110,"height":20,"id":"","role":"AXButton","y":632,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":658,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":658,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":14,"id":"","role":"AXCheckBox","y":684,"width":142,"label":"Reduce Motion (fixture)","value":0}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"details-one-dark.png","windowID":3283,"exit":0}
+{"press":"sidebar-compatibility-close","result":0}
+{"press":"zero (fixture)","result":0}
+{"snapshot":"after-zero-dark.png","disclosure":0}
+{"x":80,"height":640,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1351Final","value":""}
+{"x":80,"height":640,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":318,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":969.5,"height":16,"id":"","role":"AXStaticText","y":104,"width":230.5,"label":"","value":"sigil-rea1351-final-home\/project"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":178,"label":"Search conversations","value":""}
+{"x":305,"height":18,"id":"","role":"AXStaticText","y":131,"width":29,"label":"","value":"⌘⇧F"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":272,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":272,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":272,"label":"Recents","value":"8 chats"}
+{"x":80,"height":456,"id":"","role":"AXScrollArea","y":264,"width":272,"label":"","value":""}
+{"x":80,"height":275,"id":"","role":"AXOpaqueProviderGroup","y":272,"width":272,"label":"","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":291,"width":272,"label":"Generated conversation 08, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":323,"width":272,"label":"Generated conversation 07, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":355,"width":272,"label":"Generated conversation 06, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":387,"width":272,"label":"Generated conversation 05, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":419,"width":272,"label":"Generated conversation 04, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":451,"width":272,"label":"Generated conversation 03, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":483,"width":272,"label":"Generated conversation 02, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":515,"width":272,"label":"Generated conversation 01, project, 9 hours ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":272,"width":37,"label":"Today, 8","value":""}
+{"x":348,"height":640,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":471.5,"height":139,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":313,"width":680,"label":"","value":""}
+{"x":471.5,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":313,"width":103.5,"label":"Claude Code","value":"Available"}
+{"x":587,"height":139,"id":"new-session-codex","role":"AXButton","y":313,"width":103,"label":"Codex","value":"Available"}
+{"x":702,"height":139,"id":"new-session-devin","role":"AXButton","y":313,"width":103.5,"label":"Devin","value":"Unavailable"}
+{"x":817.5,"height":139,"id":"new-session-cursor","role":"AXButton","y":313,"width":103.5,"label":"Cursor","value":"Unavailable"}
+{"x":933,"height":139,"id":"new-session-kimi","role":"AXButton","y":313,"width":103,"label":"Kimi Code","value":"Unavailable"}
+{"x":1048,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":313,"width":103.5,"label":"Grok Build","value":"Available"}
+{"x":697.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":485,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":784.25,"height":15,"id":"new-session-surface","role":"AXButton","y":508,"width":54.5,"label":"Options…","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":585.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":606,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":1074.5,"height":20,"id":"","role":"AXButton","y":606,"width":85,"label":"one (fixture)","value":""}
+{"x":1167.5,"height":20,"id":"","role":"AXButton","y":606,"width":90.5,"label":"three (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":632,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":1110,"height":20,"id":"","role":"AXButton","y":632,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":658,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":658,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":14,"id":"","role":"AXCheckBox","y":684,"width":142,"label":"Reduce Motion (fixture)","value":0}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"after-zero-dark.png","windowID":3283,"exit":0}
+{"press":"three (fixture)","result":0}
+{"press":"unavailable (fixture)","result":0}
+{"snapshot":"after-unavailable-dark.png","disclosure":0}
+{"x":80,"height":640,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1351Final","value":""}
+{"x":80,"height":640,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":318,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":969.5,"height":16,"id":"","role":"AXStaticText","y":104,"width":230.5,"label":"","value":"sigil-rea1351-final-home\/project"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":178,"label":"Search conversations","value":""}
+{"x":305,"height":18,"id":"","role":"AXStaticText","y":131,"width":29,"label":"","value":"⌘⇧F"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":272,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":272,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":272,"label":"Recents","value":"8 chats"}
+{"x":80,"height":456,"id":"","role":"AXScrollArea","y":264,"width":272,"label":"","value":""}
+{"x":80,"height":275,"id":"","role":"AXOpaqueProviderGroup","y":272,"width":272,"label":"","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":291,"width":272,"label":"Generated conversation 08, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":323,"width":272,"label":"Generated conversation 07, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":355,"width":272,"label":"Generated conversation 06, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":387,"width":272,"label":"Generated conversation 05, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":419,"width":272,"label":"Generated conversation 04, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":451,"width":272,"label":"Generated conversation 03, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":483,"width":272,"label":"Generated conversation 02, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":515,"width":272,"label":"Generated conversation 01, project, 9 hours ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":272,"width":37,"label":"Today, 8","value":""}
+{"x":348,"height":640,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":471.5,"height":139,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":313,"width":680,"label":"","value":""}
+{"x":471.5,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":313,"width":103.5,"label":"Claude Code","value":"Unavailable"}
+{"x":587,"height":139,"id":"new-session-codex","role":"AXButton","y":313,"width":103,"label":"Codex","value":"Unavailable"}
+{"x":702,"height":139,"id":"new-session-devin","role":"AXButton","y":313,"width":103.5,"label":"Devin","value":"Unavailable"}
+{"x":817.5,"height":139,"id":"new-session-cursor","role":"AXButton","y":313,"width":103.5,"label":"Cursor","value":"Unavailable"}
+{"x":933,"height":139,"id":"new-session-kimi","role":"AXButton","y":313,"width":103,"label":"Kimi Code","value":"Unavailable"}
+{"x":1048,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":313,"width":103.5,"label":"Grok Build","value":"Unavailable"}
+{"x":697.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":485,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":784.25,"height":15,"id":"new-session-surface","role":"AXButton","y":508,"width":54.5,"label":"Options…","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":585.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":606,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":1074.5,"height":20,"id":"","role":"AXButton","y":606,"width":85,"label":"one (fixture)","value":""}
+{"x":1167.5,"height":20,"id":"","role":"AXButton","y":606,"width":90.5,"label":"three (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":632,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":1110,"height":20,"id":"","role":"AXButton","y":632,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":658,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":658,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":14,"id":"","role":"AXCheckBox","y":684,"width":142,"label":"Reduce Motion (fixture)","value":0}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"after-unavailable-dark.png","windowID":3283,"exit":0}
+{"press":"unsupported (fixture)","result":0}
+{"snapshot":"after-unsupported-dark.png","disclosure":0}
+{"x":80,"height":640,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1351Final","value":""}
+{"x":80,"height":640,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":318,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":969.5,"height":16,"id":"","role":"AXStaticText","y":104,"width":230.5,"label":"","value":"sigil-rea1351-final-home\/project"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":178,"label":"Search conversations","value":""}
+{"x":305,"height":18,"id":"","role":"AXStaticText","y":131,"width":29,"label":"","value":"⌘⇧F"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":272,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":272,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":272,"label":"Recents","value":"8 chats"}
+{"x":80,"height":456,"id":"","role":"AXScrollArea","y":264,"width":272,"label":"","value":""}
+{"x":80,"height":349,"id":"","role":"AXOpaqueProviderGroup","y":264,"width":272,"label":"","value":""}
+{"x":92,"height":30,"id":"sidebar-codex-version-notice","role":"AXStaticText","y":264,"width":230.5,"label":"","value":"Codex 1.0.0 is newer than Sigil checked (0.157.1). History format is not supported."}
+{"x":92,"height":24,"id":"sidebar-codex-version-notice","role":"AXButton","y":298,"width":84.5,"label":"Settings…","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":357,"width":272,"label":"Generated conversation 08, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":389,"width":272,"label":"Generated conversation 07, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":421,"width":272,"label":"Generated conversation 06, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":453,"width":272,"label":"Generated conversation 05, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":485,"width":272,"label":"Generated conversation 04, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":517,"width":272,"label":"Generated conversation 03, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":549,"width":272,"label":"Generated conversation 02, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":581,"width":272,"label":"Generated conversation 01, project, 9 hours ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":338,"width":37,"label":"Today, 8","value":""}
+{"x":348,"height":640,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":471.5,"height":139,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":313,"width":680,"label":"","value":""}
+{"x":471.5,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":313,"width":103.5,"label":"Claude Code","value":"Available"}
+{"x":587,"height":139,"id":"new-session-codex","role":"AXButton","y":313,"width":103,"label":"Codex","value":"Available"}
+{"x":702,"height":139,"id":"new-session-devin","role":"AXButton","y":313,"width":103.5,"label":"Devin","value":"Unavailable"}
+{"x":817.5,"height":139,"id":"new-session-cursor","role":"AXButton","y":313,"width":103.5,"label":"Cursor","value":"Unavailable"}
+{"x":933,"height":139,"id":"new-session-kimi","role":"AXButton","y":313,"width":103,"label":"Kimi Code","value":"Unavailable"}
+{"x":1048,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":313,"width":103.5,"label":"Grok Build","value":"Available"}
+{"x":697.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":485,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":784.25,"height":15,"id":"new-session-surface","role":"AXButton","y":508,"width":54.5,"label":"Options…","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":585.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":606,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":1074.5,"height":20,"id":"","role":"AXButton","y":606,"width":85,"label":"one (fixture)","value":""}
+{"x":1167.5,"height":20,"id":"","role":"AXButton","y":606,"width":90.5,"label":"three (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":632,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":1110,"height":20,"id":"","role":"AXButton","y":632,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":658,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":658,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":14,"id":"","role":"AXCheckBox","y":684,"width":142,"label":"Reduce Motion (fixture)","value":0}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"after-unsupported-dark.png","windowID":3283,"exit":0}
+{"press":"three (fixture)","result":0}
+{"press":"Light (fixture)","result":0}
+{"snapshot":"after-three-light.png","disclosure":1}
+{"x":80,"height":640,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1351Final","value":""}
+{"x":80,"height":640,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":318,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":969.5,"height":16,"id":"","role":"AXStaticText","y":104,"width":230.5,"label":"","value":"sigil-rea1351-final-home\/project"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"ellipsis","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":178,"label":"Search conversations","value":""}
+{"x":305,"height":18,"id":"","role":"AXStaticText","y":131,"width":29,"label":"","value":"⌘⇧F"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":272,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":272,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":272,"label":"Recents","value":"8 chats"}
+{"x":80,"height":422,"id":"","role":"AXScrollArea","y":264,"width":272,"label":"","value":""}
+{"x":80,"height":275,"id":"","role":"AXOpaqueProviderGroup","y":272,"width":272,"label":"","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":291,"width":272,"label":"Generated conversation 08, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":323,"width":272,"label":"Generated conversation 07, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":355,"width":272,"label":"Generated conversation 06, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":387,"width":272,"label":"Generated conversation 05, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":419,"width":272,"label":"Generated conversation 04, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":451,"width":272,"label":"Generated conversation 03, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":483,"width":272,"label":"Generated conversation 02, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":515,"width":272,"label":"Generated conversation 01, project, 9 hours ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":272,"width":37,"label":"Today, 8","value":""}
+{"x":471.5,"height":139,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":313,"width":680,"label":"","value":""}
+{"x":471.5,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":313,"width":103.5,"label":"Claude Code","value":"Available"}
+{"x":587,"height":139,"id":"new-session-codex","role":"AXButton","y":313,"width":103,"label":"Codex","value":"Available"}
+{"x":702,"height":139,"id":"new-session-devin","role":"AXButton","y":313,"width":103.5,"label":"Devin","value":"Unavailable"}
+{"x":817.5,"height":139,"id":"new-session-cursor","role":"AXButton","y":313,"width":103.5,"label":"Cursor","value":"Unavailable"}
+{"x":933,"height":139,"id":"new-session-kimi","role":"AXButton","y":313,"width":103,"label":"Kimi Code","value":"Unavailable"}
+{"x":1048,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":313,"width":103.5,"label":"Grok Build","value":"Available"}
+{"x":697.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":485,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":784.25,"height":15,"id":"new-session-surface","role":"AXButton","y":508,"width":54.5,"label":"Options…","value":""}
+{"x":88,"height":26,"id":"sidebar-compatibility-disclosure","role":"AXButton","y":686,"width":256,"label":"Compatibility details","value":"3 CLIs are newer than checked versions. Details hidden."}
+{"x":348,"height":640,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":585.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":606,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":1074.5,"height":20,"id":"","role":"AXButton","y":606,"width":85,"label":"one (fixture)","value":""}
+{"x":1167.5,"height":20,"id":"","role":"AXButton","y":606,"width":90.5,"label":"three (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":632,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":1110,"height":20,"id":"","role":"AXButton","y":632,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":658,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":658,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":14,"id":"","role":"AXCheckBox","y":684,"width":142,"label":"Reduce Motion (fixture)","value":0}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"after-three-light.png","windowID":3283,"exit":0}
+{"press":"Reduce Motion (fixture)","result":0}
+{"snapshot":"after-reduced-motion-light.png","disclosure":1}
+{"x":80,"height":640,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1351Final","value":""}
+{"x":80,"height":640,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":318,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":969.5,"height":16,"id":"","role":"AXStaticText","y":104,"width":230.5,"label":"","value":"sigil-rea1351-final-home\/project"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"ellipsis","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":178,"label":"Search conversations","value":""}
+{"x":305,"height":18,"id":"","role":"AXStaticText","y":131,"width":29,"label":"","value":"⌘⇧F"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":272,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":272,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":272,"label":"Recents","value":"8 chats"}
+{"x":80,"height":422,"id":"","role":"AXScrollArea","y":264,"width":272,"label":"","value":""}
+{"x":80,"height":275,"id":"","role":"AXOpaqueProviderGroup","y":272,"width":272,"label":"","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":291,"width":272,"label":"Generated conversation 08, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":323,"width":272,"label":"Generated conversation 07, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":355,"width":272,"label":"Generated conversation 06, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":387,"width":272,"label":"Generated conversation 05, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":419,"width":272,"label":"Generated conversation 04, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":451,"width":272,"label":"Generated conversation 03, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":483,"width":272,"label":"Generated conversation 02, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":515,"width":272,"label":"Generated conversation 01, project, 9 hours ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":272,"width":37,"label":"Today, 8","value":""}
+{"x":471.5,"height":139,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":313,"width":680,"label":"","value":""}
+{"x":471.5,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":313,"width":103.5,"label":"Claude Code","value":"Available"}
+{"x":587,"height":139,"id":"new-session-codex","role":"AXButton","y":313,"width":103,"label":"Codex","value":"Available"}
+{"x":702,"height":139,"id":"new-session-devin","role":"AXButton","y":313,"width":103.5,"label":"Devin","value":"Unavailable"}
+{"x":817.5,"height":139,"id":"new-session-cursor","role":"AXButton","y":313,"width":103.5,"label":"Cursor","value":"Unavailable"}
+{"x":933,"height":139,"id":"new-session-kimi","role":"AXButton","y":313,"width":103,"label":"Kimi Code","value":"Unavailable"}
+{"x":1048,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":313,"width":103.5,"label":"Grok Build","value":"Available"}
+{"x":697.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":485,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":784.25,"height":15,"id":"new-session-surface","role":"AXButton","y":508,"width":54.5,"label":"Options…","value":""}
+{"x":88,"height":26,"id":"sidebar-compatibility-disclosure","role":"AXButton","y":686,"width":256,"label":"Compatibility details","value":"3 CLIs are newer than checked versions. Details hidden."}
+{"x":348,"height":640,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":585.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":606,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":1074.5,"height":20,"id":"","role":"AXButton","y":606,"width":85,"label":"one (fixture)","value":""}
+{"x":1167.5,"height":20,"id":"","role":"AXButton","y":606,"width":90.5,"label":"three (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":632,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":1110,"height":20,"id":"","role":"AXButton","y":632,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":658,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":658,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":14,"id":"","role":"AXCheckBox","y":684,"width":142,"label":"Reduce Motion (fixture)","value":1}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"after-reduced-motion-light.png","windowID":3283,"exit":0}
+{"snapshot":"after-minimum-light.png","disclosure":1}
+{"x":80,"height":492,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":760,"label":"SigilR1351Final","value":""}
+{"x":80,"height":492,"id":"","role":"AXGroup","y":80,"width":760,"label":"","value":""}
+{"x":318,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":529.5,"height":16,"id":"","role":"AXStaticText","y":104,"width":230.5,"label":"","value":"sigil-rea1351-final-home\/project"}
+{"x":770,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":800,"height":14,"id":"ellipsis","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":178,"label":"Search conversations","value":""}
+{"x":305,"height":18,"id":"","role":"AXStaticText","y":131,"width":29,"label":"","value":"⌘⇧F"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":272,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":272,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":272,"label":"Recents","value":"8 chats"}
+{"x":80,"height":274,"id":"","role":"AXScrollArea","y":264,"width":272,"label":"","value":""}
+{"x":80,"height":275,"id":"","role":"AXOpaqueProviderGroup","y":272,"width":272,"label":"","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":291,"width":272,"label":"Generated conversation 08, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":323,"width":272,"label":"Generated conversation 07, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":355,"width":272,"label":"Generated conversation 06, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":387,"width":272,"label":"Generated conversation 05, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":419,"width":272,"label":"Generated conversation 04, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":451,"width":272,"label":"Generated conversation 03, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":483,"width":272,"label":"Generated conversation 02, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":515,"width":272,"label":"Generated conversation 01, project, 9 hours ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":272,"width":37,"label":"Today, 8","value":""}
+{"x":334,"height":276,"id":"","role":"AXScrollBar","y":263,"width":19,"label":"","value":0}
+{"x":343,"height":250.5,"id":"","role":"AXValueIndicator","y":267,"width":6,"label":"","value":0}
+{"x":335,"height":0,"id":"","role":"AXButton","y":264,"width":0,"label":"","value":""}
+{"x":335,"height":0,"id":"","role":"AXButton","y":264,"width":0,"label":"","value":""}
+{"x":343,"height":17,"id":"","role":"AXButton","y":518,"width":6,"label":"","value":""}
+{"x":343,"height":0,"id":"","role":"AXButton","y":267,"width":6,"label":"","value":""}
+{"x":385,"height":302,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":211,"width":413,"label":"","value":""}
+{"x":385,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":211,"width":129.5,"label":"Claude Code","value":"Available"}
+{"x":526.5,"height":139,"id":"new-session-codex","role":"AXButton","y":211,"width":130,"label":"Codex","value":"Available"}
+{"x":668.5,"height":139,"id":"new-session-devin","role":"AXButton","y":211,"width":129.5,"label":"Devin","value":"Unavailable"}
+{"x":385,"height":139,"id":"new-session-cursor","role":"AXButton","y":374,"width":129.5,"label":"Cursor","value":"Unavailable"}
+{"x":526.5,"height":139,"id":"new-session-kimi","role":"AXButton","y":374,"width":130,"label":"Kimi Code","value":"Unavailable"}
+{"x":668.5,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":374,"width":129.5,"label":"Grok Build","value":"Available"}
+{"x":88,"height":26,"id":"sidebar-compatibility-disclosure","role":"AXButton","y":538,"width":256,"label":"Compatibility details","value":"3 CLIs are newer than checked versions. Details hidden."}
+{"x":477.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":546,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":348,"height":492,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":538,"height":14,"id":"","role":"AXStaticText","y":437.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":538,"height":20,"id":"","role":"AXButton","y":458,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":634.5,"height":20,"id":"","role":"AXButton","y":458,"width":85,"label":"one (fixture)","value":""}
+{"x":727.5,"height":20,"id":"","role":"AXButton","y":458,"width":90.5,"label":"three (fixture)","value":""}
+{"x":538,"height":20,"id":"","role":"AXButton","y":484,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":670,"height":20,"id":"","role":"AXButton","y":484,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":538,"height":20,"id":"","role":"AXButton","y":510,"width":92,"label":"Light (fixture)","value":""}
+{"x":638,"height":20,"id":"","role":"AXButton","y":510,"width":90,"label":"Dark (fixture)","value":""}
+{"x":538,"height":14,"id":"","role":"AXCheckBox","y":536,"width":142,"label":"Reduce Motion (fixture)","value":1}
+{"x":564.25,"height":15,"id":"new-session-surface","role":"AXButton","y":569,"width":54.5,"label":"Options…","value":""}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"after-minimum-light.png","windowID":3283,"exit":0}
+{"snapshot":"after-sidebar-minimum-light.png","disclosure":1}
+{"x":80,"height":492,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":760,"label":"SigilR1351Final","value":""}
+{"x":80,"height":492,"id":"","role":"AXGroup","y":80,"width":760,"label":"","value":""}
+{"x":246,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":529.5,"height":16,"id":"","role":"AXStaticText","y":104,"width":230.5,"label":"","value":"sigil-rea1351-final-home\/project"}
+{"x":770,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":800,"height":14,"id":"ellipsis","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":106,"label":"Search conversations","value":""}
+{"x":233,"height":18,"id":"","role":"AXStaticText","y":131,"width":29,"label":"","value":"⌘⇧F"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":200,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":200,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":200,"label":"Recents","value":"8 chats"}
+{"x":80,"height":274,"id":"","role":"AXScrollArea","y":264,"width":200,"label":"","value":""}
+{"x":80,"height":275,"id":"","role":"AXOpaqueProviderGroup","y":272,"width":200,"label":"","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":291,"width":200,"label":"Generated conversation 08, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":323,"width":200,"label":"Generated conversation 07, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":355,"width":200,"label":"Generated conversation 06, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":387,"width":200,"label":"Generated conversation 05, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":419,"width":200,"label":"Generated conversation 04, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":451,"width":200,"label":"Generated conversation 03, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":483,"width":200,"label":"Generated conversation 02, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":515,"width":200,"label":"Generated conversation 01, project, 9 hours ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":272,"width":37,"label":"Today, 8","value":""}
+{"x":262,"height":276,"id":"","role":"AXScrollBar","y":263,"width":19,"label":"","value":0}
+{"x":271,"height":250.5,"id":"","role":"AXValueIndicator","y":267,"width":6,"label":"","value":0}
+{"x":263,"height":0,"id":"","role":"AXButton","y":264,"width":0,"label":"","value":""}
+{"x":263,"height":0,"id":"","role":"AXButton","y":264,"width":0,"label":"","value":""}
+{"x":271,"height":17,"id":"","role":"AXButton","y":518,"width":6,"label":"","value":""}
+{"x":271,"height":0,"id":"","role":"AXButton","y":267,"width":6,"label":"","value":""}
+{"x":313,"height":302,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":211,"width":485,"label":"","value":""}
+{"x":313,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":211,"width":153.5,"label":"Claude Code","value":"Available"}
+{"x":478.5,"height":139,"id":"new-session-codex","role":"AXButton","y":211,"width":154,"label":"Codex","value":"Available"}
+{"x":644.5,"height":139,"id":"new-session-devin","role":"AXButton","y":211,"width":153.5,"label":"Devin","value":"Unavailable"}
+{"x":313,"height":139,"id":"new-session-cursor","role":"AXButton","y":374,"width":153.5,"label":"Cursor","value":"Unavailable"}
+{"x":478.5,"height":139,"id":"new-session-kimi","role":"AXButton","y":374,"width":154,"label":"Kimi Code","value":"Unavailable"}
+{"x":644.5,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":374,"width":153.5,"label":"Grok Build","value":"Available"}
+{"x":88,"height":26,"id":"sidebar-compatibility-disclosure","role":"AXButton","y":538,"width":184,"label":"Compatibility details","value":"3 CLIs are newer than checked versions. Details hidden."}
+{"x":441.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":546,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":276,"height":492,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":538,"height":14,"id":"","role":"AXStaticText","y":437.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":538,"height":20,"id":"","role":"AXButton","y":458,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":634.5,"height":20,"id":"","role":"AXButton","y":458,"width":85,"label":"one (fixture)","value":""}
+{"x":727.5,"height":20,"id":"","role":"AXButton","y":458,"width":90.5,"label":"three (fixture)","value":""}
+{"x":538,"height":20,"id":"","role":"AXButton","y":484,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":670,"height":20,"id":"","role":"AXButton","y":484,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":538,"height":20,"id":"","role":"AXButton","y":510,"width":92,"label":"Light (fixture)","value":""}
+{"x":638,"height":20,"id":"","role":"AXButton","y":510,"width":90,"label":"Dark (fixture)","value":""}
+{"x":538,"height":14,"id":"","role":"AXCheckBox","y":536,"width":142,"label":"Reduce Motion (fixture)","value":1}
+{"x":528.25,"height":15,"id":"new-session-surface","role":"AXButton","y":569,"width":54.5,"label":"Options…","value":""}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"after-sidebar-minimum-light.png","windowID":3283,"exit":0}
+{"snapshot":"after-sidebar-wide-light.png","disclosure":1}
+{"x":80,"height":640,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1351Final","value":""}
+{"x":80,"height":640,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":476,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":969.5,"height":16,"id":"","role":"AXStaticText","y":104,"width":230.5,"label":"","value":"sigil-rea1351-final-home\/project"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"ellipsis","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":336,"label":"Search conversations","value":""}
+{"x":463,"height":18,"id":"","role":"AXStaticText","y":131,"width":29,"label":"","value":"⌘⇧F"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":430,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":430,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":430,"label":"Recents","value":"8 chats"}
+{"x":80,"height":422,"id":"","role":"AXScrollArea","y":264,"width":430,"label":"","value":""}
+{"x":80,"height":275,"id":"","role":"AXOpaqueProviderGroup","y":272,"width":430,"label":"","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":291,"width":430,"label":"Generated conversation 08, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":323,"width":430,"label":"Generated conversation 07, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":355,"width":430,"label":"Generated conversation 06, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":387,"width":430,"label":"Generated conversation 05, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":419,"width":430,"label":"Generated conversation 04, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":451,"width":430,"label":"Generated conversation 03, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":483,"width":430,"label":"Generated conversation 02, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":515,"width":430,"label":"Generated conversation 01, project, 9 hours ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":272,"width":37,"label":"Today, 8","value":""}
+{"x":550.5,"height":139,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":313,"width":680,"label":"","value":""}
+{"x":550.5,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":313,"width":103.5,"label":"Claude Code","value":"Available"}
+{"x":666,"height":139,"id":"new-session-codex","role":"AXButton","y":313,"width":103,"label":"Codex","value":"Available"}
+{"x":781,"height":139,"id":"new-session-devin","role":"AXButton","y":313,"width":103.5,"label":"Devin","value":"Unavailable"}
+{"x":896.5,"height":139,"id":"new-session-cursor","role":"AXButton","y":313,"width":103.5,"label":"Cursor","value":"Unavailable"}
+{"x":1012,"height":139,"id":"new-session-kimi","role":"AXButton","y":313,"width":103,"label":"Kimi Code","value":"Unavailable"}
+{"x":1127,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":313,"width":103.5,"label":"Grok Build","value":"Available"}
+{"x":776.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":485,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":863.25,"height":15,"id":"new-session-surface","role":"AXButton","y":508,"width":54.5,"label":"Options…","value":""}
+{"x":88,"height":26,"id":"sidebar-compatibility-disclosure","role":"AXButton","y":686,"width":414,"label":"Compatibility details","value":"3 CLIs are newer than checked versions. Details hidden."}
+{"x":506,"height":640,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":585.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":606,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":1074.5,"height":20,"id":"","role":"AXButton","y":606,"width":85,"label":"one (fixture)","value":""}
+{"x":1167.5,"height":20,"id":"","role":"AXButton","y":606,"width":90.5,"label":"three (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":632,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":1110,"height":20,"id":"","role":"AXButton","y":632,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":658,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":658,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":14,"id":"","role":"AXCheckBox","y":684,"width":142,"label":"Reduce Motion (fixture)","value":1}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"after-sidebar-wide-light.png","windowID":3283,"exit":0}
+{"press":"Home","result":0}
+{"snapshot":"navigation-home.png","disclosure":1}
+{"x":80,"height":640,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1351Final","value":""}
+{"x":80,"height":640,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":476,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":969.5,"height":16,"id":"","role":"AXStaticText","y":104,"width":230.5,"label":"","value":"sigil-rea1351-final-home\/project"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"ellipsis","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":336,"label":"Search conversations","value":""}
+{"x":463,"height":18,"id":"","role":"AXStaticText","y":131,"width":29,"label":"","value":"⌘⇧F"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":430,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":430,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":430,"label":"Recents","value":"8 chats"}
+{"x":80,"height":422,"id":"","role":"AXScrollArea","y":264,"width":430,"label":"","value":""}
+{"x":80,"height":55,"id":"","role":"AXOpaqueProviderGroup","y":272,"width":430,"label":"","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":295,"width":430,"label":"project","value":"8 chats"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":275.5,"width":49,"label":"Projects, 1","value":""}
+{"x":459,"height":22,"id":"plus","role":"AXButton","y":272,"width":22,"label":"Add Project","value":""}
+{"x":550.5,"height":139,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":313,"width":680,"label":"","value":""}
+{"x":550.5,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":313,"width":103.5,"label":"Claude Code","value":"Available"}
+{"x":666,"height":139,"id":"new-session-codex","role":"AXButton","y":313,"width":103,"label":"Codex","value":"Available"}
+{"x":781,"height":139,"id":"new-session-devin","role":"AXButton","y":313,"width":103.5,"label":"Devin","value":"Unavailable"}
+{"x":896.5,"height":139,"id":"new-session-cursor","role":"AXButton","y":313,"width":103.5,"label":"Cursor","value":"Unavailable"}
+{"x":1012,"height":139,"id":"new-session-kimi","role":"AXButton","y":313,"width":103,"label":"Kimi Code","value":"Unavailable"}
+{"x":1127,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":313,"width":103.5,"label":"Grok Build","value":"Available"}
+{"x":776.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":485,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":863.25,"height":15,"id":"new-session-surface","role":"AXButton","y":508,"width":54.5,"label":"Options…","value":""}
+{"x":88,"height":26,"id":"sidebar-compatibility-disclosure","role":"AXButton","y":686,"width":414,"label":"Compatibility details","value":"3 CLIs are newer than checked versions. Details hidden."}
+{"x":506,"height":640,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":585.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":606,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":1074.5,"height":20,"id":"","role":"AXButton","y":606,"width":85,"label":"one (fixture)","value":""}
+{"x":1167.5,"height":20,"id":"","role":"AXButton","y":606,"width":90.5,"label":"three (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":632,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":1110,"height":20,"id":"","role":"AXButton","y":632,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":658,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":658,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":14,"id":"","role":"AXCheckBox","y":684,"width":142,"label":"Reduce Motion (fixture)","value":1}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"navigation-home.png","windowID":3283,"exit":0}
+{"press":"project","result":0}
+{"snapshot":"navigation-project.png","disclosure":1}
+{"x":80,"height":640,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1351Final","value":""}
+{"x":80,"height":640,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":476,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":969.5,"height":16,"id":"","role":"AXStaticText","y":104,"width":230.5,"label":"","value":"sigil-rea1351-final-home\/project"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"ellipsis","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":336,"label":"Search conversations","value":""}
+{"x":463,"height":18,"id":"","role":"AXStaticText","y":131,"width":29,"label":"","value":"⌘⇧F"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":430,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":430,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":430,"label":"Recents","value":"8 chats"}
+{"x":88,"height":30,"id":"","role":"AXButton","y":268,"width":76.5,"label":"Back to projects","value":"project"}
+{"x":426,"height":24,"id":"archivebox","role":"AXButton","y":271,"width":24,"label":"Archive Project","value":""}
+{"x":452,"height":24,"id":"pin","role":"AXButton","y":271,"width":24,"label":"Pin Project","value":""}
+{"x":478,"height":24,"id":"plus","role":"AXButton","y":271,"width":24,"label":"New Session","value":""}
+{"x":80,"height":384,"id":"","role":"AXScrollArea","y":302,"width":430,"label":"","value":""}
+{"x":80,"height":256,"id":"","role":"AXOpaqueProviderGroup","y":302,"width":430,"label":"","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":302,"width":430,"label":"Generated conversation 08, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":334,"width":430,"label":"Generated conversation 07, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":366,"width":430,"label":"Generated conversation 06, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":398,"width":430,"label":"Generated conversation 05, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":430,"width":430,"label":"Generated conversation 04, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":462,"width":430,"label":"Generated conversation 03, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":494,"width":430,"label":"Generated conversation 02, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":526,"width":430,"label":"Generated conversation 01, project, 9 hours ago","value":"Closed"}
+{"x":550.5,"height":139,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":313,"width":680,"label":"","value":""}
+{"x":550.5,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":313,"width":103.5,"label":"Claude Code","value":"Available"}
+{"x":666,"height":139,"id":"new-session-codex","role":"AXButton","y":313,"width":103,"label":"Codex","value":"Available"}
+{"x":781,"height":139,"id":"new-session-devin","role":"AXButton","y":313,"width":103.5,"label":"Devin","value":"Unavailable"}
+{"x":896.5,"height":139,"id":"new-session-cursor","role":"AXButton","y":313,"width":103.5,"label":"Cursor","value":"Unavailable"}
+{"x":1012,"height":139,"id":"new-session-kimi","role":"AXButton","y":313,"width":103,"label":"Kimi Code","value":"Unavailable"}
+{"x":1127,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":313,"width":103.5,"label":"Grok Build","value":"Available"}
+{"x":776.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":485,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":863.25,"height":15,"id":"new-session-surface","role":"AXButton","y":508,"width":54.5,"label":"Options…","value":""}
+{"x":88,"height":26,"id":"sidebar-compatibility-disclosure","role":"AXButton","y":686,"width":414,"label":"Compatibility details","value":"3 CLIs are newer than checked versions. Details hidden."}
+{"x":506,"height":640,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":585.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":606,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":1074.5,"height":20,"id":"","role":"AXButton","y":606,"width":85,"label":"one (fixture)","value":""}
+{"x":1167.5,"height":20,"id":"","role":"AXButton","y":606,"width":90.5,"label":"three (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":632,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":1110,"height":20,"id":"","role":"AXButton","y":632,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":658,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":658,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":14,"id":"","role":"AXCheckBox","y":684,"width":142,"label":"Reduce Motion (fixture)","value":1}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"navigation-project.png","windowID":3283,"exit":0}
+{"press":"Recents","result":0}
+{"snapshot":"navigation-recents.png","disclosure":1}
+{"x":80,"height":640,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1351Final","value":""}
+{"x":80,"height":640,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":476,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":969.5,"height":16,"id":"","role":"AXStaticText","y":104,"width":230.5,"label":"","value":"sigil-rea1351-final-home\/project"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"ellipsis","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":336,"label":"Search conversations","value":""}
+{"x":463,"height":18,"id":"","role":"AXStaticText","y":131,"width":29,"label":"","value":"⌘⇧F"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":430,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":430,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":430,"label":"Recents","value":"8 chats"}
+{"x":80,"height":422,"id":"","role":"AXScrollArea","y":264,"width":430,"label":"","value":""}
+{"x":80,"height":275,"id":"","role":"AXOpaqueProviderGroup","y":272,"width":430,"label":"","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":291,"width":430,"label":"Generated conversation 08, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":323,"width":430,"label":"Generated conversation 07, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":355,"width":430,"label":"Generated conversation 06, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":387,"width":430,"label":"Generated conversation 05, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":419,"width":430,"label":"Generated conversation 04, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":451,"width":430,"label":"Generated conversation 03, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":483,"width":430,"label":"Generated conversation 02, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":515,"width":430,"label":"Generated conversation 01, project, 9 hours ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":272,"width":37,"label":"Today, 8","value":""}
+{"x":550.5,"height":139,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":313,"width":680,"label":"","value":""}
+{"x":550.5,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":313,"width":103.5,"label":"Claude Code","value":"Available"}
+{"x":666,"height":139,"id":"new-session-codex","role":"AXButton","y":313,"width":103,"label":"Codex","value":"Available"}
+{"x":781,"height":139,"id":"new-session-devin","role":"AXButton","y":313,"width":103.5,"label":"Devin","value":"Unavailable"}
+{"x":896.5,"height":139,"id":"new-session-cursor","role":"AXButton","y":313,"width":103.5,"label":"Cursor","value":"Unavailable"}
+{"x":1012,"height":139,"id":"new-session-kimi","role":"AXButton","y":313,"width":103,"label":"Kimi Code","value":"Unavailable"}
+{"x":1127,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":313,"width":103.5,"label":"Grok Build","value":"Available"}
+{"x":776.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":485,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":863.25,"height":15,"id":"new-session-surface","role":"AXButton","y":508,"width":54.5,"label":"Options…","value":""}
+{"x":88,"height":26,"id":"sidebar-compatibility-disclosure","role":"AXButton","y":686,"width":414,"label":"Compatibility details","value":"3 CLIs are newer than checked versions. Details hidden."}
+{"x":506,"height":640,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":585.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":606,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":1074.5,"height":20,"id":"","role":"AXButton","y":606,"width":85,"label":"one (fixture)","value":""}
+{"x":1167.5,"height":20,"id":"","role":"AXButton","y":606,"width":90.5,"label":"three (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":632,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":1110,"height":20,"id":"","role":"AXButton","y":632,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":658,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":658,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":14,"id":"","role":"AXCheckBox","y":684,"width":142,"label":"Reduce Motion (fixture)","value":1}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"navigation-recents.png","windowID":3283,"exit":0}
+{"result":0,"ownedAXSearch":"conversation 03"}
+{"snapshot":"search-one-result.png","disclosure":1}
+{"x":80,"height":640,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1351Final","value":""}
+{"x":80,"height":640,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":476,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":969.5,"height":16,"id":"","role":"AXStaticText","y":104,"width":230.5,"label":"","value":"sigil-rea1351-final-home\/project"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"ellipsis","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":336,"label":"Search conversations","value":"conversation 03"}
+{"x":463,"height":18,"id":"","role":"AXStaticText","y":131,"width":29,"label":"","value":"⌘⇧F"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":430,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":430,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":430,"label":"Recents","value":"8 chats"}
+{"x":80,"height":422,"id":"","role":"AXScrollArea","y":264,"width":430,"label":"","value":""}
+{"x":80,"height":275,"id":"","role":"AXOpaqueProviderGroup","y":272,"width":430,"label":"","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":291,"width":430,"label":"Generated conversation 08, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":323,"width":430,"label":"Generated conversation 07, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":355,"width":430,"label":"Generated conversation 06, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":387,"width":430,"label":"Generated conversation 05, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":419,"width":430,"label":"Generated conversation 04, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":451,"width":430,"label":"Generated conversation 03, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":483,"width":430,"label":"Generated conversation 02, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":515,"width":430,"label":"Generated conversation 01, project, 9 hours ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":272,"width":37,"label":"Today, 8","value":""}
+{"x":550.5,"height":139,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":313,"width":680,"label":"","value":""}
+{"x":550.5,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":313,"width":103.5,"label":"Claude Code","value":"Available"}
+{"x":666,"height":139,"id":"new-session-codex","role":"AXButton","y":313,"width":103,"label":"Codex","value":"Available"}
+{"x":781,"height":139,"id":"new-session-devin","role":"AXButton","y":313,"width":103.5,"label":"Devin","value":"Unavailable"}
+{"x":896.5,"height":139,"id":"new-session-cursor","role":"AXButton","y":313,"width":103.5,"label":"Cursor","value":"Unavailable"}
+{"x":1012,"height":139,"id":"new-session-kimi","role":"AXButton","y":313,"width":103,"label":"Kimi Code","value":"Unavailable"}
+{"x":1127,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":313,"width":103.5,"label":"Grok Build","value":"Available"}
+{"x":776.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":485,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":863.25,"height":15,"id":"new-session-surface","role":"AXButton","y":508,"width":54.5,"label":"Options…","value":""}
+{"x":88,"height":26,"id":"sidebar-compatibility-disclosure","role":"AXButton","y":686,"width":414,"label":"Compatibility details","value":"3 CLIs are newer than checked versions. Details hidden."}
+{"x":506,"height":640,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":585.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":606,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":1074.5,"height":20,"id":"","role":"AXButton","y":606,"width":85,"label":"one (fixture)","value":""}
+{"x":1167.5,"height":20,"id":"","role":"AXButton","y":606,"width":90.5,"label":"three (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":632,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":1110,"height":20,"id":"","role":"AXButton","y":632,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":658,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":658,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":14,"id":"","role":"AXCheckBox","y":684,"width":142,"label":"Reduce Motion (fixture)","value":1}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"search-one-result.png","windowID":3283,"exit":0}
+{"normalOwnedQuitAfterGap":true}
