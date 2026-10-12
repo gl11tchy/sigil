@@ -1,0 +1,157 @@
+{"executable":"\/Users\/exec\/Documents\/Codex\/2026-10-09\/task\/rea-1351-native-final\/SigilR1351Final.app\/Contents\/MacOS\/SigilR1351Final","bundleID":"com.gl11tchy.sigil.rea1351.final","ownedPID":26251}
+{"AXWindowRead":0}
+{"snapshot":"after-three-dark.png","disclosure":1}
+{"x":80,"height":640,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1351Final","value":""}
+{"x":80,"height":640,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":318,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":883,"height":16,"id":"","role":"AXStaticText","y":104,"width":317,"label":"","value":"sigil-rea1351-unsupported-files-home\/project"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":214,"label":"Search conversations","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":272,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":272,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":272,"label":"Recents","value":"8 chats"}
+{"x":80,"height":422,"id":"","role":"AXScrollArea","y":264,"width":272,"label":"","value":""}
+{"x":80,"height":349,"id":"","role":"AXOpaqueProviderGroup","y":264,"width":272,"label":"","value":""}
+{"x":92,"height":30,"id":"sidebar-history-compatibility-notice","role":"AXStaticText","y":264,"width":216.5,"label":"","value":"Some history files are incomplete or unsupported. Details in Settings."}
+{"x":92,"height":24,"id":"sidebar-history-compatibility-notice","role":"AXButton","y":298,"width":179,"label":"History details in Settings","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":357,"width":272,"label":"Generated conversation 08, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":389,"width":272,"label":"Generated conversation 07, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":421,"width":272,"label":"Generated conversation 06, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":453,"width":272,"label":"Generated conversation 05, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":485,"width":272,"label":"Generated conversation 04, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":517,"width":272,"label":"Generated conversation 03, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":549,"width":272,"label":"Generated conversation 02, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":581,"width":272,"label":"Generated conversation 01, project, 9 hours ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":338,"width":37,"label":"Today, 8","value":""}
+{"x":471.5,"height":139,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":313,"width":680,"label":"","value":""}
+{"x":471.5,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":313,"width":103.5,"label":"Claude Code","value":"Available"}
+{"x":587,"height":139,"id":"new-session-codex","role":"AXButton","y":313,"width":103,"label":"Codex","value":"Available"}
+{"x":702,"height":139,"id":"new-session-devin","role":"AXButton","y":313,"width":103.5,"label":"Devin","value":"Unavailable"}
+{"x":817.5,"height":139,"id":"new-session-cursor","role":"AXButton","y":313,"width":103.5,"label":"Cursor","value":"Unavailable"}
+{"x":933,"height":139,"id":"new-session-kimi","role":"AXButton","y":313,"width":103,"label":"Kimi Code","value":"Unavailable"}
+{"x":1048,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":313,"width":103.5,"label":"Grok Build","value":"Available"}
+{"x":697.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":485,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":784.25,"height":15,"id":"new-session-surface","role":"AXButton","y":508,"width":54.5,"label":"Options…","value":""}
+{"x":88,"height":26,"id":"sidebar-compatibility-disclosure","role":"AXButton","y":686,"width":256,"label":"Compatibility details","value":"3 CLIs are newer than checked versions. Details hidden."}
+{"x":348,"height":640,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":585.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":606,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":1074.5,"height":20,"id":"","role":"AXButton","y":606,"width":85,"label":"one (fixture)","value":""}
+{"x":1167.5,"height":20,"id":"","role":"AXButton","y":606,"width":90.5,"label":"three (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":632,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":1110,"height":20,"id":"","role":"AXButton","y":632,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":658,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":658,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":14,"id":"","role":"AXCheckBox","y":684,"width":142,"label":"Reduce Motion (fixture)","value":0}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"after-three-dark.png","windowID":3347,"exit":0}
+{"historyWarningVisible":true,"historySettingsActionVisible":true}
+{"snapshot":"unsupported-files.png","disclosure":1}
+{"x":80,"height":640,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1351Final","value":""}
+{"x":80,"height":640,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":318,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":883,"height":16,"id":"","role":"AXStaticText","y":104,"width":317,"label":"","value":"sigil-rea1351-unsupported-files-home\/project"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":214,"label":"Search conversations","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":272,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":272,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":272,"label":"Recents","value":"8 chats"}
+{"x":80,"height":422,"id":"","role":"AXScrollArea","y":264,"width":272,"label":"","value":""}
+{"x":80,"height":349,"id":"","role":"AXOpaqueProviderGroup","y":264,"width":272,"label":"","value":""}
+{"x":92,"height":30,"id":"sidebar-history-compatibility-notice","role":"AXStaticText","y":264,"width":216.5,"label":"","value":"Some history files are incomplete or unsupported. Details in Settings."}
+{"x":92,"height":24,"id":"sidebar-history-compatibility-notice","role":"AXButton","y":298,"width":179,"label":"History details in Settings","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":357,"width":272,"label":"Generated conversation 08, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":389,"width":272,"label":"Generated conversation 07, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":421,"width":272,"label":"Generated conversation 06, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":453,"width":272,"label":"Generated conversation 05, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":485,"width":272,"label":"Generated conversation 04, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":517,"width":272,"label":"Generated conversation 03, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":549,"width":272,"label":"Generated conversation 02, project, 9 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":581,"width":272,"label":"Generated conversation 01, project, 9 hours ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":338,"width":37,"label":"Today, 8","value":""}
+{"x":471.5,"height":139,"id":"new-session-surface","role":"AXOpaqueProviderGroup","y":313,"width":680,"label":"","value":""}
+{"x":471.5,"height":139,"id":"new-session-claudeCode","role":"AXButton","y":313,"width":103.5,"label":"Claude Code","value":"Available"}
+{"x":587,"height":139,"id":"new-session-codex","role":"AXButton","y":313,"width":103,"label":"Codex","value":"Available"}
+{"x":702,"height":139,"id":"new-session-devin","role":"AXButton","y":313,"width":103.5,"label":"Devin","value":"Unavailable"}
+{"x":817.5,"height":139,"id":"new-session-cursor","role":"AXButton","y":313,"width":103.5,"label":"Cursor","value":"Unavailable"}
+{"x":933,"height":139,"id":"new-session-kimi","role":"AXButton","y":313,"width":103,"label":"Kimi Code","value":"Unavailable"}
+{"x":1048,"height":139,"id":"new-session-grokBuild","role":"AXButton","y":313,"width":103.5,"label":"Grok Build","value":"Available"}
+{"x":697.5,"height":15,"id":"new-session-surface","role":"AXStaticText","y":485,"width":228,"label":"","value":"Choose a CLI to start with your defaults."}
+{"x":784.25,"height":15,"id":"new-session-surface","role":"AXButton","y":508,"width":54.5,"label":"Options…","value":""}
+{"x":88,"height":26,"id":"sidebar-compatibility-disclosure","role":"AXButton","y":686,"width":256,"label":"Compatibility details","value":"3 CLIs are newer than checked versions. Details hidden."}
+{"x":348,"height":640,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":585.875244140625,"width":138,"label":"","value":"Generated fixture controls"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":606,"width":88.5,"label":"zero (fixture)","value":""}
+{"x":1074.5,"height":20,"id":"","role":"AXButton","y":606,"width":85,"label":"one (fixture)","value":""}
+{"x":1167.5,"height":20,"id":"","role":"AXButton","y":606,"width":90.5,"label":"three (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":632,"width":124,"label":"unavailable (fixture)","value":""}
+{"x":1110,"height":20,"id":"","role":"AXButton","y":632,"width":132.5,"label":"unsupported (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":658,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":658,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":14,"id":"","role":"AXCheckBox","y":684,"width":142,"label":"Reduce Motion (fixture)","value":0}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"unsupported-files.png","windowID":3347,"exit":0}
+{"press":"History details in Settings","result":0}
+{"snapshot":"history-settings.png","disclosure":0}
+{"x":486,"height":708,"id":"com_apple_SwiftUI_Settings_window","role":"AXWindow","y":154,"width":540,"label":"Appearance","value":""}
+{"x":486,"height":708,"id":"","role":"AXGroup","y":154,"width":540,"label":"","value":""}
+{"x":486,"height":620,"id":"","role":"AXScrollArea","y":242,"width":540,"label":"","value":""}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":262,"width":41.5,"label":"Theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":297,"width":111.5,"label":"Sigil Dark theme","value":""}
+{"x":639.5,"height":65,"id":"","role":"AXButton","y":297,"width":111.5,"label":"Sigil Light theme","value":""}
+{"x":761,"height":65,"id":"","role":"AXButton","y":297,"width":111.5,"label":"Grok Night theme","value":""}
+{"x":882.5,"height":65,"id":"","role":"AXButton","y":297,"width":111.5,"label":"Grok Day theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":372,"width":111.5,"label":"Grok Ember theme","value":""}
+{"x":639.5,"height":65,"id":"","role":"AXButton","y":372,"width":111.5,"label":"GitHub theme","value":""}
+{"x":761,"height":65,"id":"","role":"AXButton","y":372,"width":111.5,"label":"Linear theme","value":""}
+{"x":882.5,"height":65,"id":"","role":"AXButton","y":372,"width":111.5,"label":"Notion theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":447,"width":111.5,"label":"Discord theme","value":""}
+{"x":639.5,"height":65,"id":"","role":"AXButton","y":447,"width":111.5,"label":"Slack theme","value":""}
+{"x":761,"height":65,"id":"","role":"AXButton","y":447,"width":111.5,"label":"Spotify theme","value":""}
+{"x":882.5,"height":65,"id":"","role":"AXButton","y":447,"width":111.5,"label":"VS Code theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":522,"width":111.5,"label":"Cursor theme","value":""}
+{"x":639.5,"height":65,"id":"","role":"AXButton","y":522,"width":111.5,"label":"X theme","value":""}
+{"x":761,"height":65,"id":"","role":"AXButton","y":522,"width":111.5,"label":"Raycast theme","value":""}
+{"x":882.5,"height":65,"id":"","role":"AXButton","y":522,"width":111.5,"label":"ChatGPT theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":597,"width":111.5,"label":"Figma theme","value":""}
+{"x":639.5,"height":65,"id":"","role":"AXButton","y":597,"width":111.5,"label":"macOS theme","value":""}
+{"x":761,"height":65,"id":"","role":"AXButton","y":597,"width":111.5,"label":"Obsidian theme","value":""}
+{"x":882.5,"height":65,"id":"","role":"AXButton","y":597,"width":111.5,"label":"Telegram theme","value":""}
+{"x":518,"height":65,"id":"","role":"AXButton","y":672,"width":111.5,"label":"Twitch theme","value":""}
+{"x":510,"height":32,"id":"","role":"AXStaticText","y":757,"width":492,"label":"","value":"Terminal themes apply to the window. Installed Grok keeps its own CLI appearance; an optional themed Grok build also receives the window palette."}
+{"x":510,"height":15,"id":"","role":"AXHeading","y":809,"width":52,"label":"Terminal","value":""}
+{"x":518,"height":16,"id":"","role":"AXStaticText","y":844,"width":54,"label":"","value":"Font size"}
+{"x":764,"height":16,"id":"","role":"AXSlider","y":844,"width":180,"label":"","value":0.20833333333333334}
+{"x":797.5,"height":16,"id":"","role":"AXValueIndicator","y":844,"width":20,"label":"","value":0.20833333333333334}
+{"x":958,"height":16,"id":"","role":"AXStaticText","y":844,"width":36,"label":"","value":"13 pt"}
+{"x":1008,"height":614.5,"id":"","role":"AXScrollBar","y":241,"width":19,"label":"","value":0}
+{"x":1017,"height":581.5,"id":"","role":"AXValueIndicator","y":245,"width":6,"label":"","value":0}
+{"x":1009,"height":0,"id":"","role":"AXButton","y":242,"width":0,"label":"","value":""}
+{"x":1009,"height":0,"id":"","role":"AXButton","y":242,"width":0,"label":"","value":""}
+{"x":1017,"height":24.5,"id":"","role":"AXButton","y":827,"width":6,"label":"","value":""}
+{"x":1017,"height":0,"id":"","role":"AXButton","y":245,"width":6,"label":"","value":""}
+{"x":486,"height":56,"id":"","role":"AXToolbar","y":186,"width":540,"label":"","value":""}
+{"x":662.5,"height":56,"id":"","role":"AXButton","y":186,"width":75,"label":"Appearance","value":""}
+{"x":738.5,"height":56,"id":"","role":"AXButton","y":186,"width":55,"label":"General","value":""}
+{"x":794.5,"height":56,"id":"","role":"AXButton","y":186,"width":55,"label":"Remote","value":""}
+{"x":494,"height":16,"id":"","role":"AXButton","y":162,"width":16,"label":"","value":""}
+{"x":540,"height":16,"id":"","role":"AXButton","y":162,"width":16,"label":"","value":""}
+{"x":541,"height":14,"id":"","role":"AXGroup","y":163,"width":14,"label":"","value":""}
+{"x":541,"height":14,"id":"","role":"AXGroup","y":163,"width":14,"label":"","value":""}
+{"x":517,"height":16,"id":"","role":"AXButton","y":162,"width":16,"label":"","value":""}
+{"x":715,"height":16,"id":"","role":"AXStaticText","y":161,"width":82,"label":"","value":"Appearance"}
+{"capture":"history-settings.png","windowID":3356,"exit":0}
+{"spokenVoiceOverValidation":"not performed; exported labels and roles inspected","VoiceOverEnabled":false}
+{"normalOwnedQuitRequested":true}
+{"ownedAppTerminated":true}

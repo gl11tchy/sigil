@@ -1,0 +1,50 @@
+{
+  "ticket": "REA-1351",
+  "base": "e76e1511e2db2ebcf9812a1ece51509b0cb29965",
+  "os": "macOS 26.5.1 (25F80)",
+  "bundleID": "com.gl11tchy.sigil.rea1351.final",
+  "executableSHA256": "45683b8921ec870cbc7be1f5214fc1c2ebe13644a60133302b72e5673286953c",
+  "sourceSHA256": {
+    "Sources/SigilApp/Views/SidebarCompatibilityDisclosure.swift": "5d5398921a7a076112b635491eaa8f70301d9bf42044cccb1543fca6eaeb6c26",
+    "Sources/SigilApp/Views/SidebarView.swift": "de437e87f3031872709f563c443cef2de4921dc6ce920f8dabce8676743b5f2a",
+    "Sources/SigilKit/Terminal/ProviderAdapter.swift": "6bed8556c246ae72aa8eb2f350b647ac1828f2480ff2dc2af90abd3ba5ed9753",
+    "Sources/SigilApp/Workbench/SidebarNoticeFixture.swift": "016ce20d15e18052d79ed3abe2b49199f093328463f0ecf581c31a8235c71402",
+    "Sources/SigilApp/SigilApp.swift": "ddac8ca28651ac7de2b5118962aea42692597f4121f6910504225c82ddf099f7",
+    "Sources/SigilApp/Views/RootView.swift": "c6a0a893c48e15a38e2b5cea6d372e715fb42e2b01536f91083439f39e5585e0"
+  },
+  "artifactsSHA256": {
+    "after-minimum-light.png": "07e76517e8093a4a223716a1a1704c922dee83a12c9d2eb7db81f50f8b293f9a",
+    "after-three-dark.png": "712c3359578318ac746d01171ca18b79bcd5d74a519970c53521428740e0ca35",
+    "before-three-dark.png": "5f4f548135497b920006bc570ce48725bb83b1bfc304d74e74b55159bf6d9edf",
+    "before.jsonl": "3dec9d7304cb91fe12f2287d5629ac69fe0935d80d040c32c40b79ace4f3dace",
+    "details-minimum-light.png": "83b11d80b7e44bd42c6e00110c448cb63e7daabdb62beae0f60be4cddac53f44",
+    "details-three-dark.png": "4da2a25a3d3da9376722a247f31654e52287327ecf622547686c6d60ae08f723",
+    "history-settings.png": "5b9f48438357a94b9600ead72abe80d0af9dfb57b4b5c4353b4f02d312cacdd5",
+    "interaction.jsonl": "71b4e62a6c8a1e6d459326c27b5034dd396ef4daca446c46f44983f9e95daedb",
+    "matrix.jsonl": "08139d32a0684e375cbdec98b2616669586cb6d2ae0726a75d223f3b334c2cc2",
+    "read-error.jsonl": "a1c4c6bb6686b77541bc7abdcf83be66679b127562c5ad3f17acdf973c9f120d",
+    "read-error.png": "5f09fa85ef0f665c1cf34287a4fcbe337ca46049d265a08d6e519a295ae964c5",
+    "unsupported-files.jsonl": "9966c849f2bfe88f0939f109f8bd51340c1dc0920a406a3a09f46e55db7d38c6",
+    "unsupported-files.png": "cb5024ee4bbcbae059a4bb181ea3a7f586a3cc738f6c980d697b9fe30ffb7596"
+  },
+  "build": "app-only Scripts/workbench/build.sh; debug arm64, strict signature verified; no local AppTests compilation/execution",
+  "nativeIdentity": "live NSWorkspace launch callback; fresh bundle/executable/launch-date validation; public AX owner checks and exact CG window-ID captures; normal owned fixture quit",
+  "passed": [
+    "three notices collapse to one 26-point footer control plus eight points bottom spacing; zero/unavailable show none; one shows count one",
+    "popover exports all provider installed/checked versions and exact legacy limitations",
+    "Command-Shift-I focuses Done; Escape dismisses and returns focus to Compatibility; Done also closes",
+    "actual AX Home/project/Recents actions; fixed generated query sent only to verified owned Search returns one of eight rows; clear action restores eight",
+    "native minimum/default/wide sidebar bounds, dark/light; reduced-motion fixture suppresses this control animation",
+    "small-window arrow-key selection reaches last row; row coordinates retained across popover open/close",
+    "actual generated read failure remains visible with Retry; incomplete-file warning remains with Settings action, which opens owned Settings window"
+  ],
+  "limits": [
+    "Spoken VoiceOver not performed (VoiceOver disabled); exported roles/labels/values observed",
+    "macOS 14 and multiple displays not exercised",
+    "Reduce Motion forced only through debug fixture input to this control; OS setting unchanged",
+    "Source snapshots are synthetic; no independently executed real CLI-version or authenticated provider claims",
+    "Earlier helper-only and source focus failures preserved outside the checkout; matrix.jsonl ends after an AX raw-value search write did not notify the binding. Successful search/scroll is in interaction.jsonl.",
+    "No daily-app launch/quit/replacement, real CLI/model calls, personal histories, security settings, new distribution, or merge"
+  ],
+  "requiredCIGate": "pending normal PR exact-head CI; original two hosted checks plus four separately authorized pointer skips unchanged"
+}

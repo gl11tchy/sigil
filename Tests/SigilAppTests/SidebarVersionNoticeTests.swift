@@ -130,8 +130,10 @@ struct SidebarVersionNoticeTests {
         let noticeScroll = try #require(scrollView(in: notices.view))
         let baselineViewport = baseline.view.convert(baselineScroll.bounds, from: baselineScroll)
         let noticeViewport = notices.view.convert(noticeScroll.bounds, from: noticeScroll)
-        #expect(abs(noticeViewport.minY - baselineViewport.minY) < 1)
-        #expect(abs(noticeViewport.height - baselineViewport.height) < 1)
+        #expect(abs(noticeViewport.maxY - baselineViewport.maxY) < 1)
+        #expect(
+            abs(baselineViewport.height - noticeViewport.height - 34) < 1,
+            "All nonblocking versions share one 26-point control and eight points of bottom spacing")
         try #require(noticeViewport.height >= 200)
 
         let document = try #require(noticeScroll.documentView)
@@ -180,11 +182,45 @@ struct SidebarVersionNoticeTests {
         for identifier in ["diagnostic-swiftui-text", "diagnostic-swiftui-button"] {
             #expect(controlIdentifiers.contains(identifier), "\(diagnostic)")
         }
-        for provider in [CLIProvider.claudeCode, .codex, .grokBuild] {
+        #expect(identifiers.contains("sidebar-compatibility-disclosure"), "\(tree). \(diagnostic)")
+        let providers: [CLIProvider] = [.claudeCode, .codex, .grokBuild]
+        for provider in providers {
             #expect(
-                identifiers.contains("sidebar-\(provider.rawValue)-version-notice"),
-                "Exported accessibility tree: \(tree). \(diagnostic)")
+                !identifiers.contains("sidebar-\(provider.rawValue)-version-notice"),
+                "Nonblocking paragraphs must be absent from the collapsed history list")
         }
+        let offsetBeforeDetails = noticeScroll.contentView.bounds.origin
+        let destinationsBeforeDetails = newer.sidebarSnapshot().destinations
+        try #require(await pressOwnedAccessibility("sidebar-compatibility-disclosure") == AXError.success.rawValue)
+        try await Task.sleep(for: .milliseconds(100))
+        let details = await ownedAccessibilityValues()
+        for provider in providers {
+            let expected = try #require(provider.versionNotice(for: newer.providerInstallations[provider]))
+            #expect(
+                details["sidebar-\(provider.rawValue)-version-notice"] == expected,
+                "The native popover must export each complete installed/checked version and limitation")
+        }
+        #expect(noticeScroll.contentView.bounds.origin == offsetBeforeDetails)
+        #expect(newer.sidebarSnapshot().destinations == destinationsBeforeDetails)
+        #expect(noticeScroll.contentView.bounds.height == noticeViewport.height)
+        try #require(await pressOwnedAccessibility("sidebar-compatibility-close") == AXError.success.rawValue)
+        try await Task.sleep(for: .milliseconds(100))
+        let closedDetails = await ownedAccessibilityValues()
+        #expect(!closedDetails.keys.contains("sidebar-compatibility-close"))
+        #expect(closedDetails["sidebar-compatibility-disclosure"]?.contains("Details hidden.") == true)
+        #expect(noticeScroll.contentView.bounds.origin == offsetBeforeDetails)
+        // A single newer provider consumes the same bounded footprint; zero consumes none.
+        let one = model(versions: [.codex: "0.160.0"])
+        let single = host(one)
+        defer { single.window.close() }
+        try await Task.sleep(for: .milliseconds(50))
+        let singleScroll = try #require(scrollView(in: single.view))
+        #expect(abs(singleScroll.contentView.bounds.height - noticeViewport.height) < 1)
+        var baselineVisited: Set<ObjectIdentifier> = []
+        var baselineTree: [String] = []
+        let baselineIdentifiers = accessibilityIdentifiers(
+            in: baseline.window, visited: &baselineVisited, tree: &baselineTree)
+        #expect(!baselineIdentifiers.contains("sidebar-compatibility-disclosure"))
         #expect(
             identifiers.contains("sidebar-history-compatibility-notice"),
             "Exported compatibility notice: \(tree). \(diagnostic)")
@@ -508,6 +544,80 @@ struct SidebarVersionNoticeTests {
                 && (record[kCGWindowNumber as String] as? UInt32) == windowID
         }
         return false
+    }
+
+    /// Public AX actions scoped to this CI app host, off its main event loop.
+    /// No posted input, permission-dependent skip or global trust override.
+    private func pressOwnedAccessibility(_ identifier: String) async -> Int32 {
+        await Task.detached {
+            let pid = ProcessInfo.processInfo.processIdentifier
+            let app = AXUIElementCreateApplication(pid)
+            let timeout = AXUIElementSetMessagingTimeout(app, 2)
+            guard timeout == .success else { return timeout.rawValue }
+            var windows: CFTypeRef?
+            let read = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &windows)
+            guard read == .success else { return read.rawValue }
+            guard let windows = windows as? [AXUIElement] else { return AXError.noValue.rawValue }
+            var count = 0
+            var matches: [AXUIElement] = []
+            func visit(_ element: AXUIElement, depth: Int) {
+                guard depth < 32, count < 1_024 else { return }
+                count += 1
+                var owner: pid_t = 0
+                guard AXUIElementGetPid(element, &owner) == .success, owner == pid else { return }
+                var value: CFTypeRef?
+                if AXUIElementCopyAttributeValue(element, kAXIdentifierAttribute as CFString, &value) == .success,
+                    value as? String == identifier
+                {
+                    matches.append(element)
+                }
+                var children: CFTypeRef?
+                if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children) == .success,
+                    let children = children as? [AXUIElement]
+                {
+                    for child in children { visit(child, depth: depth + 1) }
+                }
+            }
+            for window in windows { visit(window, depth: 0) }
+            guard matches.count == 1 else { return AXError.noValue.rawValue }
+            return AXUIElementPerformAction(matches[0], kAXPressAction as CFString).rawValue
+        }.value
+    }
+
+    private func ownedAccessibilityValues() async -> [String: String] {
+        await Task.detached {
+            let pid = ProcessInfo.processInfo.processIdentifier
+            let app = AXUIElementCreateApplication(pid)
+            guard AXUIElementSetMessagingTimeout(app, 2) == .success else { return [:] }
+            var windows: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &windows) == .success,
+                let windows = windows as? [AXUIElement]
+            else { return [:] }
+            var count = 0
+            var values: [String: String] = [:]
+            func visit(_ element: AXUIElement, depth: Int) {
+                guard depth < 32, count < 1_024 else { return }
+                count += 1
+                var owner: pid_t = 0
+                guard AXUIElementGetPid(element, &owner) == .success, owner == pid else { return }
+                var identifier: CFTypeRef?
+                var value: CFTypeRef?
+                if AXUIElementCopyAttributeValue(element, kAXIdentifierAttribute as CFString, &identifier) == .success,
+                    let identifier = identifier as? String
+                {
+                    _ = AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value)
+                    values[identifier] = value as? String ?? ""
+                }
+                var children: CFTypeRef?
+                if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children) == .success,
+                    let children = children as? [AXUIElement]
+                {
+                    for child in children { visit(child, depth: depth + 1) }
+                }
+            }
+            for window in windows { visit(window, depth: 0) }
+            return values
+        }.value
     }
 
     private func host(_ model: AppModel) -> (window: NSWindow, view: NSView) {

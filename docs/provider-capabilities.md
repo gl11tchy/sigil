@@ -97,13 +97,21 @@ This optional local gate requires installed CLIs; ordinary CI does not.
   all six providers and its single **Check Again** explicitly refreshes their
   shared inventory, including exhausted timeout budgets.
 - `CLIProvider.checkedVersion` records these checked contracts. When an available
-  CLI reports a newer semantic version, the sidebar and selected provider in New
-  Session name both versions in a quiet compatibility notice. Compatible versions
-  say history and turn state are best effort; an unsupported Codex or Claude major
-  says its history format is unsupported. Unknown version output makes no version
-  claim. Sidebar notices share the history scroll area so wrapped text preserves
-  navigation and the list viewport at small window sizes. A version notice does
-  not prevent starting the installed CLI.
+  CLI reports a newer semantic version, the selected provider in New Session
+  names both versions in its compatibility notice. In the sidebar, compatible
+  newer versions share one default-collapsed **Compatibility** footer control
+  (⌘⇧I), regardless of provider count. Its native popover lists each provider's
+  installed and checked versions and says history and turn state are best effort;
+  Done or Escape dismisses it and returns focus to the control. The footer takes
+  34 points, leaving navigation and the top of the history viewport stable.
+  An unsupported Codex or Claude major retains a visible history-format warning
+  and Settings action in the history list. Incomplete/unsupported-file notices
+  retain their own Settings action; actual read failures retain the existing
+  failure state and Retry. Unknown version output makes no version claim, and
+  unavailable or failed probes cannot become benign compatibility details.
+  A version notice does not prevent starting the installed CLI. This presentation
+  change (REA-1351) does not change the checked baselines, parser, lifecycle or
+  tab-binding identity rules.
 
 ## Provider availability in New Session and Settings
 
