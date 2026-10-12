@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Darwin
 import SwiftTerm
 import SwiftUI
 import Testing
@@ -332,8 +333,8 @@ struct SidebarVersionNoticeTests {
                     context: nil, eventNumber: Self.nextEventNumber(), clickCount: 1, pressure: 1))
             events.append(event)
         }
-        // NSTextView may enter a nested tracking loop on mouse-down. Queue the
-        // complete gesture first so it can receive mouse-up without waiting on this task.
+        // NSTextView may enter a nested tracking loop on mouse-down. Deliver the
+        // complete gesture independently so mouse-up does not await this main-actor task.
         try await dispatch(events)
     }
 
@@ -369,7 +370,14 @@ struct SidebarVersionNoticeTests {
 
     @MainActor
     private final class InputReceipt {
-        var events: [Int: NSEvent] = [:]
+        var events: [Int64: NSEvent] = [:]
+    }
+
+    private struct PointerInput: Sendable {
+        let kind: UInt32
+        let x: Double
+        let y: Double
+        let token: Int64
     }
 
     private func dispatch(_ event: NSEvent) async throws {
@@ -378,39 +386,103 @@ struct SidebarVersionNoticeTests {
 
     private func dispatch(_ events: [NSEvent]) async throws {
         try #require(NSApplication.shared.isRunning)
-        let inputs = Dictionary(uniqueKeysWithValues: events.map { ($0.eventNumber, $0) })
-        let mask = events.reduce(NSEvent.EventTypeMask()) { mask, event in
-            mask.union(NSEvent.EventTypeMask(rawValue: 1 << event.type.rawValue))
+        let window = try #require(events.first?.window)
+        try #require(window.isVisible && window.isKeyWindow)
+        try #require(NSScreen.screens.count == 1, "The CI pointer fixture requires one owned display")
+        try #require(CGPreflightPostEventAccess(), "CI native input requires existing event-posting permission")
+        NSApp.activate(ignoringOtherApps: true)
+        let activationDeadline = ContinuousClock.now + .seconds(2)
+        while !NSApp.isActive, ContinuousClock.now < activationDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(NSApp.isActive && window.isKeyWindow)
+        let screenHeight = CGDisplayBounds(CGMainDisplayID()).height
+        let pid = getpid()
+        let windowID = CGWindowID(window.windowNumber)
+        let inputs = events.map { event in
+            let point = window.convertPoint(toScreen: event.locationInWindow)
+            let kind: CGEventType =
+                switch event.type {
+                case .leftMouseDown: .leftMouseDown
+                case .leftMouseDragged: .leftMouseDragged
+                default: .leftMouseUp
+                }
+            return PointerInput(
+                kind: kind.rawValue, x: point.x, y: screenHeight - point.y, token: Int64(event.eventNumber))
         }
         let receipt = InputReceipt()
         let monitor = try #require(
-            NSEvent.addLocalMonitorForEvents(matching: mask) { observed in
+            NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]) { observed in
                 MainActor.assumeIsolated {
-                    if let input = inputs[observed.eventNumber], observed.windowNumber == input.windowNumber {
-                        receipt.events[observed.eventNumber] = observed
+                    if let cg = observed.cgEvent {
+                        let token = cg.getIntegerValueField(.eventSourceUserData)
+                        if inputs.contains(where: { $0.token == token }), observed.window === window {
+                            receipt.events[token] = observed
+                        }
                     }
                 }
                 return observed
             })
         defer { NSEvent.removeMonitor(monitor) }
-        for event in events { NSApp.postEvent(event, atStart: false) }
+        // Native NSTextView tracking can block the main event loop. Deliver the
+        // bounded sequence independently, checking WindowServer ownership before every event.
+        let delivery = Task.detached {
+            for input in inputs {
+                let point = CGPoint(x: input.x, y: input.y)
+                guard Self.ownedPointerTarget(point, pid: pid, windowID: windowID) else { return false }
+                if input.kind == CGEventType.leftMouseDown.rawValue {
+                    guard
+                        let move = CGEvent(
+                            mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point,
+                            mouseButton: .left)
+                    else { return false }
+                    move.flags = []
+                    move.post(tap: .cghidEventTap)
+                    try? await Task.sleep(for: .milliseconds(10))
+                }
+                guard let type = CGEventType(rawValue: input.kind),
+                    let cg = CGEvent(
+                        mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)
+                else { return false }
+                cg.flags = []
+                cg.setIntegerValueField(.mouseEventClickState, value: 1)
+                cg.setIntegerValueField(.eventSourceUserData, value: input.token)
+                cg.post(tap: .cghidEventTap)
+                try? await Task.sleep(for: .milliseconds(80))
+            }
+            return true
+        }
+        try #require(await delivery.value, "Every pointer target must remain the owned CI window")
         let deadline = ContinuousClock.now + .seconds(2)
         while receipt.events.count != events.count, ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(10))
         }
-        for event in events {
+        for (event, input) in zip(events, inputs) {
             let observed = try #require(
-                receipt.events[event.eventNumber], "The app-host loop must deliver every exact input")
-            // AppKit may copy a posted event; Swift object identity is not input identity.
-            // Validate the entire delivery envelope, including its requested coordinates.
-            try #require(observed.eventNumber == event.eventNumber)
-            try #require(observed.windowNumber == event.windowNumber)
-            try #require(observed.window === event.window)
+                receipt.events[input.token], "The app-host loop must receive every native input")
+            #expect(observed.window === window)
             #expect(observed.type == event.type)
-            #expect(observed.timestamp == event.timestamp)
-            #expect(observed.modifierFlags == event.modifierFlags)
-            #expect(observed.locationInWindow == event.locationInWindow)
+            let cg = try #require(observed.cgEvent)
+            #expect(cg.getIntegerValueField(.eventSourceUserData) == input.token)
+            #expect(cg.location == CGPoint(x: input.x, y: input.y))
+            #expect(observed.modifierFlags.isEmpty)
         }
+    }
+
+    nonisolated private static func ownedPointerTarget(_ point: CGPoint, pid: pid_t, windowID: CGWindowID) -> Bool {
+        guard
+            let records = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+                as? [[String: Any]]
+        else { return false }
+        for record in records {
+            guard (record[kCGWindowLayer as String] as? Int) == 0,
+                let raw = record[kCGWindowBounds as String] as? [String: Any],
+                let bounds = CGRect(dictionaryRepresentation: raw as CFDictionary), bounds.contains(point)
+            else { continue }
+            return (record[kCGWindowOwnerPID as String] as? Int) == Int(pid)
+                && (record[kCGWindowNumber as String] as? UInt32) == windowID
+        }
+        return false
     }
 
     private func host(_ model: AppModel) -> (window: NSWindow, view: NSView) {

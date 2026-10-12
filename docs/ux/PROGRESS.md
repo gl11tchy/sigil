@@ -741,3 +741,10 @@ tests passed and the real false-green log is rejected. Exact-head CI and parent
 personal diff/native review remain required before merge.
 No personal histories, process enumeration, denied process reads, daily-app
 replacement, merge or next-ticket work occurred. REA-1351 stays separate.
+
+The 0a94 CI completed all 1,220 Swift tests and 37 XCTest cases, then failed
+all four new hosted interactions. Exact xcresult details record posted-event
+timestamp rounding, a 32-point coordinate difference, missing seam capture/focus
+and empty terminal/Notes selection. The new CI-only driver uses guarded native
+pointer input and exact target-window receipts; all behavior assertions remain.
+Its result is pending. App source and the preserved Mac evidence are unchanged.
