@@ -31,13 +31,19 @@ struct AboutBuildIdentityHostTests {
         #expect(text.contains("1.0.0"))
         #expect(text.contains("548.1"))
         #expect(text.contains("aaaaaaa"))
-        NSApp.activate()
+        // Match the existing interactive app-host driver: the passive
+        // activation request leaves Xcode's test runner in front on macOS26.
+        NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
         let deadline = ContinuousClock.now + .seconds(2)
-        while NSApp.keyWindow !== panel && ContinuousClock.now < deadline {
+        while !NSApp.isActive || !panel.isKeyWindow || NSApp.keyWindow !== panel,
+            ContinuousClock.now < deadline
+        {
             try await Task.sleep(for: .milliseconds(10))
         }
-        try #require(NSApp.keyWindow === panel, "Close requires this native About panel to be key")
+        try #require(
+            NSApp.isActive && panel.isKeyWindow && NSApp.keyWindow === panel,
+            "About key-window precondition: active=\(NSApp.isActive), canBecomeKey=\(panel.canBecomeKey)")
         AppWindowCommands.closeTabOrKeyWindow(model)
         #expect(!panel.isVisible)
         #expect(model.tabs.map(\.id) == [tab.id])

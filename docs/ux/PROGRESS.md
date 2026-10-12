@@ -846,3 +846,13 @@ assertion retained. Shared production window handlers keep the original Close
 body byte-identical. The original exact-six sidebar gate and skip rules remain;
 About receives a separate mandatory exact-one/no-skip gate. Host execution and
 compiled ZIP are pending; no local app build/test, new permission or input retry.
+
+Head40fa55c CI38321649935 passed all1226 CLI Swift tests and the unchanged
+six-case sidebar gate (two mandatory passes, four authorized pointer skips).
+The real About host displayed identity but still had no keyWindow. Inspection
+of the existing interactive host driver found its explicit
+activate(ignoringOtherApps:true) call and active/isKeyWindow/exact-key guard.
+The About case now uses that same owned-app activation contract once before
+Close and strengthens its precondition to match. No new input permission,
+keystroke, skip or weakened behavior assertion; no production change.
+Current-head native Close, remaining full CI and compiled ZIP remain pending.
