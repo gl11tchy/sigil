@@ -108,7 +108,7 @@ struct SidebarVersionNoticeTests {
         defer { nativeControl.window.close() }
         let baseline = host(checked)
         defer { baseline.window.close() }
-        let notices = host(newer)
+        let notices = host(newer, interactive: true)
         defer { notices.window.close() }
         // Request the generated host's AX hierarchy before reading SwiftUI's public getters.
         // Query only this generated host, off its main event loop; no trust or environment override.
@@ -600,6 +600,10 @@ struct SidebarVersionNoticeTests {
     /// No posted input, permission-dependent skip or global trust override.
     private func pressOwnedAccessibility(_ identifier: String) async -> Int32 {
         await Task.detached {
+            func stage(_ value: String) {
+                FileHandle.standardError.write(Data("REA-1351 AX stage: \(identifier): \(value)\n".utf8))
+            }
+            stage("querying own windows")
             let pid = ProcessInfo.processInfo.processIdentifier
             let app = AXUIElementCreateApplication(pid)
             let timeout = AXUIElementSetMessagingTimeout(app, 2)
@@ -628,9 +632,14 @@ struct SidebarVersionNoticeTests {
                     for child in children { visit(child, depth: depth + 1) }
                 }
             }
+            stage("walking own hierarchy")
             for window in windows { visit(window, depth: 0) }
+            stage("hierarchy complete; matches=\(matches.count), elements=\(count)")
             guard matches.count == 1 else { return AXError.noValue.rawValue }
-            return AXUIElementPerformAction(matches[0], kAXPressAction as CFString).rawValue
+            stage("performing press")
+            let result = AXUIElementPerformAction(matches[0], kAXPressAction as CFString).rawValue
+            stage("press returned \(result)")
+            return result
         }.value
     }
 
@@ -670,21 +679,28 @@ struct SidebarVersionNoticeTests {
         }.value
     }
 
-    private func host(_ model: AppModel) -> (window: NSWindow, view: NSView) {
+    private func host(_ model: AppModel, interactive: Bool = false) -> (window: NSWindow, view: NSView) {
         host(
             NSHostingView(
-                rootView: SidebarView(model: model).environment(\.palette, Palette(theme: .sigilDark))))
+                rootView: SidebarView(model: model).environment(\.palette, Palette(theme: .sigilDark))),
+            interactive: interactive)
     }
 
-    private func host(_ view: NSView, size: NSSize = .init(width: 200, height: 460)) -> (window: NSWindow, view: NSView)
-    {
+    private func host(_ view: NSView, size: NSSize = .init(width: 200, height: 460), interactive: Bool = false) -> (
+        window: NSWindow, view: NSView
+    ) {
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
-            styleMask: [.borderless], backing: .buffered, defer: false)
+            styleMask: interactive ? [.titled] : [.borderless], backing: .buffered, defer: false)
         window.animationBehavior = .none
         window.isReleasedWhenClosed = false
         window.contentView = view
-        window.orderFront(nil)
+        if interactive {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate()
+        } else {
+            window.orderFront(nil)
+        }
         view.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
         return (window, view)
