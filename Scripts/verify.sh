@@ -63,6 +63,9 @@ echo "==> Sidereal mobile browser checks"
 npm --prefix "$ROOT/Sidereal" exec -- playwright install chromium webkit || fail "Sidereal browsers"
 npm --prefix "$ROOT/Sidereal" run test:browser || fail "Sidereal browser tests"
 
+echo "==> build/release identity fixtures"
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s "$SCRIPT_DIR/tests" -p 'test_build_identity.py' \
+  || fail "build/release identity fixtures"
 echo "==> swift test --no-parallel"
 # Several integration tests use blocking processes and sockets. Serial execution
 # avoids starving the older Swift concurrency runtime on GitHub's macOS runner.
