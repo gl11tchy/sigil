@@ -359,6 +359,25 @@ struct SidebarSnapshotTests {
         let task = Task { await model.observeSidebarFilesystem() }
         defer { task.cancel() }
         try await Task.sleep(for: .milliseconds(100))
+        // FSEvents can deliver coalesced fixture-creation events after the stream starts.
+        // Establish a bounded quiet period before measuring steady-state behavior.
+        // A periodic invalidation still fails: it cannot stay quiet for longer than its interval.
+        let startupDeadline = ContinuousClock.now + .seconds(4)
+        var settled = false
+        while !settled, ContinuousClock.now < startupDeadline {
+            let startupChanged = OSAllocatedUnfairLock(initialState: false)
+            withObservationTracking {
+                _ = model.sidebarSnapshot()
+            } onChange: {
+                startupChanged.withLock { $0 = true }
+            }
+            let quietDeadline = ContinuousClock.now + .milliseconds(1_300)
+            while !startupChanged.withLock({ $0 }), ContinuousClock.now < quietDeadline {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            settled = !startupChanged.withLock { $0 }
+        }
+        try #require(settled, "The mounted watcher must become quiet before the steady-state assertion")
         let observed = OSAllocatedUnfairLock(initialState: false)
         withObservationTracking {
             _ = model.sidebarSnapshot()

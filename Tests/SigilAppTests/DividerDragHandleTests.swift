@@ -38,11 +38,151 @@ struct DividerDragHandleTests {
                         with: type, location: NSPoint(x: x + delta, y: 250), modifierFlags: [],
                         timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
                         context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
-                NSApp.sendEvent(event)
+                try dispatch(event)
                 try await Task.sleep(for: .milliseconds(20))
             }
             #expect(fixture.defaults.double(forKey: "window.sidebarWidth") == before + 20)
         }
+    }
+
+    @Test func clickingACappedRenderedSeamPreservesThePreferenceAndFocusesIt() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        fixture.defaults.set(430.0, forKey: "window.sidebarWidth")
+        let model = fixture.model()
+        model.panel.isVisible = true
+        defer { model.closeAllTabsAndWait() }
+        let window = NSWindow(
+            contentRect: NSRect(x: 100, y: 100, width: 900, height: 500),
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let host = NSHostingView(
+            rootView: WindowContent(model: model)
+                .frame(width: 900, height: 500)
+                .defaultAppStorage(fixture.defaults))
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        try await Task.sleep(for: .milliseconds(100))
+        host.layoutSubtreeIfNeeded()
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseDragged, .leftMouseUp] {
+            let event = try #require(
+                NSEvent.mouseEvent(
+                    with: type, location: NSPoint(x: 218.5, y: 250), modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+            try dispatch(event)
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(fixture.defaults.double(forKey: "window.sidebarWidth") == 430)
+        #expect(model.isSidebarDividerFocused)
+    }
+
+    @Test func terminalSelectionKeepsTheWindowStationary() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let folder = try fixture.directory("terminal-drag")
+        try fixture.writeListedSession(id: "terminal-drag", cwd: folder.path)
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        model.open(try #require(fixture.store.sessions.first))
+        let hosted = HostedWindow(model: model, defaults: fixture.defaults)
+        defer { hosted.window.close() }
+        try await Task.sleep(for: .milliseconds(100))
+        hosted.host.layoutSubtreeIfNeeded()
+        let terminal = try #require(model.selectedTab).controller.view
+        try #require(terminal.window === hosted.window)
+        try #require(terminal.bounds.width > 200 && terminal.bounds.height > 40)
+        terminal.feed(text: "\u{1b}[2J\u{1b}[HGenerated terminal selection sentinel\r\n")
+        let origin = hosted.window.frame.origin
+        let start = terminal.convert(NSPoint(x: 8, y: terminal.bounds.height - 10), to: nil)
+        let end = terminal.convert(NSPoint(x: 160, y: terminal.bounds.height - 10), to: nil)
+        try await drag(in: hosted.window, from: start, to: end)
+        let selected = terminal.selection.getSelectedText()
+        #expect(!selected.isEmpty)
+        #expect("Generated terminal selection sentinel".contains(selected))
+        #expect(hosted.window.frame.origin == origin)
+    }
+
+    @Test func notesEditorSelectionKeepsTheWindowStationary() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let folder = try fixture.directory("editor-drag")
+        try fixture.writeListedSession(id: "editor-drag", cwd: folder.path)
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(fixture.store.sessions.first)
+        model.open(session)
+        let text = "Generated editor selection sentinel ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        model.panel.setNotes(text, forSessionID: session.id, cwd: session.cwd)
+        model.showPanel(.notes)
+        let hosted = HostedWindow(model: model, defaults: fixture.defaults)
+        defer { hosted.window.close() }
+        try await Task.sleep(for: .milliseconds(100))
+        hosted.host.layoutSubtreeIfNeeded()
+        let editor = try #require(textEditor(in: hosted.host, containing: text))
+        let first = editor.firstRect(forCharacterRange: NSRange(location: 4, length: 1), actualRange: nil)
+        let last = editor.firstRect(forCharacterRange: NSRange(location: 20, length: 1), actualRange: nil)
+        try #require(!first.isEmpty && !last.isEmpty)
+        let origin = hosted.window.frame.origin
+        try await drag(
+            in: hosted.window,
+            from: hosted.window.convertPoint(fromScreen: NSPoint(x: first.midX, y: first.midY)),
+            to: hosted.window.convertPoint(fromScreen: NSPoint(x: last.midX, y: last.midY)))
+        #expect(editor.selectedRange().length > 0)
+        #expect(hosted.window.frame.origin == origin)
+    }
+
+    private func drag(in window: NSWindow, from start: NSPoint, to end: NSPoint) async throws {
+        for (type, point) in [
+            (NSEvent.EventType.leftMouseDown, start), (.leftMouseDragged, end), (.leftMouseUp, end),
+        ] {
+            let event = try #require(
+                NSEvent.mouseEvent(
+                    with: type, location: point, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+            try dispatch(event)
+            try await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
+    private func textEditor(in view: NSView, containing text: String) -> NSTextView? {
+        if let editor = view as? NSTextView, editor.string == text { return editor }
+        for child in view.subviews {
+            if let editor = textEditor(in: child, containing: text) { return editor }
+        }
+        return nil
+    }
+
+    @MainActor
+    private struct HostedWindow {
+        let window: NSWindow
+        let host: NSHostingView<AnyView>
+        init(model: AppModel, defaults: UserDefaults) {
+            window = NSWindow(
+                contentRect: NSRect(x: 100, y: 100, width: 1200, height: 600),
+                styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            host = NSHostingView(rootView: AnyView(WindowContent(model: model).defaultAppStorage(defaults)))
+            window.contentView = host
+            window.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    /// currentEvent is the last event retrieved from the application queue.
+    /// Calling sendEvent directly skips that step and leaves the gesture with a stale event.
+    private func dispatch(_ event: NSEvent) throws {
+        NSApp.postEvent(event, atStart: true)
+        let queued = try #require(
+            NSApp.nextEvent(
+                matching: NSEvent.EventTypeMask(rawValue: 1 << event.type.rawValue),
+                until: .distantPast, inMode: .default, dequeue: true))
+        try #require(queued === event)
+        try #require(NSApp.currentEvent === event)
+        NSApp.sendEvent(queued)
     }
 
     @Test func captureStartsOnMouseDownAndLeavesTheWindowPolicyIntact() {
@@ -55,6 +195,26 @@ struct DividerDragHandleTests {
         #expect(fixture.window.isMovableByWindowBackground)
         fixture.up(400)
         #expect(!fixture.view.capture.isActive)
+    }
+
+    @Test func aNoMotionClickDoesNotReplaceTheStoredWidthWithTheRenderedCap() {
+        let fixture = Fixture(width: 218, limits: 200...218)
+        defer { fixture.window.close() }
+        var savedWidth = 430.0
+        var capture = DividerDragHandle.Capture()
+        let down = capture.update(
+            with: fixture.event(.leftMouseDown, 400), in: fixture.window,
+            width: 218, limits: 200...218, direction: .right)
+        #expect(capture.isActive, "Mouse-down still starts the capture used to request focus")
+        if let down { savedWidth = down }
+        let stationary = capture.update(
+            with: fixture.event(.leftMouseDragged, 400), in: fixture.window,
+            width: 218, limits: 200...218, direction: .right)
+        if let stationary { savedWidth = stationary }
+        capture.end()
+        #expect(down == nil)
+        #expect(stationary == nil)
+        #expect(savedWidth == 430)
     }
 
     @Test func movingTheWindowDoesNotChangeScreenTranslation() {

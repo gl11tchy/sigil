@@ -25,12 +25,10 @@ struct DividerDragHandle: View {
                     .onChanged { _ in
                         guard let event = NSApp.currentEvent, let window = event.window else { return }
                         let started = !capture.isActive
-                        if let next = capture.update(
+                        let next = capture.update(
                             with: event, in: window, width: width, limits: limits, direction: direction)
-                        {
-                            width = next
-                            if started { onDragStart() }
-                        }
+                        if started, capture.isActive { onDragStart() }
+                        if let next { width = next }
                     }
                     .onEnded { _ in capture.end() }
             )
@@ -56,8 +54,9 @@ struct DividerDragHandle: View {
             guard let previousScreenX, let dragWidth, event.type != .leftMouseDown else {
                 self.previousScreenX = x
                 self.dragWidth = clamp(width)
-                return self.dragWidth
+                return nil
             }
+            guard x != previousScreenX else { return nil }
             // Consume movement at the bounds, so reversing has no overshoot dead zone.
             let next = clamp(dragWidth + direction.rawValue * (x - previousScreenX))
             self.previousScreenX = x

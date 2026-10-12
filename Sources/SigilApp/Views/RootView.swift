@@ -155,7 +155,6 @@ struct WindowContent: View {
             }
         }
         .background(palette.canvas)
-        .modifier(WindowBackgroundDrag())
         .tint(palette.accent)
         .environment(\.palette, palette)
         .background(WindowChrome(background: palette.canvasNSColor))
@@ -371,6 +370,8 @@ private struct TopBar: View {
 
             if model.tabs.isEmpty {
                 Spacer(minLength: 8)
+                    .contentShape(Rectangle())
+                    .modifier(WindowBackgroundDrag())
             } else {
                 TabStripView(model: model)
             }
@@ -663,20 +664,25 @@ struct WindowChrome: NSViewRepresentable {
     }
 }
 
-/// The background starts a native window drag; controls above it keep their
-/// own input. This avoids server-side background capture claiming a divider.
-private struct WindowBackgroundDrag: ViewModifier {
-    @ViewBuilder func body(content: Content) -> some View {
-        if #available(macOS 15, *) {
-            content.gesture(WindowDragGesture())
-        } else {
-            content.gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        guard let event = NSApp.currentEvent, event.type == .leftMouseDown else { return }
-                        event.window?.performDrag(with: event)
-                    }
-            )
+/// Apply only to non-interactive chrome. A bounded native view keeps window
+/// dragging out of the terminal and editor's event handling.
+struct WindowBackgroundDrag: ViewModifier {
+    func body(content: Content) -> some View {
+        content.background(WindowDragRegion())
+    }
+}
+
+private struct WindowDragRegion: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { Surface() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    final class Surface: NSView {
+        // Deliver the initial click even while this window is inactive.
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        override func mouseDown(with event: NSEvent) {
+            window?.performDrag(with: event)
         }
     }
 }

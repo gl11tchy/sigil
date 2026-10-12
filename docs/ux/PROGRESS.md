@@ -711,25 +711,27 @@ corrected exact-head run. No denied local build or extra worker was used.
 
 ## REA-1350: sidebar divider capture and background dragging
 
-The current-main generated fixture reproduced moving local-coordinate feedback
-and competing server-side window dragging. The shared 9-point seam now captures
-on mouse-down with stable screen-coordinate NSEvent deltas and immediate reversal
-at physical width caps. The existing geometry solver, persisted width, keyboard
-and AX steps remain. Native background gestures preserve window movement outside
-the seams without the server-side capture that competed with them.
+The generated current-main fixture reproduced moving local-coordinate feedback and
+competing server-side window dragging. Shared 9-point seams now capture mouse-down
+with screen-coordinate NSEvent deltas and immediate reversal at physical width caps.
+A no-motion click focuses the seam without replacing a saved width with its rendered
+cap. The geometry solver, persisted preference and keyboard/AX steps remain.
 
-The final current-source native run passed all 66 drag samples across the first
-trace and nine matrix cases, with stationary windows. Both hit-target edges,
-bounds, utility panel, 900/760 window sizes, hide/show, focused keyboard input,
-AX adjustment and verified fresh-process width 220 persistence passed. All three
-background regions moved: header 30 and sidebar text regions 20 for a 30-point
-pointer path. [The QA record](../qa/rea-1350.md) includes this difference, source
-provenance, screenshots and limits; earlier prototypes are not final evidence.
+The final candidate passed 66 drag samples, target edges, bounds, utility panel,
+900/760 widths, hide/show, keyboard/AX adjustment and fresh-process persistence.
+Saved 430 rendered 218 survived a stationary click and restored 430 after widening.
+Generated terminal selection kept the window stationary. Small native header drag
+surfaces moved the window 30 points, including the first drag while inactive. A
+SwiftUI window gesture still intercepted terminal mouse-down after being narrowed
+and was replaced with the bounded native surfaces.
 
-The app-only debug build, strict signature verification, four-file strict Swift
-formatting and diff check passed. Nine AppTests are written for CI only; the
-previous local compilation rejection was honored. Exact-head CI and parent
-personal diff/native review remain required before merge. No personal histories,
-process enumeration, denied process reads, daily-app replacement or next-ticket
-work occurred. Retired task debug apps received normal quit requests only after
-fresh matching LaunchServices callbacks. REA-1351 remains separate.
+The [QA record](../qa/rea-1350.md) identifies final source-matched evidence in
+`rea-1350-ready-native/` and the initial CI failure investigation. Thirteen divider
+AppTests, including rendered Notes selection, remain CI only. The filesystem test
+now establishes bounded startup quiet before its unchanged assertions. App-only
+build, signature, formatting and diff checks passed. The populated native-history
+attempt remained AX-unresponsive and is an explicit Notes verification gap.
+
+Exact-head CI and parent personal diff/native review remain required before merge.
+No personal histories, process enumeration, denied process reads, daily-app
+replacement, merge or next-ticket work occurred. REA-1351 stays separate.
