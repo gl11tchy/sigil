@@ -195,10 +195,12 @@ struct SidebarVersionNoticeTests {
                 !identifiers.contains("sidebar-\(provider.rawValue)-version-notice"),
                 "Nonblocking paragraphs must be absent from the collapsed history list")
         }
+        trace("collapsed checks complete; opening compatibility details")
         let offsetBeforeDetails = noticeScroll.contentView.bounds.origin
         let destinationsBeforeDetails = newer.sidebarSnapshot().destinations
         try #require(await pressOwnedAccessibility("sidebar-compatibility-disclosure") == AXError.success.rawValue)
         try await Task.sleep(for: .milliseconds(100))
+        trace("compatibility AX press complete; reading details")
         let details = await ownedAccessibilityValues()
         for provider in providers {
             let expected = try #require(provider.versionNotice(for: newer.providerInstallations[provider]))
@@ -209,13 +211,16 @@ struct SidebarVersionNoticeTests {
         #expect(noticeScroll.contentView.bounds.origin == offsetBeforeDetails)
         #expect(newer.sidebarSnapshot().destinations == destinationsBeforeDetails)
         #expect(noticeScroll.contentView.bounds.height == noticeViewport.height)
+        trace("version/scroll checks complete; closing details")
         try #require(await pressOwnedAccessibility("sidebar-compatibility-close") == AXError.success.rawValue)
         try await Task.sleep(for: .milliseconds(100))
+        trace("close AX press complete; reading closed state")
         let closedDetails = await ownedAccessibilityValues()
         #expect(!closedDetails.keys.contains("sidebar-compatibility-close"))
         #expect(closedDetails["sidebar-compatibility-disclosure"]?.contains("Details hidden.") == true)
         #expect(noticeScroll.contentView.bounds.origin == offsetBeforeDetails)
         // A single newer provider consumes the same bounded footprint; zero consumes none.
+        trace("closed state checks complete; hosting one-version sidebar")
         let one = model(versions: [.codex: "0.160.0"])
         let single = host(one)
         defer { single.window.close() }
@@ -228,31 +233,40 @@ struct SidebarVersionNoticeTests {
             in: baseline.window, visited: &baselineVisited, tree: &baselineTree)
         #expect(!baselineIdentifiers.contains("sidebar-compatibility-disclosure"))
         // A targeted request works both before first appearance and on an existing Settings window.
+        trace("one/zero checks complete; hosting default Appearance settings")
         let preferences = host(
             NSHostingView(rootView: SettingsView(model: newer)), size: .init(width: 540, height: 660))
         defer { preferences.window.close() }
         try await Task.sleep(for: .milliseconds(50))
+        trace("Appearance settings hosted; reading initial pane")
         #expect(!(await ownedAccessibilityValues()).keys.contains("settings-general"))
+        trace("requesting General on existing Settings window")
         newer.requestGeneralSettings()
         try await Task.sleep(for: .milliseconds(100))
+        trace("reading routed General pane")
         #expect((await ownedAccessibilityValues()).keys.contains("settings-general"))
         #expect(newer.generalSettingsRequest == nil, "A targeted route is consumed, not replayed on ordinary opens")
+        trace("requesting General on existing Settings window")
         newer.requestGeneralSettings()
         try await Task.sleep(for: .milliseconds(50))
         #expect(newer.generalSettingsRequest == nil)
+        trace("reading routed General pane")
         #expect((await ownedAccessibilityValues()).keys.contains("settings-general"))
+        trace("existing/repeated route checks complete; hosting first-open request")
         let firstOpen = model(versions: [:])
         firstOpen.requestGeneralSettings()
         let routed = host(
             NSHostingView(rootView: SettingsView(model: firstOpen)), size: .init(width: 540, height: 660))
         defer { routed.window.close() }
         try await Task.sleep(for: .milliseconds(50))
+        trace("first-open settings hosted; checking consumption and exported pane")
         #expect(firstOpen.generalSettingsRequest == nil)
         var routedVisited: Set<ObjectIdentifier> = []
         var routedTree: [String] = []
         #expect(
             accessibilityIdentifiers(in: routed.window, visited: &routedVisited, tree: &routedTree)
                 .contains("settings-general"))
+        trace("all routing checks complete; retained history notice check")
         #expect(
             identifiers.contains("sidebar-history-compatibility-notice"),
             "Exported compatibility notice: \(tree). \(diagnostic)")
@@ -576,6 +590,10 @@ struct SidebarVersionNoticeTests {
                 && (record[kCGWindowNumber as String] as? UInt32) == windowID
         }
         return false
+    }
+
+    private func trace(_ stage: String) {
+        FileHandle.standardError.write(Data("REA-1351 hosted stage: \(stage)\n".utf8))
     }
 
     /// Public AX actions scoped to this CI app host, off its main event loop.
