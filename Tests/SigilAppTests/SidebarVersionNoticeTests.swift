@@ -604,12 +604,22 @@ struct SidebarVersionNoticeTests {
     private func pressOwnedAccessibility(_ identifier: String, in window: NSWindow) -> Int32 {
         var visited: Set<ObjectIdentifier> = []
         var matches: [NSObject] = []
-        visitAccessibility(window, visited: &visited) { element in
-            if accessibilityValue(in: element, selector: #selector(NSAccessibilityProtocol.accessibilityIdentifier))
-                as? String
-                == identifier, let object = element as? NSObject
-            {
-                matches.append(object)
+        var roots: [NSWindow] = []
+        func collect(_ root: NSWindow) {
+            guard !roots.contains(where: { $0 === root }), roots.count < 16 else { return }
+            roots.append(root)
+            for child in root.childWindows ?? [] where child.isVisible { collect(child) }
+        }
+        collect(window)
+        trace("owned parent/child accessibility roots: \(roots.map { String(describing: type(of: $0)) })")
+        for root in roots {
+            visitAccessibility(root, visited: &visited) { element in
+                if accessibilityValue(in: element, selector: #selector(NSAccessibilityProtocol.accessibilityIdentifier))
+                    as? String
+                    == identifier, let object = element as? NSObject
+                {
+                    matches.append(object)
+                }
             }
         }
         trace("AppKit accessibility matches for \(identifier): \(matches.count)")
