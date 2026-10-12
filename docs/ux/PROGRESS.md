@@ -833,3 +833,8 @@ assertions. Automatic review findings were independently confirmed: dirty
 dependency/ignored compiled inputs, edited provenance notes and unpublished
 draft collisions. All 23 corrected synthetic fixtures pass; corrected-head CI
 and compiled ZIP validation remain pending. Original evidence is preserved.
+
+Head5e6105f still lacked a key window in the unhosted CLI test despite native
+activation; all 23 identity fixtures and displayed metadata passed. One further
+bounded correction dispatches AppKit events, with failure diagnostics, while
+keeping the key-window and Close assertions. Its exact-head result is pending.

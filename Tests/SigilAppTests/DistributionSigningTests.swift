@@ -116,10 +116,18 @@ struct DistributionSigningTests {
         NSApp.activate()
         panel.makeKeyAndOrderFront(nil)
         let deadline = Date().addingTimeInterval(2)
+        var dispatchedEvents = 0
         while NSApp.keyWindow !== panel && Date() < deadline {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+            if let event = NSApp.nextEvent(
+                matching: .any, until: Date().addingTimeInterval(0.01), inMode: .default, dequeue: true)
+            {
+                NSApp.sendEvent(event)
+                dispatchedEvents += 1
+            }
         }
-        try #require(NSApp.keyWindow === panel, "Close requires this native About panel to be key")
+        try #require(
+            NSApp.keyWindow === panel,
+            "About focus: active=\(NSApp.isActive), canBecomeKey=\(panel.canBecomeKey), dispatched=\(dispatchedEvents)")
         GrokCommands.closeTabOrKeyWindow(model)
         #expect(!panel.isVisible)
         #expect(model.tabs.map(\.id) == [tab.id])
