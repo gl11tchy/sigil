@@ -199,6 +199,7 @@ struct SidebarVersionNoticeTests {
         let window = NSWindow(
             contentRect: NSRect(x: 100, y: 100, width: 900, height: 500),
             styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.animationBehavior = .none
         window.isReleasedWhenClosed = false
         defer { window.close() }
         let host = NSHostingView(
@@ -237,6 +238,7 @@ struct SidebarVersionNoticeTests {
         let window = NSWindow(
             contentRect: NSRect(x: 100, y: 100, width: 900, height: 500),
             styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.animationBehavior = .none
         window.isReleasedWhenClosed = false
         defer { window.close() }
         let host = NSHostingView(
@@ -351,6 +353,7 @@ struct SidebarVersionNoticeTests {
             window = NSWindow(
                 contentRect: NSRect(x: 100, y: 100, width: 1200, height: 600),
                 styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+            window.animationBehavior = .none
             window.isReleasedWhenClosed = false
             host = NSHostingView(rootView: AnyView(WindowContent(model: model).defaultAppStorage(defaults)))
             window.contentView = host
@@ -398,7 +401,14 @@ struct SidebarVersionNoticeTests {
         for event in events {
             let observed = try #require(
                 receipt.events[event.eventNumber], "The app-host loop must deliver every exact input")
-            try #require(observed === event)
+            // AppKit may copy a posted event; Swift object identity is not input identity.
+            // Validate the entire delivery envelope, including its requested coordinates.
+            try #require(observed.eventNumber == event.eventNumber)
+            try #require(observed.windowNumber == event.windowNumber)
+            try #require(observed.window === event.window)
+            #expect(observed.type == event.type)
+            #expect(observed.timestamp == event.timestamp)
+            #expect(observed.modifierFlags == event.modifierFlags)
             #expect(observed.locationInWindow == event.locationInWindow)
         }
     }
@@ -413,6 +423,7 @@ struct SidebarVersionNoticeTests {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 200, height: 460),
             styleMask: [.borderless], backing: .buffered, defer: false)
+        window.animationBehavior = .none
         window.isReleasedWhenClosed = false
         window.contentView = view
         window.orderFront(nil)

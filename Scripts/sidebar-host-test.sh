@@ -27,7 +27,7 @@ import time
 root = Path(sys.argv[1])
 build_only = sys.argv[2] == '--build-only'
 
-def run(command, environment, timeout):
+def run(command, environment, timeout, require_success=True):
     process = subprocess.Popen(command, env=environment, start_new_session=True)
     try:
         status = process.wait(timeout=timeout)
@@ -39,8 +39,9 @@ def run(command, environment, timeout):
             os.killpg(process.pid, signal.SIGKILL)
             process.wait()
         raise SystemExit(f'Sidebar host command exceeded its {timeout}s bound.')
-    if status:
+    if status and require_success:
         raise SystemExit(status)
+    return status
 
 with tempfile.TemporaryDirectory(prefix='sigil-sidebar-host-') as temporary:
     work = Path(temporary)
@@ -101,16 +102,17 @@ with tempfile.TemporaryDirectory(prefix='sigil-sidebar-host-') as temporary:
         artifacts.mkdir(parents=True, exist_ok=True)
         result = artifacts / f'sidebar-host-{time.time_ns()}.xcresult'
         # Omit repetition and retry options for the normal single execution.
-        run([
+        test_status = run([
             'xcodebuild', '-xctestrun', str(test_run), '-destination', f'platform=macOS,arch={platform.machine()}',
             '-parallel-testing-enabled', 'NO',
             '-test-timeouts-enabled', 'YES', '-default-test-execution-time-allowance', '120',
             '-resultBundlePath', str(result), 'test-without-building', '-quiet',
-        ], environment, 240)
+        ], environment, 240, require_success=False)
         summary = json.loads(subprocess.check_output([
             'xcrun', 'xcresulttool', 'get', 'test-results', 'summary', '--path', str(result)
         ], env=environment, timeout=30))
-        if summary.get('passedTests') != 6 or summary.get('failedTests') != 0 or summary.get('skippedTests') != 0:
+        print(json.dumps(summary, indent=2))
+        if test_status != 0 or summary.get('passedTests') != 6 or summary.get('failedTests') != 0 or summary.get('skippedTests') != 0:
             raise SystemExit(f'Expected six passed fixtures with no failures or skips: {summary}')
         print(f'Sidebar host: six fixtures passed, no retries or skips. Evidence: {result}')
 PY
