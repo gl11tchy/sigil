@@ -26,6 +26,23 @@ def git(root, *args):
     ).strip()
 
 
+def sources_dirty(root):
+    if git(root, "status", "--porcelain", "--untracked-files=normal"):
+        return True
+    # SwiftPM compiles ignored source files and edited dependency checkouts.
+    # Match install-latest's input boundary; generated .build products stay out.
+    ignored = git(root, "status", "--porcelain", "--ignored=matching", "--", "Sources", "Tests", "Resources")
+    if any(not line.rstrip('"').endswith("/.DS_Store") for line in ignored.splitlines()):
+        return True
+    checkouts = root / ".build" / "checkouts"
+    if checkouts.is_dir():
+        for checkout in checkouts.iterdir():
+            if checkout.is_dir() and (checkout / ".git").exists():
+                if git(checkout, "status", "--porcelain", "--untracked-files=normal"):
+                    return True
+    return False
+
+
 def source_identity(root, env):
     root = Path(root).resolve()
     commit, count = "unknown", "1"
@@ -33,7 +50,7 @@ def source_identity(root, env):
         if Path(git(root, "rev-parse", "--show-toplevel")).resolve() == root:
             head = git(root, "rev-parse", "--verify", "HEAD")
             if COMMIT.fullmatch(head):
-                dirty = bool(git(root, "status", "--porcelain", "--untracked-files=normal"))
+                dirty = sources_dirty(root)
                 commit = head + ("-dirty" if dirty else "")
                 # A shallow count is not the repository's build count. Local
                 # source-only builds use 1; CI supplies its run.attempt identity.
@@ -100,6 +117,8 @@ def verify_existing(repo, identity, release, archive):
         raise ValueError("existing build release is not a published final release")
     if release.get("tag_name") != identity["tag"] or release.get("name") != release_title(identity):
         raise ValueError("existing build release metadata differs")
+    if (release.get("body") or "").strip() != release_notes(identity):
+        raise ValueError("existing build release provenance notes differ")
     if not verify_tag(repo, identity["tag"], identity["commit"]):
         raise ValueError("existing release has no source tag")
     assets = [asset for asset in release.get("assets", []) if asset.get("name") == "Sigil.zip"]
@@ -117,6 +136,22 @@ def release_title(identity):
     return f"Sigil {identity['version']} ({identity['build']}, {identity['commit'][:7]})"
 
 
+def release_notes(identity):
+    return (f"Built from main (`{identity['commit']}`). Build `{identity['build']}`. "
+            f"ZIP SHA-256 `{identity['sha256']}`. Unzip and replace /Applications/Sigil.app, "
+            "or from a clone: `Scripts/install.sh`.")
+
+
+def find_release(repo, tag):
+    # The by-tag REST endpoint omits drafts. Authenticated paginated listings
+    # include them, so an interrupted upload cannot cause another create.
+    pages = json.loads(gh("api", "--paginate", "--slurp", f"repos/{repo}/releases?per_page=100"))
+    matches = [release for page in pages for release in page if release.get("tag_name") == tag]
+    if len(matches) > 1:
+        raise ValueError("multiple releases collide with this build tag")
+    return matches[0] if matches else None
+
+
 def publish(archive, env):
     identity = archive_identity(archive)
     repo, commit, build = env["GITHUB_REPOSITORY"], env["GITHUB_SHA"], env["SIGIL_BUILD"]
@@ -125,17 +160,14 @@ def publish(archive, env):
     if not re.fullmatch(r"[1-9][0-9]*\.[1-9][0-9]*", build):
         raise ValueError("published builds require a numeric run.attempt identity")
     tag = identity["tag"]
-    existing = gh("api", f"repos/{repo}/releases/tags/{tag}", missing_ok=True)
+    existing = find_release(repo, tag)
     if existing is not None:
-        verify_existing(repo, identity, json.loads(existing), archive)
+        verify_existing(repo, identity, existing, archive)
         # A rerun of an older build must not change Latest or prune newer builds.
         return {**identity, "result": "already published; identical source and ZIP"}
     verify_tag(repo, tag, commit)  # Reject a colliding orphan tag before creation.
-    notes = (f"Built from main (`{commit}`). Build `{build}`. "
-             f"ZIP SHA-256 `{identity['sha256']}`. Unzip and replace /Applications/Sigil.app, "
-             "or from a clone: `Scripts/install.sh`.")
     gh("release", "create", tag, str(archive), "--repo", repo, "--target", commit,
-       "--title", release_title(identity), "--notes", notes, "--latest")
+       "--title", release_title(identity), "--notes", release_notes(identity), "--latest")
     # Read the uploaded ZIP and source tag before pruning anything.
     release = json.loads(gh("api", f"repos/{repo}/releases/tags/{tag}"))
     verify_existing(repo, identity, release, archive)

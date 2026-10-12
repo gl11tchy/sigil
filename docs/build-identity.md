@@ -2,8 +2,10 @@
 
 `SigilCommit` in the installed bundle is the authoritative source identity:
 the full Git commit, with `-dirty` for tracked or untracked source changes, or
-`unknown` when the source directory is not its own Git checkout. Ignored build
-outputs do not mark source dirty. About Sigil uses the bundle's version, build
+`unknown` when the source directory is not its own Git checkout. Edited SwiftPM
+dependency checkouts and ignored files under compiled source/resource paths
+also mark it dirty, matching the installer input boundary. Generated build
+outputs and ignored Finder metadata do not. About Sigil uses the bundle's version, build
 and seven-character commit; it retains `-dirty` and renders missing metadata as
 `unknown`. It still opens the standard native About panel, and the existing
 Close Tab command closes that key window rather than a conversation tab.
@@ -21,9 +23,12 @@ build number. PR ZIPs contain a debug bundle; main retains the existing release
 build. Publication requires a clean full commit matching `GITHUB_SHA`. Dirty,
 unknown and mismatched artifacts are rejected before any remote mutation.
 
-Before creating a release, the publisher checks for a colliding release or tag.
+Before creating a release, the publisher checks authenticated paginated release
+listings for a colliding release (including drafts), then checks the source tag.
+The by-tag REST endpoint covers published releases; draft visibility requires
+the [authenticated list endpoint](https://docs.github.com/en/rest/releases/releases#list-releases).
 An existing published release is accepted idempotently only if its metadata,
-source tag and downloaded ZIP match exactly. It does not upload, edit Latest or
+provenance notes, source tag and downloaded ZIP match exactly. It does not upload, edit Latest or
 prune on that path. A different source, ZIP or incomplete draft stops the run;
 nothing is overwritten. A new release retains `gh release create`'s upload-before-
 publish behavior. Its uploaded ZIP and tag are read back before pruning.

@@ -107,8 +107,19 @@ struct DistributionSigningTests {
         #expect(text.contains("1.0.0"))
         #expect(text.contains("548.1"))
         #expect(text.contains("aaaaaaa"))
+        // swift test is not an app-host event loop. Activate this CI-only
+        // process before testing the existing key-window Close route.
+        let previousPolicy = NSApp.activationPolicy()
+        try #require(NSApp.setActivationPolicy(.regular))
+        defer { NSApp.setActivationPolicy(previousPolicy) }
+        NSApp.finishLaunching()
+        NSApp.activate()
         panel.makeKeyAndOrderFront(nil)
-        #expect(NSApp.keyWindow === panel)
+        let deadline = Date().addingTimeInterval(2)
+        while NSApp.keyWindow !== panel && Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+        try #require(NSApp.keyWindow === panel, "Close requires this native About panel to be key")
         GrokCommands.closeTabOrKeyWindow(model)
         #expect(!panel.isVisible)
         #expect(model.tabs.map(\.id) == [tab.id])

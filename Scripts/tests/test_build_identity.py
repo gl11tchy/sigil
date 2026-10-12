@@ -42,14 +42,17 @@ class FakeGitHub:
 
     def metadata(self, info):
         return {"tag_name": info["tag"], "name": identity.release_title(info),
+                "body": identity.release_notes(info),
                 "draft": False, "prerelease": False,
                 "assets": [{"name": "Sigil.zip", "size": self.archive.stat().st_size}]}
 
     def __call__(self, *args, missing_ok=False):
         self.calls.append(args)
         if args[0] == "api":
+            if "--paginate" in args:
+                return json.dumps([[], [self.release] if self.release else []])
             if "/releases/tags/" in args[1]:
-                return json.dumps(self.release) if self.release else None
+                return json.dumps(self.release) if self.release and not self.release["draft"] else None
             if "/git/ref/tags/" in args[1]:
                 return json.dumps({"object": {"type": "commit", "sha": self.tagged}}) if self.tagged else None
         if args[:2] == ("release", "create"):
@@ -153,6 +156,30 @@ class SourceIdentityTests(unittest.TestCase):
             with self.subTest(env=env), self.assertRaises(ValueError):
                 self.source(env=env)
 
+    def test_edited_ignored_dependency_checkout_marks_root_dirty(self):
+        (self.repo / ".gitignore").write_text(".build/\n")
+        self.git("add", ".gitignore")
+        self.git("commit", "-qm", "ignore generated products")
+        dependency = self.repo / ".build" / "checkouts" / "dependency"
+        subprocess.run(["git", "clone", "-q", str(self.repo), str(dependency)], env=self.env, check=True)
+        head = self.git("rev-parse", "HEAD")
+        self.assertEqual(self.source()["commit"], head)
+        (dependency / "source").write_text("edited dependency")
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assertEqual(self.source()["commit"], head + "-dirty")
+
+    def test_ignored_compiled_source_marks_dirty_but_finder_metadata_does_not(self):
+        (self.repo / ".gitignore").write_text("Sources/Generated.swift\n.DS_Store\n")
+        self.git("add", ".gitignore")
+        self.git("commit", "-qm", "ignore generated source")
+        source = self.repo / "Sources"
+        source.mkdir()
+        (source / ".DS_Store").write_text("finder")
+        head = self.git("rev-parse", "HEAD")
+        self.assertEqual(self.source()["commit"], head)
+        (source / "Generated.swift").write_text("compiled source")
+        self.assertEqual(self.source()["commit"], head + "-dirty")
+
 
 class ReleaseIdentityTests(unittest.TestCase):
     def setUp(self):
@@ -233,6 +260,8 @@ class ReleaseIdentityTests(unittest.TestCase):
     def test_same_commit_and_build_but_different_zip_cannot_overwrite(self):
         other = zip_fixture(self.root / "different.zip", payload=b"b")
         fake = FakeGitHub(other, existing=True)
+        # Even claimed notes cannot substitute for downloading the actual ZIP.
+        fake.release["body"] = identity.release_notes(identity.archive_identity(self.archive))
         with patch.object(identity, "gh", fake), self.assertRaisesRegex(ValueError, "uploaded ZIP differs"):
             identity.publish(self.archive, self.env)
         self.assertEqual(fake.mutations, [])
@@ -240,6 +269,13 @@ class ReleaseIdentityTests(unittest.TestCase):
     def test_same_build_different_source_tag_cannot_overwrite(self):
         fake = FakeGitHub(self.archive, existing=True, tagged="b" * 40)
         with patch.object(identity, "gh", fake), self.assertRaisesRegex(ValueError, "different source"):
+            identity.publish(self.archive, self.env)
+        self.assertEqual(fake.mutations, [])
+
+    def test_edited_provenance_notes_cannot_pass_as_identical(self):
+        fake = FakeGitHub(self.archive, existing=True)
+        fake.release["body"] = "Built from a different source and digest"
+        with patch.object(identity, "gh", fake), self.assertRaisesRegex(ValueError, "provenance notes differ"):
             identity.publish(self.archive, self.env)
         self.assertEqual(fake.mutations, [])
 
@@ -256,6 +292,7 @@ class ReleaseIdentityTests(unittest.TestCase):
         with patch.object(identity, "gh", fake), self.assertRaises(ValueError):
             identity.publish(self.archive, self.env)
         self.assertEqual(fake.mutations, [])
+        self.assertTrue(any("--paginate" in call for call in fake.calls))
 
     def test_permission_error_stops_before_any_mutation(self):
         with patch.object(identity, "gh", side_effect=RuntimeError("HTTP 403 denied")) as gh:

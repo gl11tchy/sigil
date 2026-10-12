@@ -825,3 +825,11 @@ checks, CI-only native About/Close checks and compiled ZIP validation are define
 in [REA-1230 evidence](../qa/rea-1230.md). Exact-head CI is pending. No local app
 build, AppTests, process enumeration, daily-app action, remote publication,
 merge, installation or next ticket has been performed.
+
+Initial head22a5438 CI38317479789 failed only the added native About test's
+key-window/Close assertions; display assertions passed and the production Close
+body is unchanged. Corrected own-process activation/focus setup retains the
+assertions. Automatic review findings were independently confirmed: dirty
+dependency/ignored compiled inputs, edited provenance notes and unpublished
+draft collisions. All 23 corrected synthetic fixtures pass; corrected-head CI
+and compiled ZIP validation remain pending. Original evidence is preserved.
