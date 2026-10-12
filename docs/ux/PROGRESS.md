@@ -748,3 +748,10 @@ timestamp rounding, a 32-point coordinate difference, missing seam capture/focus
 and empty terminal/Notes selection. The new CI-only driver uses guarded native
 pointer input and exact target-window receipts; all behavior assertions remain.
 Its result is pending. App source and the preserved Mac evidence are unchanged.
+
+CI38207095514 completed the full Swift/XCTest run, then the four hosted cases
+failed before input because their visible windows were not key. The correction
+activates once before each complete gesture and requires the exact key window;
+there is no reactivation during dragging. The multi-point terminal path also
+fixes the source-confirmed missing selection-extension event. App behavior
+assertions and app source remain unchanged; the next exact-head run is pending.

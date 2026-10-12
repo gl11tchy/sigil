@@ -214,6 +214,7 @@ struct SidebarVersionNoticeTests {
         for offset in [-4.0, 0.0, 4.0] {
             let before = fixture.defaults.double(forKey: "window.sidebarWidth")
             let x = before + 0.5 + offset
+            var events: [NSEvent] = []
             for (type, delta) in [
                 (NSEvent.EventType.leftMouseDown, 0.0), (.leftMouseDragged, 20.0), (.leftMouseUp, 20.0),
             ] {
@@ -222,9 +223,9 @@ struct SidebarVersionNoticeTests {
                         with: type, location: NSPoint(x: x + delta, y: 250), modifierFlags: [],
                         timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
                         context: nil, eventNumber: Self.nextEventNumber(), clickCount: 1, pressure: 1))
-                try await dispatch(event)
-                try await Task.sleep(for: .milliseconds(20))
+                events.append(event)
             }
+            try await dispatch(events)
             #expect(fixture.defaults.double(forKey: "window.sidebarWidth") == before + 20)
         }
     }
@@ -250,15 +251,16 @@ struct SidebarVersionNoticeTests {
         window.makeKeyAndOrderFront(nil)
         try await Task.sleep(for: .milliseconds(100))
         host.layoutSubtreeIfNeeded()
+        var events: [NSEvent] = []
         for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
             let event = try #require(
                 NSEvent.mouseEvent(
                     with: type, location: NSPoint(x: 218.5, y: 250), modifierFlags: [],
                     timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
                     context: nil, eventNumber: Self.nextEventNumber(), clickCount: 1, pressure: 1))
-            try await dispatch(event)
-            try await Task.sleep(for: .milliseconds(20))
+            events.append(event)
         }
+        try await dispatch(events)
         #expect(fixture.defaults.double(forKey: "window.sidebarWidth") == 430)
         #expect(model.isSidebarDividerFocused)
     }
@@ -323,8 +325,13 @@ struct SidebarVersionNoticeTests {
 
     private func drag(in window: NSWindow, from start: NSPoint, to end: NSPoint) async throws {
         var events: [NSEvent] = []
+        // SwiftTerm anchors selection at the first drag event, then extends it
+        // on subsequent movement. Supply a real path instead of one end-point jump.
+        let middle = NSPoint(x: start.x + (end.x - start.x) / 2, y: start.y + (end.y - start.y) / 2)
+        let firstMovement = NSPoint(x: start.x + (end.x - start.x) / 4, y: start.y + (end.y - start.y) / 4)
         for (type, point) in [
-            (NSEvent.EventType.leftMouseDown, start), (.leftMouseDragged, end), (.leftMouseUp, end),
+            (NSEvent.EventType.leftMouseDown, start), (.leftMouseDragged, firstMovement),
+            (.leftMouseDragged, middle), (.leftMouseDragged, end), (.leftMouseUp, end),
         ] {
             let event = try #require(
                 NSEvent.mouseEvent(
@@ -380,22 +387,20 @@ struct SidebarVersionNoticeTests {
         let token: Int64
     }
 
-    private func dispatch(_ event: NSEvent) async throws {
-        try await dispatch([event])
-    }
-
     private func dispatch(_ events: [NSEvent]) async throws {
         try #require(NSApplication.shared.isRunning)
         let window = try #require(events.first?.window)
-        try #require(window.isVisible && window.isKeyWindow)
+        try #require(window.isVisible)
         try #require(NSScreen.screens.count == 1, "The CI pointer fixture requires one owned display")
         try #require(CGPreflightPostEventAccess(), "CI native input requires existing event-posting permission")
+        // Activate once before the complete gesture; never reactivate during a drag.
         NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
         let activationDeadline = ContinuousClock.now + .seconds(2)
-        while !NSApp.isActive, ContinuousClock.now < activationDeadline {
+        while !NSApp.isActive || !window.isKeyWindow, ContinuousClock.now < activationDeadline {
             try await Task.sleep(for: .milliseconds(10))
         }
-        try #require(NSApp.isActive && window.isKeyWindow)
+        try #require(NSApp.isActive && window.isKeyWindow && NSApp.keyWindow === window)
         let screenHeight = CGDisplayBounds(CGMainDisplayID()).height
         let pid = getpid()
         let windowID = CGWindowID(window.windowNumber)
