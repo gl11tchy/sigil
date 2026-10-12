@@ -77,59 +77,10 @@ struct DistributionSigningTests {
         let source = try String(
             contentsOf: Self.repo.appendingPathComponent("Sources/SigilApp/SigilApp.swift"), encoding: .utf8)
         #expect(source.contains("CommandGroup(replacing: .appInfo)"))
-        #expect(source.contains("Button(\"About Sigil\") { Self.showAboutPanel() }"))
+        #expect(source.contains("Button(\"About Sigil\") { AppWindowCommands.showAboutPanel() }"))
         #expect(source.contains("CommandGroup(after: .appInfo)"))
         #expect(source.contains("Button(\"Check for Updates…\")"))
-        #expect(source.contains("Button(\"Close Tab\") { launch.whenReady(Self.closeTabOrKeyWindow) }"))
+        #expect(source.contains("Button(\"Close Tab\") { launch.whenReady(AppWindowCommands.closeTabOrKeyWindow) }"))
     }
 
-    @MainActor
-    @Test func nativeAboutPanelShowsIdentityAndClosePreservesTabs() throws {
-        _ = NSApplication.shared
-        let fixture = try ModelFixture(script: "#!/bin/sh\nread line\n")
-        defer { fixture.cleanup() }
-        let model = fixture.model()
-        defer { model.closeAllTabsAndWait() }
-        let tab = try #require(model.newTab(in: try fixture.directory("project")))
-        let previous = Set(NSApp.windows.map(ObjectIdentifier.init))
-        GrokCommands.showAboutPanel(
-            identity: AppBuildIdentity(info: [
-                "CFBundleShortVersionString": "1.0.0", "CFBundleVersion": "548.1",
-                "SigilCommit": String(repeating: "a", count: 40),
-            ]))
-        let panel = try #require(NSApp.windows.first { !previous.contains(ObjectIdentifier($0)) && $0.isVisible })
-        defer { panel.orderOut(nil) }
-        func strings(_ view: NSView) -> [String] {
-            let own = (view as? NSTextField).map { [$0.stringValue] } ?? []
-            return own + view.subviews.flatMap(strings)
-        }
-        let text = strings(try #require(panel.contentView)).joined(separator: " ")
-        #expect(text.contains("1.0.0"))
-        #expect(text.contains("548.1"))
-        #expect(text.contains("aaaaaaa"))
-        // swift test is not an app-host event loop. Activate this CI-only
-        // process before testing the existing key-window Close route.
-        let previousPolicy = NSApp.activationPolicy()
-        try #require(NSApp.setActivationPolicy(.regular))
-        defer { NSApp.setActivationPolicy(previousPolicy) }
-        NSApp.finishLaunching()
-        NSApp.activate()
-        panel.makeKeyAndOrderFront(nil)
-        let deadline = Date().addingTimeInterval(2)
-        var dispatchedEvents = 0
-        while NSApp.keyWindow !== panel && Date() < deadline {
-            if let event = NSApp.nextEvent(
-                matching: .any, until: Date().addingTimeInterval(0.01), inMode: .default, dequeue: true)
-            {
-                NSApp.sendEvent(event)
-                dispatchedEvents += 1
-            }
-        }
-        try #require(
-            NSApp.keyWindow === panel,
-            "About focus: active=\(NSApp.isActive), canBecomeKey=\(panel.canBecomeKey), dispatched=\(dispatchedEvents)")
-        GrokCommands.closeTabOrKeyWindow(model)
-        #expect(!panel.isVisible)
-        #expect(model.tabs.map(\.id) == [tab.id])
-    }
 }

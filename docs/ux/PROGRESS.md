@@ -838,3 +838,11 @@ Head5e6105f still lacked a key window in the unhosted CLI test despite native
 activation; all 23 identity fixtures and displayed metadata passed. One further
 bounded correction dispatches AppKit events, with failure diagnostics, while
 keeping the key-window and Close assertions. Its exact-head result is pending.
+
+The ff79161 diagnostic showed dispatched11 events, canBecomeKey=true and
+active=false in the unbundled CLI. Native About verification moves to the
+existing CI-only SwiftUI app host, with every metadata/key-window/Close/tab
+assertion retained. Shared production window handlers keep the original Close
+body byte-identical. The original exact-six sidebar gate and skip rules remain;
+About receives a separate mandatory exact-one/no-skip gate. Host execution and
+compiled ZIP are pending; no local app build/test, new permission or input retry.

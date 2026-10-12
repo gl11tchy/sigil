@@ -66,6 +66,8 @@ npm --prefix "$ROOT/Sidereal" run test:browser || fail "Sidereal browser tests"
 echo "==> build/release identity fixtures"
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s "$SCRIPT_DIR/tests" -p 'test_build_identity.py' \
   || fail "build/release identity fixtures"
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s "$SCRIPT_DIR/tests" -p 'test_about_host_results.py' \
+  || fail "native About result gate"
 echo "==> swift test --no-parallel"
 # Several integration tests use blocking processes and sockets. Serial execution
 # avoids starving the older Swift concurrency runtime on GitHub's macOS runner.

@@ -162,7 +162,7 @@ struct GrokCommands: Commands {
         }
 
         CommandGroup(after: .newItem) {
-            Button("Close Tab") { launch.whenReady(Self.closeTabOrKeyWindow) }
+            Button("Close Tab") { launch.whenReady(AppWindowCommands.closeTabOrKeyWindow) }
                 .keyboardShortcut("w", modifiers: .command)
                 .disabled(model?.tabs.isEmpty ?? true)
             Divider()
@@ -284,7 +284,7 @@ struct GrokCommands: Commands {
         }
 
         CommandGroup(replacing: .appInfo) {
-            Button("About Sigil") { Self.showAboutPanel() }
+            Button("About Sigil") { AppWindowCommands.showAboutPanel() }
         }
 
         CommandGroup(after: .appInfo) {
@@ -306,55 +306,10 @@ struct GrokCommands: Commands {
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16), change)
     }
 
-    static func showAboutPanel(identity: AppBuildIdentity = .current) {
-        NSApp.orderFrontStandardAboutPanel(options: identity.aboutPanelOptions)
-    }
-
-    /// ⌘W belongs to the window in front. Settings and About get the system
-    /// Close action, a sheet blocks it, and only the tab window closes a tab.
-    static func closeTabOrKeyWindow(_ model: AppModel) {
-        guard let key = NSApp.keyWindow else { return }
-        if model.tabs.contains(where: { $0.controller.view.window === key }) {
-            model.closeSelectedTab()
-        } else if key.sheetParent == nil {
-            key.performClose(nil)
-        } else {
-            NSSound.beep()
-        }
-    }
-
     /// The field editor of a focused text field is an `NSTextView`. Forward to
     /// it so these shortcuts do not steal from search, sheets, or Settings.
     @discardableResult
     private static func performTextAction(_ selector: Selector) -> Bool {
         NSApp.sendAction(selector, to: nil, from: nil)
-    }
-}
-
-/// The installed bundle, rather than the current checkout, identifies this app.
-struct AppBuildIdentity {
-    static var current: Self { Self(info: Bundle.main.infoDictionary ?? [:]) }
-
-    let version: String
-    let build: String
-    let commit: String
-
-    init(info: [String: Any]) {
-        version = info["CFBundleShortVersionString"] as? String ?? "unknown"
-        build = info["CFBundleVersion"] as? String ?? "unknown"
-        commit = info["SigilCommit"] as? String ?? "unknown"
-    }
-
-    var shortCommit: String {
-        let dirty = commit.hasSuffix("-dirty")
-        let source = dirty ? String(commit.dropLast(6)) : commit
-        guard source.count == 40 || source.count == 64,
-            source.allSatisfy({ "0123456789abcdef".contains($0) })
-        else { return "unknown" }
-        return String(source.prefix(7)) + (dirty ? "-dirty" : "")
-    }
-
-    var aboutPanelOptions: [NSApplication.AboutPanelOptionKey: Any] {
-        [.applicationVersion: version, .version: "\(build), \(shortCommit)"]
     }
 }

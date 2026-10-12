@@ -48,6 +48,8 @@ The fixtures exercise clean/dirty/outside-Git/shallow/equal-count source state,
 final-ZIP metadata, idempotent reruns, source/artifact collisions, denied reads
 and unchanged pruning boundaries. They do not compile or launch an app, use
 credentials, publish releases or delete remote data. SigilAppTests run in CI
-only; DistributionSigningTests covers the menu/options and native About
-display/Close behavior. Release publication on main remains a post-review
+only; DistributionSigningTests covers the menu/options; AboutBuildIdentityHostTests
+covers native display/key-window/Close/tab behavior in the real SwiftUI app
+host. It is excluded from the unhosted CLI runner. The existing exact-six sidebar
+gate remains, and About has its own mandatory exact-one/no-skip result gate. Release publication on main remains a post-review
 validation step; the PR does not claim it has already run.
