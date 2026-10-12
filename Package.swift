@@ -10,7 +10,7 @@ let package = Package(
         .executable(name: "sigil-mcp", targets: ["SigilMCP"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.18.0"),
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.18.0")
     ],
     targets: [
         // Lock-free atomics for the crash reporter, which needs ordering a
@@ -36,7 +36,7 @@ let package = Package(
             name: "SigilAppTests",
             // Required CI coverage runs in the SwiftUI app host, not the SwiftPM command-line runner.
             dependencies: ["SigilApp", "SigilKit"],
-            exclude: ["SidebarVersionNoticeTests.swift"]
+            exclude: ["SidebarVersionNoticeTests.swift", "AboutBuildIdentityHostTests.swift"]
         ),
     ]
 )

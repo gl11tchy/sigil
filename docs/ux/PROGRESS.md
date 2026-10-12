@@ -808,3 +808,51 @@ identities and still requires both unrelated fixtures to pass; pointer failures,
 partial results and other skips fail. All other CI checks and the completion guard
 remain mandatory. Skipped pointer behavior and owner manual verification are not
 claimed as passed. No denied input retry, security change, merge or installation.
+
+## REA-1230: one build identity (2026-10-12)
+
+Starting main f0e319a; no open PRs, only this assigned ticket In Progress, and
+existing worktrees have no tracked changes. Reproduced the mismatch from the
+verified build-547.1 ZIP: bundle build301, no SigilCommit. Synthetic histories
+also reproduced equal counts with different source SHAs.
+
+The bundle now records full source identity/dirty/unknown, About uses installed
+metadata, and CI gives bundle and release the same numeric run.attempt identity.
+Final ZIP metadata/source and uploaded ZIP/tag verification gate publication;
+idempotent existing artifacts perform no edit, upload or prune. Collision and
+denied reads stop; the former prune limit/allowlist remain. Focused fixture
+checks, CI-only native About/Close checks and compiled ZIP validation are defined
+in [REA-1230 evidence](../qa/rea-1230.md). Exact-head CI is pending. No local app
+build, AppTests, process enumeration, daily-app action, remote publication,
+merge, installation or next ticket has been performed.
+
+Initial head22a5438 CI38317479789 failed only the added native About test's
+key-window/Close assertions; display assertions passed and the production Close
+body is unchanged. Corrected own-process activation/focus setup retains the
+assertions. Automatic review findings were independently confirmed: dirty
+dependency/ignored compiled inputs, edited provenance notes and unpublished
+draft collisions. All 23 corrected synthetic fixtures pass; corrected-head CI
+and compiled ZIP validation remain pending. Original evidence is preserved.
+
+Head5e6105f still lacked a key window in the unhosted CLI test despite native
+activation; all 23 identity fixtures and displayed metadata passed. One further
+bounded correction dispatches AppKit events, with failure diagnostics, while
+keeping the key-window and Close assertions. Its exact-head result is pending.
+
+The ff79161 diagnostic showed dispatched11 events, canBecomeKey=true and
+active=false in the unbundled CLI. Native About verification moves to the
+existing CI-only SwiftUI app host, with every metadata/key-window/Close/tab
+assertion retained. Shared production window handlers keep the original Close
+body byte-identical. The original exact-six sidebar gate and skip rules remain;
+About receives a separate mandatory exact-one/no-skip gate. Host execution and
+compiled ZIP are pending; no local app build/test, new permission or input retry.
+
+Head40fa55c CI38321649935 passed all1226 CLI Swift tests and the unchanged
+six-case sidebar gate (two mandatory passes, four authorized pointer skips).
+The real About host displayed identity but still had no keyWindow. Inspection
+of the existing interactive host driver found its explicit
+activate(ignoringOtherApps:true) call and active/isKeyWindow/exact-key guard.
+The About case now uses that same owned-app activation contract once before
+Close and strengthens its precondition to match. No new input permission,
+keystroke, skip or weakened behavior assertion; no production change.
+Current-head native Close, remaining full CI and compiled ZIP remain pending.

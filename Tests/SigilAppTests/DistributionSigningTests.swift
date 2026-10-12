@@ -1,5 +1,8 @@
+import AppKit
 import Foundation
 import Testing
+
+@testable import SigilApp
 
 struct DistributionSigningTests {
     private static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -34,4 +37,50 @@ struct DistributionSigningTests {
         let hardened = script.components(separatedBy: "--options runtime").dropFirst()
         #expect(hardened.filter { $0.hasPrefix(" --timestamp --entitlements \"$ENTITLEMENTS\"") }.count == 2)
     }
+
+    @Test func bundleBuildWritesTheFullSourceIdentity() throws {
+        let script = try String(
+            contentsOf: Self.repo.appendingPathComponent("Scripts/build-app.sh"), encoding: .utf8)
+        #expect(script.contains("build-identity.py\" source \"$ROOT\""))
+        #expect(script.contains("plutil -insert SigilCommit -string \"$commit\""))
+        let workflow = try String(
+            contentsOf: Self.repo.appendingPathComponent(".github/workflows/ci.yml"), encoding: .utf8)
+        #expect(workflow.contains("fetch-depth: 0"))
+        #expect(workflow.contains("SIGIL_BUILD: ${{ github.run_number }}.${{ github.run_attempt }}"))
+        #expect(workflow.contains("build-identity.py publish dist/Sigil.zip"))
+    }
+
+    @Test(arguments: [
+        (String(repeating: "a", count: 40), "aaaaaaa"),
+        (String(repeating: "b", count: 40) + "-dirty", "bbbbbbb-dirty"),
+        ("unknown", "unknown"),
+        ("not-a-commit", "unknown"),
+    ])
+    func aboutIdentityRetainsBuildAndSourceState(commit: String, short: String) {
+        let identity = AppBuildIdentity(info: [
+            "CFBundleShortVersionString": "1.0.0", "CFBundleVersion": "548.1", "SigilCommit": commit,
+        ])
+        #expect(identity.commit == commit)
+        #expect(identity.shortCommit == short)
+        #expect(identity.aboutPanelOptions[.applicationVersion] as? String == "1.0.0")
+        #expect(identity.aboutPanelOptions[.version] as? String == "548.1, \(short)")
+    }
+
+    @Test func missingBundleIdentityIsUnknown() {
+        let identity = AppBuildIdentity(info: [:])
+        #expect(identity.version == "unknown")
+        #expect(identity.build == "unknown")
+        #expect(identity.shortCommit == "unknown")
+    }
+
+    @Test func aboutMenuKeepsUpdatesAndCloseCommands() throws {
+        let source = try String(
+            contentsOf: Self.repo.appendingPathComponent("Sources/SigilApp/SigilApp.swift"), encoding: .utf8)
+        #expect(source.contains("CommandGroup(replacing: .appInfo)"))
+        #expect(source.contains("Button(\"About Sigil\") { AppWindowCommands.showAboutPanel() }"))
+        #expect(source.contains("CommandGroup(after: .appInfo)"))
+        #expect(source.contains("Button(\"Check for Updates…\")"))
+        #expect(source.contains("Button(\"Close Tab\") { launch.whenReady(AppWindowCommands.closeTabOrKeyWindow) }"))
+    }
+
 }

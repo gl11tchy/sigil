@@ -162,7 +162,7 @@ struct GrokCommands: Commands {
         }
 
         CommandGroup(after: .newItem) {
-            Button("Close Tab") { launch.whenReady(Self.closeTabOrKeyWindow) }
+            Button("Close Tab") { launch.whenReady(AppWindowCommands.closeTabOrKeyWindow) }
                 .keyboardShortcut("w", modifiers: .command)
                 .disabled(model?.tabs.isEmpty ?? true)
             Divider()
@@ -283,6 +283,10 @@ struct GrokCommands: Commands {
             }
         }
 
+        CommandGroup(replacing: .appInfo) {
+            Button("About Sigil") { AppWindowCommands.showAboutPanel() }
+        }
+
         CommandGroup(after: .appInfo) {
             Button("Check for Updates…") {
                 NSWorkspace.shared.open(
@@ -300,19 +304,6 @@ struct GrokCommands: Commands {
     private static func animateColumn(_ change: () -> Void) {
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16), change)
-    }
-
-    /// ⌘W belongs to the window in front. Settings and About get the system
-    /// Close action, a sheet blocks it, and only the tab window closes a tab.
-    private static func closeTabOrKeyWindow(_ model: AppModel) {
-        guard let key = NSApp.keyWindow else { return }
-        if model.tabs.contains(where: { $0.controller.view.window === key }) {
-            model.closeSelectedTab()
-        } else if key.sheetParent == nil {
-            key.performClose(nil)
-        } else {
-            NSSound.beep()
-        }
     }
 
     /// The field editor of a focused text field is an `NSTextView`. Forward to

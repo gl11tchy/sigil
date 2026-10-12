@@ -51,23 +51,8 @@ if [[ "$DISTRIBUTION" == "1" ]]; then
   fi
 fi
 
-version="${SIGIL_VERSION:-1.0.0}"
-if [[ -n "${SIGIL_BUILD:-}" ]]; then
-  build="$SIGIL_BUILD"
-elif git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  build="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 1)"
-else
-  build="1"
-fi
-
-if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "error: SIGIL_VERSION must contain three numbers, for example 1.0.0" >&2
-  exit 1
-fi
-if [[ ! "$build" =~ ^[1-9][0-9]*(\.[0-9]+){0,2}$ ]]; then
-  echo "error: SIGIL_BUILD must be a positive number with at most three parts" >&2
-  exit 1
-fi
+identity="$(python3 "$SCRIPT_DIR/build-identity.py" source "$ROOT")"
+read -r version build commit <<< "$identity"
 
 case "$ALLOW_THIN" in
   0 | 1) ;;
@@ -275,6 +260,7 @@ printf 'APPL????' >"$CONTENTS/PkgInfo"
 cp "$PLIST_TEMPLATE" "$CONTENTS/Info.plist"
 plutil -replace CFBundleShortVersionString -string "$version" "$CONTENTS/Info.plist"
 plutil -replace CFBundleVersion -string "$build" "$CONTENTS/Info.plist"
+plutil -insert SigilCommit -string "$commit" "$CONTENTS/Info.plist"
 plutil -lint "$CONTENTS/Info.plist" >/dev/null
 
 if grep -q '__VERSION__\|__BUILD__' "$CONTENTS/Info.plist"; then
