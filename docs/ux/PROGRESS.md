@@ -728,12 +728,16 @@ SwiftUI window gesture still intercepted terminal mouse-down after being narrowe
 and was replaced with the bounded native surfaces.
 
 The [QA record](../qa/rea-1350.md) identifies final source-matched evidence in
-`rea-1350-final-review-native/` and the initial CI failure investigation. Thirteen divider
-AppTests, including rendered Notes selection, remain CI only. The filesystem test
+`rea-1350-final-review-native/` and the initial CI failure investigation. Nine capture tests stay in serial Swift Testing; four rendered interaction
+cases, including Notes selection, now use the existing CI-only SwiftUI app host. The filesystem test
 now establishes bounded startup quiet before its unchanged assertions. App-only
 build, signature, formatting and diff checks passed. The populated native-history
 attempt remained AX-unresponsive and is an explicit Notes verification gap.
 
-Exact-head CI and parent personal diff/native review remain required before merge.
+CI38202086650 was false green: a recorded seam failure and incomplete Swift
+Testing output were hidden by a zero command status. The gate now requires a
+complete passing summary and rejects recorded failures; seven synthetic guard
+tests passed and the real false-green log is rejected. Exact-head CI and parent
+personal diff/native review remain required before merge.
 No personal histories, process enumeration, denied process reads, daily-app
 replacement, merge or next-ticket work occurred. REA-1351 stays separate.

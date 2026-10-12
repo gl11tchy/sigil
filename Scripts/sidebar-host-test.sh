@@ -51,12 +51,15 @@ with tempfile.TemporaryDirectory(prefix='sigil-sidebar-host-') as temporary:
         executable = home / 'bin' / provider
         executable.write_text(f'#!/bin/sh\nprintf "%s\\n" "{version}"\n')
         executable.chmod(0o700)
+    shell = home / 'bin' / 'sigil-fixture-shell'
+    shell.write_text('#!/bin/sh\nexit 0\n')
+    shell.chmod(0o700)
     isolated = {
         'HOME': str(home), 'CFFIXED_USER_HOME': str(home),
         'CODEX_HOME': str(home / '.codex'), 'CLAUDE_CONFIG_DIR': str(home / '.claude'),
         'GROK_HOME': str(home / '.grok'), 'TMPDIR': str(home / 'tmp') + '/',
         'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_CONFIG_HOME': str(home / 'config'),
-        'PATH': f'{home / "bin"}:/usr/bin:/bin:/usr/sbin:/sbin',
+        'PATH': f'{home / "bin"}:/usr/bin:/bin:/usr/sbin:/sbin', 'SHELL': str(shell),
     }
     environment = os.environ.copy()
     environment.update(isolated)
@@ -107,7 +110,7 @@ with tempfile.TemporaryDirectory(prefix='sigil-sidebar-host-') as temporary:
         summary = json.loads(subprocess.check_output([
             'xcrun', 'xcresulttool', 'get', 'test-results', 'summary', '--path', str(result)
         ], env=environment, timeout=30))
-        if summary.get('passedTests') != 2 or summary.get('failedTests') != 0 or summary.get('skippedTests') != 0:
-            raise SystemExit(f'Expected two passed fixtures with no failures or skips: {summary}')
-        print(f'Sidebar host: two fixtures passed, no retries or skips. Evidence: {result}')
+        if summary.get('passedTests') != 6 or summary.get('failedTests') != 0 or summary.get('skippedTests') != 0:
+            raise SystemExit(f'Expected six passed fixtures with no failures or skips: {summary}')
+        print(f'Sidebar host: six fixtures passed, no retries or skips. Evidence: {result}')
 PY

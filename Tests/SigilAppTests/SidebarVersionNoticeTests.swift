@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import SwiftTerm
 import SwiftUI
 import Testing
 
@@ -188,6 +189,220 @@ struct SidebarVersionNoticeTests {
             "Exported compatibility notice: \(tree). \(diagnostic)")
     }
 
+    @Test func theRenderedSeamReceivesRealMouseEventsAtBothEdges() async throws {
+        try #require(NSApplication.shared.isRunning, "Rendered input requires the SwiftUI app-host loop")
+        let fixture = try SidebarFixture()
+        defer { fixture.cleanup() }
+        fixture.defaults.set(272.0, forKey: "window.sidebarWidth")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let window = NSWindow(
+            contentRect: NSRect(x: 100, y: 100, width: 900, height: 500),
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let host = NSHostingView(
+            rootView: WindowContent(model: model)
+                .frame(width: 900, height: 500)
+                .defaultAppStorage(fixture.defaults))
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        try await Task.sleep(for: .milliseconds(100))
+        host.layoutSubtreeIfNeeded()
+        for offset in [-4.0, 0.0, 4.0] {
+            let before = fixture.defaults.double(forKey: "window.sidebarWidth")
+            let x = before + 0.5 + offset
+            for (type, delta) in [
+                (NSEvent.EventType.leftMouseDown, 0.0), (.leftMouseDragged, 20.0), (.leftMouseUp, 20.0),
+            ] {
+                let event = try #require(
+                    NSEvent.mouseEvent(
+                        with: type, location: NSPoint(x: x + delta, y: 250), modifierFlags: [],
+                        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                        context: nil, eventNumber: Self.nextEventNumber(), clickCount: 1, pressure: 1))
+                try await dispatch(event)
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            #expect(fixture.defaults.double(forKey: "window.sidebarWidth") == before + 20)
+        }
+    }
+
+    @Test func clickingACappedRenderedSeamPreservesThePreferenceAndFocusesIt() async throws {
+        let fixture = try SidebarFixture()
+        defer { fixture.cleanup() }
+        fixture.defaults.set(430.0, forKey: "window.sidebarWidth")
+        let model = fixture.model()
+        model.panel.isVisible = true
+        defer { model.closeAllTabsAndWait() }
+        let window = NSWindow(
+            contentRect: NSRect(x: 100, y: 100, width: 900, height: 500),
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let host = NSHostingView(
+            rootView: WindowContent(model: model)
+                .frame(width: 900, height: 500)
+                .defaultAppStorage(fixture.defaults))
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        try await Task.sleep(for: .milliseconds(100))
+        host.layoutSubtreeIfNeeded()
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            let event = try #require(
+                NSEvent.mouseEvent(
+                    with: type, location: NSPoint(x: 218.5, y: 250), modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: Self.nextEventNumber(), clickCount: 1, pressure: 1))
+            try await dispatch(event)
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(fixture.defaults.double(forKey: "window.sidebarWidth") == 430)
+        #expect(model.isSidebarDividerFocused)
+    }
+
+    @Test func terminalSelectionKeepsTheWindowStationary() async throws {
+        let fixture = try SidebarFixture()
+        defer { fixture.cleanup() }
+        let folder = try fixture.directory("terminal-drag")
+        try fixture.writeListedSession(id: "terminal-drag", cwd: folder.path)
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        model.open(try #require(fixture.store.sessions.first))
+        let hosted = HostedWindow(model: model, defaults: fixture.defaults)
+        defer { hosted.window.close() }
+        try await Task.sleep(for: .milliseconds(100))
+        hosted.host.layoutSubtreeIfNeeded()
+        let tab = try #require(model.selectedTab)
+        let terminal = try #require(tab.controller.view as? LocalProcessTerminalView)
+        try #require(terminal.window === hosted.window)
+        try #require(terminal.bounds.width > 200 && terminal.bounds.height > 40)
+        terminal.feed(text: "\u{1b}[2J\u{1b}[HGenerated terminal selection sentinel\r\n")
+        let origin = hosted.window.frame.origin
+        let start = terminal.convert(NSPoint(x: 8, y: terminal.bounds.height - 10), to: nil)
+        let end = terminal.convert(NSPoint(x: 160, y: terminal.bounds.height - 10), to: nil)
+        try await drag(in: hosted.window, from: start, to: end)
+        let selected = terminal.selection.getSelectedText()
+        #expect(!selected.isEmpty)
+        #expect("Generated terminal selection sentinel".contains(selected))
+        #expect(hosted.window.frame.origin == origin)
+    }
+
+    @Test func notesEditorSelectionKeepsTheWindowStationary() async throws {
+        let fixture = try SidebarFixture()
+        defer { fixture.cleanup() }
+        let folder = try fixture.directory("editor-drag")
+        try fixture.writeListedSession(id: "editor-drag", cwd: folder.path)
+        await fixture.store.reload()
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let session = try #require(fixture.store.sessions.first)
+        model.open(session)
+        let text = "Generated editor selection sentinel ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        model.panel.setNotes(text, forSessionID: session.id, cwd: session.cwd)
+        model.showPanel(.notes)
+        let hosted = HostedWindow(model: model, defaults: fixture.defaults)
+        defer { hosted.window.close() }
+        try await Task.sleep(for: .milliseconds(100))
+        hosted.host.layoutSubtreeIfNeeded()
+        let editor = try #require(textEditor(in: hosted.host, containing: text))
+        let first = editor.firstRect(forCharacterRange: NSRange(location: 4, length: 1), actualRange: nil)
+        let last = editor.firstRect(forCharacterRange: NSRange(location: 20, length: 1), actualRange: nil)
+        try #require(!first.isEmpty && !last.isEmpty)
+        let origin = hosted.window.frame.origin
+        try await drag(
+            in: hosted.window,
+            from: hosted.window.convertPoint(fromScreen: NSPoint(x: first.midX, y: first.midY)),
+            to: hosted.window.convertPoint(fromScreen: NSPoint(x: last.midX, y: last.midY)))
+        #expect(editor.selectedRange().length > 0)
+        #expect(hosted.window.frame.origin == origin)
+    }
+
+    private func drag(in window: NSWindow, from start: NSPoint, to end: NSPoint) async throws {
+        var events: [NSEvent] = []
+        for (type, point) in [
+            (NSEvent.EventType.leftMouseDown, start), (.leftMouseDragged, end), (.leftMouseUp, end),
+        ] {
+            let event = try #require(
+                NSEvent.mouseEvent(
+                    with: type, location: point, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: Self.nextEventNumber(), clickCount: 1, pressure: 1))
+            events.append(event)
+        }
+        // NSTextView may enter a nested tracking loop on mouse-down. Queue the
+        // complete gesture first so it can receive mouse-up without waiting on this task.
+        try await dispatch(events)
+    }
+
+    private func textEditor(in view: NSView, containing text: String) -> NSTextView? {
+        if let editor = view as? NSTextView, editor.string == text { return editor }
+        for child in view.subviews {
+            if let editor = textEditor(in: child, containing: text) { return editor }
+        }
+        return nil
+    }
+
+    @MainActor
+    private struct HostedWindow {
+        let window: NSWindow
+        let host: NSHostingView<AnyView>
+        init(model: AppModel, defaults: UserDefaults) {
+            window = NSWindow(
+                contentRect: NSRect(x: 100, y: 100, width: 1200, height: 600),
+                styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            host = NSHostingView(rootView: AnyView(WindowContent(model: model).defaultAppStorage(defaults)))
+            window.contentView = host
+            window.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    private static var eventNumber = 10_000
+    private static func nextEventNumber() -> Int {
+        eventNumber += 1
+        return eventNumber
+    }
+
+    @MainActor
+    private final class InputReceipt {
+        var events: [Int: NSEvent] = [:]
+    }
+
+    private func dispatch(_ event: NSEvent) async throws {
+        try await dispatch([event])
+    }
+
+    private func dispatch(_ events: [NSEvent]) async throws {
+        try #require(NSApplication.shared.isRunning)
+        let inputs = Dictionary(uniqueKeysWithValues: events.map { ($0.eventNumber, $0) })
+        let mask = events.reduce(NSEvent.EventTypeMask()) { mask, event in
+            mask.union(NSEvent.EventTypeMask(rawValue: 1 << event.type.rawValue))
+        }
+        let receipt = InputReceipt()
+        let monitor = try #require(
+            NSEvent.addLocalMonitorForEvents(matching: mask) { observed in
+                MainActor.assumeIsolated {
+                    if let input = inputs[observed.eventNumber], observed.windowNumber == input.windowNumber {
+                        receipt.events[observed.eventNumber] = observed
+                    }
+                }
+                return observed
+            })
+        defer { NSEvent.removeMonitor(monitor) }
+        for event in events { NSApp.postEvent(event, atStart: false) }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while receipt.events.count != events.count, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        for event in events {
+            let observed = try #require(
+                receipt.events[event.eventNumber], "The app-host loop must deliver every exact input")
+            try #require(observed === event)
+            #expect(observed.locationInWindow == event.locationInWindow)
+        }
+    }
+
     private func host(_ model: AppModel) -> (window: NSWindow, view: NSView) {
         host(
             NSHostingView(
@@ -322,6 +537,19 @@ private final class SidebarFixture {
         ]
         try JSONSerialization.data(withJSONObject: summary).write(
             to: directory.appendingPathComponent("summary.json"), options: .atomic)
+    }
+
+    func model() -> AppModel {
+        settings.isTabMessagingEnabled = false
+        settings.defaultDirectory = root.path
+        return AppModel(
+            settings: settings, store: store,
+            trashConversation: { _ in }, presentError: { _ in },
+            panel: RightPanel(defaults: defaults, notesStore: ConversationNotesStore(root: notesRoot)),
+            pairingStore: InMemoryRemotePairingStore(),
+            providerInstallations: [
+                .grokBuild: ProviderInstallation(executable: executable, version: nil, problem: nil)
+            ])
     }
 
     func cleanup() {

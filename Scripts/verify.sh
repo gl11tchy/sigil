@@ -66,7 +66,9 @@ npm --prefix "$ROOT/Sidereal" run test:browser || fail "Sidereal browser tests"
 echo "==> swift test --no-parallel"
 # Several integration tests use blocking processes and sockets. Serial execution
 # avoids starving the older Swift concurrency runtime on GitHub's macOS runner.
-swift test --no-parallel || fail "swift test"
+SWIFT_TEST_LOG="$(mktemp "${TMPDIR:-/tmp}/sigil-swift-test.XXXXXX")"
+swift test --no-parallel 2>&1 | tee "$SWIFT_TEST_LOG" || fail "swift test"
+python3 "$SCRIPT_DIR/check-swift-test-log.py" "$SWIFT_TEST_LOG" || fail "swift test completion"
 
 echo "==> CI-only SwiftUI app-hosted sidebar fixture"
 "$SCRIPT_DIR/sidebar-host-test.sh" || fail "sidebar app-hosted test"
