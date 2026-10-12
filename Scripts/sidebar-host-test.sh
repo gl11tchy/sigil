@@ -26,6 +26,8 @@ import time
 
 root = Path(sys.argv[1])
 build_only = sys.argv[2] == '--build-only'
+sys.path.insert(0, str(root / 'Scripts'))
+from sidebar_host_results import validate
 
 def run(command, environment, timeout, require_success=True):
     process = subprocess.Popen(command, env=environment, start_new_session=True)
@@ -112,7 +114,12 @@ with tempfile.TemporaryDirectory(prefix='sigil-sidebar-host-') as temporary:
             'xcrun', 'xcresulttool', 'get', 'test-results', 'summary', '--path', str(result)
         ], env=environment, timeout=30))
         print(json.dumps(summary, indent=2))
-        if test_status != 0 or summary.get('passedTests') != 6 or summary.get('failedTests') != 0 or summary.get('skippedTests') != 0:
-            raise SystemExit(f'Expected six passed fixtures with no failures or skips: {summary}')
-        print(f'Sidebar host: six fixtures passed, no retries or skips. Evidence: {result}')
+        tree = json.loads(subprocess.check_output([
+            'xcrun', 'xcresulttool', 'get', 'test-results', 'tests', '--path', str(result)
+        ], env=environment, timeout=30))
+        try:
+            outcome = validate(summary, tree, test_status)
+        except ValueError as error:
+            raise SystemExit(f'{error}: {summary}')
+        print(f'Sidebar host: {outcome}. Evidence: {result}')
 PY

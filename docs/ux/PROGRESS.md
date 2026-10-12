@@ -755,3 +755,12 @@ activates once before each complete gesture and requires the exact key window;
 there is no reactivation during dragging. The multi-point terminal path also
 fixes the source-confirmed missing selection-extension event. App behavior
 assertions and app source remain unchanged; the next exact-head run is pending.
+
+On 2026-10-12 at 14:22 UTC the owner explicitly chose manual sidebar verification
+and requested unblocking. Only the four named REA-1350 pointer tests now skip with
+an explicit reason when event-posting permission is unavailable. Their bodies,
+assertions and permission/ownership guards remain. The hosted gate verifies exact
+identities and still requires both unrelated fixtures to pass; pointer failures,
+partial results and other skips fail. All other CI checks and the completion guard
+remain mandatory. Skipped pointer behavior and owner manual verification are not
+claimed as passed. No denied input retry, security change, merge or installation.

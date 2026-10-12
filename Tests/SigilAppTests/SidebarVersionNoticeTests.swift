@@ -190,7 +190,12 @@ struct SidebarVersionNoticeTests {
             "Exported compatibility notice: \(tree). \(diagnostic)")
     }
 
-    @Test func theRenderedSeamReceivesRealMouseEventsAtBothEdges() async throws {
+    @Test(
+        .enabled(
+            if: CGPreflightPostEventAccess(),
+            "REA-1350 owner manual verification: native pointer input skipped because event-posting permission is unavailable"
+        ))
+    func theRenderedSeamReceivesRealMouseEventsAtBothEdges() async throws {
         try #require(NSApplication.shared.isRunning, "Rendered input requires the SwiftUI app-host loop")
         let fixture = try SidebarFixture()
         defer { fixture.cleanup() }
@@ -230,7 +235,12 @@ struct SidebarVersionNoticeTests {
         }
     }
 
-    @Test func clickingACappedRenderedSeamPreservesThePreferenceAndFocusesIt() async throws {
+    @Test(
+        .enabled(
+            if: CGPreflightPostEventAccess(),
+            "REA-1350 owner manual verification: native pointer input skipped because event-posting permission is unavailable"
+        ))
+    func clickingACappedRenderedSeamPreservesThePreferenceAndFocusesIt() async throws {
         let fixture = try SidebarFixture()
         defer { fixture.cleanup() }
         fixture.defaults.set(430.0, forKey: "window.sidebarWidth")
@@ -265,7 +275,12 @@ struct SidebarVersionNoticeTests {
         #expect(model.isSidebarDividerFocused)
     }
 
-    @Test func terminalSelectionKeepsTheWindowStationary() async throws {
+    @Test(
+        .enabled(
+            if: CGPreflightPostEventAccess(),
+            "REA-1350 owner manual verification: native pointer input skipped because event-posting permission is unavailable"
+        ))
+    func terminalSelectionKeepsTheWindowStationary() async throws {
         let fixture = try SidebarFixture()
         defer { fixture.cleanup() }
         let folder = try fixture.directory("terminal-drag")
@@ -293,7 +308,12 @@ struct SidebarVersionNoticeTests {
         #expect(hosted.window.frame.origin == origin)
     }
 
-    @Test func notesEditorSelectionKeepsTheWindowStationary() async throws {
+    @Test(
+        .enabled(
+            if: CGPreflightPostEventAccess(),
+            "REA-1350 owner manual verification: native pointer input skipped because event-posting permission is unavailable"
+        ))
+    func notesEditorSelectionKeepsTheWindowStationary() async throws {
         let fixture = try SidebarFixture()
         defer { fixture.cleanup() }
         let folder = try fixture.directory("editor-drag")
