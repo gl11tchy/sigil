@@ -42,7 +42,7 @@
       "after272": 139
     },
     "hover": "actual HID mouse moves with existing permission, callback-owned active window and WindowServer ownership checked before every event; title frame identical on entry/exit",
-    "pinnedWorkingMinimumHover": "54/55.5pt title widths; exact idle/hover/exit rectangles",
+    "pinnedWorkingMinimumHover": "Pinned: exact idle/hover/exit w54. Working corrected capture: full sidebar label + 200x32 frame, unique match, actual mouse100/438, visible actions, exact idle/hover w55.5. Working exit not verified.",
     "rename": "supported Name:Rename AX action; native AXTextField full draft and224pt width; no typed input; exported Cancel pressed before cleanup",
     "searchSingleProject": "representative full AX labels/roles/positions/sizes identical to baseline",
     "Archive": "supported pinned Archive action and six width/theme captures; Unarchive action returned0 but subsequent navigation miss caused observer exit16, not claimed complete",
@@ -54,7 +54,8 @@
     "native menu traversal missed Rename; supported named Rename used instead; owned menu canceled",
     "Home with inline rename re-presented native Rename sheet; behind-sheet cleanup not claimed; supported Cancel then normal cleanup verified",
     "reused final bundle produced no visible-window match; guard stopped input; normally terminated; fresh renamed identity used",
-    "Archive post-Unarchive navigation miss; captures preserved and normal owned cleanup required"
+    "Archive post-Unarchive navigation miss; captures preserved and normal owned cleanup required",
+    "Parent independently verified working hover selected top tab at311/112, not sidebar row80/422/200x32; invalid working-hover assertion retracted."
   ],
   "limits": [
     "No spoken VoiceOver validation",
@@ -72,12 +73,13 @@
     "pinned-hover.json": "219788f88dee620bc63605a578d7bc94da01edd3187db47fb033e0ae2bc217ba",
     "before-200-light.png": "9bf16232fc907bdb003e65dae5b0af835e672e1d5365548c5ace425f1e2847e9",
     "archived-pinned-430-light.png": "5b262f7558ebf913b16332125d50fb449ea93506e27a05d26941a76eaa3edd83",
-    "working-hover-200-light.png": "16bf803220c3cefe47145558ea36f23a0517a38a362d8005a7948848cdba2598",
+    "working-hover-200-light.png": "d61c9aa486e1e5331ee9a60b05b7cfee97128701e3d997183595ae572ba2005e",
     "hover-exited-272-light.png": "12c729a34ee1d1e4bad6e7960ba1baa3ce8339fb02598d0a13d1acccbe9fc7ea",
     "archive.jsonl": "522272976ddddf0f3e6d1b27706ed577ff5f452af71400a45b6b0efaa3abd99d",
     "before-recents-272-dark.json": "4207bafeeeed61ca638f2bb3c98ec2551c37cd77b3f87a23a248e4fab950c38d",
     "recents-272-dark.json": "b0846186720fa6286557c1c344f4a8c0be38253e98bd6b9d4e436583aeb3f8e0",
     "after.jsonl": "514a7589ea801b644008fb62369dd5efc675067febc4c782e858b3f48cedaa05",
+    "working-sidebar.jsonl": "88bde48a0c812786edbdbf02f3b176418b2358c585924d9cab5152ff959cbd5b",
     "recents-430-light.json": "2cbd8d04275f04bbcf9ab94dbad56db9ac9fb15cc65ac505b393079f5238b547",
     "before-430-dark.png": "2535818df6889d6e37787a52a2e547c039cf2a4b301de9655c0d3e6c2023c085",
     "before-recents-272-light.json": "4207bafeeeed61ca638f2bb3c98ec2551c37cd77b3f87a23a248e4fab950c38d",
@@ -96,6 +98,7 @@
     "before-recents-430-light.json": "0b6d333d4440a5d4e0d43d0b9f5786d16c385ed8f35af5e8002b148d33e83b51",
     "search-272-light.png": "e8313b00d1f7580f3b81869bb2bbf8c95fe79f6a8f7787cdf4c0c1d6614d37ff",
     "pinned-hover-200-light.png": "9603aee241e06d754564a4eacd1bbd05dd22a421b3eabd0333791f403db532ed",
+    "working-sidebar-idle.json": "874e2076748e19e2af15c09ae9dd0c9757e483514f8e7822cdc160f1799b9f29",
     "before-272-dark.png": "db1917e692b0689a3a8730427d077a659ff5bc469fe6f7e73f40edd4d388349c",
     "before.jsonl": "059edd1d2807db86b4ec0bec2e74f2f0f65fa72a87533c40d3ca760b221ddb23",
     "recents-272-light.json": "b0846186720fa6286557c1c344f4a8c0be38253e98bd6b9d4e436583aeb3f8e0",
@@ -106,9 +109,12 @@
     "rename.json": "429e979ce23c6ec3b88593676c313935f7d524b9c6a4880e3aac86b0485ff7c9",
     "before-recents-200-dark.json": "ce8eff5c5860a45b4a8737c0b755300eb29bc0abf8e5d2f9ac1ed795073a82dd",
     "recents-200-dark.json": "219788f88dee620bc63605a578d7bc94da01edd3187db47fb033e0ae2bc217ba",
+    "working-sidebar-hover.json": "874e2076748e19e2af15c09ae9dd0c9757e483514f8e7822cdc160f1799b9f29",
     "after-430-light.png": "aa5ca97a2b883f481adddbb348b5c6068df63519cff3ed76d667887a281bafbc",
     "before-recents-200-light.json": "ce8eff5c5860a45b4a8737c0b755300eb29bc0abf8e5d2f9ac1ed795073a82dd",
+    "working-sidebar-idle-200-light.png": "157067d22240d8d1d95463fdb7adeced0c7073dbe0c5347af33215e86296529a",
     "before-272-light.png": "be36dc6d93d20d812a5bd193de8b2961a306fe245dc1a89bac8f95d43ea826e2",
+    "working-tab-hover-invalid-200-light.png": "16bf803220c3cefe47145558ea36f23a0517a38a362d8005a7948848cdba2598",
     "working-hover.json": "219788f88dee620bc63605a578d7bc94da01edd3187db47fb033e0ae2bc217ba",
     "hover-entered.json": "b0846186720fa6286557c1c344f4a8c0be38253e98bd6b9d4e436583aeb3f8e0"
   },
@@ -117,10 +123,56 @@
     "Final37821": "native Rename Cancel then generated-tab cleanup; isTerminated true",
     "PriorAfter35531": "native Rename Cancel then generated-tab cleanup; isTerminated true",
     "Windowless41496": "guard prevented input; normal termination confirmed",
-    "Archive45913": "post-navigation-miss normal generated-tab cleanup; isTerminated true"
+    "Archive45913": "post-navigation-miss normal generated-tab cleanup; isTerminated true",
+    "WorkingReview59366": "normal generated-tab cleanup and termination confirmed after corrected idle/hover capture; exit snapshot not claimed"
   },
   "nativeOS": {
     "version": "26.5.1",
     "build": "25F80"
+  },
+  "workingHoverCorrection": {
+    "parentFinding": "prior selector matched the working tab; prior idle/hover/exit claim retracted",
+    "invalidImage": "working-tab-hover-invalid-200-light.png",
+    "ownedPID": 59366,
+    "bundleID": "com.gl11tchy.sigil.rea1247.working",
+    "windowID": 3965,
+    "target": {
+      "targetLabel": "修复并发请求导致的重复通知与页面状态错误, payments-infrastructure-frontend, 4 hours ago",
+      "targetValue": "Selected, working",
+      "targetFrame": [
+        80,
+        422,
+        200,
+        32
+      ],
+      "targetRole": "AXButton",
+      "targetWindowID": 3965
+    },
+    "mousePoint": [
+      100,
+      438
+    ],
+    "idleTitleFrame": {
+      "height": 17,
+      "width": 55.5,
+      "x": 16,
+      "y": 349.5
+    },
+    "hoverTitleFrame": {
+      "height": 17,
+      "width": 55.5,
+      "x": 16,
+      "y": 349.5
+    },
+    "hoverActions": "visually confirmed Archive/Pin/Delete in actual sidebar row",
+    "exit": "observer exited12 after mouse exit before final snapshot; no exit geometry pass claimed",
+    "productionChanged": false,
+    "sourceSHA256": {
+      "Sources/SigilApp/Views/SidebarView.swift": "326e264e1c11cf704389118c44a5ddbed33eb56cb00803e103b8342408097092",
+      "Sources/SigilApp/Workbench/SidebarTitleFixture.swift": "7d3f0e8bcbe1d5fa171621cfc3fe5a6bff2548b0576ab50f5fbba6890469b66a",
+      "Sources/SigilApp/SigilApp.swift": "6e53308763d7ce1a76994f2ec60d00588347594aba8537ef953fcd77f67bdbdd",
+      "Sources/SigilApp/Views/RootView.swift": "ffa21e35b821f62b3c5d3f3faa5e8ad1c556b9f9bab98270f9c70f6cb4b52efc"
+    },
+    "executableSHA256": "ea2e831cd513738524d636f2e18ebad29ac4640a21b431206847a9a94e5f340d"
   }
 }

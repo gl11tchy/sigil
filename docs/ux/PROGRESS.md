@@ -7,7 +7,8 @@ full-width rename field retain their existing paths. Generated native captures
 at 200/272/430pt in both themes reproduce the baseline and demonstrate the
 change, including wide/non-Latin titles, pinned/working marks and Archived.
 The representative 272pt title grows from 94 to 154pt. Actual guarded pointer
-hover and supported Rename/Archive AX actions were exercised without keystrokes.
+hover (including a corrected full-label/frame working-row capture after parent
+found the prior selector picked its tab) and supported Rename/Archive AX actions were exercised without keystrokes.
 All 57 existing search-highlight tests, app-only builds, signatures and strict
 lint/diff checks passed; AppTests run only in normal PR CI. [Evidence and
 limits](../qa/rea-1247.md) preserve driver misses and incomplete Unarchive

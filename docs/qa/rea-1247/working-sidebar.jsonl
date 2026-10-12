@@ -1,0 +1,116 @@
+{"executable":"\/Users\/exec\/Documents\/Codex\/2026-10-09\/task\/rea-1247-native-working\/SigilR1247Working.app\/Contents\/MacOS\/SigilR1247Working","bundleID":"com.gl11tchy.sigil.rea1247.working","ownedPID":59366}
+{"AXWindowRead":0}
+{"press":"Pin Wide (fixture)","result":0}
+{"press":"Working (fixture)","result":0}
+{"press":"Light (fixture)","result":0}
+{"press":"200pt (fixture)","result":0}
+{"workingSidebarMatches":1}
+{"targetLabel":"修复并发请求导致的重复通知与页面状态错误, payments-infrastructure-frontend, 4 hours ago","targetValue":"Selected, working","targetFrame":[80,422,200,32],"targetRole":"AXButton","targetWindowID":3965}
+{"press":"Record frames (fixture)","result":0}
+{"snapshot":"working-sidebar-idle-200-light.png","disclosure":0}
+{"x":80,"height":720,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1247Working","value":""}
+{"x":80,"height":720,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":246,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":289,"height":54,"id":"","role":"AXScrollArea","y":80,"width":583.5,"label":"","value":""}
+{"x":291,"height":28,"id":"","role":"AXButton","y":98,"width":176,"label":"修复并发请求导致的重复通知与页面状态错误","value":"selected, working"}
+{"x":467,"height":24,"id":"xmark","role":"AXButton","y":100,"width":20,"label":"Close 修复并发请求导致的重复通知与页面状态错误","value":""}
+{"x":495,"height":24,"id":"plus","role":"AXButton","y":100,"width":24,"label":"New Session","value":""}
+{"x":882.5,"height":15,"id":"","role":"AXUnknown","y":104.5,"width":85.5,"label":"Working","value":""}
+{"x":988,"height":15,"id":"","role":"AXStaticText","y":104.5,"width":214,"label":"","value":"Folder projects\/payments-infrastructure-frontend"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"ellipsis","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":106,"label":"Search conversations","value":""}
+{"x":233,"height":18,"id":"","role":"AXStaticText","y":131,"width":29,"label":"","value":"⌘⇧F"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":200,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":200,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":200,"label":"Recents","value":"8 chats"}
+{"x":80,"height":536,"id":"","role":"AXScrollArea","y":264,"width":200,"label":"","value":""}
+{"x":80,"height":380,"id":"","role":"AXOpaqueProviderGroup","y":272,"width":200,"label":"","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":291,"width":200,"label":"WWWW MMMM distinguish wide glyphs, ui, 4 hours ago, pinned","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":358,"width":200,"label":"Fix flaky test retries in concurrent requests, acme-api, 4 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":390,"width":200,"label":"Fix flaky authentication handshakes, acme-api, 4 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":422,"width":200,"label":"修复并发请求导致的重复通知与页面状态错误, payments-infrastructure-frontend, 4 hours ago","value":"Selected, working"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":454,"width":200,"label":"Add rate limiting to payment requests, payments-infrastructure-frontend, 4 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":521,"width":200,"label":"👩🏽‍💻 Review café navigation and keyboard focus, ui, 2 days ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":553,"width":200,"label":"Dark mode title contrast improvements, ui, 2 days ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":620,"width":200,"label":"إصلاح تكرار الإشعارات في واجهة المستخدم, research-platform, 3 weeks ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":272,"width":41.5,"label":"Pinned, 1","value":""}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":339,"width":37,"label":"Today, 4","value":""}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":502,"width":94.5,"label":"Previous 7 days, 2","value":""}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":601,"width":103,"label":"Previous 30 days, 1","value":""}
+{"x":276,"height":720,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":582,"width":147,"label":"","value":"Generated REA-1247 fixture"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":602,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":602,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":628,"width":88,"label":"200pt (fixture)","value":""}
+{"x":1074,"height":20,"id":"","role":"AXButton","y":628,"width":88,"label":"272pt (fixture)","value":""}
+{"x":1170,"height":20,"id":"","role":"AXButton","y":628,"width":88,"label":"430pt (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":654,"width":111.5,"label":"Pin Wide (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":680,"width":132,"label":"Search Wide (fixture)","value":""}
+{"x":1118,"height":20,"id":"","role":"AXButton","y":680,"width":132.5,"label":"Clear Search (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":706,"width":108.5,"label":"Working (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":732,"width":139.5,"label":"Clear Working (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":758,"width":142,"label":"Record frames (fixture)","value":""}
+{"x":292,"height":634,"id":"","role":"AXTextArea","y":145,"width":967,"label":"Grok Build terminal","value":"Generated fixture CLI only"}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"working-sidebar-idle-200-light.png","windowID":3965,"exit":0}
+{"ownedMouseMove":[100,438],"windowID":3965}
+{"press":"Record frames (fixture)","result":0}
+{"snapshot":"working-sidebar-hover-200-light.png","disclosure":0}
+{"x":80,"height":720,"id":"SwiftUI.ModifiedContent<SwiftUI.ModifiedContent<SigilApp.RootView, SwiftUI._FlexFrameLayout>, SwiftUI._AppearanceActionModifier>-1-AppWindow-1","role":"AXWindow","y":80,"width":1200,"label":"SigilR1247Working","value":""}
+{"x":80,"height":720,"id":"","role":"AXGroup","y":80,"width":1200,"label":"","value":""}
+{"x":246,"height":24,"id":"sidebar.leading","role":"AXButton","y":90,"width":24,"label":"Hide Sidebar","value":""}
+{"x":289,"height":54,"id":"","role":"AXScrollArea","y":80,"width":583.5,"label":"","value":""}
+{"x":291,"height":28,"id":"","role":"AXButton","y":98,"width":176,"label":"修复并发请求导致的重复通知与页面状态错误","value":"selected, working"}
+{"x":467,"height":24,"id":"xmark","role":"AXButton","y":100,"width":20,"label":"Close 修复并发请求导致的重复通知与页面状态错误","value":""}
+{"x":495,"height":24,"id":"plus","role":"AXButton","y":100,"width":24,"label":"New Session","value":""}
+{"x":882.5,"height":15,"id":"","role":"AXUnknown","y":104.5,"width":85.5,"label":"Working","value":""}
+{"x":988,"height":15,"id":"","role":"AXStaticText","y":104.5,"width":214,"label":"","value":"Folder projects\/payments-infrastructure-frontend"}
+{"x":1210,"height":24,"id":"sidebar.trailing","role":"AXButton","y":100,"width":24,"label":"Show Panel","value":""}
+{"x":1240,"height":14,"id":"ellipsis","role":"AXMenuButton","y":105,"width":20,"label":"Session actions","value":""}
+{"x":99.5,"height":12,"id":"magnifyingglass","role":"AXImage","y":134,"width":12,"label":"Search","value":""}
+{"x":120,"height":16,"id":"","role":"AXTextField","y":132,"width":106,"label":"Search conversations","value":""}
+{"x":233,"height":18,"id":"","role":"AXStaticText","y":131,"width":29,"label":"","value":"⌘⇧F"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":164,"width":200,"label":"New session","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":196,"width":200,"label":"Home","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":228,"width":200,"label":"Recents","value":"8 chats"}
+{"x":80,"height":536,"id":"","role":"AXScrollArea","y":264,"width":200,"label":"","value":""}
+{"x":80,"height":380,"id":"","role":"AXOpaqueProviderGroup","y":272,"width":200,"label":"","value":""}
+{"x":80,"height":32,"id":"","role":"AXButton","y":291,"width":200,"label":"WWWW MMMM distinguish wide glyphs, ui, 4 hours ago, pinned","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":358,"width":200,"label":"Fix flaky test retries in concurrent requests, acme-api, 4 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":390,"width":200,"label":"Fix flaky authentication handshakes, acme-api, 4 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":422,"width":200,"label":"修复并发请求导致的重复通知与页面状态错误, payments-infrastructure-frontend, 4 hours ago","value":"Selected, working"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":454,"width":200,"label":"Add rate limiting to payment requests, payments-infrastructure-frontend, 4 hours ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":521,"width":200,"label":"👩🏽‍💻 Review café navigation and keyboard focus, ui, 2 days ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":553,"width":200,"label":"Dark mode title contrast improvements, ui, 2 days ago","value":"Closed"}
+{"x":80,"height":32,"id":"","role":"AXButton","y":620,"width":200,"label":"إصلاح تكرار الإشعارات في واجهة المستخدم, research-platform, 3 weeks ago","value":"Closed"}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":272,"width":41.5,"label":"Pinned, 1","value":""}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":339,"width":37,"label":"Today, 4","value":""}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":502,"width":94.5,"label":"Previous 7 days, 2","value":""}
+{"x":96,"height":15,"id":"","role":"AXHeading","y":601,"width":103,"label":"Previous 30 days, 1","value":""}
+{"x":276,"height":720,"id":"","role":"AXUnknown","y":80,"width":9,"label":"Sidebar width","value":""}
+{"x":978,"height":14,"id":"","role":"AXStaticText","y":582,"width":147,"label":"","value":"Generated REA-1247 fixture"}
+{"x":978,"height":20,"id":"","role":"AXButton","y":602,"width":92,"label":"Light (fixture)","value":""}
+{"x":1078,"height":20,"id":"","role":"AXButton","y":602,"width":90,"label":"Dark (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":628,"width":88,"label":"200pt (fixture)","value":""}
+{"x":1074,"height":20,"id":"","role":"AXButton","y":628,"width":88,"label":"272pt (fixture)","value":""}
+{"x":1170,"height":20,"id":"","role":"AXButton","y":628,"width":88,"label":"430pt (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":654,"width":111.5,"label":"Pin Wide (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":680,"width":132,"label":"Search Wide (fixture)","value":""}
+{"x":1118,"height":20,"id":"","role":"AXButton","y":680,"width":132.5,"label":"Clear Search (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":706,"width":108.5,"label":"Working (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":732,"width":139.5,"label":"Clear Working (fixture)","value":""}
+{"x":978,"height":20,"id":"","role":"AXButton","y":758,"width":142,"label":"Record frames (fixture)","value":""}
+{"x":292,"height":634,"id":"","role":"AXTextArea","y":145,"width":967,"label":"Grok Build terminal","value":"Generated fixture CLI only"}
+{"x":88,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":134,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":135,"height":14,"id":"","role":"AXGroup","y":89,"width":14,"label":"","value":""}
+{"x":111,"height":16,"id":"","role":"AXButton","y":88,"width":16,"label":"","value":""}
+{"capture":"working-sidebar-hover-200-light.png","windowID":3965,"exit":0}
+{"ownedMouseMove":[880,280],"windowID":3965}
