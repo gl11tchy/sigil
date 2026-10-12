@@ -721,7 +721,8 @@ The final candidate passed 66 drag samples, target edges, bounds, utility panel,
 900/760 widths, hide/show, keyboard/AX adjustment and fresh-process persistence.
 Saved 430 rendered 218 survived a stationary click and restored 430 after widening.
 Generated terminal selection kept the window stationary. Read-only folder labels
-retain dragging with the sidebar hidden. Small native header drag
+retain dragging with the sidebar hidden; the observed 20-point movement for a
+30-point path remains a review limitation. Small native header drag
 surfaces moved the window 30 points, including the first drag while inactive. A
 SwiftUI window gesture still intercepted terminal mouse-down after being narrowed
 and was replaced with the bounded native surfaces.
