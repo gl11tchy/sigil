@@ -26,6 +26,7 @@ struct RootView: View {
                     .background(FirstKeyView())
                     .overlay(alignment: .bottomTrailing) {
                         if SidebarNoticeFixture.requested { SidebarNoticeFixtureControls(model: model) }
+                        if SidebarTitleFixture.requested { SidebarTitleFixtureControls(model: model) }
                     }
 
             #else

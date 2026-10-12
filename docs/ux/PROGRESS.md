@@ -1,3 +1,19 @@
+## REA-1247: preserve distinguishing Recents titles
+
+Multi-project rows now prioritize the title over a bounded project name and a
+separate fixed-width relative time. Hover actions reuse the resting accessory
+allocation, so title geometry stays stable; search, single-project rows and the
+full-width rename field retain their existing paths. Generated native captures
+at 200/272/430pt in both themes reproduce the baseline and demonstrate the
+change, including wide/non-Latin titles, pinned/working marks and Archived.
+The representative 272pt title grows from 94 to 154pt. Actual guarded pointer
+hover and supported Rename/Archive AX actions were exercised without keystrokes.
+All 57 existing search-highlight tests, app-only builds, signatures and strict
+lint/diff checks passed; AppTests run only in normal PR CI. [Evidence and
+limits](../qa/rea-1247.md) preserve driver misses and incomplete Unarchive
+navigation, with normal owned-fixture cleanup. Exact-head CI and parent personal
+review remain required. No merge, daily-app action or next ticket.
+
 # Workbench progress ledger
 
 The resumable record for the [experience contract](EXPERIENCE.md). Each entry

@@ -163,9 +163,11 @@ Inter, 8pt side padding, and the `control` radius, as measured in the harness.
 - **Sections**: a sentence-case label in 12.5pt `ink2` with a trailing mono
   count — "Open 3", "Projects 12", "Pinned 2", "Today 4".
 - **Rows**: one line, title in `ink`, trailing metadata in mono `ink2` — the
-  compact time, or `project · time` in lists that span projects. A search
-  result adds the matched context as a second mono line. Hover shows the
-  row's actions (archive, pin, close) in place of the metadata. Pinned rows
+  compact time, or `project · time` in lists that span projects. In those
+  one-line lists the title takes priority over the project label, which truncates
+  first; the time keeps its full width. A search result adds the matched context as a second mono line. Hover shows the
+  row's actions (archive, pin, close) in place of the metadata; multi-project
+  rows keep that allocation so the title does not shift on hover. Pinned rows
   keep a small pin mark in `ink3`.
 - **Selected**: the open conversation is `hover2` in dark mode; in light mode
   it lifts to `surface` with the `button` ring, because a grey fill vanishes
