@@ -198,10 +198,11 @@ struct SidebarVersionNoticeTests {
         trace("collapsed checks complete; opening compatibility details")
         let offsetBeforeDetails = noticeScroll.contentView.bounds.origin
         let destinationsBeforeDetails = newer.sidebarSnapshot().destinations
-        try #require(await pressOwnedAccessibility("sidebar-compatibility-disclosure") == AXError.success.rawValue)
+        try #require(
+            pressOwnedAccessibility("sidebar-compatibility-disclosure", in: notices.window) == AXError.success.rawValue)
         try await Task.sleep(for: .milliseconds(100))
         trace("compatibility AX press complete; reading details")
-        let details = await ownedAccessibilityValues()
+        let details = ownedAccessibilityValues()
         for provider in providers {
             let expected = try #require(provider.versionNotice(for: newer.providerInstallations[provider]))
             #expect(
@@ -212,10 +213,11 @@ struct SidebarVersionNoticeTests {
         #expect(newer.sidebarSnapshot().destinations == destinationsBeforeDetails)
         #expect(noticeScroll.contentView.bounds.height == noticeViewport.height)
         trace("version/scroll checks complete; closing details")
-        try #require(await pressOwnedAccessibility("sidebar-compatibility-close") == AXError.success.rawValue)
+        try #require(
+            pressOwnedAccessibility("sidebar-compatibility-close", in: notices.window) == AXError.success.rawValue)
         try await Task.sleep(for: .milliseconds(100))
         trace("close AX press complete; reading closed state")
-        let closedDetails = await ownedAccessibilityValues()
+        let closedDetails = ownedAccessibilityValues()
         #expect(!closedDetails.keys.contains("sidebar-compatibility-close"))
         #expect(closedDetails["sidebar-compatibility-disclosure"]?.contains("Details hidden.") == true)
         #expect(noticeScroll.contentView.bounds.origin == offsetBeforeDetails)
@@ -239,19 +241,19 @@ struct SidebarVersionNoticeTests {
         defer { preferences.window.close() }
         try await Task.sleep(for: .milliseconds(50))
         trace("Appearance settings hosted; reading initial pane")
-        #expect(!(await ownedAccessibilityValues()).keys.contains("settings-general"))
+        #expect(!(ownedAccessibilityValues()).keys.contains("settings-general"))
         trace("requesting General on existing Settings window")
         newer.requestGeneralSettings()
         try await Task.sleep(for: .milliseconds(100))
         trace("reading routed General pane")
-        #expect((await ownedAccessibilityValues()).keys.contains("settings-general"))
+        #expect((ownedAccessibilityValues()).keys.contains("settings-general"))
         #expect(newer.generalSettingsRequest == nil, "A targeted route is consumed, not replayed on ordinary opens")
         trace("requesting General on existing Settings window")
         newer.requestGeneralSettings()
         try await Task.sleep(for: .milliseconds(50))
         #expect(newer.generalSettingsRequest == nil)
         trace("reading routed General pane")
-        #expect((await ownedAccessibilityValues()).keys.contains("settings-general"))
+        #expect((ownedAccessibilityValues()).keys.contains("settings-general"))
         trace("existing/repeated route checks complete; hosting first-open request")
         let firstOpen = model(versions: [:])
         firstOpen.requestGeneralSettings()
@@ -596,87 +598,68 @@ struct SidebarVersionNoticeTests {
         FileHandle.standardError.write(Data("REA-1351 hosted stage: \(stage)\n".utf8))
     }
 
-    /// Public AX actions scoped to this CI app host, off its main event loop.
-    /// No posted input, permission-dependent skip or global trust override.
-    private func pressOwnedAccessibility(_ identifier: String) async -> Int32 {
-        await Task.detached {
-            func stage(_ value: String) {
-                FileHandle.standardError.write(Data("REA-1351 AX stage: \(identifier): \(value)\n".utf8))
+    /// In-process accessibility uses AppKit's main-actor getters and press method.
+    /// Self-AXUIElement tree lookup trapped in CI before reaching the actual action.
+    /// The root is the owned fixture window; no posted input or permission override.
+    private func pressOwnedAccessibility(_ identifier: String, in window: NSWindow) -> Int32 {
+        var visited: Set<ObjectIdentifier> = []
+        var matches: [NSObject] = []
+        visitAccessibility(window, visited: &visited) { element in
+            if accessibilityValue(in: element, selector: #selector(NSAccessibilityProtocol.accessibilityIdentifier))
+                as? String
+                == identifier, let object = element as? NSObject
+            {
+                matches.append(object)
             }
-            stage("querying own windows")
-            let pid = ProcessInfo.processInfo.processIdentifier
-            let app = AXUIElementCreateApplication(pid)
-            let timeout = AXUIElementSetMessagingTimeout(app, 2)
-            guard timeout == .success else { return timeout.rawValue }
-            var windows: CFTypeRef?
-            let read = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &windows)
-            guard read == .success else { return read.rawValue }
-            guard let windows = windows as? [AXUIElement] else { return AXError.noValue.rawValue }
-            var count = 0
-            var matches: [AXUIElement] = []
-            func visit(_ element: AXUIElement, depth: Int) {
-                guard depth < 32, count < 1_024 else { return }
-                count += 1
-                var owner: pid_t = 0
-                guard AXUIElementGetPid(element, &owner) == .success, owner == pid else { return }
-                var value: CFTypeRef?
-                if AXUIElementCopyAttributeValue(element, kAXIdentifierAttribute as CFString, &value) == .success,
-                    value as? String == identifier
-                {
-                    matches.append(element)
-                }
-                var children: CFTypeRef?
-                if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children) == .success,
-                    let children = children as? [AXUIElement]
-                {
-                    for child in children { visit(child, depth: depth + 1) }
-                }
-            }
-            stage("walking own hierarchy")
-            for window in windows { visit(window, depth: 0) }
-            stage("hierarchy complete; matches=\(matches.count), elements=\(count)")
-            guard matches.count == 1 else { return AXError.noValue.rawValue }
-            stage("performing press")
-            let result = AXUIElementPerformAction(matches[0], kAXPressAction as CFString).rawValue
-            stage("press returned \(result)")
-            return result
-        }.value
+        }
+        trace("AppKit accessibility matches for \(identifier): \(matches.count)")
+        guard matches.count == 1 else { return AXError.noValue.rawValue }
+        let object = matches[0]
+        let action = #selector(NSAccessibilityProtocol.accessibilityPerformPress)
+        guard object.responds(to: action), let implementation = object.method(for: action) else {
+            return AXError.actionUnsupported.rawValue
+        }
+        // SwiftUI's exported nodes support the public Objective-C method without
+        // necessarily declaring the full NSAccessibilityProtocol. Preserve its BOOL
+        // result with the declared C ABI rather than treating it as an object return.
+        typealias Press = @convention(c) (AnyObject, Selector) -> Bool
+        let press = unsafeBitCast(implementation, to: Press.self)
+        let accepted = press(object, action)
+        trace("AppKit accessibility press returned \(accepted)")
+        return accepted ? AXError.success.rawValue : AXError.failure.rawValue
     }
 
-    private func ownedAccessibilityValues() async -> [String: String] {
-        await Task.detached {
-            let pid = ProcessInfo.processInfo.processIdentifier
-            let app = AXUIElementCreateApplication(pid)
-            guard AXUIElementSetMessagingTimeout(app, 2) == .success else { return [:] }
-            var windows: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &windows) == .success,
-                let windows = windows as? [AXUIElement]
-            else { return [:] }
-            var count = 0
-            var values: [String: String] = [:]
-            func visit(_ element: AXUIElement, depth: Int) {
-                guard depth < 32, count < 1_024 else { return }
-                count += 1
-                var owner: pid_t = 0
-                guard AXUIElementGetPid(element, &owner) == .success, owner == pid else { return }
-                var identifier: CFTypeRef?
-                var value: CFTypeRef?
-                if AXUIElementCopyAttributeValue(element, kAXIdentifierAttribute as CFString, &identifier) == .success,
-                    let identifier = identifier as? String
-                {
-                    _ = AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value)
-                    values[identifier] = value as? String ?? ""
-                }
-                var children: CFTypeRef?
-                if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &children) == .success,
-                    let children = children as? [AXUIElement]
-                {
-                    for child in children { visit(child, depth: depth + 1) }
-                }
+    private func ownedAccessibilityValues() -> [String: String] {
+        var values: [String: String] = [:]
+        var visited: Set<ObjectIdentifier> = []
+        for window in NSApp.windows where window.isVisible {
+            visitAccessibility(window, visited: &visited) { element in
+                guard
+                    let identifier = accessibilityValue(
+                        in: element, selector: #selector(NSAccessibilityProtocol.accessibilityIdentifier)) as? String
+                else { return }
+                values[identifier] =
+                    accessibilityValue(
+                        in: element, selector: #selector(NSAccessibilityProtocol.accessibilityValue)) as? String ?? ""
             }
-            for window in windows { visit(window, depth: 0) }
-            return values
-        }.value
+        }
+        return values
+    }
+
+    private func visitAccessibility(
+        _ element: any NSObjectProtocol, visited: inout Set<ObjectIdentifier>,
+        inspect: (any NSObjectProtocol) -> Void
+    ) {
+        guard visited.count < 1_024, visited.insert(ObjectIdentifier(element)).inserted else { return }
+        inspect(element)
+        let children =
+            accessibilityValue(
+                in: element, selector: #selector(NSAccessibilityProtocol.accessibilityChildren)) as? [Any] ?? []
+        for child in NSAccessibility.unignoredChildren(from: children) {
+            if let child = child as? any NSObjectProtocol {
+                visitAccessibility(child, visited: &visited, inspect: inspect)
+            }
+        }
     }
 
     private func host(_ model: AppModel, interactive: Bool = false) -> (window: NSWindow, view: NSView) {
