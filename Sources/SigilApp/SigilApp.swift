@@ -14,7 +14,9 @@ struct SigilApp: App {
         // A launch without GROK_HOME reads it from the login shell while the
         // window shows. The model is built once it is adopted.
         #if DEBUG
-            if SidebarNoticeFixture.requested {
+            if SidebarTitleFixture.requested {
+                _launch = State(initialValue: AppLaunch(makeModel: SidebarTitleFixture.makeModel))
+            } else if SidebarNoticeFixture.requested {
                 _launch = State(initialValue: AppLaunch(makeModel: SidebarNoticeFixture.makeModel))
             } else {
                 _launch = State(initialValue: AppLaunch())

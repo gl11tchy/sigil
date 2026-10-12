@@ -72,11 +72,18 @@ struct SidebarView: View {
     @State private var selectionAnchor: String?
     @State private var pendingBulkDelete: [GrokSession]?
     /// Minute tick for relative times and Today/Yesterday buckets.
-    @State private var now = Date()
+    @State private var now = Self.clockTime
     /// The row under the pointer. The one `hover` fill glides to it.
     @State private var hoveredRowID: String?
     @Namespace private var glideSpace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private static var clockTime: Date {
+        #if DEBUG
+            if SidebarTitleFixture.requested { return SidebarTitleFixture.now }
+        #endif
+        return Date()
+    }
 
     /// F2. Unicode private-use scalar for `NSF2FunctionKey`.
     private static let f2 = KeyEquivalent(Character("\u{F705}"))
@@ -181,7 +188,7 @@ struct SidebarView: View {
         .task {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(60))
-                now = Date()
+                now = Self.clockTime
             }
         }
     }
@@ -2053,23 +2060,37 @@ private struct SessionRow: View {
                 }
             } else {
                 titleLine(runs: paint.titleRuns, truncation: paint.titleTruncation)
-                    .layoutPriority(0)
+                    .background {
+                        #if DEBUG
+                            if SidebarTitleFixture.requested {
+                                SidebarTitleFixtureMeasure(key: rowID + "/title")
+                            }
+                        #endif
+                    }
+                    .layoutPriority(showsProject ? 1 : 0)
                 Spacer(minLength: 8)
                 if isRenaming {
                     EmptyView()
+                } else if showsProject {
+                    // Keep the resting allocation while actions replace the metadata.
+                    // Pin/working marks reserve their space even while hover hides them.
+                    stateMarks.opacity(showsControls ? 0 : 1)
+                    measuredBrowsingMetadata(paint)
+                        .opacity(showsControls ? 0 : 1)
+                        .accessibilityHidden(showsControls)
+                        .overlay(alignment: .trailing) {
+                            if showsControls { actions }
+                        }
                 } else if showsControls {
                     actions
                 } else {
                     stateMarks
-                    metadata(paint)
-                        .frame(maxWidth: 120, alignment: .trailing)
-                        .fixedSize(horizontal: paint.subtitle.count <= 4, vertical: false)
-                        .layoutPriority(1)
+                    measuredBrowsingMetadata(paint)
                 }
             }
         }
         .padding(.leading, 8)
-        .padding(.trailing, showsControls && !isRenaming ? 5 : 8)
+        .padding(.trailing, showsControls && !isRenaming && (isSearchResult || !showsProject) ? 5 : 8)
         .padding(.vertical, isSearchResult ? 6 : 0)
         .frame(minHeight: 32)
         .background(
@@ -2102,6 +2123,41 @@ private struct SessionRow: View {
         .mono(11.5)
         .lineLimit(1)
         .truncationMode(textTruncationMode(paint.subtitleTruncation))
+    }
+
+    private func measuredBrowsingMetadata(_ paint: SearchMatchHighlight.RowPaint) -> some View {
+        browsingMetadata(paint)
+            .background {
+                #if DEBUG
+                    if SidebarTitleFixture.requested {
+                        SidebarTitleFixtureMeasure(key: rowID + "/metadata")
+                    }
+                #endif
+            }
+    }
+
+    @ViewBuilder
+    private func browsingMetadata(_ paint: SearchMatchHighlight.RowPaint) -> some View {
+        if showsProject {
+            HStack(spacing: 0) {
+                Text(session.projectName)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(minWidth: 24, maxWidth: 72, alignment: .trailing)
+                    .layoutPriority(0)
+                Text(" · ").fixedSize()
+                Text(session.updatedAt.shortRelative(to: now))
+                    .fixedSize()
+                    .layoutPriority(2)
+            }
+            .mono(11.5)
+            .foregroundStyle(palette.ink2)
+        } else {
+            metadata(paint)
+                .frame(maxWidth: 120, alignment: .trailing)
+                .fixedSize(horizontal: paint.subtitle.count <= 4, vertical: false)
+                .layoutPriority(1)
+        }
     }
 
     /// Working light and pin, at rest.
