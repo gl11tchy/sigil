@@ -383,6 +383,7 @@ private struct TopBar: View {
                     .lineLimit(1)
                     .truncationMode(.head)
                     .padding(.horizontal, 6)
+                    .modifier(WindowBackgroundDrag())
             } else if let tab = model.selectedTab {
                 if tab.activity == .working {
                     WorkingLabel(since: tab.workingSince)
@@ -461,6 +462,7 @@ private struct TopBar: View {
                 .padding(.horizontal, 4)
                 .help(tab.workingDirectory.abbreviatedPath)
                 .accessibilityLabel("Folder \(folder)")
+                .modifier(WindowBackgroundDrag())
         }
     }
 }

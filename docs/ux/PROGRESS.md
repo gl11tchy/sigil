@@ -720,13 +720,14 @@ cap. The geometry solver, persisted preference and keyboard/AX steps remain.
 The final candidate passed 66 drag samples, target edges, bounds, utility panel,
 900/760 widths, hide/show, keyboard/AX adjustment and fresh-process persistence.
 Saved 430 rendered 218 survived a stationary click and restored 430 after widening.
-Generated terminal selection kept the window stationary. Small native header drag
+Generated terminal selection kept the window stationary. Read-only folder labels
+retain dragging with the sidebar hidden. Small native header drag
 surfaces moved the window 30 points, including the first drag while inactive. A
 SwiftUI window gesture still intercepted terminal mouse-down after being narrowed
 and was replaced with the bounded native surfaces.
 
 The [QA record](../qa/rea-1350.md) identifies final source-matched evidence in
-`rea-1350-ready-native/` and the initial CI failure investigation. Thirteen divider
+`rea-1350-final-review-native/` and the initial CI failure investigation. Thirteen divider
 AppTests, including rendered Notes selection, remain CI only. The filesystem test
 now establishes bounded startup quiet before its unchanged assertions. App-only
 build, signature, formatting and diff checks passed. The populated native-history

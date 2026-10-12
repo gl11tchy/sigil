@@ -1,4 +1,5 @@
 import AppKit
+import SwiftTerm
 import SwiftUI
 import Testing
 
@@ -65,7 +66,7 @@ struct DividerDragHandleTests {
         window.makeKeyAndOrderFront(nil)
         try await Task.sleep(for: .milliseconds(100))
         host.layoutSubtreeIfNeeded()
-        for type in [NSEvent.EventType.leftMouseDown, .leftMouseDragged, .leftMouseUp] {
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
             let event = try #require(
                 NSEvent.mouseEvent(
                     with: type, location: NSPoint(x: 218.5, y: 250), modifierFlags: [],
@@ -91,7 +92,7 @@ struct DividerDragHandleTests {
         defer { hosted.window.close() }
         try await Task.sleep(for: .milliseconds(100))
         hosted.host.layoutSubtreeIfNeeded()
-        let terminal = try #require(model.selectedTab).controller.view
+        let terminal = try #require(try #require(model.selectedTab).controller.view as? LocalProcessTerminalView)
         try #require(terminal.window === hosted.window)
         try #require(terminal.bounds.width > 200 && terminal.bounds.height > 40)
         terminal.feed(text: "\u{1b}[2J\u{1b}[HGenerated terminal selection sentinel\r\n")
