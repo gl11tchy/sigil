@@ -188,6 +188,8 @@ struct SidebarView: View {
     private var header: some View {
         HStack {
             Spacer()
+                .contentShape(Rectangle())
+                .modifier(WindowBackgroundDrag())
             IconButton(systemImage: "sidebar.leading", help: "Hide Sidebar (⌘B)", label: "Hide Sidebar") {
                 withAnimation(reduceMotion ? nil : Motion.slide) {
                     model.isSidebarVisible.toggle()

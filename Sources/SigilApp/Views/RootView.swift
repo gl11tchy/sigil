@@ -89,6 +89,7 @@ private struct LaunchCanvas: View {
                     .accessibilityLabel("Starting Sigil")
             }
         }
+        .modifier(WindowBackgroundDrag())
         .background(WindowChrome(background: palette.canvasNSColor))
         .ignoresSafeArea(.container, edges: .top)
     }
@@ -120,8 +121,13 @@ struct WindowContent: View {
                             get: { columns.sidebar },
                             set: { sidebarWidth = $0 }
                         ),
+                        maximumWidth: WindowColumns(
+                            width: geometry.size.width, sidebarWidth: 430,
+                            panelWidth: model.panel.isVisible ? model.panel.width : nil
+                        ).sidebar,
                         onFocusChange: { model.isSidebarDividerFocused = $0 }
                     )
+                    .zIndex(1)
                 }
                 detail
                     .padding(.leading, model.isSidebarVisible ? 0 : Self.inset)
@@ -132,8 +138,14 @@ struct WindowContent: View {
                         width: Binding(
                             get: { columns.panel },
                             set: { model.panel.width = $0 }
-                        )
+                        ),
+                        maximumWidth: WindowColumns(
+                            width: geometry.size.width,
+                            sidebarWidth: model.isSidebarVisible ? columns.sidebar : nil,
+                            panelWidth: RightPanel.maxWidth
+                        ).panel
                     )
+                    .zIndex(1)
                     RightPanelView(model: model, availableWidth: columns.panel)
                         .padding(.leading, Self.inset / 2)
                         .padding(.trailing, Self.inset)
@@ -358,6 +370,8 @@ private struct TopBar: View {
 
             if model.tabs.isEmpty {
                 Spacer(minLength: 8)
+                    .contentShape(Rectangle())
+                    .modifier(WindowBackgroundDrag())
             } else {
                 TabStripView(model: model)
             }
@@ -369,6 +383,7 @@ private struct TopBar: View {
                     .lineLimit(1)
                     .truncationMode(.head)
                     .padding(.horizontal, 6)
+                    .modifier(WindowBackgroundDrag())
             } else if let tab = model.selectedTab {
                 if tab.activity == .working {
                     WorkingLabel(since: tab.workingSince)
@@ -447,6 +462,7 @@ private struct TopBar: View {
                 .padding(.horizontal, 4)
                 .help(tab.workingDirectory.abbreviatedPath)
                 .accessibilityLabel("Folder \(folder)")
+                .modifier(WindowBackgroundDrag())
         }
     }
 }
@@ -489,10 +505,16 @@ struct WorkingLabel: View {
 /// the screen's own border is the edge. Focus shows an accent bar.
 private struct SplitDivider: View {
     @Binding var width: Double
+    let maximumWidth: Double
     let onFocusChange: (Bool) -> Void
     @Environment(\.palette) private var palette
-    @State private var widthAtDragStart: Double?
     @FocusState private var isFocused: Bool
+
+    private var limits: ClosedRange<Double> { min(200, maximumWidth)...maximumWidth }
+
+    private func clamp(_ value: Double) -> Double {
+        min(limits.upperBound, max(limits.lowerBound, value))
+    }
 
     var body: some View {
         Color.clear
@@ -507,32 +529,20 @@ private struct SplitDivider: View {
                 }
             }
             .overlay {
-                Color.clear
+                DividerDragHandle(width: $width, limits: limits, direction: .right) { isFocused = true }
                     .frame(width: 9)
-                    .contentShape(Rectangle())
-                    .onHover { inside in
-                        if inside { NSCursor.resizeLeftRight.set() } else { NSCursor.arrow.set() }
-                    }
-                    .gesture(
-                        DragGesture(minimumDistance: 1)
-                            .onChanged { value in
-                                let base = widthAtDragStart ?? width
-                                widthAtDragStart = base
-                                width = min(430, max(200, base + value.translation.width))
-                            }
-                            .onEnded { _ in widthAtDragStart = nil }
-                    )
+                    .accessibilityHidden(true)
             }
-            .focusable(interactions: .activate)
+            .focusable(interactions: .edit)
             .focused($isFocused)
             .onChange(of: isFocused) { _, focused in onFocusChange(focused) }
             .onDisappear { onFocusChange(false) }
             .onKeyPress(.leftArrow) {
-                width = max(200, width - 20)
+                width = clamp(width - 20)
                 return .handled
             }
             .onKeyPress(.rightArrow) {
-                width = min(430, width + 20)
+                width = clamp(width + 20)
                 return .handled
             }
             .accessibilityElement()
@@ -540,8 +550,8 @@ private struct SplitDivider: View {
             .accessibilityValue("\(Int(width)) points")
             .accessibilityAdjustableAction { direction in
                 switch direction {
-                case .increment: width = min(430, width + 20)
-                case .decrement: width = max(200, width - 20)
+                case .increment: width = clamp(width + 20)
+                case .decrement: width = clamp(width - 20)
                 @unknown default: break
                 }
             }
@@ -649,9 +659,32 @@ struct WindowChrome: NSViewRepresentable {
             guard let window = nsView.window else { return }
             window.titlebarAppearsTransparent = true
             window.titleVisibility = .hidden
-            window.isMovableByWindowBackground = true
+            window.isMovableByWindowBackground = false
             window.backgroundColor = color
             window.styleMask.insert(.fullSizeContentView)
+        }
+    }
+}
+
+/// Apply only to non-interactive chrome. A bounded native view keeps window
+/// dragging out of the terminal and editor's event handling.
+struct WindowBackgroundDrag: ViewModifier {
+    func body(content: Content) -> some View {
+        content.background(WindowDragRegion())
+    }
+}
+
+private struct WindowDragRegion: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { Surface() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    final class Surface: NSView {
+        // Deliver the initial click even while this window is inactive.
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        override func mouseDown(with event: NSEvent) {
+            window?.performDrag(with: event)
         }
     }
 }

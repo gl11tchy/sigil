@@ -26,8 +26,10 @@ import time
 
 root = Path(sys.argv[1])
 build_only = sys.argv[2] == '--build-only'
+sys.path.insert(0, str(root / 'Scripts'))
+from sidebar_host_results import validate
 
-def run(command, environment, timeout):
+def run(command, environment, timeout, require_success=True):
     process = subprocess.Popen(command, env=environment, start_new_session=True)
     try:
         status = process.wait(timeout=timeout)
@@ -39,8 +41,9 @@ def run(command, environment, timeout):
             os.killpg(process.pid, signal.SIGKILL)
             process.wait()
         raise SystemExit(f'Sidebar host command exceeded its {timeout}s bound.')
-    if status:
+    if status and require_success:
         raise SystemExit(status)
+    return status
 
 with tempfile.TemporaryDirectory(prefix='sigil-sidebar-host-') as temporary:
     work = Path(temporary)
@@ -51,12 +54,15 @@ with tempfile.TemporaryDirectory(prefix='sigil-sidebar-host-') as temporary:
         executable = home / 'bin' / provider
         executable.write_text(f'#!/bin/sh\nprintf "%s\\n" "{version}"\n')
         executable.chmod(0o700)
+    shell = home / 'bin' / 'sigil-fixture-shell'
+    shell.write_text('#!/bin/sh\nexit 0\n')
+    shell.chmod(0o700)
     isolated = {
         'HOME': str(home), 'CFFIXED_USER_HOME': str(home),
         'CODEX_HOME': str(home / '.codex'), 'CLAUDE_CONFIG_DIR': str(home / '.claude'),
         'GROK_HOME': str(home / '.grok'), 'TMPDIR': str(home / 'tmp') + '/',
         'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_CONFIG_HOME': str(home / 'config'),
-        'PATH': f'{home / "bin"}:/usr/bin:/bin:/usr/sbin:/sbin',
+        'PATH': f'{home / "bin"}:/usr/bin:/bin:/usr/sbin:/sbin', 'SHELL': str(shell),
     }
     environment = os.environ.copy()
     environment.update(isolated)
@@ -98,16 +104,22 @@ with tempfile.TemporaryDirectory(prefix='sigil-sidebar-host-') as temporary:
         artifacts.mkdir(parents=True, exist_ok=True)
         result = artifacts / f'sidebar-host-{time.time_ns()}.xcresult'
         # Omit repetition and retry options for the normal single execution.
-        run([
+        test_status = run([
             'xcodebuild', '-xctestrun', str(test_run), '-destination', f'platform=macOS,arch={platform.machine()}',
             '-parallel-testing-enabled', 'NO',
             '-test-timeouts-enabled', 'YES', '-default-test-execution-time-allowance', '120',
             '-resultBundlePath', str(result), 'test-without-building', '-quiet',
-        ], environment, 240)
+        ], environment, 240, require_success=False)
         summary = json.loads(subprocess.check_output([
             'xcrun', 'xcresulttool', 'get', 'test-results', 'summary', '--path', str(result)
         ], env=environment, timeout=30))
-        if summary.get('passedTests') != 2 or summary.get('failedTests') != 0 or summary.get('skippedTests') != 0:
-            raise SystemExit(f'Expected two passed fixtures with no failures or skips: {summary}')
-        print(f'Sidebar host: two fixtures passed, no retries or skips. Evidence: {result}')
+        print(json.dumps(summary, indent=2))
+        tree = json.loads(subprocess.check_output([
+            'xcrun', 'xcresulttool', 'get', 'test-results', 'tests', '--path', str(result)
+        ], env=environment, timeout=30))
+        try:
+            outcome = validate(summary, tree, test_status)
+        except ValueError as error:
+            raise SystemExit(f'{error}: {summary}')
+        print(f'Sidebar host: {outcome}. Evidence: {result}')
 PY

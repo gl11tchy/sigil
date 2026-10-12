@@ -708,3 +708,59 @@ bound existing title closures to the defaulted boost parameter. The fix retains
 the original public search signature and adds a required-label boost overload;
 all original callers and assertions stay intact. Real Store/AppTests await the
 corrected exact-head run. No denied local build or extra worker was used.
+
+## REA-1350: sidebar divider capture and background dragging
+
+The generated current-main fixture reproduced moving local-coordinate feedback and
+competing server-side window dragging. Shared 9-point seams now capture mouse-down
+with screen-coordinate NSEvent deltas and immediate reversal at physical width caps.
+A no-motion click focuses the seam without replacing a saved width with its rendered
+cap. The geometry solver, persisted preference and keyboard/AX steps remain.
+
+The final candidate passed 66 drag samples, target edges, bounds, utility panel,
+900/760 widths, hide/show, keyboard/AX adjustment and fresh-process persistence.
+Saved 430 rendered 218 survived a stationary click and restored 430 after widening.
+Generated terminal selection kept the window stationary. Read-only folder labels
+retain dragging with the sidebar hidden; the observed 20-point movement for a
+30-point path remains a review limitation. Small native header drag
+surfaces moved the window 30 points, including the first drag while inactive. A
+SwiftUI window gesture still intercepted terminal mouse-down after being narrowed
+and was replaced with the bounded native surfaces.
+
+The [QA record](../qa/rea-1350.md) identifies final source-matched evidence in
+`rea-1350-final-review-native/` and the initial CI failure investigation. Nine capture tests stay in serial Swift Testing; four rendered interaction
+cases, including Notes selection, now use the existing CI-only SwiftUI app host. The filesystem test
+now establishes bounded startup quiet before its unchanged assertions. App-only
+build, signature, formatting and diff checks passed. The populated native-history
+attempt remained AX-unresponsive and is an explicit Notes verification gap.
+
+CI38202086650 was false green: a recorded seam failure and incomplete Swift
+Testing output were hidden by a zero command status. The gate now requires a
+complete passing summary and rejects recorded failures; seven synthetic guard
+tests passed and the real false-green log is rejected. Exact-head CI and parent
+personal diff/native review remain required before merge.
+No personal histories, process enumeration, denied process reads, daily-app
+replacement, merge or next-ticket work occurred. REA-1351 stays separate.
+
+The 0a94 CI completed all 1,220 Swift tests and 37 XCTest cases, then failed
+all four new hosted interactions. Exact xcresult details record posted-event
+timestamp rounding, a 32-point coordinate difference, missing seam capture/focus
+and empty terminal/Notes selection. The new CI-only driver uses guarded native
+pointer input and exact target-window receipts; all behavior assertions remain.
+Its result is pending. App source and the preserved Mac evidence are unchanged.
+
+CI38207095514 completed the full Swift/XCTest run, then the four hosted cases
+failed before input because their visible windows were not key. The correction
+activates once before each complete gesture and requires the exact key window;
+there is no reactivation during dragging. The multi-point terminal path also
+fixes the source-confirmed missing selection-extension event. App behavior
+assertions and app source remain unchanged; the next exact-head run is pending.
+
+On 2026-10-12 at 14:22 UTC the owner explicitly chose manual sidebar verification
+and requested unblocking. Only the four named REA-1350 pointer tests now skip with
+an explicit reason when event-posting permission is unavailable. Their bodies,
+assertions and permission/ownership guards remain. The hosted gate verifies exact
+identities and still requires both unrelated fixtures to pass; pointer failures,
+partial results and other skips fail. All other CI checks and the completion guard
+remain mandatory. Skipped pointer behavior and owner manual verification are not
+claimed as passed. No denied input retry, security change, merge or installation.
