@@ -39,6 +39,16 @@ final class AppModel {
     private(set) var newSessionFocusToken = 0
     var showsNewSessionSurface: Bool { isShowingNewSessionSurface || tabs.isEmpty }
     var isShowingTabList = false
+    /// A one-shot route for history warning actions. Ordinary Settings keeps its chosen tab.
+    private(set) var generalSettingsRequest: UUID?
+
+    func requestGeneralSettings() { generalSettingsRequest = UUID() }
+
+    func consumeGeneralSettingsRequest() -> Bool {
+        guard generalSettingsRequest != nil else { return false }
+        generalSettingsRequest = nil
+        return true
+    }
     private(set) var pendingSessionDirectory: URL?
     /// Find-in-terminal bar for the selected tab.
     var isFindBarVisible = false

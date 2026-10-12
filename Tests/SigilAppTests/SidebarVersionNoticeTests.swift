@@ -130,7 +130,13 @@ struct SidebarVersionNoticeTests {
         let noticeScroll = try #require(scrollView(in: notices.view))
         let baselineViewport = baseline.view.convert(baselineScroll.bounds, from: baselineScroll)
         let noticeViewport = notices.view.convert(noticeScroll.bounds, from: noticeScroll)
-        #expect(abs(noticeViewport.maxY - baselineViewport.maxY) < 1)
+        #expect(notices.view.isFlipped == baseline.view.isFlipped)
+        let baselineTop = baseline.view.isFlipped ? baselineViewport.minY : baselineViewport.maxY
+        let noticeTop = notices.view.isFlipped ? noticeViewport.minY : noticeViewport.maxY
+        #expect(abs(noticeTop - baselineTop) < 1)
+        print(
+            "REA-1351 viewport: flipped=\(notices.view.isFlipped), baseline=\(baselineViewport), notices=\(noticeViewport)"
+        )
         #expect(
             abs(baselineViewport.height - noticeViewport.height - 34) < 1,
             "All nonblocking versions share one 26-point control and eight points of bottom spacing")
@@ -221,6 +227,32 @@ struct SidebarVersionNoticeTests {
         let baselineIdentifiers = accessibilityIdentifiers(
             in: baseline.window, visited: &baselineVisited, tree: &baselineTree)
         #expect(!baselineIdentifiers.contains("sidebar-compatibility-disclosure"))
+        // A targeted request works both before first appearance and on an existing Settings window.
+        let preferences = host(
+            NSHostingView(rootView: SettingsView(model: newer)), size: .init(width: 540, height: 660))
+        defer { preferences.window.close() }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!(await ownedAccessibilityValues()).keys.contains("settings-general"))
+        newer.requestGeneralSettings()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect((await ownedAccessibilityValues()).keys.contains("settings-general"))
+        #expect(newer.generalSettingsRequest == nil, "A targeted route is consumed, not replayed on ordinary opens")
+        newer.requestGeneralSettings()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(newer.generalSettingsRequest == nil)
+        #expect((await ownedAccessibilityValues()).keys.contains("settings-general"))
+        let firstOpen = model(versions: [:])
+        firstOpen.requestGeneralSettings()
+        let routed = host(
+            NSHostingView(rootView: SettingsView(model: firstOpen)), size: .init(width: 540, height: 660))
+        defer { routed.window.close() }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(firstOpen.generalSettingsRequest == nil)
+        var routedVisited: Set<ObjectIdentifier> = []
+        var routedTree: [String] = []
+        #expect(
+            accessibilityIdentifiers(in: routed.window, visited: &routedVisited, tree: &routedTree)
+                .contains("settings-general"))
         #expect(
             identifiers.contains("sidebar-history-compatibility-notice"),
             "Exported compatibility notice: \(tree). \(diagnostic)")
@@ -626,9 +658,10 @@ struct SidebarVersionNoticeTests {
                 rootView: SidebarView(model: model).environment(\.palette, Palette(theme: .sigilDark))))
     }
 
-    private func host(_ view: NSView) -> (window: NSWindow, view: NSView) {
+    private func host(_ view: NSView, size: NSSize = .init(width: 200, height: 460)) -> (window: NSWindow, view: NSView)
+    {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 200, height: 460),
+            contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.borderless], backing: .buffered, defer: false)
         window.animationBehavior = .none
         window.isReleasedWhenClosed = false

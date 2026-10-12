@@ -60,6 +60,7 @@ struct SidebarView: View {
         var observeHover: ((SidebarGlide) -> Void)? = nil
     #endif
     @Environment(\.palette) private var palette
+    @Environment(\.openSettings) private var openSettings
     @FocusState private var focus: SidebarFocus?
     /// Arrow-key highlight. Separate from open/active so those markers stay
     /// about the tab strip, not about where the keys are.
@@ -359,7 +360,7 @@ struct SidebarView: View {
                     if model.store.historyNotice != nil {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Some history files are incomplete or unsupported. Details in Settings.")
-                            SettingsLink { Text("History details in Settings") }
+                            generalSettingsLink("History details in Settings")
                                 .accessibilityIdentifier("sidebar-history-settings")
                         }
                         .ui(12.5).foregroundStyle(palette.ink2)
@@ -375,7 +376,7 @@ struct SidebarView: View {
                         {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(notice.text)
-                                SettingsLink { Text("Settings…") }
+                                generalSettingsLink("Settings…")
                             }.ui(12).foregroundStyle(palette.redInk)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -914,6 +915,14 @@ struct SidebarView: View {
                 Text("It shows up here as soon as it has a name.")
             }
         }
+    }
+
+    private func generalSettingsLink(_ title: String) -> some View {
+        Button(title) {
+            model.requestGeneralSettings()
+            openSettings()
+        }
+        .help("Open history and CLI details in General settings")
     }
 
     // MARK: - Keyboard

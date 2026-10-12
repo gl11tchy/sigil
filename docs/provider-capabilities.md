@@ -105,8 +105,10 @@ This optional local gate requires installed CLIs; ordinary CI does not.
   Done or Escape dismisses it and returns focus to the control. The footer takes
   34 points, leaving navigation and the top of the history viewport stable.
   An unsupported Codex or Claude major retains a visible history-format warning
-  and Settings action in the history list. Incomplete/unsupported-file notices
-  retain their own Settings action; actual read failures retain the existing
+  and Settings action in the history list. Both warning actions explicitly open
+  the General pane containing CLI/history details via a consumed one-shot request;
+  ordinary Settings opens keep the default or user-selected pane.
+  Incomplete/unsupported-file notices retain their own Settings action; actual read failures retain the existing
   failure state and Retry. Unknown version output makes no version claim, and
   unavailable or failed probes cannot become benign compatibility details.
   A version notice does not prevent starting the installed CLI. This presentation

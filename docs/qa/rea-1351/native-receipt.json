@@ -46,5 +46,7 @@
     "Earlier helper-only and source focus failures preserved outside the checkout; matrix.jsonl ends after an AX raw-value search write did not notify the binding. Successful search/scroll is in interaction.jsonl.",
     "No daily-app launch/quit/replacement, real CLI/model calls, personal histories, security settings, new distribution, or merge"
   ],
-  "requiredCIGate": "pending normal PR exact-head CI; original two hosted checks plus four separately authorized pointer skips unchanged"
+  "requiredCIGate": "pending normal PR exact-head CI; original two hosted checks plus four separately authorized pointer skips unchanged",
+  "evidenceHead": "a82acc427d417a099197c0c4a438d85a93b22666",
+  "routingReviewCorrection": "Historical source/captures at a82. Settings routing claim is superseded by routing-receipt.json; the old Settings image is Appearance and proves opening only."
 }

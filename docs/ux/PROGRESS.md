@@ -21,6 +21,16 @@ VoiceOver, macOS 14 and multiple-display behavior remain unverified. REA-1350's
 separate owner manual pointer acceptance remains pending; its exact four CI
 exceptions and the six-test gate are unchanged. No daily-app replacement or merge.
 
+Parent review found that the warning Settings links reached Appearance, not the
+General pane containing the promised facts. One-shot General routing now preserves
+ordinary opens and manual tab choices; actual owned native captures prove both
+warning actions and repeated routing. The first exact-head CI run passed 1,222
+Swift tests and 37 XCTest tests but failed the hosted physical-top assertion's
+unflipped-coordinate assumption. The check now honors the host's coordinate
+orientation while retaining the 34-point budget and every other assertion.
+The old failure remains in the verification record. Corrected-head CI and parent
+review of this focused delta remain required; the four pointer exceptions are unchanged.
+
 ## REA-1272: find conversations by note text
 
 The Mac sidebar searches the first 64 KiB of eligible conversation notes after
