@@ -42,6 +42,8 @@ struct RemoteProject: Codable, Sendable {
     var folder: String
     /// True when a new session there can start in a worktree.
     var repository: Bool?
+    /// Per-folder default. Home repositories still allow an explicit worktree.
+    var worktreeDefault: Bool?
 }
 
 /// What the phone may choose when it starts a session, as the Mac's New Session sheet offers.
@@ -179,23 +181,22 @@ enum RemoteCommands {
             if let problem = await checkedStartProblem(provider, model: model) { return failure(request, problem) }
             // As the Mac's New Session sheet does: a git repository gets a new worktree when
             // Settings says so. A phone that shows the toggle sends its own answer.
-            var start = project
-            if request.worktree ?? model.settings.startsInWorktree, SigilWorktree.isInRepository(project) {
-                do {
-                    start = try await SigilWorktree.create(for: project, root: worktreeRoot) ?? project
-                } catch {
-                    let detail = error.localizedDescription.split(whereSeparator: \.isNewline).first ?? ""
-                    return failure(request, bounded("Could not create a worktree. \(detail)", bytes: 240))
-                }
-                // Remote was stopped while git ran: start nothing for a phone that is gone.
-                guard !Task.isCancelled else { return failure(request, "Remote was turned off.") }
-            }
             let remembered = model.settings.defaultDirectory
             let focused = model.settings.focusedProjectPath
-            // A provider refresh may have started while the worktree was created.
-            if let problem = await checkedStartProblem(provider, model: model) { return failure(request, problem) }
-            guard model.newTab(in: start, model: chosenModel, effort: chosenEffort, provider: provider) != nil
-            else { return failure(request, "Could not start a session. Check Sigil on your Mac.") }
+            let useWorktree =
+                request.worktree
+                ?? (model.settings.startsInWorktree && SigilWorktree.shouldDefaultToWorktree(project))
+            let result = await SessionWorktreeStart.start(
+                project: project, useWorktree: useWorktree && SigilWorktree.isInRepository(project), root: worktreeRoot,
+                validate: { await checkedStartProblem(provider, model: model) },
+                launch: { folder in
+                    model.newTab(in: folder, model: chosenModel, effort: chosenEffort, provider: provider) != nil
+                })
+            if let message = result.message {
+                // Keep complete recovery paths: truncating a checkout path would
+                // make a retained attempt impossible to find from the phone.
+                return failure(request, message)
+            }
             if !named.isEmpty {
                 if model.settings.defaultDirectory != remembered {
                     model.settings.defaultDirectory = remembered
@@ -416,7 +417,9 @@ enum RemoteCommands {
             guard project.cwd.utf8.count <= 4_000, !project.cwd.isEmpty else { return nil }
             return RemoteProject(
                 name: bounded(project.name, bytes: 96), folder: project.cwd,
-                repository: SigilWorktree.isInRepository(URL(fileURLWithPath: project.cwd)))
+                repository: SigilWorktree.isInRepository(URL(fileURLWithPath: project.cwd)),
+                worktreeDefault: model.settings.startsInWorktree
+                    && SigilWorktree.shouldDefaultToWorktree(URL(fileURLWithPath: project.cwd)))
         }
     }
 

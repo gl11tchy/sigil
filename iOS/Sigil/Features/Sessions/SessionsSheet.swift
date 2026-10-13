@@ -471,6 +471,7 @@ struct NewSessionSheet: View {
     @State private var effort = ""
     @State private var target: Target?
     @State private var inWorktree = true
+    @State private var explicitWorktreeChoice: Bool?
 
     enum Target: Hashable {
         case currentFolder
@@ -489,6 +490,12 @@ struct NewSessionSheet: View {
     private var canUseWorktree: Bool {
         guard store.supportsSessionOps, case .project(let folder) = target else { return false }
         return store.projects.first { $0.folder == folder }?.repository == true
+    }
+
+    private var worktreeChoice: Bool {
+        guard case .project(let folder) = target else { return inWorktree }
+        return store.projects.first { $0.folder == folder }?
+            .worktreeChoice(savedDefault: inWorktree, explicit: explicitWorktreeChoice) ?? inWorktree
     }
 
     var body: some View {
@@ -633,7 +640,7 @@ struct NewSessionSheet: View {
                 }
                 if canUseWorktree {
                     FormRule()
-                    Toggle(isOn: $inWorktree) {
+                    Toggle(isOn: Binding(get: { worktreeChoice }, set: { explicitWorktreeChoice = $0 })) {
                         Text("Start in a new worktree")
                             .typeStep(.row)
                             .foregroundStyle(Theme.ink)
@@ -646,7 +653,7 @@ struct NewSessionSheet: View {
         } footer: {
             if let error = store.errorMessage {
                 Notice(text: error, tone: .failure)
-            } else if canUseWorktree, inWorktree {
+            } else if canUseWorktree, worktreeChoice {
                 Text("A fresh checkout on its own branch, under ~/.sigil/worktrees, as the Mac does.")
                     .typeStep(.small)
                     .foregroundStyle(Theme.ink2)
@@ -656,6 +663,7 @@ struct NewSessionSheet: View {
 
     private func choice(_ title: String, detail: String, monospaced: Bool, target choice: Target) -> some View {
         Button {
+            if target != choice { explicitWorktreeChoice = nil }
             target = choice
         } label: {
             HStack(spacing: Theme.Space.small) {
@@ -716,7 +724,7 @@ struct NewSessionSheet: View {
         }
         store.newSession(
             in: folder, provider: options == nil ? nil : providerID, model: takesModel ? model : nil,
-            effort: takesModel ? effort : nil, worktree: canUseWorktree ? inWorktree : nil)
+            effort: takesModel ? effort : nil, worktree: canUseWorktree ? worktreeChoice : nil)
         dismiss()
     }
 

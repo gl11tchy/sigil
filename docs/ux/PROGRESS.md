@@ -1,3 +1,20 @@
+## REA-1225: selected folders and unused worktree attempts (2026-10-13)
+
+Candidate for parent personal review; no merge, installation or manual UI
+acceptance recorded. The missing-folder fallback was reproduced against main
+`c1d886d` by test-only CI38359248731 (seven issues in the new cases only;
+1,250 Swift tests, 37 XCTest cases passing). Creation now validates the selected
+folder in the exact source commit before allocating resources. Attempt receipts
+guard non-force rollback; changed, locked, possibly started or uncertain resources
+retain their complete recovery paths. Inline, Options and phone starts share the
+same contract. Home repositories default to their project folder while preserving
+explicit choices, including an additive per-project native-phone default.
+
+Focused safety fixtures and limits are in [REA-1225 QA](../qa/rea-1225.md).
+AppTests remain CI-only. Required renamed-debug AX/window-ID verification is
+unobserved; no local build/process/cache-denial retry or daily-app interaction.
+Independent task-finishing and Web New Session work are unchanged.
+
 ## REA-1247: preserve distinguishing Recents titles
 
 Multi-project rows now prioritize the title over a bounded project name and a
