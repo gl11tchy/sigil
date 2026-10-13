@@ -1,3 +1,18 @@
+## REA-1231: reopen Grok with saved options (2026-10-13)
+
+Sidebar and remote opening now choose saved model and valid saved effort
+independently, using Settings only for each absent/invalid field. A saved model
+survives missing/stale/failed catalogs. Relaunch restoration and provider/identity
+checks stay unchanged; no tooltip/redesign or automatic model substitution.
+
+Unchanged-code test-only CI38384966225 reproduced three issues in its new test:
+Settings model, Settings effort and incorrect resume arguments. The other 1,280
+Swift tests and 37 XCTest cases passed. [QA](../qa/rea-1231.md) records generated
+history/fake-CLI coverage and limits. AppTests run only in CI; real Grok model
+acceptance/rejection-choice UI, real phone and rendered AX/window-ID behavior
+remain unobserved. Await exact-head CI and parent personal review. No merge,
+installation, personal histories, paid inference or next ticket.
+
 ## REA-1222: Cancel preserves a saved pairing (2026-10-13)
 
 Cancel now stops only its pending generation without clearing saved credentials
