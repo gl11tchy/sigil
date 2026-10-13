@@ -804,10 +804,26 @@ final class AppModel {
         let projects = SidebarOrganization.projects(from: sessions, canonicalPath: canonicalPath)
         // A search ranks by match and Archived lists only archived chats.
         guard !SidebarOrganization.isSearching(searchText), sidebarSurface != .archived else {
-            return projects
+            return markingAddedProjectAvailability(projects)
         }
         return SidebarOrganization.merging(
-            added: settings.addedProjects, into: projects, canonicalPath: canonicalPath)
+            added: settings.addedProjects, into: projects,
+            isAvailable: Self.isProjectDirectoryAvailable, canonicalPath: canonicalPath)
+    }
+
+    /// Recheck a saved folder without changing its reference or rebuilding history.
+    func retryProjectAvailability() { invalidateSidebarFilesystem() }
+
+    /// Tag filtered groups without adding rows or changing their order/dates.
+    private func markingAddedProjectAvailability(_ projects: [SidebarProject]) -> [SidebarProject] {
+        let references = Dictionary(
+            settings.addedProjects.map { (canonicalPath($0.path), $0.path) },
+            uniquingKeysWith: { first, _ in first })
+        return projects.map { project in
+            var marked = project
+            if let path = references[project.id] { marked.isAvailable = Self.isProjectDirectoryAvailable(path) }
+            return marked
+        }
     }
 
     /// Adds a folder to Projects before it has a chat. A Sigil worktree adds its project.
@@ -888,14 +904,16 @@ final class AppModel {
             ?? project(at: path, from: store.sessions)
             ?? SidebarOrganization.merging(
                 added: settings.addedProjects.filter { samePath($0.path, path) },
-                into: [], canonicalPath: canonicalPath
+                into: [], isAvailable: Self.isProjectDirectoryAvailable, canonicalPath: canonicalPath
             ).first
     }
 
     private func project(at path: String, from sessions: [GrokSession]) -> SidebarProject? {
         let focused = canonicalPath(path)
-        return SidebarOrganization.projects(from: sessions, canonicalPath: canonicalPath)
-            .first { $0.id == focused || samePath($0.cwd, path) }
+        return markingAddedProjectAvailability(
+            SidebarOrganization.projects(from: sessions, canonicalPath: canonicalPath)
+        )
+        .first { $0.id == focused || samePath($0.cwd, path) }
     }
 
     /// Chats in the open project, or the full sidebar list.
@@ -1179,10 +1197,11 @@ final class AppModel {
         }
         // Earlier builds added a Sigil worktree as its own project, which
         // could then be pinned or left open. Each becomes its project.
+        // Folder availability is transient; only explicit Remove/Archive drops an added reference.
         let remainingAdded = SidebarOrganization.foldingWorktrees(
             settings.addedProjects, path: \.path,
             moving: { AddedProject(path: $1, addedAt: $0.addedAt) }, samePath: samePath
-        ).filter { Self.isUsableDirectory(URL(fileURLWithPath: $0.path)) }
+        )
         if remainingAdded != settings.addedProjects {
             settings.addedProjects = remainingAdded
         }
@@ -3865,6 +3884,12 @@ final class AppModel {
         var isDirectory: ObjCBool = false
         return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
             && isDirectory.boolValue
+    }
+
+    static func isProjectDirectoryAvailable(_ path: String) -> Bool {
+        let manager = FileManager.default
+        return isUsableDirectory(URL(fileURLWithPath: path))
+            && manager.isReadableFile(atPath: path) && manager.isExecutableFile(atPath: path)
     }
 
     func showError(title: String, message: String) {

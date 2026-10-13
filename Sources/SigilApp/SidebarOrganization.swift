@@ -32,6 +32,8 @@ struct SidebarProject: Identifiable, Equatable, Sendable {
     var cwd: String
     var sessions: [GrokSession]
     var updatedAt: Date
+    /// Availability of an explicitly added folder; never authorization to forget it.
+    var isAvailable = true
 
     var count: Int { sessions.count }
 }
@@ -529,6 +531,7 @@ enum SidebarOrganization {
     static func merging(
         added: [AddedProject],
         into projects: [SidebarProject],
+        isAvailable: (String) -> Bool,
         canonicalPath: (String) -> String
     ) -> [SidebarProject] {
         var result = projects
@@ -536,6 +539,7 @@ enum SidebarOrganization {
             let key = canonicalPath(entry.path)
             if let index = result.firstIndex(where: { $0.id == key }) {
                 result[index].updatedAt = max(result[index].updatedAt, entry.addedAt)
+                result[index].isAvailable = isAvailable(entry.path)
                 continue
             }
             let name = URL(fileURLWithPath: entry.path).lastPathComponent
@@ -554,7 +558,8 @@ enum SidebarOrganization {
                     displayPath: displayPath,
                     cwd: entry.path,
                     sessions: [],
-                    updatedAt: entry.addedAt
+                    updatedAt: entry.addedAt,
+                    isAvailable: isAvailable(entry.path)
                 ))
         }
         return result.enumerated()
