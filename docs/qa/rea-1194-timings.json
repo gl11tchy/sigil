@@ -48,6 +48,40 @@
     "cpuRate": 4,
     "warmups": 5,
     "count": 20,
+    "median": 7.3499999940395355,
+    "p95": 9.099999994039536,
+    "maximum": 9.099999994039536,
+    "samples": [
+      9.099999994039536,
+      8.900000005960464,
+      8.799999982118607,
+      8.599999994039536,
+      7.699999988079071,
+      8.5,
+      8.900000005960464,
+      9.099999994039536,
+      6.899999976158142,
+      6.699999988079071,
+      6.800000011920929,
+      6.5999999940395355,
+      7.5,
+      6.9000000059604645,
+      6.9000000059604645,
+      7.0999999940395355,
+      6.5,
+      6.299999982118607,
+      7.300000011920929,
+      7.399999976158142
+    ]
+  },
+  "region": "renderOutput entry through final updateLatest: formatting, DOM/Find and synchronous layout/scroll; network/decryption/history merge/later raster excluded",
+  "percentile": "nearest rank p95=sorted sample19 of20; median mean of middle pair",
+  "preRepairLocal": {
+    "rawCharacters": 404620,
+    "formattedCharacters": 381981,
+    "cpuRate": 4,
+    "warmups": 5,
+    "count": 20,
     "median": 7.700000002980232,
     "p95": 9,
     "maximum": 9.199999988079071,
@@ -73,7 +107,5 @@
       7,
       7
     ]
-  },
-  "region": "renderOutput entry through final updateLatest: formatting, DOM/Find and synchronous layout/scroll; network/decryption/history merge/later raster excluded",
-  "percentile": "nearest rank p95=sorted sample19 of20; median mean of middle pair"
+  }
 }

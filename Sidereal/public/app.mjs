@@ -370,7 +370,7 @@ function renderOutput(changedSession = false, prepended = false) {
   const terminal = $('terminal');
   const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
   const fromEnd = terminal.scrollHeight - terminal.scrollTop;
-  if (!rawMode && (readableFrom !== rawOutput || changedSession || prepended)) {
+  if (!rawMode && readableFrom !== rawOutput) {
     readableText = readable.update(rawOutput, { reset: changedSession || prepended }); readableFrom = rawOutput;
   }
   const output = rawMode ? rawOutput : readableText;

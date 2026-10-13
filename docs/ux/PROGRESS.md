@@ -2,7 +2,7 @@
 
 Generated ~400KB encrypted-loopback polls at390×844/4x Chromium CPU measured
 70.95/72.90/75.20ms median/p95/max before changes; final local source measured
-7.70/9.00/9.20ms with the same five warmups/20 samples and direct render region.
+7.35/9.10/9.10ms with the same five warmups/20 samples and direct render region.
 Exact formatter checkpoints and verified DOM prefix retention replace full work
 on ordinary tail changes; unsafe/earlier edits conservatively replay. Full
 formatter oracle,33 Node checks,216 Chromium/WebKit web-find/mobile passes with

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
-import { readableOutput } from '../public/output.mjs';
+import { readableOutput, createReadableOutput, commonPrefixLength } from '../public/output.mjs';
 import { pairingFromText } from '../public/pairing.mjs';
 
 // Saved search coalescing and unchanged-poll reuse (browser audit B2 and B4).
@@ -88,7 +88,11 @@ async function browser() {
     },
   };
   const app = {
-    readableOutput: text => { formatted.push(text); return readableOutput(text); },
+    commonPrefixLength,
+    createReadableOutput: () => {
+      const reader = createReadableOutput();
+      return { reset: () => reader.reset(), update: (text, options) => { formatted.push(text); return reader.update(text, options); } };
+    },
     pairingFromText, document, location: { origin: 'https://sidereal.example', protocol: 'https:', pathname: '/', hash: '' },
     history: { replaceState() {} }, indexedDB,
     window: { addEventListener() {} },
