@@ -1,5 +1,5 @@
 import { importKey, randomKey, seal, open } from './crypto.mjs';
-import { readableOutput } from './output.mjs';
+import { createReadableOutput, commonPrefixLength } from './output.mjs';
 import { pairingFromText } from './pairing.mjs';
 const $ = id => document.getElementById(id);
 const STATUS_LABELS = { working: 'Working', starting: 'Starting…', idle: 'Ready', exited: 'Session ended', unknown: 'Status unknown', waitingForApproval: 'Needs approval', interrupted: 'Stopped', failed: 'Failed', disconnected: 'Disconnected' };
@@ -196,12 +196,6 @@ function applyTail(bucket, next) {
   if (room > 0) bucket.history += scrolled.slice(0, room);
   bucket.tail = next;
 }
-function commonPrefixLength(left, right) {
-  const count = Math.min(left.length, right.length);
-  let index = 0;
-  while (index < count && left[index] === right[index]) index += 1;
-  return index;
-}
 function prependSlice(bucket, slice) {
   if (typeof slice !== 'string' || new TextEncoder().encode(slice).length > 12_000) {
     bucket.exhausted = true;
@@ -371,11 +365,14 @@ function render(state) {
 }
 // Polls usually return the same text; format it again only when it changes.
 let readableFrom = null, readableText = '';
+const readable = createReadableOutput();
 function renderOutput(changedSession = false, prepended = false) {
   const terminal = $('terminal');
   const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
   const fromEnd = terminal.scrollHeight - terminal.scrollTop;
-  if (!rawMode && readableFrom !== rawOutput) { readableText = readableOutput(rawOutput); readableFrom = rawOutput; }
+  if (!rawMode && (readableFrom !== rawOutput || changedSession || prepended)) {
+    readableText = readable.update(rawOutput, { reset: changedSession || prepended }); readableFrom = rawOutput;
+  }
   const output = rawMode ? rawOutput : readableText;
   $('empty-output').hidden = Boolean(output);
   const ended = Boolean(selected) && (selectedRunning === false || selectedStatus === 'exited');
@@ -687,10 +684,28 @@ function chunkStarts(output) {
 // Paint the output as one text node per chunk, with no marks, in blocks of whole lines. A block ends
 // where a line starts findBlock characters or more into it, and before a line over findBlock long.
 function paintText(output) {
-  if (findText !== output) { findText = output; findStarts = chunkStarts(output); }
-  findNodes = output ? findStarts.map((start, index) => document.createTextNode(output.slice(start, findStarts[index + 1] ?? output.length))) : [];
+  const terminal = $('terminal');
+  let keptBlocks = 0, keptChunks = 0, from = 0;
+  if (findText && output && findBlocks.length) {
+    const shared = commonPrefixLength(findText, output);
+    // Rebuild the block containing the preceding chunk too: a changed newline,
+    // word or combining mark can change the last chunk's deterministic boundary.
+    const chunk = Math.max(0, findChunkAt(shared) - 1);
+    while (keptBlocks + 1 < findBlocks.length && findBlocks[keptBlocks + 1] <= chunk) keptBlocks++;
+    if (findBlockNodes.slice(0, keptBlocks).some((node, index) => terminal.childNodes[index] !== node)) keptBlocks = 0;
+    keptChunks = findBlocks[keptBlocks]; from = findStarts[keptChunks];
+  }
+  // Marks can split text nodes inside retained blocks. Restore those nodes before
+  // replacing the suffix, then the normal Find path recomputes its visible marks.
+  markMatches([]);
+  findText = output;
+  findStarts = findStarts.slice(0, keptChunks).concat(chunkStarts(output.slice(from)).map(start => start + from));
+  findNodes = findNodes.slice(0, keptChunks).concat(output ? findStarts.slice(keptChunks).map((start, index) =>
+    document.createTextNode(output.slice(start, findStarts[keptChunks + index + 1] ?? output.length))) : []);
+  const retainedBlocks = findBlocks.slice(0, keptBlocks), retainedNodes = findBlockNodes.slice(0, keptBlocks);
   findSplits = new Map(); findBlocks = findNodes.length ? [0] : []; findComplexBlocks = new Map();
-  for (let chunk = 1; chunk < findStarts.length; chunk++) {
+  if (findNodes.length) findBlocks = retainedBlocks.concat(keptChunks);
+  for (let chunk = keptChunks + 1; chunk < findStarts.length; chunk++) {
     const start = findStarts[chunk];
     if (output[start - 1] !== '\n') continue;
     const end = output.indexOf('\n', start);
@@ -698,12 +713,16 @@ function paintText(output) {
   }
   // The last block is painted in the terminal itself, after the others: WebKit copies a selection
   // that ends after a block element with one more line.
-  findBlockNodes = findBlocks.slice(0, -1).map((chunk, index) => {
+  findBlockNodes = retainedNodes.concat(findBlocks.slice(keptBlocks, -1).map((chunk, index) => {
     const block = document.createElement('span');
-    block.append(...findNodes.slice(chunk, findBlocks[index + 1]));
+    block.append(...findNodes.slice(chunk, findBlocks[keptBlocks + index + 1]));
     return block;
-  });
-  $('terminal').replaceChildren(...findBlockNodes, ...findNodes.slice(findBlocks.at(-1) ?? 0));
+  }));
+  if (!keptBlocks) terminal.replaceChildren(...findBlockNodes, ...findNodes.slice(findBlocks.at(-1) ?? 0));
+  else {
+    while (terminal.childNodes.length > keptBlocks) terminal.lastChild.remove();
+    terminal.append(...findBlockNodes.slice(keptBlocks), ...findNodes.slice(findBlocks.at(-1) ?? 0));
+  }
 }
 // Whether the matches on a block are marked in WebKit: it has complex text.
 function findMarkable(block) {
@@ -1509,6 +1528,7 @@ async function forget() {
   $('keys').hidden = true; $('keys-toggle').setAttribute('aria-expanded', 'false');
   clearAttachments();
   rawOutput = ''; rawMode = false; displayedOutput = null; readableFrom = null; readableText = '';
+  readable.reset();
   histories.clear(); pendingEarlier = null; earlierFlight = false; searchToken++;
   sessionTabs = []; $('sessions-dialog').close(); $('project-dialog').close(); closeFind();
   $('raw-toggle').setAttribute('aria-pressed', 'false'); $('raw-toggle').textContent = 'Show raw terminal';
@@ -1551,6 +1571,7 @@ async function beginPair(pairing) {
   drafts.clear(); attachmentDrafts.clear(); histories.clear(); sessionTabs = [];
   selected = null; selectedStatus = null; selectedRunning = undefined; selectedCapabilities = undefined;
   currentPrompt = null; promptSignature = null; tabsSignature = ''; rawOutput = ''; displayedOutput = null;
+  readable.reset(); readableFrom = null; readableText = '';
   pendingEarlier = null; earlierFlight = false; searchToken++;
   $('message').value = ''; $('terminal').textContent = ''; $('interaction').hidden = true;
   renderAttachments();

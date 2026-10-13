@@ -4,6 +4,60 @@ import { once } from 'node:events';
 import { randomKey, importKey, seal, open } from '../../public/crypto.mjs';
 import { readableOutput } from '../../public/output.mjs';
 
+// Test-only instrumentation of the actual render path; no production telemetry.
+async function measureOutput(page) {
+  await page.route('**/app.mjs*', async route => {
+    const response = await route.fetch();
+    const source = (await response.text())
+      .replace('function renderOutput(changedSession = false, prepended = false) {',
+        'function renderOutput(changedSession = false, prepended = false) { const measuredStart = performance.now(); const measuredBefore = displayedOutput;')
+      .replace('  updateLatest();\n}\n\nfunction renderSessionList()',
+        '  updateLatest(); if (measuredBefore !== displayedOutput) (window.outputDurations ??= []).push(performance.now() - measuredStart);\n}\n\nfunction renderSessionList()');
+    expect(source).toContain('window.outputDurations');
+    await route.fulfill({ response, body: source });
+  });
+}
+
+test('REA-1194 measures changed 400KB polls directly at 4x Chromium CPU', async ({ page, baseURL, browserName }, info) => {
+  test.skip(browserName !== 'chromium', 'CDP CPU throttling is Chromium-only');
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await measureOutput(page);
+  const slice = id => Array.from({ length: 132 }, (_, line) =>
+    `|  Result ${id}-${String(line).padStart(3, '0')}: verified synthetic project output with details and stable data. |`).join('\n').slice(0, 11_899) + '\n';
+  let history = 0, version = 0;
+  const tail = slice('tail');
+  expect(Buffer.byteLength(slice('history-33'))).toBeLessThanOrEqual(12_000);
+  const mac = await pair(page, baseURL, { terminal: () => `${tail}Current response ${version}\n`,
+    earlier: () => history < 33 ? slice(`history-${++history}`) : '' });
+  try {
+    for (let loaded = await page.locator('#terminal').evaluate(node => node.textContent.length); history < 33;) {
+      await page.waitForTimeout(100);
+      await page.locator('#terminal').evaluate(node => { node.scrollTop = 0; node.dispatchEvent(new Event('scroll')); });
+      await page.waitForFunction(length => document.getElementById('terminal').textContent.length > length, loaded, { timeout: 5_000 });
+      loaded = await page.locator('#terminal').evaluate(node => node.textContent.length);
+    }
+    const formattedCharacters = await page.locator('#terminal').evaluate(node => node.textContent.length);
+    expect(formattedCharacters).toBeGreaterThan(350_000);
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+    await page.evaluate(() => { window.outputDurations = []; });
+    for (let sample = 0; sample < 25; sample++) {
+      version++;
+      await expect(page.locator('#terminal')).toContainText(`Current response ${version}`);
+    }
+    const samples = (await page.evaluate(() => window.outputDurations)).slice(5);
+    expect(samples.length).toBe(20);
+    const sorted = [...samples].sort((a, b) => a - b);
+    const result = { rawCharacters: 34 * 11_900 + `Current response ${version}\n`.length, formattedCharacters,
+      cpuRate: 4, warmups: 5, count: samples.length,
+      median: (sorted[9] + sorted[10]) / 2, p95: sorted[18], maximum: sorted.at(-1), samples };
+    console.log('REA-1194 direct render durations', JSON.stringify(result));
+    await info.attach('400KB-direct-render-durations', { body: JSON.stringify(result, null, 2), contentType: 'application/json' });
+    if (!process.env.SIDEREAL_PERF_BASELINE) expect(result.p95).toBeLessThanOrEqual(25);
+  } finally { mac.close(); }
+});
+
 // A synthetic Mac on the actual relay and encryption, as in mobile.spec.mjs. Never touches user sessions.
 let sharedRoom, previousHost;
 async function pair(page, origin, options) {
@@ -187,6 +241,61 @@ for (const api of [true, false]) {
     test.beforeEach(async ({ page }) => {
       await page.setViewportSize({ width: 390, height: 844 });
       if (!api) await page.addInitScript(() => { delete window.Highlight; });
+    });
+
+    test('REA-1194 retains prefix blocks through tail edits, Find, raw mode and selection', async ({ page, baseURL, browserName }, info) => {
+      const errors = [];
+      page.on('pageerror', error => errors.push(error.message));
+      const head = Array.from({ length: 350 }, (_, index) => `Stable line ${index}: synthetic content with enough words for a long history.`).join('\n') + '\n\n';
+      let tail = 'Current needle 🙂 é क्‍ष 日本\n';
+      const mac = await pair(page, baseURL, { terminal: () => head + tail });
+      try {
+        await expect(page.locator('#terminal')).toHaveText(readableOutput(head + tail));
+        await openFind(page, 'needle');
+        await page.evaluate(() => {
+          window.retainedBlock = document.querySelector('#terminal > span');
+          window.retainedText = window.retainedBlock.firstChild;
+        });
+        tail = 'Current needle changed 🙂 é क्‍ष 日本\nAnother needle in the changed tail.\n';
+        await expect(page.locator('#terminal')).toHaveText(readableOutput(head + tail));
+        await expect(page.locator('#find-count')).toHaveText('1 of 2');
+        expect(await page.evaluate(() => window.retainedBlock === document.querySelector('#terminal > span') && window.retainedText.isConnected)).toBe(true);
+        for (let index = 0; index < 4; index++) {
+          await page.getByRole('button', { name: 'Next match' }).click();
+          await page.getByRole('button', { name: 'Previous match' }).click();
+        }
+        expect((await findState(page)).current.text).toBe('needle');
+        await toggleRaw(page);
+        await expect(page.locator('#terminal')).toHaveText(head + tail);
+        await page.evaluate(() => {
+          Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => { window.copiedOutput = text; } } });
+        });
+        await page.getByLabel('Connection settings').click();
+        await page.getByRole('button', { name: 'Copy output', exact: true }).click();
+        expect(await page.evaluate(() => window.copiedOutput)).toBe(head + tail);
+        await page.getByLabel('Connection settings').click();
+        await toggleRaw(page);
+        await expect(page.locator('#terminal')).toHaveText(readableOutput(head + tail));
+        await page.getByRole('button', { name: 'Close find' }).click();
+        await page.evaluate(() => {
+          const terminal = document.getElementById('terminal');
+          const first = document.createTreeWalker(terminal, NodeFilter.SHOW_TEXT).nextNode();
+          const range = document.createRange(); range.setStart(first, 0); range.setEnd(first, 12);
+          getSelection().removeAllRanges(); getSelection().addRange(range);
+        });
+        const selected = await page.evaluate(() => getSelection().toString());
+        const before = mac.actions.length;
+        tail = 'Changed response while selecting the stable prefix.\n';
+        await expect.poll(() => mac.actions.length).toBeGreaterThan(before);
+        expect(await page.evaluate(() => getSelection().toString())).toBe(selected);
+        await page.evaluate(() => { getSelection().removeAllRanges(); document.dispatchEvent(new Event('selectionchange')); });
+        await expect(page.locator('#terminal')).toHaveText(readableOutput(head + tail));
+        await openFind(page, 'response');
+        await expect(page.locator('#find-count')).toHaveText('1 of 1');
+        expect((await findState(page)).current).toMatchObject({ text: 'response', visible: true });
+        if (api) await page.screenshot({ path: info.outputPath(`rea-1194-${browserName}-390x844.png`) });
+        expect(errors).toEqual([]);
+      } finally { mac.close(); }
     });
 
     test('Find counts 31,200 matches exactly and keeps the terminal O(visible)', async ({ page, baseURL }) => {
