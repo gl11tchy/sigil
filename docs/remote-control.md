@@ -139,6 +139,20 @@ struct RemoteRequest: Codable, Sendable {
   define UTC epoch expiry and zero storage. APNs honors expiry on a best-effort
   basis, may reorder notifications and may deliver after expiry. These bounds
   do not guarantee storage, ordering or physical delivery.
+  The APNs client retires an unanswered/error connection and permits one fresh
+  attempt only before any response headers/status. Each attempt has an absolute
+  10s timer; the entire send has a 20s monotonic budget, clipped at admission and
+  before each attempt to the original expiry. Payload bytes, activity timestamp,
+  collapse key, bearer and expiry are frozen once. The relay charges one logical
+  send, regardless of that internal retry. Concurrent failures share a current
+  replacement; old close/error/GOAWAY handlers cannot evict it. Accepted streams
+  can finish during GOAWAY retirement; connections with no pending work close
+  after 10 minutes idle. Shutdown destroys owned connections and prevents retry.
+  A missing response still leaves delivery uncertain. The iPhone receipt ledger
+  rejects a duplicate sealed alert ID for actionable handling; the extension may
+  retain a passive local fallback. Repeated transport attempts and delayed ordering
+  remain possible. Retaining original activity timestamps avoids making an old
+  retry look newer. Neither APNs nor this client promises exactly-once delivery.
 - Spec: `docs/phone-companion-2-spec.md`.
 
 ## Verification and boundaries

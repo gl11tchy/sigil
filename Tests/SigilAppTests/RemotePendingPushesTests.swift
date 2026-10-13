@@ -29,7 +29,12 @@ struct RemotePendingPushesTests {
         #expect(copy.id == original.id && copy.issuedAt == now && copy.expiresAt == original.expiresAt)
         #expect(copy.frame.push?.issuedAt == Int(now.timeIntervalSince1970))
         #expect(copy.frame.push?.expiresAt == Int(original.expiresAt.timeIntervalSince1970))
-        #expect(try JSONEncoder().encode(copy.frame) == JSONEncoder().encode(original.frame))
+        // JSON object order is not a byte contract. Canonical encoding checks
+        // every field while the sealed payload itself must remain identical.
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        #expect(copy.frame.push?.data == original.frame.push?.data)
+        #expect(try encoder.encode(copy.frame) == encoder.encode(original.frame))
         queue.expire(now: now.addingTimeInterval(299))
         #expect(queue.entries.count == 1)
         queue.expire(now: original.expiresAt)

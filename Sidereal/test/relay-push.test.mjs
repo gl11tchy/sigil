@@ -2,8 +2,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import http2 from 'node:http2';
+import { generateKeyPairSync } from 'node:crypto';
 import WebSocket from 'ws';
 import { createRelay } from '../server.mjs';
+import { createAPNs } from '../apns.mjs';
 import { importKey, seal } from '../public/crypto.mjs';
 
 const origin = 'http://localhost:3099';
@@ -42,6 +45,48 @@ const settle = () => new Promise(resolve => setTimeout(resolve, 50));
 const pushes = ws => ws.frames.filter(frame => frame.type === 'push');
 const alert = data => JSON.stringify({ push: { data, thread: 'tab-1' } });
 const activity = (event, status) => JSON.stringify({ push: { activity: activityToken, event, state: { status } } });
+
+test('REA-1212 fresh HTTP2 recovery counts once against the relay room budget', async t => {
+  const connections = [], received = [];
+  const server = http2.createServer();
+  server.on('session', session => { connections.push(session); session.on('error', () => {}); });
+  server.on('stream', (stream, headers) => {
+    stream.on('error', () => {});
+    let body = '';
+    stream.setEncoding('utf8');
+    stream.on('data', chunk => { body += chunk; });
+    stream.on('end', () => {
+      received.push({ headers, body });
+      if (stream.session !== connections[0]) { stream.respond({ ':status': 200 }); stream.end(); }
+    });
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const endpoint = `http://127.0.0.1:${server.address().port}`;
+  const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const apns = createAPNs({ key: privateKey.export({ type: 'pkcs8', format: 'pem' }), keyId: 'K', teamId: 'T', topic: 'test',
+    hosts: { development: endpoint }, requestTimeoutMs: 120 });
+  const { base, room, hostToken } = await setup(t, { apns });
+  t.after(() => { apns.close(); connections.forEach(session => session.destroy()); server.close(); });
+  const mac = host(base, room, hostToken);
+  await until(() => mac.frames.some(frame => frame.type === 'ready'), 'ready');
+  mac.send(JSON.stringify({ pushToken: alertToken(1), pushEnvironment: 'development' }));
+  for (let index = 0; index < 60; index++) {
+    if (index && index % 25 === 0) await new Promise(resolve => setTimeout(resolve, 1050));
+    mac.send(alert(btoa(String(index))));
+    await until(() => pushes(mac).length === index + 1, 'logical push reply');
+  }
+  assert.equal(pushes(mac).filter(frame => frame.ok).length, 60);
+  assert.equal(received.length, 61); // one retry, charged as one logical event
+  assert.equal(connections.length, 2);
+  assert.equal(received[0].body, received[1].body);
+  assert.equal(received[0].headers['apns-collapse-id'], received[1].headers['apns-collapse-id']);
+  mac.send(alert('AAAA'));
+  await until(() => pushes(mac).length === 61, 'rate refusal');
+  assert.deepEqual(pushes(mac)[60], { type: 'push', ok: false, reason: 'rate' });
+  assert.equal(received.length, 61);
+  mac.close();
+});
 
 // An APNs stand-in that holds every push until the test answers it.
 function heldAPNs() {
