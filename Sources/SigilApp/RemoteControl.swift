@@ -19,7 +19,17 @@ final class RemoteControl {
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var socket: URLSessionWebSocketTask?
     @ObservationIgnored private var peer: String?
+    @ObservationIgnored private var authenticatedPeer: String?
     @ObservationIgnored private var generation = UUID()
+    @ObservationIgnored private var connectionGeneration = UUID()
+    @ObservationIgnored private var currentRoom: String?
+    @ObservationIgnored private var hostRouted = false
+    @ObservationIgnored private var registeredPushGeneration: UUID?
+    @ObservationIgnored private var pushGeneration = UUID()
+    @ObservationIgnored private var pendingPushes = RemotePendingPushes()
+    @ObservationIgnored private var pushDrain: Task<Void, Never>?
+    @ObservationIgnored private var pushDrainID: UUID?
+    @ObservationIgnored private let pushClock: () -> Date
     @ObservationIgnored private var network: URLSession?
     @ObservationIgnored private let store: any RemotePairingStore
     @ObservationIgnored private let notifications: NotificationCenter
@@ -36,6 +46,9 @@ final class RemoteControl {
     #if DEBUG
         /// Holds an old connection failure while a test reopens a new generation.
         @ObservationIgnored var beforeConnectionFailureHandling: (@MainActor () async -> Void)?
+        /// Suspends an owned push write while the socket reader processes a
+        /// generation/token/peer change. Nil in ordinary operation.
+        @ObservationIgnored var beforeQueuedPushSend: (@MainActor () async -> Void)?
     #endif
     @ObservationIgnored private var lastSentTabs: [RemoteState.Tab]?
     @ObservationIgnored private var lastSentSelection: String?
@@ -46,7 +59,13 @@ final class RemoteControl {
     /// The phone's push token, kept with the pairing and re-sent to the relay on every connect.
     @ObservationIgnored private var push: (token: String, environment: String)?
     /// Live Activity push tokens by tab id, for as long as the phone keeps one running.
-    @ObservationIgnored private var activities: [String: String] = [:]
+    private struct ActivityRegistration {
+        let token: String
+        let generation: UUID
+        var environment: String?
+        var ending = false
+    }
+    @ObservationIgnored private var activities: [String: ActivityRegistration] = [:]
     @ObservationIgnored private var planner = RemoteAlertPlanner()
     @ObservationIgnored private var alertTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var deviceKey: String?
@@ -63,10 +82,12 @@ final class RemoteControl {
     /// Production passes DistributedNotificationCenter; the default stays in this process.
     init(
         store: any RemotePairingStore = KeychainRemotePairingStore(),
-        notifications: NotificationCenter = NotificationCenter()
+        notifications: NotificationCenter = NotificationCenter(),
+        pushClock: (() -> Date)? = nil
     ) {
         self.store = store
         self.notifications = notifications
+        self.pushClock = pushClock ?? { Date() }
         revokeFailed = store.revokeFailed
         notifications.addObserver(forName: Self.revokedNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.revokedElsewhere() }
@@ -131,6 +152,7 @@ final class RemoteControl {
             return
         }
         let restored = restoredSession(for: origin, saved: saved)
+        if deviceKey != restored.deviceKey { activities.removeAll() }
         deviceKey = restored.deviceKey
         if let saved, let token = saved.pushToken, let environment = saved.pushEnvironment,
             RemoteControl.origin(saved.origin)?.absoluteString == origin.absoluteString
@@ -168,6 +190,7 @@ final class RemoteControl {
                         let allocated = try await self.allocate(origin: origin, network: network)
                         guard self.generation == current, !Task.isCancelled else { return }
                         room = allocated
+                        self.currentRoom = allocated.room
                         if !session.isPaired {
                             var link = URLComponents(url: origin, resolvingAgainstBaseURL: false)!
                             link.path = "/"
@@ -188,11 +211,14 @@ final class RemoteControl {
                     let socket = network.webSocketTask(with: socketRequest)
                     socket.maximumMessageSize = 110_000
                     self.socket = socket
+                    self.connectionGeneration = UUID()
+                    self.pausePushDrain()
                     ready = false
                     socket.resume()
                     let keepAlive = Task { await Self.keepAlive(socket) }
                     defer { keepAlive.cancel() }
                     self.peer = nil
+                    self.authenticatedPeer = nil
                     var routed = false
                     while !Task.isCancelled, self.generation == current {
                         let message = try await socket.receive()
@@ -211,6 +237,7 @@ final class RemoteControl {
                                 ["room": room.room, "ticket": session.ticket], key: key, direction: "relay-host")
                             try await self.send(Frame(route: route), socket: socket)
                         } else if frame.type == "ready" {
+                            guard routed else { throw RemoteError.invalidMessage }
                             ready = true
                             failures = 0
                             self.status = session.isPaired ? "Phone disconnected" : "Scan to connect"
@@ -218,12 +245,20 @@ final class RemoteControl {
                             self.error = unsaved
                             // The relay forgets the token with the room; a fresh room hears it again.
                             if let push = self.push {
+                                let registrationGeneration = self.pushGeneration
                                 try await self.send(
                                     Frame(pushToken: push.token, pushEnvironment: push.environment), socket: socket)
+                                guard self.generation == current, self.socket === socket,
+                                    self.pushGeneration == registrationGeneration, !Task.isCancelled
+                                else { return }
+                                self.registeredPushGeneration = registrationGeneration
                             }
+                            self.hostRouted = true
+                            self.drainPushes()
                         } else if frame.type == "peer", let id = frame.peer, id.count <= 64 {
                             if retireRoom { break }
                             self.peer = id
+                            self.authenticatedPeer = nil
                             self.stopWatching()
                             session.resetConnection()
                             self.eventSequence = 0
@@ -236,6 +271,7 @@ final class RemoteControl {
                                 frame.ok == true ? "ok" : (frame.reason ?? frame.status.map(String.init) ?? "failed")
                         } else if frame.type == "left", frame.peer == self.peer {
                             self.peer = nil
+                            self.authenticatedPeer = nil
                             self.stopWatching()
                             RemoteCommands.uploads = RemoteUpload.Inbox()
                             self.status = session.isPaired ? "Phone disconnected" : "Scan to connect"
@@ -273,9 +309,13 @@ final class RemoteControl {
                                 self.expiresAt = nil
                                 self.status = "Phone connected"
                                 self.deviceKey = session.deviceKey
+                                self.authenticatedPeer = id
+                                self.pendingPushes.clearAlerts()
                                 if firstPair, let key = session.deviceKey {
                                     retireRoom = true
                                     self.push = nil
+                                    self.pushGeneration = UUID()
+                                    self.registeredPushGeneration = nil
                                     if self.store.save(
                                         RemotePairing(
                                             origin: origin.absoluteString, deviceKey: key, ticket: session.ticket))
@@ -332,7 +372,9 @@ final class RemoteControl {
                     guard self.generation == current, !Task.isCancelled else { return }
                     // Reached only to retire the room. The phone reconnects by ticket.
                     socket.cancel(with: .goingAway, reason: nil)
+                    self.pausePushDrain()
                     self.peer = nil
+                    self.authenticatedPeer = nil
                     self.stopWatching()
                 } catch {
                     #if DEBUG
@@ -340,6 +382,9 @@ final class RemoteControl {
                     #endif
                     guard self.generation == current, !Task.isCancelled else { return }
                     self.stopWatching()
+                    self.pausePushDrain()
+                    self.peer = nil
+                    self.authenticatedPeer = nil
                     self.socket?.cancel(with: .goingAway, reason: nil)
                     failures += 1
                     // A route refused before ready means the relay no longer has the room.
@@ -379,6 +424,13 @@ final class RemoteControl {
             activities = [:]
         }
         generation = UUID()
+        pausePushDrain()
+        pendingPushes.clear()
+        activities = activities.filter { !$0.value.ending }
+        currentRoom = nil
+        authenticatedPeer = nil
+        for pending in alertTasks.values { pending.cancel() }
+        alertTasks.removeAll()
         task?.cancel()
         task = nil
         stopWatching()
@@ -433,6 +485,15 @@ final class RemoteControl {
             push = (token, environment)
             registration = Frame(pushToken: token, pushEnvironment: environment)
         }
+        pushGeneration = UUID()
+        registeredPushGeneration = nil
+        pushDrain?.cancel()
+        pushDrain = nil
+        pushDrainID = nil
+        pendingPushes.clearAlerts()
+        let registrationGeneration = pushGeneration
+        let pairingGeneration = generation
+        let connection = connectionGeneration
         if let key = session.deviceKey {
             _ = store.save(
                 RemotePairing(
@@ -443,6 +504,11 @@ final class RemoteControl {
         // never be undone by saving an old key when that write returns.
         try await send(registration, socket: socket)
         await afterPushRegistrationSend?()
+        guard generation == pairingGeneration, connectionGeneration == connection,
+            self.socket === socket, pushGeneration == registrationGeneration
+        else { throw CancellationError() }
+        registeredPushGeneration = registrationGeneration
+        drainPushes()
         var reply = RemoteReply(challenge: command.challenge, sequence: command.sequence)
         reply.state = RemoteCommands.snapshot(model)
         return RemoteCommands.fitting(reply)
@@ -450,20 +516,36 @@ final class RemoteControl {
 
     /// `activity`: a Live Activity push token for one tab, or empty when the activity ended.
     private func registerActivity(_ command: RemoteRequest, model: AppModel) -> RemoteReply {
-        guard let tabID = command.tabID, model.tabs.contains(where: { $0.id.uuidString == tabID }) else {
+        guard let tabID = command.tabID else {
             return RemoteReply(
                 challenge: command.challenge, sequence: command.sequence, ok: false, error: "This tab is closed.")
         }
         let token = (command.text ?? "").lowercased()
+        guard
+            token.isEmpty && activities[tabID]?.ending == true
+                || model.tabs.contains(where: { $0.id.uuidString == tabID })
+        else {
+            return RemoteReply(
+                challenge: command.challenge, sequence: command.sequence, ok: false, error: "This tab is closed.")
+        }
         if token.isEmpty {
             activities[tabID] = nil
+            pendingPushes.removeActivity(tabID)
         } else {
             guard token.utf8.count >= 64, token.utf8.count <= 200, RemoteCrypto.isLowerHex(token) else {
                 return RemoteReply(
                     challenge: command.challenge, sequence: command.sequence, ok: false,
                     error: "That activity token is not usable.")
             }
-            activities[tabID] = token
+            expirePushes()
+            if activities[tabID] == nil, activities.count >= RemotePendingPushes.capacity {
+                return RemoteReply(
+                    challenge: command.challenge, sequence: command.sequence, ok: false,
+                    error: "Too many activities are waiting to finish. Try again after they catch up.")
+            }
+            pendingPushes.removeActivity(tabID)
+            activities[tabID] = ActivityRegistration(
+                token: token, generation: UUID(), environment: push?.environment)
         }
         var reply = RemoteReply(challenge: command.challenge, sequence: command.sequence)
         reply.state = RemoteCommands.snapshot(model)
@@ -478,6 +560,7 @@ final class RemoteControl {
             return
         }
         let id = tab.id.uuidString
+        let schedulingGeneration = generation
         // The first look sets the baseline at once, so the next change is a transition.
         if !planner.knownTabs.contains(id) { evaluate(tab, model: model) }
         guard alertTasks[id] == nil else { return }
@@ -486,6 +569,7 @@ final class RemoteControl {
             guard let self else { return }
             self.alertTasks[id] = nil
             guard !Task.isCancelled, let tab, let model else { return }
+            guard self.generation == schedulingGeneration else { return }
             self.evaluate(tab, model: model)
         }
     }
@@ -499,17 +583,22 @@ final class RemoteControl {
             interactionID: prompt?.id, verified: prompt?.verified == true)
         let plan = planner.plan(tabID: id, snapshot)
         // A phone on the socket sees the change itself; alerts are for a phone that is away.
-        guard peer == nil, let socket else { return }
-        if allowAlerts, let alert = plan.alert, push != nil, let deviceKey {
+        guard isEnabled else { return }
+        if allowAlerts, authenticatedPeer == nil, var alert = plan.alert, let push, let deviceKey {
+            alert.issuedAt = Int(pushClock().timeIntervalSince1970)
             if let sealed = try? RemoteCrypto.seal(alert, key: deviceKey, direction: RemoteAlert.direction) {
                 let frame = Frame(push: .init(data: sealed, thread: id))
-                Task { try? await self.send(frame, socket: socket) }
+                enqueuePush(
+                    frame, kind: .alert, tabID: id, tokenGeneration: pushGeneration,
+                    environment: push.environment, issuedAt: Date(timeIntervalSince1970: Double(alert.issuedAt)))
             }
         }
-        if let state = plan.activity, let token = activities[id] {
-            let frame = Frame(push: .init(activity: token, state: state, event: plan.ends ? "end" : "update"))
-            if plan.ends { activities[id] = nil }
-            Task { try? await self.send(frame, socket: socket) }
+        if let state = plan.activity, let activity = activities[id], !activity.ending {
+            let frame = Frame(push: .init(activity: activity.token, state: state, event: plan.ends ? "end" : "update"))
+            if plan.ends { activities[id]?.ending = true }
+            enqueuePush(
+                frame, kind: plan.ends ? .end : .update, tabID: id,
+                tokenGeneration: activity.generation, environment: activity.environment, issuedAt: pushClock())
         }
     }
 
@@ -517,16 +606,136 @@ final class RemoteControl {
     func forgetTab(_ id: TerminalTab.ID) {
         let key = id.uuidString
         // Closed while the phone was away: its card ends now, or it would outlive the tab.
-        if let token = activities[key], peer == nil, let socket {
+        if let activity = activities[key], !activity.ending {
             let state = RemoteActivityState(
                 status: "exited", since: Int(Date().timeIntervalSince1970), asking: false)
-            let frame = Frame(push: .init(activity: token, state: state, event: "end"))
-            Task { try? await self.send(frame, socket: socket) }
+            let frame = Frame(push: .init(activity: activity.token, state: state, event: "end"))
+            activities[key]?.ending = true
+            enqueuePush(
+                frame, kind: .end, tabID: key, tokenGeneration: activity.generation,
+                environment: activity.environment, issuedAt: pushClock())
         }
         planner.forget(tabID: key)
-        activities[key] = nil
         alertTasks[key]?.cancel()
         alertTasks[key] = nil
+    }
+
+    var pendingPushCount: Int { pendingPushes.entries.count }
+    var isHostReadyForPushes: Bool {
+        hostRouted && registeredPushGeneration == pushGeneration && socket != nil && push != nil
+    }
+
+    private func pausePushDrain() {
+        hostRouted = false
+        registeredPushGeneration = nil
+        pushDrain?.cancel()
+        pushDrain = nil
+        pushDrainID = nil
+    }
+
+    private func expirePushes() {
+        pendingPushes.expire(now: pushClock())
+        // Ending registrations reserve capacity until their queued end was
+        // written, explicitly reconciled, or reached its original deadline.
+        let ending = activities.filter { $0.value.ending }
+        for (id, activity) in ending {
+            if !pendingPushes.entries.contains(where: {
+                $0.kind == .end && $0.tabID == id && $0.tokenGeneration == activity.generation
+            }) {
+                activities[id] = nil
+            }
+        }
+    }
+
+    private func enqueuePush(
+        _ frame: Frame, kind: RemotePendingPushes.Kind, tabID: String,
+        tokenGeneration: UUID, environment: String?, issuedAt: Date
+    ) {
+        guard isEnabled else { return }
+        pendingPushes.expire(now: pushClock())
+        // These are local queue deadlines, not APNs storage headers. No retry
+        // extends them, and activity cleanup gets a longer bounded window.
+        let lifetime: TimeInterval = kind == .alert ? 300 : kind == .update ? 60 : 900
+        let entry = RemotePendingPushes.Entry(
+            frame: frame, kind: kind, tabID: tabID, pairing: generation, room: currentRoom,
+            tokenGeneration: tokenGeneration, environment: environment, issuedAt: issuedAt,
+            expiresAt: issuedAt.addingTimeInterval(lifetime))
+        _ = pendingPushes.append(entry, now: pushClock())
+        drainPushes()
+    }
+
+    private func drainPushes() {
+        guard pushDrain == nil, isHostReadyForPushes, let socket, let room = currentRoom else { return }
+        let pairing = generation
+        let connection = connectionGeneration
+        let drainID = UUID()
+        pushDrainID = drainID
+        pushDrain = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.pushDrainID == drainID {
+                    self.pushDrain = nil
+                    self.pushDrainID = nil
+                }
+            }
+            while !Task.isCancelled, self.generation == pairing, self.connectionGeneration == connection,
+                self.socket === socket, self.currentRoom == room, self.isHostReadyForPushes
+            {
+                self.expirePushes()
+                var candidate: RemotePendingPushes.Entry?
+                for entry in self.pendingPushes.entries {
+                    let tokenMatches =
+                        entry.kind == .alert
+                        ? entry.tokenGeneration == self.pushGeneration && self.authenticatedPeer == nil
+                        : self.activities[entry.tabID]?.generation == entry.tokenGeneration
+                    guard entry.pairing == pairing, tokenMatches else {
+                        self.pendingPushes.remove(entry.id)
+                        continue
+                    }
+                    // A same-pairing/activity end may use the newly registered
+                    // replacement room; ordinary old-room events cannot.
+                    if let oldRoom = entry.room, oldRoom != room, entry.kind != .end {
+                        self.pendingPushes.remove(entry.id)
+                        continue
+                    }
+                    // Hold an old-environment end without blocking valid frames
+                    // behind it. Only explicit activity reconciliation retires it.
+                    let environment = entry.environment ?? self.activities[entry.tabID]?.environment
+                    if environment == nil || environment == self.push?.environment {
+                        candidate = entry
+                        break
+                    }
+                }
+                guard let entry = candidate else { return }
+                if entry.kind != .alert, self.activities[entry.tabID]?.environment == nil {
+                    self.activities[entry.tabID]?.environment = self.push?.environment
+                }
+                #if DEBUG
+                    await self.beforeQueuedPushSend?()
+                #endif
+                guard !Task.isCancelled, self.generation == pairing, self.connectionGeneration == connection,
+                    self.socket === socket, self.pushDrainID == drainID,
+                    self.pendingPushes.entries.contains(where: { $0.id == entry.id }),
+                    self.isHostReadyForPushes, entry.expiresAt > self.pushClock()
+                else { continue }
+                do {
+                    try await self.send(entry.frame, socket: socket)
+                } catch {
+                    guard self.generation == pairing, self.connectionGeneration == connection else { return }
+                    self.pausePushDrain()
+                    socket.cancel(with: .goingAway, reason: nil)
+                    return
+                }
+                guard !Task.isCancelled, self.generation == pairing, self.connectionGeneration == connection,
+                    self.socket === socket, self.pushDrainID == drainID
+                else { return }
+                self.pendingPushes.remove(entry.id)
+                if entry.kind == .end, self.activities[entry.tabID]?.generation == entry.tokenGeneration {
+                    self.activities[entry.tabID] = nil
+                }
+                try? await Task.sleep(for: Self.frameSpacing)
+            }
+        }
     }
 
     // MARK: Events

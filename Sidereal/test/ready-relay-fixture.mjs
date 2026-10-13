@@ -27,7 +27,9 @@ const proxy = http.createServer((req, res) => {
   req.pipe(forwarded);
 });
 const sockets = new WebSocketServer({ noServer: true });
+let hostConnections = 0;
 proxy.on('upgrade', (req, socket, head) => sockets.handleUpgrade(req, socket, head, client => {
+  const hostIndex = req.url.includes('role=host') ? ++hostConnections : 0;
   const backend = new WebSocket(`ws://127.0.0.1:${innerPort}${req.url}`, {
     headers: req.headers.authorization ? { authorization: req.headers.authorization } : {},
   });
@@ -37,6 +39,9 @@ proxy.on('upgrade', (req, socket, head) => sockets.handleUpgrade(req, socket, he
   let completed = false;
   const deliver = message => { if (client.readyState === WebSocket.OPEN) client.send(message.data, { binary: message.binary }); };
   const release = () => {
+    if (hostIndex === 1 && existsSync(process.env.SIGIL_TEST_DROP_HOST)) {
+      backend.terminate(); client.terminate(); return;
+    }
     if (!route || !existsSync(process.env.SIGIL_TEST_ROUTE_RELEASE)) return;
     deliver(route);
     route = undefined;

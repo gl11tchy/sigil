@@ -104,6 +104,22 @@ struct RemoteRequest: Codable, Sendable {
   `APNS_TEAM_ID` and `APNS_TOPIC` (the phone's bundle id). Without all four it
   answers `{type: "push", ok: false, reason: "off"}` and nothing else changes.
   Sixty pushes a minute per room; a `410` from Apple forgets the token.
+
+  The Mac holds only push frames until the current host socket is routed, ready
+  and its applicable token registration has completed. One paced drain checks
+  connection, room, pairing and token generations around writes. Queued events
+  retain their identity, issuance and fixed local expiry: alerts300s, activity
+  updates60s and ends900s. These are queue limits; APNs storage headers are
+  unchanged. The20-entry queue coalesces activity updates, prioritizes ends and
+  cannot renew an event on reconnect. Twenty active/pending-end registrations
+  reserve capacity; further new activities receive a clear busy reply until a
+  slot is released. An unauthenticated peer cannot clear alerts. Authentication
+  clears ordinary alerts, while activity ends remain until written, explicitly
+  retired by the phone, or expired. Closed-tab retirement acknowledgements are
+  accepted for known pending ends. Stop/revoke clear the queue. A same-owner end
+  can use a newly registered replacement room; other old-room events are dropped.
+  No terminal commands enter this queue. Socket/APNs acceptance remains distinct
+  from actual phone delivery.
 - Spec: `docs/phone-companion-2-spec.md`.
 
 ## Verification and boundaries
