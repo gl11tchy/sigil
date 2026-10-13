@@ -21,6 +21,28 @@ The resumable record for the [experience contract](EXPERIENCE.md). Each entry
 says what was built, how it was checked, what the check showed, and what is
 still open. Nothing here is a timing; counts are counted actions.
 
+## REA-1229: user ownership in the Sigil-only list (2026-10-13)
+
+Retain exact conversation IDs from saved pins, archives, names and colors,
+including unknown or unreadable history. A separate preferences-only migration
+uses independent immutable addition records plus the existing compatibility list, checks
+persistence/readback before completion, and reconciles failed future actions
+and another copy's later arrivals. Opening alone and Notes alone stay excluded;
+provider identity/binding and history parsing are unchanged.
+
+Generated test-only baseline CI38348628425 at
+`71c40caf598afc3e34216770ebb159b63625107d` reproduced 31 issues in the eight new
+ownership cases on unchanged main production code: 1,239 Swift tests/109 suites,
+37 XCTest cases passing. Focused final fixtures cover all categories, overlapping
+writes, failed persistence/completion and retry, relaunch, pending identity and
+the open-chat/Notes exclusions. See [QA](../qa/rea-1229.md); observed final
+exact-head CI and parent review are recorded in the PR and task receipts.
+
+Strict local formatting and diff checks passed. AppTests/builds remain CI-only;
+prior local process/cache denials are not retried. No daily-app replacement,
+personal histories or paid inference. PR162's blocked note and all pending manual
+validation remain untouched. Await parent personal review before merge.
+
 ## REA-1351: quiet compatibility details
 
 Newer compatible CLI notices share one collapsed native popover control in the
