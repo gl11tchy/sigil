@@ -146,4 +146,71 @@ struct SigilOnlyHistoryTests {
 
         #expect(!settings.sigilConversationsSeeded)
     }
+
+    @Test(arguments: ["pin", "archive", "name", "color"])
+    func legacyOwnershipSurvivesAnAlreadyCompletedOriginalSeed(_ category: String) async throws {
+        let suite = "SigilOnlyHistoryTests.REA1229.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: "session.sigilConversationsSeeded")
+        let owned = session("legacy-\(category)", cwd: "/tmp/generated-rea1229")
+        let outside = session("outside", cwd: owned.cwd, provider: .codex)
+        let (model, settings) = await model(sessions: [owned, outside], defaults: defaults)
+        defer { model.closeAllTabsAndWait() }
+        switch category {
+        case "pin": settings.pinnedConversations = [.init(sessionID: owned.id, cwd: owned.cwd)]
+        case "archive": settings.archivedConversations = [.init(sessionID: owned.id, cwd: owned.cwd)]
+        case "name": settings.conversationNames = [.init(sessionID: owned.id, cwd: owned.cwd, name: "My chat")]
+        default: settings.tabColors = [.init(sessionID: owned.id, cwd: owned.cwd, color: .violet)]
+        }
+
+        model.seedSigilConversations()
+
+        #expect(settings.isSigilConversation(owned.id))
+        #expect(AppSettings(defaults: defaults).isSigilConversation(owned.id))
+        #expect(defaults.bool(forKey: "session.sigilConversationsSeeded2"))
+        #expect(!settings.isSigilConversation(outside.id))
+        if category == "archive" {
+            #expect(model.archivedCount == 1)
+            settings.focusedProjectPath = SidebarOrganization.archivedID
+        }
+        #expect(model.sidebarSessions.map(\.id) == [owned.id])
+        if category == "pin" { #expect(model.pinnedSessions().map(\.id) == [owned.id]) }
+    }
+
+    @Test(arguments: ["pin", "archive", "name", "color"])
+    func futureOwnershipSurvivesTurningOtherAppsOff(_ category: String) async throws {
+        let suite = "SigilOnlyHistoryTests.REA1229.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: "session.sigilConversationsSeeded")
+        defaults.set(true, forKey: "session.sigilConversationsSeeded2")
+        let owned = session("future-\(category)", cwd: "/tmp/generated-rea1229")
+        let outside = session("outside", cwd: owned.cwd, provider: .codex)
+        let (model, settings) = await model(sessions: [owned, outside], defaults: defaults)
+        defer { model.closeAllTabsAndWait() }
+        settings.showOtherAppSessions = true
+        switch category {
+        case "pin": model.pin(owned)
+        case "archive": model.archive(owned)
+        case "name": model.rename(owned, to: "My chat")
+        default:
+            let tab = TerminalTab(
+                spec: .init(
+                    workingDirectory: URL(fileURLWithPath: owned.cwd),
+                    mode: .resume(sessionID: owned.nativeSessionID), provider: owned.provider),
+                settings: settings)
+            model.setTabColor(tab, to: .violet)
+        }
+        settings.showOtherAppSessions = false
+
+        #expect(settings.isSigilConversation(owned.id))
+        #expect(AppSettings(defaults: defaults).isSigilConversation(owned.id))
+        #expect(!settings.isSigilConversation(outside.id))
+        if category == "archive" {
+            #expect(model.archivedCount == 1)
+            settings.focusedProjectPath = SidebarOrganization.archivedID
+        }
+        #expect(model.sidebarSessions.map(\.id) == [owned.id])
+    }
 }
