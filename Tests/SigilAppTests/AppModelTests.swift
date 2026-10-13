@@ -10,6 +10,34 @@ import Testing
 struct AppModelTests {
 
     @Test @MainActor
+    func savedGrokHistoryReopensWithItsOwnModelAndEffort() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        defer { fixture.store.stop() }
+        fixture.settings.isTabMessagingEnabled = false
+        fixture.settings.model = "grok-4.7"
+        fixture.settings.effort = "low"
+        let cwd = try fixture.directory("saved-grok-project")
+        try fixture.writeListedSession(
+            id: "saved-grok", cwd: cwd.path,
+            modelID: "grok-4.7-build-fast", reasoningEffort: "xhigh")
+        await fixture.store.reload()
+        let saved = try #require(fixture.store.sessions.first { $0.id == "saved-grok" })
+        #expect(saved.isHistoryValidated)
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        model.open(saved)
+        let tab = try #require(model.tabs.first)
+        #expect(tab.spec.model == "grok-4.7-build-fast")
+        #expect(tab.spec.reasoningEffort == "xhigh")
+        #expect(
+            tab.spec.arguments() == [
+                "--cwd", cwd.path, "--resume", "saved-grok",
+                "--model", "grok-4.7-build-fast", "--reasoning-effort", "xhigh",
+            ])
+    }
+
+    @Test @MainActor
     func savedDisplayCannotPruneMigrateOrRestoreWithoutFreshSourceIdentity() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
@@ -4735,7 +4763,9 @@ final class ModelFixture {
         summary: String = "Session",
         messages: Int = 4,
         sessionKind: String? = nil,
-        updatedAt: String = "2026-08-01T00:00:00Z"
+        updatedAt: String = "2026-08-01T00:00:00Z",
+        modelID: String? = nil,
+        reasoningEffort: String? = nil
     ) throws {
         let dir = GrokPaths.sessionDirectory(cwd: cwd, sessionID: id)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -4749,6 +4779,8 @@ final class ModelFixture {
         if let sessionKind {
             json["session_kind"] = sessionKind
         }
+        if let modelID { json["current_model_id"] = modelID }
+        if let reasoningEffort { json["reasoning_effort"] = reasoningEffort }
         let data = try JSONSerialization.data(withJSONObject: json)
         try data.write(to: dir.appendingPathComponent("summary.json"), options: .atomic)
     }
