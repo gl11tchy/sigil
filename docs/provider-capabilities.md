@@ -344,7 +344,7 @@ The internal states are starting, working, waiting for approval, confirmed idle,
 interrupted, exited, failed, disconnected, and unknown. A live CLI initially has
 unknown turn state. User submission means input was sent, not accepted.
 
-After submission, Claude Code, Devin, Cursor, Kimi and new Codex tabs keep an
+After submission, Claude Code, Devin, Cursor, Kimi and unmatched new Codex tabs keep an
 unknown state, with a neutral last-input tooltip and no Working loader or elapsed
 timer. They do not count as working on the Mac or in phone snapshots. A running
 CLI still requires confirmation before close or quit. No completion-watch task
@@ -353,6 +353,25 @@ enables observation only after its session metadata passes the existing scanner'
 shape, version and native identity checks. Missing or rejected metadata stays
 unknown. Codex writer identity invalidation ends its watch and disables lifecycle
 observation; Grok can still observe a journal created after submission.
+
+When a new Codex tab gains its verified conversation identity, it attaches the
+exact validated transcript to the current child process generation. The journal
+rechecks the owned process tree's sole writable rollout before and after each
+read; ambiguity, lost generation or a different file ends tracking. The file's
+device/inode and validated prefix also remain fixed. A cached row, folder/time
+match or user input cannot supply that proof. Explicit user links validate the
+selected envelope but retain tail-only reading without claiming process ownership.
+
+For an automatically verified rollout born after the child started, the journal
+reads from zero with the child birth time as its event boundary, in bounded chunks.
+Catch-up restores only the final observed state: an already active first turn
+becomes Working, while an already completed turn becomes Idle without an unread
+dot, settle callback or historical phone alert. Events published after the
+attachment boundary remain live, including completion of a caught-up active turn.
+The phone planner rebases silently during catch-up so that later live transitions
+can alert normally; registered phone activities can still receive current state.
+A partial record becomes live when its remaining bytes arrive.
+Restart retains the transcript and tails new events; it does not replay prior turns.
 
 Neither terminal title symbols nor output silence can complete a turn. The
 bounded journal reader checks native session/turn identity and a submission-time
@@ -376,8 +395,8 @@ queued turn requires its own matching events. Interruption stops the watcher;
 the next submission opens a fresh reader at the current file end. Each watcher
 generation fences poll results and completion callbacks, so replaced processes
 cannot apply a stale batch or completion notification. Grok retains its input
-and chunk-event behavior. Newly bound Codex tabs remain the separate REA-1218
-scope; this does not expand conversation identity evidence.
+and chunk-event behavior. Late attachment also fences every poll by native
+session identity and child generation; it does not expand conversation identity evidence.
 
 These journal formats are version-sensitive, not promised stable provider APIs.
 Grok tab-message delivery waits for confirmed idle. An unknown or active tab

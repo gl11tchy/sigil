@@ -954,3 +954,49 @@ shared copies, file/pin preservation and accessible state text. Manual mounted
 image/native UI/VoiceOver observations remain unobserved. Build308 and blocked
 PR162 remain untouched. Stop for parent personal final-code review; no merge,
 installation or next ticket.
+
+## 2026-10-13 — REA-1218: attach verified late Codex lifecycle
+
+Isolated `fix/rea-1218-late-codex-lifecycle` starts from main
+`18d6a17411a0a69726ccdc050e9c4c73170c71f6`. The test-only
+`dce595abf850fe7f01d79f7e80a7539ba3e60949` reproduced three issues in
+[CI38394128901](https://github.com/gl11tchy-team/sigil/actions/runs/38394128901):
+validated explicit linking left lifecycle false, no watcher, and lifecycle false
+in the phone snapshot. The other 1,284 Swift tests and all 37 XCTest cases passed.
+
+The candidate carries opaque exact file/process receipts into late attachment,
+silently catches up the final post-launch state, and retains the transcript on
+Restart. Replaced files, rewritten prefixes, appended headers, ambiguous ownership
+and stale process/session generations end observation. Mid-turn Return preserves
+the existing watcher; a fresh reader after interruption tails current history.
+Generated Kit fixtures and CI-only App fixtures cover the first turn, delayed
+identity, completed-before-attachment, background unread completion, phone
+capabilities, queued turns and delayed results after close/restart. New kernel
+observations are synthetic. Strict local formatting and diff checks passed;
+The exact-head integrated result, source tree and limits are recorded in
+[PR170's validation](https://github.com/gl11tchy-team/sigil/pull/170) and its
+[current checks](https://github.com/gl11tchy-team/sigil/pull/170/checks).
+The mission requires that final head's integrated gate to pass.
+
+First candidate `a8c3ecf7aeb8d4719445e18c30a0a46ccd6ea87e` stopped at
+test compilation in CI38397622262: `#require` lost an injected closure's
+Sendable type. The resolver call now precedes its assertion. Source review
+added final file evidence verification after the last lease and capability-only
+publication, with focused fixtures. A new exact-head gate follows this relevant
+repair; there is no overlapping run or claimed Swift-test pass for the first gate.
+
+Head `a2e3ac84086fb78b599cc747b2ba479bc2ca9a47`, CI38398604337,
+ran 1,301 Swift tests in 111 suites with one issue: the restart fixture compared
+`/var` and `/private/var` URLs for the same file. The other 1,300 Swift tests and
+all 37 XCTest cases passed. The assertion now uses the existing canonical path,
+without changing production identity. Personal review and review comment
+4258674183 found that alert suppression also dropped Live Activity updates after
+consuming the planner transition. Only notification alerts are now suppressed;
+actual RemoteControl/loopback-relay cases capture state frames and decrypt the
+later live finished alert. No Apple/APNs service or real phone is contacted.
+
+No local AppTests/app build, prior cache/process/build-denial retry, live process
+inventory, personal histories, real model calls or daily-app interaction. Actual
+Codex, real-phone alerts and renamed-debug AX/window-ID UI remain unobserved.
+Protected PR162 and prior manual-review tickets are preserved. Parent personal
+final-code review is required before merge, installation or another ticket.
