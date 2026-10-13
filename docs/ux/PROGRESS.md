@@ -8,7 +8,9 @@ on ordinary tail changes; unsafe/earlier edits conservatively replay. Full
 formatter oracle,33 Node checks,216 Chromium/WebKit web-find/mobile passes with
 two explicit skips, new Find/raw/copy/selection/node checks and screenshots are
 documented in [QA](../qa/rea-1194.md). Related chrome scope is unchanged. Final
-new-case focus/exact-head CI and parent review pending. No merge/install/deploy,
+new-case focus passes; the repaired gate passed Verify but caught the required
+iPhone formatter mirror. Resource parity is synchronized; next exact-head
+native gate and parent review pending. No merge/install/deploy,
 provider calls, personal data, local AppTests/build or second implementation.
 
 ## REA-1212: bounded APNs connection recovery (2026-10-13)
