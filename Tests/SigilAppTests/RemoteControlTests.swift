@@ -90,21 +90,22 @@ struct RemoteControlTests {
         #expect(remote.isPaired)
     }
 
-    @Test(arguments: [RemoteControl.legacyRailwayOrigin, RemoteControl.legacyApexOrigin]) @MainActor
-    func cancelKeepsARetiredOriginsSavedPairing(origin: String) throws {
+    @Test @MainActor func cancelKeepsARetiredOriginsSavedPairing() throws {
         let fixture = try PairingCancellationFixture()
         defer { fixture.cleanup() }
-        let saved = fakePairing(origin: origin)
-        let store = PairingCancellationStore(saved: saved)
-        let remote = RemoteControl(store: store)
-        defer { remote.stop() }
-        // This synchronous attempt never reaches the retired or live relay.
-        remote.start(urlText: "https://pairing-b.invalid", model: fixture.model)
-        #expect(remote.isEnabled && !remote.isPaired)
-        remote.cancelPairing()
-        #expect(store.saved == saved)
-        #expect(store.clears == 0 && store.saves == 0)
-        #expect(!remote.isEnabled)
+        for origin in [RemoteControl.legacyRailwayOrigin, RemoteControl.legacyApexOrigin] {
+            let saved = fakePairing(origin: origin)
+            let store = PairingCancellationStore(saved: saved)
+            let remote = RemoteControl(store: store)
+            defer { remote.stop() }
+            // This synchronous attempt never reaches the retired or live relay.
+            remote.start(urlText: "https://pairing-b.invalid", model: fixture.model)
+            #expect(remote.isEnabled && !remote.isPaired)
+            remote.cancelPairing()
+            #expect(store.saved == saved)
+            #expect(store.clears == 0 && store.saves == 0)
+            #expect(!remote.isEnabled)
+        }
     }
 
     @Test @MainActor func cancelPreservesTheFailedDisconnectRetryUntilExplicitDisconnectSucceeds() throws {

@@ -13,6 +13,11 @@ AppTests remain CI-only; real phone, rendered UI and daily-app behavior are
 unobserved. Await candidate CI and parent personal final-diff review. No merge,
 installation, actual Keychain/phone state or personal histories were touched.
 
+First candidate CI38377097064 failed compiling a test argument provider's
+main-actor origin constants. Moving the same two examples into the test body
+repairs that isolation error; production code is unchanged. The failed run remains
+in QA evidence, and corrected-head CI is required.
+
 ## REA-1225: selected folders and unused worktree attempts (2026-10-13)
 
 Candidate for parent personal review; no merge, installation or manual UI
