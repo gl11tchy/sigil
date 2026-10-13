@@ -1000,3 +1000,46 @@ inventory, personal histories, real model calls or daily-app interaction. Actual
 Codex, real-phone alerts and renamed-debug AX/window-ID UI remain unobserved.
 Protected PR162 and prior manual-review tickets are preserved. Parent personal
 final-code review is required before merge, installation or another ticket.
+
+## 2026-10-13 — REA-1209: routed and registered push readiness
+
+Isolated `fix/rea-1209-ready-push-queue` starts from
+`fc46fccc2a42affe0ba779cba571452ba8fdfa52`. Test-only
+`791746a554e62d514dfcdcc2870cad69fd4c682a`,
+[CI38411917626](https://github.com/gl11tchy-team/sigil/actions/runs/38411917626),
+changed only a generated loopback proxy/test. Actual RemoteControl emitted a
+synthetic stopped alert while the real relay's host challenge was withheld.
+One test failed three assertions: no captured alert, backend close1008 and two
+room allocations. The other1,302 Swift tests and37 XCTest cases passed.
+
+The candidate gates a bounded push-only queue on routed/registered readiness,
+retains original identity/time/fixed expiry, coalesces activity updates and
+reserves slots for accepted ends. Pairing/connection/room/token fences reject
+stale continuations. Only authenticated phone commands clear ordinary alerts;
+known closed-tab ends can be explicitly retired, and otherwise remain eligible
+for delivery or expiry. Terminal commands are never queued. Focused generated
+fixtures use actual RemoteControl/relay capture, a fake clock and owned write
+barriers. Local formatting, JavaScript syntax and diff checks passed; final
+exact-head integrated evidence will be recorded in the PR after observation.
+
+First candidate `ed384512fba419d469851ff265b4098aedab6f2e`, CI38415786835,
+stopped at test compilation: mutating queue calls and a throwing fixture read
+were wrapped by Swift Testing macros. Those calls now precede their assertions;
+production behavior is unchanged by this repair. No Swift test pass is claimed
+for the first gate. The next gate follows this relevant repair, without overlap.
+
+Repaired66f9d0515b3f62757149f839ad3df1a7bdb52040 / CI38417202880
+compiled and ran1,313 Swift tests with8 issues: five in the prior late-Codex
+completed catch-up case after connected-phone updates changed capture order,
+and three new phone-fixture cases because the proxy omitted required Origin.
+All37 XCTest cases and the pure queue suite passed. Ordinary connected-phone
+update behavior is restored while ends remain eligible; Origin is forwarded,
+and token replacement tests a genuinely queued away update. Prior assertions
+remain intact. The next exact-head gate follows those concrete repairs.
+
+No local AppTests/build, denial retry, personal history, real provider/Apple
+calls, process inventory, security/credential or public distribution changes.
+Relay allocation/proxy policy, APNs TTL policy and HTTP/2 retry remain separate.
+Physical delivery and rendered Settings/AX/window-ID behavior are unobserved.
+Protected PR162 and all ten earlier manual-review records remain preserved.
+Stop for parent personal final-code review; no merge/install or next ticket.

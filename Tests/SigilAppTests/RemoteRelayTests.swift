@@ -260,13 +260,17 @@ final class RelayPhone {
     private let socket: URLSessionWebSocketTask
     private let timeout: Task<Void, Never>
 
-    init(relay: RelayFixture) throws {
-        var endpoint = try #require(URLComponents(string: relay.origin))
+    convenience init(relay: RelayFixture) throws {
+        try self.init(origin: relay.origin, phoneOrigin: relay.phoneOrigin)
+    }
+
+    init(origin: String, phoneOrigin: String = "http://localhost:3099") throws {
+        var endpoint = try #require(URLComponents(string: origin))
         endpoint.scheme = "ws"
         endpoint.path = "/connect"
         endpoint.queryItems = [URLQueryItem(name: "role", value: "phone")]
         var request = URLRequest(url: try #require(endpoint.url))
-        request.setValue(relay.phoneOrigin, forHTTPHeaderField: "Origin")
+        request.setValue(phoneOrigin, forHTTPHeaderField: "Origin")
         let socket = network.webSocketTask(with: request)
         self.socket = socket
         socket.resume()
