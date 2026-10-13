@@ -276,6 +276,7 @@ final class RemoteControl {
                             RemoteCommands.uploads = RemoteUpload.Inbox()
                             self.status = session.isPaired ? "Phone disconnected" : "Scan to connect"
                             if retireRoom { break }
+                            self.drainPushes()
                         } else if let id = frame.peer, id == self.peer, let ciphertext = frame.data {
                             do {
                                 let firstPair = !session.isPaired
@@ -593,7 +594,9 @@ final class RemoteControl {
                     environment: push.environment, issuedAt: Date(timeIntervalSince1970: Double(alert.issuedAt)))
             }
         }
-        if let state = plan.activity, let activity = activities[id], !activity.ending {
+        if let state = plan.activity, let activity = activities[id], !activity.ending,
+            authenticatedPeer == nil || plan.ends
+        {
             let frame = Frame(push: .init(activity: activity.token, state: state, event: plan.ends ? "end" : "update"))
             if plan.ends { activities[id]?.ending = true }
             enqueuePush(
@@ -684,6 +687,10 @@ final class RemoteControl {
                 self.expirePushes()
                 var candidate: RemotePendingPushes.Entry?
                 for entry in self.pendingPushes.entries {
+                    // Connected phones can update ordinary activity state from
+                    // current snapshots. Keep queued updates pending; a peer
+                    // appearance alone supplies no reconciliation evidence.
+                    if entry.kind == .update && self.authenticatedPeer != nil { continue }
                     let tokenMatches =
                         entry.kind == .alert
                         ? entry.tokenGeneration == self.pushGeneration && self.authenticatedPeer == nil

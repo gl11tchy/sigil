@@ -1028,6 +1028,15 @@ were wrapped by Swift Testing macros. Those calls now precede their assertions;
 production behavior is unchanged by this repair. No Swift test pass is claimed
 for the first gate. The next gate follows this relevant repair, without overlap.
 
+Repaired66f9d0515b3f62757149f839ad3df1a7bdb52040 / CI38417202880
+compiled and ran1,313 Swift tests with8 issues: five in the prior late-Codex
+completed catch-up case after connected-phone updates changed capture order,
+and three new phone-fixture cases because the proxy omitted required Origin.
+All37 XCTest cases and the pure queue suite passed. Ordinary connected-phone
+update behavior is restored while ends remain eligible; Origin is forwarded,
+and token replacement tests a genuinely queued away update. Prior assertions
+remain intact. The next exact-head gate follows those concrete repairs.
+
 No local AppTests/build, denial retry, personal history, real provider/Apple
 calls, process inventory, security/credential or public distribution changes.
 Relay allocation/proxy policy, APNs TTL policy and HTTP/2 retry remain separate.

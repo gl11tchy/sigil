@@ -31,7 +31,10 @@ let hostConnections = 0;
 proxy.on('upgrade', (req, socket, head) => sockets.handleUpgrade(req, socket, head, client => {
   const hostIndex = req.url.includes('role=host') ? ++hostConnections : 0;
   const backend = new WebSocket(`ws://127.0.0.1:${innerPort}${req.url}`, {
-    headers: req.headers.authorization ? { authorization: req.headers.authorization } : {},
+    headers: {
+      ...(req.headers.authorization ? { authorization: req.headers.authorization } : {}),
+      ...(req.headers.origin ? { origin: req.headers.origin } : {}),
+    },
   });
   const outbound = [];
   let route;

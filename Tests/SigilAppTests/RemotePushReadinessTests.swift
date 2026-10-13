@@ -113,14 +113,21 @@ struct RemotePushReadinessTests {
             .init(
                 challenge: challenge, sequence: 2, action: "activity", tabID: context.tab.id.uuidString,
                 text: String(repeating: "cd", count: 40)), key: context.device)
+        phone.close()
+        #expect(await readinessEventually { context.remote.status == "Phone disconnected" })
         let gate = ReadyPushGate()
         defer { gate.release() }
         context.remote.beforeQueuedPushSend = { await gate.holdOnce() }
         await context.interrupt()
         #expect(await readinessEventually { gate.paused })
-        let replaced = try await phone.request(
+        let replacementPhone = try RelayPhone(origin: context.relay.origin)
+        defer { replacementPhone.close() }
+        let replacementChallenge = try await replacementPhone.route(["ticket": context.ticket])
+        _ = try await replacementPhone.request(
+            .init(challenge: replacementChallenge, sequence: 1, action: "state"), key: context.device)
+        let replaced = try await replacementPhone.request(
             .init(
-                challenge: challenge, sequence: 3, action: "activity", tabID: context.tab.id.uuidString,
+                challenge: replacementChallenge, sequence: 2, action: "activity", tabID: context.tab.id.uuidString,
                 text: String(repeating: "ef", count: 40)), key: context.device)
         #expect(replaced.ok && context.remote.pendingPushCount == 0)
         gate.release()
