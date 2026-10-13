@@ -82,12 +82,15 @@ struct AddedProjectTests {
         let bytes = Data("generated project data".utf8)
         try bytes.write(to: file)
         try fixture.writeListedSession(id: "seed", cwd: other.path)
+        if archive { try fixture.writeListedSession(id: "archive-target", cwd: project.path) }
+        fixture.settings.showWorktreeSessions = true
         await fixture.store.reload()
         let model = fixture.model()
         defer { model.closeAllTabsAndWait() }
         model.addProject(other)
         model.addProject(project)
         var row = try #require(model.sidebarProjects.first { $0.cwd == project.path })
+        #expect(model.isRemovableOnly(row) == !archive)
         model.pin(row)
         model.pin(try #require(model.sidebarProjects.first { $0.cwd == other.path }))
 
@@ -106,7 +109,7 @@ struct AddedProjectTests {
         let anotherCopy = AppSettings(defaults: fixture.defaults)
         anotherCopy.addedProjects.append(AddedProject(path: shared.path, addedAt: Date()))
         anotherCopy.pinnedProjects.append(shared.path)
-        if archive { model.archive(row) } else { model.removeProject(row) }
+        model.archiveOrRemove(row)
 
         #expect(!fixture.settings.addedProjects.contains { $0.path == project.path })
         #expect(fixture.settings.addedProjects.contains { $0.path == other.path })
@@ -114,6 +117,11 @@ struct AddedProjectTests {
         #expect(fixture.settings.pinnedProjects == [other.path, shared.path])
         #expect(try Data(contentsOf: survivingFile) == bytes)
         #expect(FileManager.default.fileExists(atPath: other.path))
+        if archive {
+            let session = try #require(fixture.store.sessions.first { $0.id == "archive-target" })
+            #expect(model.isArchived(session))
+            #expect(FileManager.default.fileExists(atPath: session.directory.path))
+        }
     }
 
     @Test(arguments: ["missing", "not-directory", "permission-denied"])
