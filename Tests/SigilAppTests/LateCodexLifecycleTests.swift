@@ -8,6 +8,27 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct LateCodexLifecycleTests {
+    @Test func losingObservationPublishesCapabilitiesEvenWhenStateWasAlreadyUnknown() async throws {
+        let fixture = try LateCodexFixture()
+        defer { fixture.cleanup() }
+        let tab = try await fixture.source.newTab()
+        _ = try fixture.rollout(tab, events: [])
+        await fixture.bind()
+        #expect(tab.activity == .unknown && tab.capabilities.lifecycle && tab.isWatchingForCompletion)
+        var publishedLoss = false
+        let original = tab.onActivityChange
+        tab.onActivityChange = {
+            original?()
+            if !tab.capabilities.lifecycle { publishedLoss = true }
+        }
+        fixture.observations.set(nil, generation: nil)
+        #expect(await eventually { !tab.isWatchingForCompletion })
+        #expect(tab.activity == .unknown && publishedLoss)
+        #expect(
+            RemoteCommands.snapshot(fixture.source.model).tabs.first { $0.id == tab.id.uuidString }?.capabilities?
+                .lifecycle == false)
+    }
+
     @Test func delayedFirstIdentityStaysUnknownUntilTheExactReceiptArrives() async throws {
         let fixture = try LateCodexFixture()
         defer { fixture.cleanup() }

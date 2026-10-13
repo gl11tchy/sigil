@@ -29,7 +29,8 @@ final class TerminalTab: Identifiable {
             onActivityChange?()
         }
     }
-    /// Called after `activity` changes, so the phone stream can send the new status.
+    /// Called after state or lifecycle capability changes so the phone stream
+    /// can send the current status and observation support.
     var onActivityChange: (() -> Void)?
     /// When the turn in flight started, for the elapsed time beside "Working".
     private(set) var workingSince: Date?
@@ -58,7 +59,11 @@ final class TerminalTab: Identifiable {
     private(set) var isCatchingUpLifecycle = false
     private var completionWatchTask: Task<Void, Never>?
     private(set) var completionWatchGeneration: UUID?
-    private var hasObservableLifecycle = false
+    private var hasObservableLifecycle = false {
+        didSet {
+            if hasObservableLifecycle != oldValue { onActivityChange?() }
+        }
+    }
     var isWatchingForCompletion: Bool { completionWatchTask != nil }
 
     init(
@@ -88,7 +93,9 @@ final class TerminalTab: Identifiable {
     /// Identity has already crossed the binding boundary. Tracking additionally
     /// belongs to this still-running child generation and exact descriptor.
     func adoptTranscript(_ transcript: CodexSessionBinding.Transcript, generation: ChildProcessGeneration?) {
-        guard spec.provider == .codex, nativeSessionID == transcript.session.nativeSessionID else { return }
+        guard spec.provider == .codex, nativeSessionID == transcript.session.nativeSessionID,
+            transcript.processGeneration == nil || transcript.processGeneration == generation
+        else { return }
         stopTurnTracking()
         completionEventsURL = transcript.session.directory
         adoptedTranscript = transcript

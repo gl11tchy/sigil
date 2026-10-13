@@ -130,7 +130,22 @@ public struct ProviderLifecycleJournal: Sendable {
         if transcript != nil, before == nil { return invalidateObservation() }
         let result = pollRecords()
         if let transcript, transcript.lease() != before { return invalidateObservation() }
+        if transcript != nil, !transcriptFileIsUnchanged() { return invalidateObservation() }
         return result
+    }
+
+    /// A stable held descriptor is insufficient if its pathname was replaced
+    /// while reading. Recheck the exact file and bounded read evidence before
+    /// returning events; ordinary appends remain valid.
+    private func transcriptFileIsUnchanged() -> Bool {
+        guard let transcript, let handle = openHandle() else { return false }
+        defer { try? handle.close() }
+        guard let current = Self.identity(handle), matches(current, transcript: transcript), current.size >= offset,
+            let validatedPrefix,
+            (try? handle.read(upToCount: validatedPrefix.count)) == validatedPrefix,
+            (try? Self.anchor(handle, behind: offset)) == trailingAnchor
+        else { return false }
+        return true
     }
 
     private mutating func pollRecords() -> [SessionLifecycleState] {

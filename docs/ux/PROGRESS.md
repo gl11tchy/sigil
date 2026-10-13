@@ -975,6 +975,13 @@ capabilities, queued turns and delayed results after close/restart. New kernel
 observations are synthetic. Strict local formatting and diff checks passed;
 the applicable candidate CI gate remains pending until recorded in the PR.
 
+First candidate `a8c3ecf7aeb8d4719445e18c30a0a46ccd6ea87e` stopped at
+test compilation in CI38397622262: `#require` lost an injected closure's
+Sendable type. The resolver call now precedes its assertion. Source review
+added final file evidence verification after the last lease and capability-only
+publication, with focused fixtures. A new exact-head gate follows this relevant
+repair; there is no overlapping run or claimed Swift-test pass for the first gate.
+
 No local AppTests/app build, prior cache/process/build-denial retry, live process
 inventory, personal histories, real model calls or daily-app interaction. Actual
 Codex, real-phone alerts and renamed-debug AX/window-ID UI remain unobserved.

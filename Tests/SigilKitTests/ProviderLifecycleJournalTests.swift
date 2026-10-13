@@ -110,6 +110,28 @@ struct ProviderLifecycleJournalTests {
         #expect(reader.poll() == [.working, .idle])
     }
 
+    @Test(arguments: ["replace", "truncate", "rewrite"])
+    func aFileMutationAtTheFinalLeaseCannotPublishTheReadBatch(change: String) throws {
+        let initial = try metadata() + codex(type: "task_started", turn: "first")
+        let fixture = try JournalFixture(initial: initial)
+        defer { fixture.cleanup() }
+        let (transcript, observations) = try ownedTranscript(fixture)
+        var reader = ProviderLifecycleJournal(transcript: transcript)
+        observations.mutateAfterRead {
+            if change == "replace" {
+                try? initial.write(to: fixture.file, options: .atomic)
+            } else if change == "truncate" {
+                try? Data().write(to: fixture.file)
+            } else {
+                let rewritten = Data(
+                    String(decoding: initial, as: UTF8.self).replacingOccurrences(of: "0.158.0", with: "1.158.0").utf8)
+                try? rewritten.write(to: fixture.file)
+            }
+        }
+        #expect(reader.poll() == [.unknown])
+        #expect(!reader.canObserve)
+    }
+
     @Test(arguments: [CLIProvider.claudeCode, .devin, .cursor, .kimi])
     func unsupportedProviderCannotObserveEvenWithAJournal(provider: CLIProvider) throws {
         let fixture = try JournalFixture()
@@ -405,11 +427,11 @@ struct ProviderLifecycleJournalTests {
         let parsed = try #require(
             NativeSessionScanner.parse(
                 provider: .codex, data: Data(contentsOf: fixture.file), file: fixture.file, modified: now))
-        let transcript = try #require(
-            CodexSessionBinding.resolveTranscript(
-                process: process, historyRoot: fixture.root, sessions: [parsed],
-                workingDirectory: URL(fileURLWithPath: "/tmp"),
-                snapshot: { _, _ in observations.read() }))
+        let resolved = CodexSessionBinding.resolveTranscript(
+            process: process, historyRoot: fixture.root, sessions: [parsed],
+            workingDirectory: URL(fileURLWithPath: "/tmp"),
+            snapshot: { _, _ in observations.read() })
+        let transcript = try #require(resolved)
         return (transcript, observations)
     }
     private func timestamp(_ date: Date) -> String { ISO8601DateFormatter().string(from: date) }
@@ -423,10 +445,25 @@ private final class JournalOwnership: @unchecked Sendable {
     private let lock = NSLock()
     private let snapshot: ProcessOpenFiles.Snapshot
     private var remaining: Int?
+    private var mutate: (@Sendable () -> Void)?
+    private var readsUntilMutation = 0
     init(_ snapshot: ProcessOpenFiles.Snapshot) { self.snapshot = snapshot }
     func allowReads(_ count: Int) { lock.withLock { remaining = count } }
+    func mutateAfterRead(_ mutate: @escaping @Sendable () -> Void) {
+        lock.withLock {
+            self.mutate = mutate
+            readsUntilMutation = 2
+        }
+    }
     func read() -> ProcessOpenFiles.Snapshot? {
         lock.withLock {
+            if mutate != nil {
+                readsUntilMutation -= 1
+                if readsUntilMutation == 0 {
+                    mutate?()
+                    mutate = nil
+                }
+            }
             if let count = remaining {
                 guard count > 0 else { return nil }
                 remaining = count - 1
@@ -436,7 +473,7 @@ private final class JournalOwnership: @unchecked Sendable {
     }
 }
 
-private struct JournalFixture {
+private struct JournalFixture: Sendable {
     let root: URL
     let file: URL
     init(initial: Data = Data()) throws {
