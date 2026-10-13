@@ -973,7 +973,10 @@ Generated Kit fixtures and CI-only App fixtures cover the first turn, delayed
 identity, completed-before-attachment, background unread completion, phone
 capabilities, queued turns and delayed results after close/restart. New kernel
 observations are synthetic. Strict local formatting and diff checks passed;
-the applicable candidate CI gate remains pending until recorded in the PR.
+The exact-head integrated result, source tree and limits are recorded in
+[PR170's validation](https://github.com/gl11tchy-team/sigil/pull/170) and its
+[current checks](https://github.com/gl11tchy-team/sigil/pull/170/checks).
+The mission requires that final head's integrated gate to pass.
 
 First candidate `a8c3ecf7aeb8d4719445e18c30a0a46ccd6ea87e` stopped at
 test compilation in CI38397622262: `#require` lost an injected closure's
@@ -981,6 +984,16 @@ Sendable type. The resolver call now precedes its assertion. Source review
 added final file evidence verification after the last lease and capability-only
 publication, with focused fixtures. A new exact-head gate follows this relevant
 repair; there is no overlapping run or claimed Swift-test pass for the first gate.
+
+Head `a2e3ac84086fb78b599cc747b2ba479bc2ca9a47`, CI38398604337,
+ran 1,301 Swift tests in 111 suites with one issue: the restart fixture compared
+`/var` and `/private/var` URLs for the same file. The other 1,300 Swift tests and
+all 37 XCTest cases passed. The assertion now uses the existing canonical path,
+without changing production identity. Personal review and review comment
+4258674183 found that alert suppression also dropped Live Activity updates after
+consuming the planner transition. Only notification alerts are now suppressed;
+actual RemoteControl/loopback-relay cases capture state frames and decrypt the
+later live finished alert. No Apple/APNs service or real phone is contacted.
 
 No local AppTests/app build, prior cache/process/build-denial retry, live process
 inventory, personal histories, real model calls or daily-app interaction. Actual

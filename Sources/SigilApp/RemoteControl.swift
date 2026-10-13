@@ -499,8 +499,8 @@ final class RemoteControl {
             interactionID: prompt?.id, verified: prompt?.verified == true)
         let plan = planner.plan(tabID: id, snapshot)
         // A phone on the socket sees the change itself; alerts are for a phone that is away.
-        guard allowAlerts, peer == nil, let socket else { return }
-        if let alert = plan.alert, push != nil, let deviceKey {
+        guard peer == nil, let socket else { return }
+        if allowAlerts, let alert = plan.alert, push != nil, let deviceKey {
             if let sealed = try? RemoteCrypto.seal(alert, key: deviceKey, direction: RemoteAlert.direction) {
                 let frame = Frame(push: .init(data: sealed, thread: id))
                 Task { try? await self.send(frame, socket: socket) }

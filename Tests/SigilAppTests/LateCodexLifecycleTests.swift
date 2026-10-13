@@ -8,6 +8,95 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct LateCodexLifecycleTests {
+    @Test(arguments: [false, true])
+    func actualRemoteCatchUpUpdatesAnAwayActivityWithoutReplayingAlerts(completed: Bool) async throws {
+        // Start the existing loopback relay before the fake CLI replaces PATH.
+        // Its APNs capture writes frames locally, never contacts Apple.
+        let relay = try await RelayFixture(captureAPNs: true)
+        defer { relay.stop() }
+        let fixture = try LateCodexFixture()
+        defer { fixture.cleanup() }
+        let model = fixture.source.model
+        let tab = try await fixture.source.newTab()
+        let remote = model.remoteControl
+        defer { remote.stop() }
+        remote.start(urlText: relay.origin, model: model)
+        let paired = try await relay.pair(remote)
+        defer { paired.phone.close() }
+        let token = String(repeating: "ab", count: 32)
+        let activityToken = String(repeating: "cd", count: 40)
+        let notify = try await paired.phone.request(
+            .init(challenge: paired.challenge, sequence: 2, action: "notify", text: token, name: "development"),
+            key: paired.device)
+        #expect(notify.ok)
+        let registered = try await paired.phone.request(
+            .init(
+                challenge: paired.challenge, sequence: 3, action: "activity", tabID: tab.id.uuidString,
+                text: activityToken),
+            key: paired.device)
+        #expect(registered.ok)
+
+        var native: String?
+        if completed {
+            native = try fixture.rollout(tab, events: [("task_started", "first")])
+            await fixture.bind()
+            #expect(await eventually { tab.activity == .working })
+        }
+        paired.phone.close()
+        #expect(await eventually { remote.status == "Phone disconnected" })
+        if let native {
+            // Keep the planner's real Working baseline. No actor suspension
+            // between publishing the completion and replacing the reader, so
+            // the old watcher cannot apply or notify its pending batch.
+            try fixture.append(native, events: [("task_complete", "first")])
+            let process = try #require(tab.controller.processGeneration)
+            let root = try #require(fixture.source.store.codexHistoryRoot)
+            let resolved = model.codexTranscriptResolver(
+                process, root, fixture.source.store.sessions, fixture.source.cwd)
+            let receipt = try #require(resolved)
+            tab.adoptTranscript(receipt, generation: process)
+        } else {
+            native = try fixture.rollout(tab, events: [("task_started", "first")])
+            await fixture.bind()
+        }
+
+        let restored = completed ? "idle" : "working"
+        #expect(await eventually { (try? capturedPushes(relay).contains { $0.state?.status == restored }) == true })
+        let caughtUp = try capturedPushes(relay)
+        #expect(caughtUp.filter { $0.pushType == "alert" }.isEmpty)
+        let updates = caughtUp.filter { $0.pushType == "liveactivity" }
+        #expect(updates.count == 1 && updates.first?.token == activityToken)
+        #expect(updates.first?.state?.status == restored && updates.first?.event == "update")
+        // A later ordinary evaluation cannot recover a consumed transition;
+        // the original catch-up must already have sent the activity frame.
+        remote.noteTab(tab, model: model)
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(try capturedPushes(relay).count == caughtUp.count)
+
+        let id = try #require(native)
+        let turn = completed ? "next" : "first"
+        if completed {
+            try fixture.append(id, events: [("task_started", turn)])
+            #expect(
+                await eventually { (try? capturedPushes(relay).contains { $0.state?.status == "working" }) == true })
+        }
+        try fixture.append(id, events: [("task_complete", turn)])
+        #expect(
+            await eventually {
+                guard let pushes = try? capturedPushes(relay) else { return false }
+                return pushes.contains { $0.pushType == "alert" }
+                    && pushes.last { $0.pushType == "liveactivity" }?.state?.status == "idle"
+            })
+        let final = try capturedPushes(relay)
+        let alerts = try final.filter { $0.pushType == "alert" }.map { push -> RemoteAlert in
+            let data = try #require(push.data)
+            return try RemoteCrypto.open(data, key: paired.device, direction: RemoteAlert.direction)
+        }
+        #expect(alerts.map(\.kind) == [.finished])
+        #expect(alerts.first?.tabID == tab.id.uuidString)
+        #expect(final.last { $0.pushType == "liveactivity" }?.state?.status == "idle")
+    }
+
     @Test func losingObservationPublishesCapabilitiesEvenWhenStateWasAlreadyUnknown() async throws {
         let fixture = try LateCodexFixture()
         defer { fixture.cleanup() }
@@ -75,7 +164,7 @@ struct LateCodexLifecycleTests {
         #expect(await eventually { tab.activity == .idle && settled == 2 })
     }
 
-    @Test func aTurnCompletedBeforeAttachmentRestoresIdleWithoutAnUnreadDotOrAlert() async throws {
+    @Test func aTurnCompletedBeforeAttachmentRestoresIdleWithoutUnreadOrSettleReplay() async throws {
         let fixture = try LateCodexFixture()
         defer { fixture.cleanup() }
         let tab = try await fixture.source.newTab()
@@ -84,24 +173,14 @@ struct LateCodexLifecycleTests {
         _ = try await fixture.source.newTab()
         var settled = 0
         tab.onSettle = { settled += 1 }
-        var phonePlanner = RemoteAlertPlanner()
-        var alerts: [RemoteAlert] = []
-        _ = phonePlanner.plan(tabID: tab.id.uuidString, status(tab))
-        let original = tab.onActivityChange
-        tab.onActivityChange = {
-            original?()
-            let plan = phonePlanner.plan(tabID: tab.id.uuidString, status(tab))
-            if !tab.isCatchingUpLifecycle, let alert = plan.alert { alerts.append(alert) }
-        }
         await fixture.bind()
         #expect(await eventually { tab.activity == .idle })
-        #expect(settled == 0 && !tab.hasUnseenActivity && alerts.isEmpty)
+        #expect(settled == 0 && !tab.hasUnseenActivity)
         try fixture.append(native, events: [("task_complete", "first")])
         try fixture.append(native, events: [("task_started", "next")])
         #expect(await eventually { tab.activity == .working })
         try fixture.append(native, events: [("task_complete", "next")])
         #expect(await eventually { settled == 1 })
-        #expect(alerts.map(\.kind) == [.finished])
     }
 
     @Test(arguments: ["ambiguous", "replace", "truncate", "rewrite", "new-header", "lost-generation"])
@@ -172,7 +251,8 @@ struct LateCodexLifecycleTests {
         fixture.source.model.restartTab(id: old.id)
         let tab = try #require(fixture.source.model.tabs.first)
         #expect(tab !== old && tab.controller.processGeneration != old.controller.processGeneration)
-        #expect(tab.spec.sessionFile == fixture.source.file(native))
+        let retained = try #require(tab.spec.sessionFile)
+        #expect(GrokPaths.canonicalPath(retained.path) == GrokPaths.canonicalPath(fixture.source.file(native).path))
         #expect(tab.nativeSessionID == native && tab.capabilities.lifecycle)
         tab.noteTurnStarted()
         var settled = 0
@@ -209,8 +289,35 @@ struct LateCodexLifecycleTests {
         }
     }
 
-    private func status(_ tab: TerminalTab) -> RemoteAlertPlanner.Snapshot {
-        .init(status: tab.activity.statusName, since: 0, question: nil, title: "fixture")
+}
+
+private struct LateCodexPush: Decodable {
+    struct Payload: Decodable {
+        struct APS: Decodable {
+            let event: String?
+            let state: RemoteActivityState?
+            enum CodingKeys: String, CodingKey {
+                case event
+                case state = "content-state"
+            }
+        }
+        struct Sigil: Decodable { let data: String }
+        let aps: APS
+        let sigil: Sigil?
+    }
+    let token: String
+    let pushType: String
+    let payload: Payload
+    var state: RemoteActivityState? { payload.aps.state }
+    var event: String? { payload.aps.event }
+    var data: String? { payload.sigil?.data }
+}
+
+@MainActor
+private func capturedPushes(_ relay: RelayFixture) throws -> [LateCodexPush] {
+    guard FileManager.default.fileExists(atPath: relay.apnsCapture.path) else { return [] }
+    return try String(contentsOf: relay.apnsCapture, encoding: .utf8).split(separator: "\n").map {
+        try JSONDecoder().decode(LateCodexPush.self, from: Data($0.utf8))
     }
 }
 

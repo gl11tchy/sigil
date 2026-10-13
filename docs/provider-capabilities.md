@@ -369,7 +369,8 @@ becomes Working, while an already completed turn becomes Idle without an unread
 dot, settle callback or historical phone alert. Events published after the
 attachment boundary remain live, including completion of a caught-up active turn.
 The phone planner rebases silently during catch-up so that later live transitions
-can alert normally. A partial record becomes live when its remaining bytes arrive.
+can alert normally; registered phone activities can still receive current state.
+A partial record becomes live when its remaining bytes arrive.
 Restart retains the transcript and tails new events; it does not replay prior turns.
 
 Neither terminal title symbols nor output silence can complete a turn. The
