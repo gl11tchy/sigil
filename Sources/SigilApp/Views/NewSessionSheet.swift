@@ -8,6 +8,24 @@ enum NewSessionLaunch: Equatable {
         case start(CLIProvider)
     }
 
+    struct WorktreeChoice {
+        private var folder: String?
+        private var explicit: Bool?
+
+        init() {}
+
+        mutating func choose(_ worktree: Bool, for directory: URL) {
+            folder = GrokPaths.canonicalPath(directory.path)
+            explicit = worktree
+        }
+
+        func startsInWorktree(for directory: URL, savedDefault: Bool) -> Bool {
+            guard SigilWorktree.isInRepository(directory) else { return false }
+            if folder == GrokPaths.canonicalPath(directory.path), let explicit { return explicit }
+            return savedDefault && SigilWorktree.shouldDefaultToWorktree(directory)
+        }
+    }
+
     /// The Model, Effort and Fast mode rows for `provider`. Nil for Kimi,
     /// whose model comes from its own config.
     @MainActor
@@ -87,8 +105,7 @@ struct NewSessionSheet: View {
     @State private var choices: [CLIProvider: ProviderModelMenu.Choice] = [:]
     @State private var grokModels = GrokModelCatalog.fallback
     @State private var menus: [CLIProvider: ProviderModelMenu] = [:]
-    @State private var startsInWorktree: Bool
-    @State private var hasChosenWorktree = false
+    @State private var worktreeChoice = NewSessionLaunch.WorktreeChoice()
     @State private var isStartingSession = false
     @State private var startTask: Task<Void, Never>?
     @FocusState private var focusedProvider: CLIProvider?
@@ -98,7 +115,6 @@ struct NewSessionSheet: View {
         self.model = model
         _provider = State(initialValue: provider ?? model.settings.defaultProvider)
         _hasChosenProvider = State(initialValue: provider != nil || model.settings.hasExplicitDefaultProvider)
-        _startsInWorktree = State(initialValue: model.settings.startsInWorktree)
     }
 
     /// Read once when the sheet opens; it resolves every folder on disk.
@@ -137,8 +153,7 @@ struct NewSessionSheet: View {
     private var isRepository: Bool { SigilWorktree.isInRepository(directory) }
 
     private var useWorktree: Bool {
-        startsInWorktree && isRepository
-            && (hasChosenWorktree || SigilWorktree.shouldDefaultToWorktree(directory))
+        worktreeChoice.startsInWorktree(for: directory, savedDefault: model.settings.startsInWorktree)
     }
 
     private var canStart: Bool { directoryIsAvailable && !isStartingSession }
@@ -183,8 +198,7 @@ struct NewSessionSheet: View {
                                 get: { useWorktree },
                                 set: {
                                     preserveProviderChoice()
-                                    startsInWorktree = $0
-                                    hasChosenWorktree = true
+                                    worktreeChoice.choose($0, for: directory)
                                 })
                         ) {
                             Text("New worktree").tag(true)
@@ -289,7 +303,6 @@ struct NewSessionSheet: View {
         .defaultFocus($isProviderRowFocused, true)
         .interactiveDismissDisabled(isStartingSession)
         .onDisappear { startTask?.cancel() }
-        .onChange(of: directory) { _, _ in hasChosenWorktree = false }
         .onChange(of: model.settings.defaultProvider) { _, next in
             if !hasChosenProvider { provider = next }
         }

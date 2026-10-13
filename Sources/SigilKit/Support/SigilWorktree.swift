@@ -130,7 +130,7 @@ public enum SigilWorktree {
         guard folder.utf8.count <= 255 else {
             throw Failure(message: "The folder path is too long for a worktree.")
         }
-        let canonicalRoot = URL(fileURLWithPath: GrokPaths.canonicalPath(root.path), isDirectory: true)
+        let canonicalRoot = canonicalFutureDirectory(root)
         let parent = canonicalRoot.appendingPathComponent(folder, isDirectory: true)
         let checkout = parent.appendingPathComponent(name, isDirectory: true)
         let branch = "sigil/\(name)"
@@ -318,6 +318,20 @@ public enum SigilWorktree {
         let identity: DirectoryIdentity
     }
 
+    /// realpath needs an existing path. Resolve the existing ancestor first so
+    /// a new root below a symlink or firmlink has the same identity Git reports.
+    private static func canonicalFutureDirectory(_ directory: URL) -> URL {
+        var ancestor = directory.standardizedFileURL
+        var components: [String] = []
+        while !FileManager.default.fileExists(atPath: ancestor.path) {
+            components.append(ancestor.lastPathComponent)
+            ancestor.deleteLastPathComponent()
+        }
+        var result = URL(fileURLWithPath: GrokPaths.canonicalPath(ancestor.path), isDirectory: true)
+        for component in components.reversed() { result.appendPathComponent(component, isDirectory: true) }
+        return result
+    }
+
     private static func makeParents(_ directory: URL) throws -> [OwnedDirectory] {
         var missing: [URL] = []
         var next = directory
@@ -392,7 +406,8 @@ public enum SigilWorktree {
         return GitResult(
             status: process.terminationStatus,
             output: text,
-            error: String(decoding: errorData.value, as: UTF8.self)
+            // Drain all hook output, but bound diagnostics separately from recovery paths.
+            error: String(decoding: errorData.value.prefix(1_024), as: UTF8.self)
                 .trimmingCharacters(in: .whitespacesAndNewlines))
     }
 

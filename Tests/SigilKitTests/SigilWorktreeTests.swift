@@ -225,6 +225,27 @@ struct SigilWorktreeTests {
         #expect(result.recoveryMessage?.contains("Worktree retained") == false)
     }
 
+    @Test func partialCreationFailureKeepsRecoverySeparateFromChattyHookDetails() async throws {
+        let fixture = try WorktreeFixture()
+        defer { fixture.cleanup() }
+        let hook = fixture.repo.appendingPathComponent(".git/hooks/post-checkout")
+        try Data("#!/bin/sh\nhead -c 300000 /dev/zero | tr '\\0' x >&2\nprintf keep > hook-work.txt\nexit 1\n".utf8)
+            .write(to: hook)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: hook.path)
+        let checkout = fixture.root.appendingPathComponent(GrokPaths.encode(path: fixture.repo.path))
+            .appendingPathComponent("partial")
+        do {
+            _ = try await SigilWorktree.createAttempt(for: fixture.repo, root: fixture.root, name: "partial")
+            Issue.record("The generated hook must fail creation")
+        } catch let failure as SigilWorktree.Failure {
+            #expect(failure.message.utf8.count < 2_000)
+            #expect(failure.recovery?.contains(checkout.path) == true)
+            #expect(failure.recovery?.contains("sigil/partial") == true)
+        }
+        #expect(try Data(contentsOf: checkout.appendingPathComponent("hook-work.txt")) == Data("keep".utf8))
+        #expect(try git(["branch", "--list", "sigil/partial"], in: fixture.repo).contains("sigil/partial"))
+    }
+
     @Test(arguments: [false, true])
     func collisionsPreserveExistingFoldersAndBranches(branchCollision: Bool) async throws {
         let fixture = try WorktreeFixture()
@@ -293,6 +314,24 @@ struct SigilWorktreeTests {
         #expect(made.workingDirectory == made.checkout.appendingPathComponent("package"))
         #expect(try Data(contentsOf: made.workingDirectory.appendingPathComponent("file")) == Data("package".utf8))
         #expect(await SigilWorktree.rollback(made, processMayHaveStarted: false) == .removed)
+    }
+
+    @Test func aMissingRootBelowASymlinkCreatesAndRemovesThePhysicalCheckout() async throws {
+        let fixture = try WorktreeFixture()
+        defer { fixture.cleanup() }
+        let physical = fixture.base.appendingPathComponent("physical-home")
+        let link = fixture.base.appendingPathComponent("linked-home")
+        try FileManager.default.createDirectory(at: physical, withIntermediateDirectories: false)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: physical)
+        let root = link.appendingPathComponent("worktrees")
+        #expect(!FileManager.default.fileExists(atPath: root.path))
+        let made = try #require(await SigilWorktree.createAttempt(for: fixture.repo, root: root, name: "alias-root"))
+        #expect(made.checkout.path.hasPrefix(physical.path + "/worktrees/"))
+        #expect(made.workingDirectory == made.checkout)
+        #expect(await SigilWorktree.rollback(made, processMayHaveStarted: false) == .removed)
+        #expect(!FileManager.default.fileExists(atPath: root.path))
+        #expect(FileManager.default.fileExists(atPath: link.path))
+        #expect(try git(["branch", "--list", made.branch], in: fixture.repo).isEmpty)
     }
 
     @Test func homeRepositoryIsRecognizedButDoesNotDefaultToAWorktree() throws {

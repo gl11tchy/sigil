@@ -7,6 +7,23 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct SessionWorktreeStartTests {
+    @Test func explicitFolderChoicesDoNotReplaceTheNextFoldersSavedDefault() throws {
+        let fixture = try PhoneCommandFixture()
+        defer { fixture.cleanup() }
+        let first = try fixture.directory("first")
+        let second = try fixture.directory("second")
+        try initialize(first)
+        try initialize(second)
+        var choice = NewSessionLaunch.WorktreeChoice()
+        choice.choose(false, for: first)
+        #expect(!choice.startsInWorktree(for: first, savedDefault: true))
+        #expect(choice.startsInWorktree(for: second, savedDefault: true))
+        choice.choose(true, for: first)
+        #expect(choice.startsInWorktree(for: first, savedDefault: false))
+        #expect(!choice.startsInWorktree(for: second, savedDefault: false))
+        #expect(!choice.startsInWorktree(for: fixture.root, savedDefault: true))
+    }
+
     @Test(arguments: ["inline", "options", "phone"])
     func everyEntryRejectsTheMissingSelectedFolder(entry: String) async throws {
         let fixture = try PhoneCommandFixture()
