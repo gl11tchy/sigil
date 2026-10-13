@@ -7,6 +7,62 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct RemotePushReadinessTests {
+    @Test(arguments: [false, true])
+    func queuedMacActivitiesKeepOriginalTimestampsAndTypeSpecificExpiry(ending: Bool) async throws {
+        let context = try await ReadyPushContext()
+        defer { context.cleanup() }
+        try context.relay.releaseRoute()
+        #expect(await readinessEventually { context.remote.isHostReadyForPushes })
+        let phone = try RelayPhone(origin: context.relay.origin)
+        defer { phone.close() }
+        let challenge = try await phone.route(["ticket": context.ticket])
+        let registered = try await phone.request(
+            .init(
+                challenge: challenge, sequence: 1, action: "activity", tabID: context.tab.id.uuidString,
+                text: String(repeating: "cd", count: 40)), key: context.device)
+        #expect(registered.ok)
+        phone.close()
+        #expect(await readinessEventually { context.remote.status == "Phone disconnected" })
+        let gate = ReadyPushGate()
+        defer { gate.release() }
+        context.remote.beforeQueuedPushSend = { await gate.holdOnce() }
+        let issued = Int(context.clock.now.timeIntervalSince1970)
+        await context.interrupt()
+        #expect(await readinessEventually { gate.paused })
+        if ending {
+            context.fixture.model.closeTab(context.tab.id)
+            context.remote.forgetTab(context.tab.id)
+        }
+        context.clock.now = context.clock.now.addingTimeInterval(30)
+        gate.release()
+        #expect(await readinessEventually { context.relay.captureCount == 2 })
+        let lines = try String(contentsOf: context.relay.capture, encoding: .utf8).split(separator: "\n")
+        let requests = try lines.map { try JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
+        let activity = try #require(requests.compactMap { $0 }.first { $0["pushType"] as? String == "liveactivity" })
+        let payload = try #require(activity["payload"] as? [String: Any])
+        let aps = try #require(payload["aps"] as? [String: Any])
+        #expect(aps["timestamp"] as? Int == issued)
+        #expect(aps["event"] as? String == (ending ? "end" : "update"))
+        #expect(activity["expiration"] as? Int == issued + (ending ? 900 : 60))
+    }
+
+    @Test func aQueuedMacAlertKeepsSealedIssuanceAndWireExpiryWhenItsClockAdvances() async throws {
+        let context = try await ReadyPushContext()
+        defer { context.cleanup() }
+        let issued = Int(context.clock.now.timeIntervalSince1970)
+        await context.interrupt()
+        #expect(context.remote.pendingPushCount == 1)
+        context.clock.now = context.clock.now.addingTimeInterval(30)
+        try context.relay.releaseRoute()
+        #expect(await readinessEventually { context.relay.captureCount == 1 })
+        let captured = try context.relay.firstAlert(key: context.device)
+        let alert = try #require(captured)
+        let expiration = try context.relay.firstExpiration()
+        #expect(alert.issuedAt == issued)
+        #expect(expiration == issued + 300)
+        #expect(context.relay.allocationCount == 1 && !context.relay.sawPolicyClose)
+    }
+
     @Test func expiredQueuedAlertsDoNotGainANewLifetimeWhenReadyArrives() async throws {
         let context = try await ReadyPushContext()
         defer { context.cleanup() }
@@ -48,6 +104,8 @@ struct RemotePushReadinessTests {
         let capturedAlert = try context.relay.firstAlert(key: context.device)
         let alert = try #require(capturedAlert)
         #expect(alert.issuedAt == Int(context.clock.now.timeIntervalSince1970))
+        let expiration = try context.relay.firstExpiration()
+        #expect(expiration == Int(context.clock.now.timeIntervalSince1970) + 300)
         #expect(context.relay.allocationCount == 1 && !context.relay.sawPolicyClose)
     }
 
@@ -252,6 +310,13 @@ final class ReadyRelayFixture {
         let sigil = payload?["sigil"] as? [String: Any]
         let data = try #require(sigil?["data"] as? String)
         return try RemoteCrypto.open(data, key: key, direction: RemoteAlert.direction)
+    }
+    func firstExpiration() throws -> Int? {
+        guard let line = try String(contentsOf: capture, encoding: .utf8).split(separator: "\n").first else {
+            return nil
+        }
+        let request = try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]
+        return request?["expiration"] as? Int
     }
     func stop() {
         if process.isRunning {

@@ -656,13 +656,19 @@ final class RemoteControl {
     ) {
         guard isEnabled else { return }
         pendingPushes.expire(now: pushClock())
-        // These are local queue deadlines, not APNs storage headers. No retry
-        // extends them, and activity cleanup gets a longer bounded window.
-        let lifetime: TimeInterval = kind == .alert ? 300 : kind == .update ? 60 : 900
+        // Whole UTC seconds align the sealed alert, local queue and APNs deadline.
+        // Copy these once; neither reconnect nor relay waiting grants a new life.
+        let lifetime = kind == .alert ? 300 : kind == .update ? 60 : 900
+        let seconds = Int(issuedAt.timeIntervalSince1970)
+        let expires = seconds + lifetime
+        var frame = frame
+        frame.push?.issuedAt = seconds
+        frame.push?.expiresAt = expires
         let entry = RemotePendingPushes.Entry(
             frame: frame, kind: kind, tabID: tabID, pairing: generation, room: currentRoom,
-            tokenGeneration: tokenGeneration, environment: environment, issuedAt: issuedAt,
-            expiresAt: issuedAt.addingTimeInterval(lifetime))
+            tokenGeneration: tokenGeneration, environment: environment,
+            issuedAt: Date(timeIntervalSince1970: Double(seconds)),
+            expiresAt: Date(timeIntervalSince1970: Double(expires)))
         _ = pendingPushes.append(entry, now: pushClock())
         drainPushes()
     }
@@ -1014,6 +1020,8 @@ final class RemoteControl {
             var activity: String?
             var state: RemoteActivityState?
             var event: String?
+            var issuedAt: Int?
+            var expiresAt: Int?
 
             init(data: String, thread: String) {
                 self.data = data

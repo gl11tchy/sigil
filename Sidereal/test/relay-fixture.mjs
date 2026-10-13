@@ -7,6 +7,19 @@ const apns = capture
   ? { async send(request) { appendFileSync(capture, `${JSON.stringify(request)}\n`); return { status: 200 }; }, close() {} }
   : null;
 const relay = createRelay({ publicOrigin: 'http://localhost:3099', apns });
+// Capture only generated room IDs, never host credentials. The native test can
+// check the exact collapse namespace after the initial QR room is retired.
+if (process.env.SIGIL_TEST_ROOM_CAPTURE) relay.server.prependListener('request', (req, res) => {
+  if (req.method !== 'POST' || req.url !== '/rooms') return;
+  const end = res.end;
+  res.end = function(...args) {
+    if (res.statusCode === 201) {
+      const { room } = JSON.parse(String(args[0]));
+      appendFileSync(process.env.SIGIL_TEST_ROOM_CAPTURE, `${room}\n`, { mode: 0o600 });
+    }
+    return end.apply(this, args);
+  };
+});
 relay.server.listen(0, '127.0.0.1', () => {
   writeFileSync(process.env.SIGIL_TEST_PORT_FILE, String(relay.server.address().port), { mode: 0o600 });
 });

@@ -63,18 +63,20 @@ test('a push is one HTTP/2 POST with Apple\'s headers, and the answer is a statu
   assert.equal(seen[0].headers['apns-topic'], 'com.example.app');
   assert.equal(seen[0].headers['apns-push-type'], 'alert');
   assert.equal(seen[0].headers['apns-priority'], '10');
+  assert.equal(seen[0].headers['apns-expiration'], '0');
   assert.equal(seen[0].headers['apns-collapse-id'], 'tab-1');
   assert.match(seen[0].headers.authorization, /^bearer [A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
   assert.deepEqual(seen[0].body, { aps: { alert: { title: 'Sigil' }, 'mutable-content': 1 }, sigil: { data: 'sealed' } });
 
   const activity = await apns.send({
-    environment: 'production', token: 'cd'.repeat(40), pushType: 'liveactivity', priority: 5,
+    environment: 'production', token: 'cd'.repeat(40), pushType: 'liveactivity', priority: 5, expiration: 1_800_000_900,
     payload: { aps: { timestamp: 1, event: 'update', 'content-state': { status: 'idle' } } },
   });
   assert.equal(activity.status, 200);
   assert.equal(seen[1].headers['apns-topic'], 'com.example.app.push-type.liveactivity');
   assert.equal(seen[1].headers['apns-push-type'], 'liveactivity');
   assert.equal(seen[1].headers['apns-priority'], '5');
+  assert.equal(seen[1].headers['apns-expiration'], '1800000900');
 
   const gone = await apns.send({ environment: 'production', token: 'bad', pushType: 'alert', payload: { aps: {} } });
   assert.deepEqual(gone, { status: 410, reason: 'Unregistered' });

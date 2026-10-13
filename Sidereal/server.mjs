@@ -147,17 +147,34 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
     if (typeof state.asking === 'boolean') out.asking = state.asking;
     return out.status ? out : null;
   };
+  const pushLifetimes = { alert: 300, update: 60, end: 900 };
+  const pushTiming = (push, lifetime) => {
+    const receivedAt = Math.floor(now() / 1000);
+    // Old hosts cannot reveal their sealed original issuance. Preserve no-store
+    // behavior instead of granting a new lifetime when a queued push is sent.
+    if (!Object.hasOwn(push, 'issuedAt') && !Object.hasOwn(push, 'expiresAt')) {
+      return { issuedAt: receivedAt, expiration: 0, expiresAt: null };
+    }
+    const { issuedAt, expiresAt } = push;
+    if (!Number.isSafeInteger(issuedAt) || !Number.isSafeInteger(expiresAt) || issuedAt <= 0 ||
+        issuedAt > receivedAt + 30 || expiresAt <= issuedAt || expiresAt - issuedAt > lifetime) return null;
+    return { issuedAt, expiration: expiresAt, expiresAt };
+  };
   // Returns what builds the APNs request for a host's push frame from the phone's
   // registration when it goes out, or null when the frame is malformed. It keeps only
   // the checked fields, never the frame.
-  const pushRequest = push => {
+  const pushRequest = (push, roomID) => {
     if (!push || typeof push !== 'object' || Array.isArray(push)) return null;
     if (typeof push.data === 'string') {
       if (push.data.length > 3000 || !/^[A-Za-z0-9+/=]+$/.test(push.data)) return null;
       const thread = typeof push.thread === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(push.thread) ? push.thread : undefined;
       const data = push.data;
-      return registration => ({
-        environment: registration?.environment, token: registration?.token, pushType: 'alert', collapseId: thread,
+      const timing = pushTiming(push, pushLifetimes.alert);
+      if (!timing) return null;
+      const collapseId = thread ? createHash('sha256').update(JSON.stringify([roomID, thread])).digest('hex') : undefined;
+      return { expiresAt: timing.expiresAt, build: registration => ({
+        environment: registration?.environment, token: registration?.token, pushType: 'alert', collapseId,
+        expiration: timing.expiration,
         payload: {
           aps: {
             alert: { title: 'Sigil', body: 'A session needs you.' }, sound: 'default', 'mutable-content': 1,
@@ -165,16 +182,19 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
           },
           sigil: { data },
         },
-      });
+      }) };
     }
     if (hexToken(push.activity) && (push.event === 'update' || push.event === 'end')) {
       const state = activityState(push.state);
       if (!state) return null;
       const { activity, event } = push;
-      return registration => {
-        const seconds = Math.floor(now() / 1000);
+      const timing = pushTiming(push, pushLifetimes[event]);
+      if (!timing) return null;
+      return { expiresAt: timing.expiresAt, build: registration => {
+        const seconds = timing.issuedAt;
         return {
           environment: registration?.environment, token: activity, pushType: 'liveactivity', priority: 10,
+          expiration: timing.expiration,
           payload: {
             aps: {
               timestamp: seconds, event, 'content-state': state,
@@ -182,7 +202,7 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
             },
           },
         };
-      };
+      } };
     }
     return null;
   };
@@ -190,12 +210,16 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
   // time in order, so a reply to the phone never waits behind one. A push keeps the token
   // registered before it; a full queue answers at once instead of holding more.
   const maxQueuedPushes = 60;
-  const queuePush = (ws, room, push) => {
-    const build = pushRequest(push);
-    if (!build) return false;
+  const queuePush = (ws, room, roomID, push) => {
+    const request = pushRequest(push, roomID);
+    if (!request) return false;
+    const { build, expiresAt } = request;
+    if (expiresAt !== null && expiresAt <= Math.floor(now() / 1000)) {
+      send(ws, { type: 'push', ok: false, reason: 'expired' }); return true;
+    }
     const queue = room.pushes ??= [];
     if (queue.length >= maxQueuedPushes) { send(ws, { type: 'push', ok: false, reason: 'busy' }); return true; }
-    queue.push({ ws, build, registration: room.push });
+    queue.push({ ws, build, expiresAt, registration: room.push });
     if (queue.length === 1) deliverPushes(room).catch(() => {});
     return true;
   };
@@ -203,12 +227,13 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
   const deliverPushes = async room => {
     const queue = room.pushes;
     while (queue.length) {
-      const { ws, build, registration } = queue[0];
+      const { ws, build, expiresAt, registration } = queue[0];
       let answer;
       // A host connection that closed or was replaced sends nothing more, and its pushes do not count.
       const live = !room.closed && room.host === ws;
       if (live && now() - (room.pushWindow || 0) >= 60000) { room.pushWindow = now(); room.pushCount = 0; }
       if (!live) answer = { ok: false, reason: 'closed' };
+      else if (expiresAt !== null && expiresAt <= Math.floor(now() / 1000)) answer = { ok: false, reason: 'expired' };
       else if (++room.pushCount > 60) answer = { ok: false, reason: 'rate' };
       else if (!apns || !registration || registration.gone) answer = { ok: false, reason: apns ? 'token' : 'off' };
       else {
@@ -338,7 +363,7 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
             return;
           }
           if (role === 'host' && room.host === ws && ('pushToken' in value || 'push' in value)) {
-            if ('pushToken' in value ? !registerPush(room, value) : !queuePush(ws, room, value.push)) ws.close(1008);
+            if ('pushToken' in value ? !registerPush(room, value) : !queuePush(ws, room, id, value.push)) ws.close(1008);
             return;
           }
           const frame = {};
