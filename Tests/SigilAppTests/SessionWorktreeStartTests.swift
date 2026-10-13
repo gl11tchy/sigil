@@ -133,6 +133,8 @@ struct SessionWorktreeStartTests {
         let task = Task { await start("phone", fixture: fixture, project: repo, root: root) }
         let checkout = try await gate.waitForCheckout()
         fixture.settings.executablePath = fixture.root.appendingPathComponent("missing-cli").path
+        #expect(fixture.model.grokExecutableURL.path == fixture.settings.executablePath)
+        #expect(fixture.model.providerLaunchProblem(.grokBuild) != nil)
         gate.release()
         #expect(await task.value != nil)
         #expect(fixture.model.tabs.isEmpty)
@@ -160,7 +162,9 @@ struct SessionWorktreeStartTests {
             defer { RemoteCommands.worktreeRoot = saved }
             fixture.settings.showWorktreeSessions = true
             fixture.model.addProject(project)
-            return await fixture.command("new", text: project.path, worktree: true).error
+            return await fixture.command(
+                "new", text: project.path, provider: CLIProvider.grokBuild.rawValue, worktree: true
+            ).error
         }
         fixture.model.requestNewSession(in: project)
         if entry == "inline" {

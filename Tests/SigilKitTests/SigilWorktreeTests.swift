@@ -311,7 +311,8 @@ struct SigilWorktreeTests {
         let link = fixture.base.appendingPathComponent("selected-link")
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: sub)
         let made = try #require(await SigilWorktree.createAttempt(for: link, root: fixture.root, name: "linked"))
-        #expect(made.workingDirectory == made.checkout.appendingPathComponent("package"))
+        #expect(made.workingDirectory.hasDirectoryPath)
+        #expect(made.workingDirectory == made.checkout.appendingPathComponent("package", isDirectory: true))
         #expect(try Data(contentsOf: made.workingDirectory.appendingPathComponent("file")) == Data("package".utf8))
         #expect(await SigilWorktree.rollback(made, processMayHaveStarted: false) == .removed)
     }

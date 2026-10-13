@@ -177,7 +177,7 @@ public enum SigilWorktree {
                 message: "Could not create branch \(branch) in \(repository). \(created.error)",
                 recovery: FileManager.default.fileExists(atPath: checkout.path) ? "Recovery: \(checkout.path)." : nil)
         }
-        let target = relative.isEmpty ? checkout : checkout.appendingPathComponent(relative)
+        let target = relative.isEmpty ? checkout : checkout.appendingPathComponent(relative, isDirectory: true)
         let receipt: Creation
         do {
             let added = try await git(["-C", repository, "worktree", "add", checkout.path, branch])
