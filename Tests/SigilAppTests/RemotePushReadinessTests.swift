@@ -67,7 +67,10 @@ struct RemotePushReadinessTests {
         let context = try await ReadyPushContext()
         defer { context.cleanup() }
         await context.interrupt()
-        #expect(context.remote.pendingPushCount == 1)
+        // The batching callback is asynchronous: never advance its clock until
+        // the original event has actually entered the queue. A fixed sleep can
+        // otherwise create a future-dated event rather than expire an old one.
+        try #require(await readinessEventually { context.remote.pendingPushCount == 1 })
         context.clock.now = context.clock.now.addingTimeInterval(301)
         try context.relay.releaseRoute()
         #expect(await readinessEventually { context.remote.isHostReadyForPushes })

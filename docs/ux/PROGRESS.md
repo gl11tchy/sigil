@@ -8,7 +8,12 @@ and prevents shutdown resurrection. All27 focused Node checks passed, including
 GOAWAY, concurrent failures, unknown duplicate attempts/order and a real-relay
 rate-charge check. A sealed alert's one actionable receipt is checked only in CI;
 passive duplicate fallback/physical delivery remain unverified. [QA](../qa/rea-1212.md)
-records evidence and limits. Exact-head gate and parent personal review pending;
+records evidence and limits. First CI38442630258 compiled and ran1,316 Swift
+tests/113 suites with three inherited fixture issues (unordered JSON bytes and
+clock advance before actual queue admission). Node203+58/browser219/37 XCTest
+passed; native checks skipped. Test-only canonical bytes and required queue
+admission preserve earlier assertions; production unchanged. Exact-head gate
+and parent personal review pending;
 no merge/install, actual provider calls, personal data, denied retry or next ticket.
 
 ## REA-1210: original push expiry (2026-10-13)
