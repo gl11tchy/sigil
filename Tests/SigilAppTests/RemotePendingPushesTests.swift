@@ -9,6 +9,17 @@ struct RemotePendingPushesTests {
     let pairing = UUID()
     let token = UUID()
 
+    @Test func legacyPushFramesDecodeWithoutInventingTiming() throws {
+        let data = Data(#"{"push":{"data":"AAAA","thread":"tab-one"}}"#.utf8)
+        let frame = try JSONDecoder().decode(RemoteControl.Frame.self, from: data)
+        #expect(frame.push?.issuedAt == nil && frame.push?.expiresAt == nil)
+        let encoded = try JSONEncoder().encode(frame)
+        let object = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        let push = try #require(object?["push"] as? [String: Any])
+        #expect(push["issuedAt"] == nil && push["expiresAt"] == nil)
+        #expect(push["data"] as? String == "AAAA")
+    }
+
     @Test func retriesKeepIdentityBytesIssueTimeAndFixedExpiry() throws {
         var queue = RemotePendingPushes()
         let original = entry(.alert, tab: "one")
@@ -16,6 +27,8 @@ struct RemotePendingPushesTests {
         #expect(appended1)
         let copy = try #require(queue.entries.first)
         #expect(copy.id == original.id && copy.issuedAt == now && copy.expiresAt == original.expiresAt)
+        #expect(copy.frame.push?.issuedAt == Int(now.timeIntervalSince1970))
+        #expect(copy.frame.push?.expiresAt == Int(original.expiresAt.timeIntervalSince1970))
         #expect(try JSONEncoder().encode(copy.frame) == JSONEncoder().encode(original.frame))
         queue.expire(now: now.addingTimeInterval(299))
         #expect(queue.entries.count == 1)
@@ -87,8 +100,11 @@ struct RemotePendingPushesTests {
         -> RemotePendingPushes.Entry
     {
         let issued = now.addingTimeInterval(offset)
+        var push = RemoteControl.Frame.Push(data: "AAAA", thread: tab)
+        push.issuedAt = Int(issued.timeIntervalSince1970)
+        push.expiresAt = Int(issued.timeIntervalSince1970) + 300
         return .init(
-            frame: .init(push: .init(data: "AAAA", thread: tab)), kind: kind, tabID: tab,
+            frame: .init(push: push), kind: kind, tabID: tab,
             pairing: pairing, room: "room-one", tokenGeneration: token, environment: "development",
             issuedAt: issued, expiresAt: issued.addingTimeInterval(300))
     }

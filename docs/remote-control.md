@@ -108,9 +108,24 @@ struct RemoteRequest: Codable, Sendable {
   The Mac holds only push frames until the current host socket is routed, ready
   and its applicable token registration has completed. One paced drain checks
   connection, room, pairing and token generations around writes. Queued events
-  retain their identity, issuance and fixed local expiry: alerts300s, activity
-  updates60s and ends900s. These are queue limits; APNs storage headers are
-  unchanged. The20-entry queue coalesces activity updates, prioritizes ends and
+  retain their identity, issuance and fixed expiry: alerts 300s, activity
+  updates 60s and ends 900s from original issuance. New push envelopes add only
+  `issuedAt`/`expiresAt` UTC integer seconds, fixed before Mac queue admission.
+  The relay copies these at admission, supplies the original absolute
+  `apns-expiration`, and drops events expired at admission or while waiting.
+  It rejects partial/noninteger/unsafe timing, expiry before or at issuance,
+  overlong lifetimes and issuance more than 30s ahead of relay time, matching
+  the client's existing future-clock allowance. Sealed alert bytes and client
+  freshness checks stay unchanged. Legacy hosts without both fields retain
+  explicit expiration 0; opaque alerts do not acquire an invented lifetime.
+  Both host and relay updates are needed for stored timed pushes; older relays
+  ignore the optional fields and keep their zero-storage behavior.
+  Activity payload timestamps freeze at original issuance (relay admission for
+  legacy frames). Alert collapse IDs are 64-byte SHA256 hashes of the JSON
+  `[roomID, tabID]` tuple, so different Macs/rooms or tabs cannot merge. Activity
+  updates/ends keep FIFO dispatch and have no shared collapse ID that could
+  replace an end; the Mac's existing coalescing/end protection stays intact.
+  The 20-entry queue coalesces activity updates, prioritizes ends and
   cannot renew an event on reconnect. Twenty active/pending-end registrations
   reserve capacity; further new activities receive a clear busy reply until a
   slot is released. An unauthenticated peer cannot clear alerts. Authentication
@@ -120,6 +135,10 @@ struct RemoteRequest: Codable, Sendable {
   can use a newly registered replacement room; other old-room events are dropped.
   No terminal commands enter this queue. Socket/APNs acceptance remains distinct
   from actual phone delivery.
+  [Apple's current APNs headers](https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns?changes=_3)
+  define UTC epoch expiry and zero storage. APNs honors expiry on a best-effort
+  basis, may reorder notifications and may deliver after expiry. These bounds
+  do not guarantee storage, ordering or physical delivery.
 - Spec: `docs/phone-companion-2-spec.md`.
 
 ## Verification and boundaries

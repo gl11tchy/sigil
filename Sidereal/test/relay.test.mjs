@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import net from 'node:net';
+import { createHash } from 'node:crypto';
 import WebSocket from 'ws';
 import { createRelay } from '../server.mjs';
 import { importKey, seal } from '../public/crypto.mjs';
@@ -535,7 +536,7 @@ test('a host registers the phone token and sends sealed alerts and activity upda
   assert.equal(apns.sent[0].environment, 'development');
   assert.equal(apns.sent[0].token, 'ab'.repeat(32));
   assert.equal(apns.sent[0].pushType, 'alert');
-  assert.equal(apns.sent[0].collapseId, 'tab-1');
+  assert.equal(apns.sent[0].collapseId, createHash('sha256').update(JSON.stringify([room, 'tab-1'])).digest('hex'));
   assert.equal(apns.sent[0].payload.aps['mutable-content'], 1);
   assert.equal(apns.sent[0].payload.aps['thread-id'], 'tab-1');
   assert.equal(apns.sent[0].payload.sigil.data, 'c2VhbGVk');

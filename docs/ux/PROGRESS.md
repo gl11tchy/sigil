@@ -1,3 +1,16 @@
+## REA-1210: original push expiry (2026-10-13)
+
+One fake-clock/held local APNs test reproduced the unchanged-code missing
+alert/update/end expirations. New additive original-issued/expiry metadata is
+fixed at Mac admission and validated/copied by the relay before waiting. Local
+and APNs deadlines align; stale waiting events expire without freshening. Legacy
+frames retain zero storage, activity timestamps freeze, and alert collapse keys
+separate rooms/tabs. Sealed bytes, identity, client freshness and permissions stay
+intact. All 46 focused Node tests and strict local formatting/syntax/diff checks
+passed. [QA](../qa/rea-1210.md) records synthetic checks and provider limits.
+Exact-head CI and parent personal review remain pending; no merge/installation,
+actual provider calls, personal data, process inventory or denied retry.
+
 ## REA-1231: reopen Grok with saved options (2026-10-13)
 
 Sidebar and remote opening now choose saved model and valid saved effort
