@@ -81,6 +81,7 @@ enum TestMain {
         run("decodes an event with a screen") { try ScreenTests.decodesAnEventWithAScreen() }
         run("rejects a malformed screen") { try ScreenTests.rejectsAMalformedScreen() }
         run("request carries worktree") { try ScreenTests.requestCarriesWorktree() }
+        run("project worktree default preserves legacy and explicit choices") { try ScreenTests.projectWorktreeDefaultKeepsLegacyAndExplicitChoices() }
         run("decodes a prompt") { try ScreenTests.decodesAPrompt() }
         run("alert opens with the right key only") { try ScreenTests.alertOpensWithTheRightKeyOnly() }
         run("pairing list rules") { try ScreenTests.pairingListRules() }

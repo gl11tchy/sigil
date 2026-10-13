@@ -40,27 +40,29 @@ enum NewSessionLaunch: Equatable {
     @MainActor
     static func start(
         _ provider: CLIProvider, model: AppModel, project: URL, useWorktree: Bool,
-        launch: (model: String, effort: String, fastMode: Bool)
+        launch: (model: String, effort: String, fastMode: Bool), worktreeRoot: URL = SigilWorktree.root
     ) async -> Bool {
         guard model.isShowingNewSessionSheet,
             await model.checkedProviderLaunchProblem(provider) == nil,
             model.isShowingNewSessionSheet, model.canSignIn(provider), AppModel.isUsableDirectory(project)
         else { return false }
-        var folder = project
-        if useWorktree {
-            do {
-                folder = try await SigilWorktree.create(for: project) ?? project
-            } catch {
-                if !Task.isCancelled {
-                    model.showError(title: "Could not create a worktree", message: error.localizedDescription)
-                }
-                return false
-            }
+        let result = await SessionWorktreeStart.start(
+            project: project, useWorktree: useWorktree, root: worktreeRoot,
+            validate: {
+                guard model.isShowingNewSessionSheet else { return "Session options were closed." }
+                return await model.checkedProviderLaunchProblem(provider)
+            },
+            launch: { folder in
+                guard model.isShowingNewSessionSheet else { return false }
+                return model.newTab(
+                    in: folder, model: launch.model, effort: launch.effort, fastMode: launch.fastMode,
+                    provider: provider) != nil
+            })
+        if let message = result.message, !Task.isCancelled || result.needsRecovery {
+            model.showError(title: "Could not start a session", message: message)
         }
-        guard !Task.isCancelled, model.isShowingNewSessionSheet else { return false }
-        return model.newTab(
-            in: folder, model: launch.model, effort: launch.effort, fastMode: launch.fastMode, provider: provider)
-            != nil
+        if case .started = result { return true }
+        return false
     }
 
     /// Left and right arrows walk the row in screen order and stop at its ends.
@@ -86,6 +88,7 @@ struct NewSessionSheet: View {
     @State private var grokModels = GrokModelCatalog.fallback
     @State private var menus: [CLIProvider: ProviderModelMenu] = [:]
     @State private var startsInWorktree: Bool
+    @State private var hasChosenWorktree = false
     @State private var isStartingSession = false
     @State private var startTask: Task<Void, Never>?
     @FocusState private var focusedProvider: CLIProvider?
@@ -133,6 +136,11 @@ struct NewSessionSheet: View {
 
     private var isRepository: Bool { SigilWorktree.isInRepository(directory) }
 
+    private var useWorktree: Bool {
+        startsInWorktree && isRepository
+            && (hasChosenWorktree || SigilWorktree.shouldDefaultToWorktree(directory))
+    }
+
     private var canStart: Bool { directoryIsAvailable && !isStartingSession }
 
     var providerVersionNotice: String? {
@@ -172,10 +180,11 @@ struct NewSessionSheet: View {
                         Picker(
                             "Work in",
                             selection: Binding(
-                                get: { startsInWorktree },
+                                get: { useWorktree },
                                 set: {
                                     preserveProviderChoice()
                                     startsInWorktree = $0
+                                    hasChosenWorktree = true
                                 })
                         ) {
                             Text("New worktree").tag(true)
@@ -280,6 +289,7 @@ struct NewSessionSheet: View {
         .defaultFocus($isProviderRowFocused, true)
         .interactiveDismissDisabled(isStartingSession)
         .onDisappear { startTask?.cancel() }
+        .onChange(of: directory) { _, _ in hasChosenWorktree = false }
         .onChange(of: model.settings.defaultProvider) { _, next in
             if !hasChosenProvider { provider = next }
         }
@@ -415,7 +425,7 @@ struct NewSessionSheet: View {
         guard canStart else { return }
         let launch = menu(for: provider)?.launch(choice(for: provider)) ?? (model: "", effort: "", fastMode: false)
         let project = directory
-        let useWorktree = startsInWorktree && isRepository
+        let useWorktree = self.useWorktree
         isStartingSession = true
         startTask = Task {
             defer {

@@ -991,6 +991,8 @@ struct RemoteSessionOpsTests {
         let projects = try #require(await fixture.command("projects").projects)
         #expect(projects.first { $0.folder == repo.path }?.repository == true)
         #expect(projects.first { $0.folder == plain.path }?.repository == false)
+        #expect(projects.first { $0.folder == repo.path }?.worktreeDefault == true)
+        #expect(projects.first { $0.folder == plain.path }?.worktreeDefault == false)
 
         // The phone's toggle wins over the Mac's setting, both ways.
         let saved = RemoteCommands.worktreeRoot

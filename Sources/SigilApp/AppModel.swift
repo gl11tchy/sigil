@@ -2332,7 +2332,7 @@ final class AppModel {
 
     /// One click uses the same launch defaults as an ordinary new tab. The
     /// optional sheet is the only place that overrides them for this launch.
-    func startDefaultSession(_ provider: CLIProvider) async {
+    func startDefaultSession(_ provider: CLIProvider, worktreeRoot: URL = SigilWorktree.root) async {
         guard showsNewSessionSurface, !isStartingNewSession else { return }
         settings.finishInitialProviderSelection()
         let project = pendingSessionDirectory ?? newSessionDirectory
@@ -2346,17 +2346,22 @@ final class AppModel {
             showError(title: "Folder is unavailable", message: "Choose another folder in Options.")
             return
         }
-        var folder = project
-        if settings.startsInWorktree, SigilWorktree.isInRepository(project) {
-            do {
-                folder = try await SigilWorktree.create(for: project) ?? project
-            } catch {
-                showError(title: "Could not create a worktree", message: error.localizedDescription)
-                return
-            }
+        let result = await SessionWorktreeStart.start(
+            project: project,
+            useWorktree: settings.startsInWorktree && SigilWorktree.shouldDefaultToWorktree(project),
+            root: worktreeRoot,
+            validate: {
+                guard self.showsNewSessionSurface else { return "Session launch was cancelled." }
+                return await self.checkedProviderLaunchProblem(provider)
+            },
+            launch: { folder in
+                guard self.showsNewSessionSurface else { return false }
+                return self.newTab(in: folder, provider: provider) != nil
+            })
+        if case .started = result { focusSelectedTerminal() }
+        if let message = result.message, !Task.isCancelled || result.needsRecovery {
+            showError(title: "Could not start a session", message: message)
         }
-        guard showsNewSessionSurface else { return }
-        if newTab(in: folder, provider: provider) != nil { focusSelectedTerminal() }
     }
 
     /// Explicit refresh replaces all results; routine entry reuses bounded successes.
