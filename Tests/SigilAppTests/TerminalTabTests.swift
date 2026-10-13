@@ -216,7 +216,7 @@ struct TerminalTabTests {
         #expect(tab.capabilities.lifecycle)
 
         tab.noteTurnStarted()
-        #expect(tab.activity == .working)
+        #expect(tab.activity == .unknown)
         #expect(tab.isWatchingForCompletion)
         try append(try codexEvents(turn: "one"), to: journal)
         #expect(await waitUntil { tab.activity == .idle })
@@ -233,6 +233,113 @@ struct TerminalTabTests {
         #expect(!tab.capabilities.lifecycle)
         #expect(tab.workingSince == nil)
         #expect(!tab.hasUnseenActivity)
+    }
+
+    @Test func midTurnCodexReturnKeepsCurrentAndQueuedTurnCompletions() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let journal = directory.appendingPathComponent("codex.jsonl")
+        let sessionID = UUID().uuidString.lowercased()
+        try codexMetadata(sessionID: sessionID).write(to: journal)
+        let tab = makeCodexTab(journal: journal, sessionID: sessionID)
+        defer { tab.terminate() }
+        var completions = 0
+        tab.onSettle = { completions += 1 }
+        tab.noteTurnStarted()
+        #expect(tab.activity == .unknown)
+        #expect(tab.isWatchingForCompletion)
+        try append(try codexEvent(type: "task_started", turn: "t1"), to: journal)
+        #expect(await waitUntil { tab.activity == .working })
+        let workingSince = tab.workingSince
+
+        tab.noteTurnStarted()
+        #expect(tab.workingSince == workingSince)
+        let complete1 = try codexEvent(type: "task_complete", turn: "t1")
+        try append(complete1, to: journal)
+        #expect(await waitUntil { tab.activity == .idle && completions == 1 })
+        #expect(tab.hasUnseenActivity)
+        tab.clearUnseenActivity()
+
+        tab.noteTurnStarted()
+        #expect(tab.activity == .idle)  // Queuing input does not prove t2 was accepted.
+        let start2 = try codexEvent(type: "task_started", turn: "t2")
+        try append(start2, to: journal)
+        #expect(await waitUntil { tab.activity == .working })
+        try append(start2 + complete1, to: journal)
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(tab.activity == .working && completions == 1 && !tab.hasUnseenActivity)
+        let complete2 = try codexEvent(type: "task_complete", turn: "t2")
+        try append(complete2, to: journal)
+        #expect(await waitUntil { tab.activity == .idle && completions == 2 })
+        tab.clearUnseenActivity()
+        try append(complete2, to: journal)
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(completions == 2 && !tab.hasUnseenActivity)
+    }
+
+    @Test func interruptedCodexWatcherStartsFreshWithoutCompletingTheOldTurn() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let journal = directory.appendingPathComponent("codex.jsonl")
+        let sessionID = UUID().uuidString.lowercased()
+        try codexMetadata(sessionID: sessionID).write(to: journal)
+        let tab = makeCodexTab(journal: journal, sessionID: sessionID)
+        defer { tab.terminate() }
+        tab.noteTurnStarted()
+        try append(try codexEvent(type: "task_started", turn: "t1"), to: journal)
+        #expect(await waitUntil { tab.activity == .working })
+        tab.noteInterrupted()
+        #expect(!tab.isWatchingForCompletion)
+        try append(try codexEvent(type: "task_complete", turn: "t1"), to: journal)
+        tab.noteTurnStarted()
+        #expect(tab.activity == .unknown)
+        try append(try codexEvent(type: "task_complete", turn: "t1"), to: journal)
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(tab.activity == .unknown && !tab.hasUnseenActivity)
+        try append(try codexEvent(type: "task_started", turn: "t2"), to: journal)
+        #expect(await waitUntil { tab.activity == .working })
+        try append(try codexEvent(type: "turn_aborted", turn: "t2"), to: journal)
+        #expect(await waitUntil { tab.activity == .interrupted })
+        #expect(!tab.hasUnseenActivity)
+    }
+
+    @Test func aPollBatchCannotUpdateATabAfterItsProcessIsReplaced() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executable = directory.appendingPathComponent("fake-codex")
+        try "#!/bin/sh\nexec /bin/sleep 30\n".write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let journal = directory.appendingPathComponent("codex.jsonl")
+        let sessionID = UUID().uuidString.lowercased()
+        try codexMetadata(sessionID: sessionID).write(to: journal)
+        let tab = makeCodexTab(journal: journal, sessionID: sessionID, executable: executable)
+        tab.start(isSelected: { true })
+        defer { tab.terminateAndWait() }
+        try #require(tab.controller.isRunning)
+        let firstProcess = try #require(tab.controller.processGeneration)
+        tab.noteTurnStarted()
+        var replaced = false
+        var completions = 0
+        tab.onSettle = { completions += 1 }
+        tab.onActivityChange = {
+            guard tab.activity == .working, !replaced else { return }
+            replaced = true
+            // Replace during application of a real multi-event journal poll.
+            tab.terminateAndWait()
+            tab.start(isSelected: { true })
+            tab.noteTurnStarted()
+        }
+        try append(try codexEvents(turn: "t1") + codexEvents(turn: "t2"), to: journal)
+        #expect(await waitUntil { replaced })
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(tab.controller.isRunning)
+        #expect(tab.controller.processGeneration != firstProcess)
+        #expect(tab.activity == .unknown && completions == 0 && !tab.hasUnseenActivity)
+        try append(try codexEvents(turn: "replacement-turn"), to: journal)
+        #expect(await waitUntil { tab.activity == .idle && completions == 1 })
     }
 
     @Test func exactProviderJournalCompletesAndDuplicateDoesNotNotifyTwice() async throws {
@@ -380,27 +487,31 @@ struct TerminalTabTests {
     }
 
     private func codexEvents(turn: String) throws -> Data {
+        try codexEvent(type: "task_started", turn: turn) + codexEvent(type: "task_complete", turn: turn)
+    }
+
+    private func codexEvent(type: String, turn: String) throws -> Data {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let timestamp = formatter.string(from: Date().addingTimeInterval(0.01))
-        return try ["task_started", "task_complete"].reduce(into: Data()) { data, type in
-            data.append(
-                try JSONSerialization.data(withJSONObject: [
-                    "timestamp": timestamp, "type": "event_msg", "payload": ["type": type, "turn_id": turn],
-                ]))
-            data.append(0x0A)
-        }
+        return try JSONSerialization.data(withJSONObject: [
+            "timestamp": timestamp, "type": "event_msg", "payload": ["type": type, "turn_id": turn],
+        ]) + Data([0x0A])
     }
 
-    private func makeCodexTab(journal: URL, sessionID: String) -> TerminalTab {
+    private func makeCodexTab(journal: URL, sessionID: String, executable: URL? = nil) -> TerminalTab {
         let suite = "TerminalTabCodex.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
         return TerminalTab(
             spec: GrokLaunchSpec(
-                executable: URL(fileURLWithPath: "/usr/bin/true"),
+                executable: executable ?? URL(fileURLWithPath: "/usr/bin/true"),
                 workingDirectory: journal.deletingLastPathComponent(),
-                mode: .resume(sessionID: sessionID), provider: .codex, sessionFile: journal),
+                mode: .resume(sessionID: sessionID),
+                providerEnvironment: [
+                    "HOME": journal.deletingLastPathComponent().path,
+                    "CODEX_HOME": journal.deletingLastPathComponent().path,
+                ], provider: .codex, sessionFile: journal),
             settings: AppSettings(defaults: defaults))
     }
 
