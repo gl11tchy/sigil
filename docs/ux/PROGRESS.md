@@ -808,3 +808,25 @@ identities and still requires both unrelated fixtures to pass; pointer failures,
 partial results and other skips fail. All other CI checks and the completion guard
 remain mandatory. Skipped pointer behavior and owner manual verification are not
 claimed as passed. No denied input retry, security change, merge or installation.
+
+## REA-1273: Finder folder paths
+
+On isolated branch `fix/rea-1273-finder-folder-paths`, based on main `f0e319a`,
+existing directories now use the same standardized absolute-path filter as
+files. Control rejection, shell quoting, Finder order, the 16-item cap and
+bracketed paste remain. No directory enumeration, content reading, upload or
+phone behavior change.
+
+[QA evidence](../qa/rea-1273.md) records test-only CI38325625030: 37 XCTest
+cases passed, and 1,225 Swift tests completed with eight expected issues in four
+folder-path tests. Finder copies sent the basename; mixed drops omitted folders.
+The unsafe-folder rejection case passed. The final candidate covers single-folder
+copy/drop and mixed drops in both paste modes, the copy operation, symlink names,
+controls and exact PTY bytes without Enter. Exact-head CI is required in PR163.
+
+The local standalone Swift probe was blocked at its default compiler cache and
+was not retried. No local AppTests or application build, personal histories,
+general clipboard inspection, daily-app interaction, merge or installation.
+The manual Finder drag/window-ID screenshot remains unobserved. REA-1230's branch
+and uncommitted blocked note are preserved. One worker and ticket remain active
+until parent personal final-diff review; no next ticket was selected.

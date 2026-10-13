@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 
 /// Turns Finder drops and clipboard images into prompt text Grok already
-/// understands: absolute paths. Image files become chips; other files paste as
+/// understands: absolute paths. Image files become chips; other files and folders paste as
 /// paths. SwiftTerm has no drag destination, so the host has to do this.
 public enum TerminalDrop {
     public static let maxFiles = 16
@@ -64,10 +64,7 @@ public enum TerminalDrop {
             guard files.count < maxFiles else { break }
             let resolved = url.standardizedFileURL
             guard isSafeToPaste(resolved.path) else { continue }
-            var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: resolved.path, isDirectory: &isDirectory),
-                !isDirectory.boolValue
-            else { continue }
+            guard FileManager.default.fileExists(atPath: resolved.path) else { continue }
             files.append(resolved)
         }
         return files
