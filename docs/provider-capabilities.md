@@ -311,6 +311,25 @@ pruned by history scans. Seeding records verified chats when the scan has notice
 alone and completes its one-time migration only after coverage is complete.
 Every applied scan signals housekeeping even if the notice count stays equal.
 
+The Sigil-only list also includes chats the user pinned, named, archived or
+colored in Sigil. Its separate ownership migration unions those four saved
+preference categories without consulting history files. IDs are copied verbatim:
+these records already use sidebar IDs, including provider prefixes. Unknown or
+unreadable history cannot remove an ownership ID, and an unknown display value
+(such as a future color) does not hide its saved ID from the migration. Opening
+an outside chat or writing a note alone does not establish ownership.
+
+Ownership membership has independent, never-pruned per-ID preference records;
+the existing JSON list remains a compatibility projection. This prevents
+overlapping copies from losing distinct additions through a shared list write.
+The `session.sigilConversationsSeeded2` marker follows a checked persistence
+barrier and identity readback. Failed writes retain in-memory IDs and retry on
+shared-list reload or store housekeeping; reconciliation also imports another
+copy's later ownership data after the initial migration has completed. A malformed
+ownership membership list is retained and cannot complete the migration. Ownership
+is a listing policy, not proof of native identity, supported history or live tab
+binding; provider validation and the original history-based seed remain separate.
+
 Filesystem events refresh native JSONL changes and the adjacent Codex title index.
 The Codex watcher excludes unrelated files in its parent directory. Grok still
 watches summaries rather than its frequently changing journals. Scanner and watcher

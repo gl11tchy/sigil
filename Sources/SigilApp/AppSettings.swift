@@ -18,6 +18,8 @@ final class AppSettings {
         static let showOtherAppSessions = "sidebar.showOtherAppSessions"
         static let sigilConversations = "session.sigilConversations"
         static let sigilConversationsSeeded = "session.sigilConversationsSeeded"
+        static let sigilConversationsSeeded2 = "session.sigilConversationsSeeded2"
+        static let sigilConversationPrefix = "session.sigilConversation."
         static let focusedProjectPath = "sidebar.focusedProjectPath"
         static let pinnedConversations = "sidebar.pinnedConversations"
         static let pinnedProjects = "sidebar.pinnedProjects"
@@ -38,6 +40,8 @@ final class AppSettings {
     }
 
     private let defaults: UserDefaults
+    @ObservationIgnored private let persistSigilOwnership: (UserDefaults, [String: Any]) -> Bool
+    @ObservationIgnored private var sigilPersistencePending = false
 
     static func normalizedFontSize(_ value: CGFloat) -> CGFloat {
         value.isFinite ? min(32, max(8, value)) : 13
@@ -98,20 +102,14 @@ final class AppSettings {
     var showSubagentSessions: Bool {
         didSet { defaults.set(showSubagentSessions, forKey: Key.showSubagentSessions) }
     }
-    /// The sidebar lists only chats started in Sigil. Claude Code, Codex and
-    /// Grok keep one shared history, so chats from the terminal and other apps
-    /// are there too; they stay hidden unless the user turns them on.
+    /// The sidebar lists chats started or given ownership data in Sigil.
+    /// Unclaimed chats in the shared CLI history stay hidden unless turned on.
     var showOtherAppSessions: Bool {
         didSet { defaults.set(showOtherAppSessions, forKey: Key.showOtherAppSessions) }
     }
-    /// Sidebar ids of the chats Sigil started, oldest first.
+    /// Sidebar ids of chats Sigil started or the user pinned, named, archived or colored.
     private(set) var sigilConversations: [String] {
-        didSet {
-            sigilConversationIDs = Set(sigilConversations)
-            if let data = try? JSONEncoder().encode(sigilConversations) {
-                defaults.set(data, forKey: Key.sigilConversations)
-            }
-        }
+        didSet { sigilConversationIDs = Set(sigilConversations) }
     }
     /// `sigilConversations` as a set, so a sidebar pass is one lookup per chat.
     @ObservationIgnored private(set) var sigilConversationIDs: Set<String> = []
@@ -119,6 +117,8 @@ final class AppSettings {
     var sigilConversationsSeeded: Bool {
         didSet { defaults.set(sigilConversationsSeeded, forKey: Key.sigilConversationsSeeded) }
     }
+    /// The ownership union was persisted successfully. Later arrivals still reconcile.
+    private(set) var sigilConversationsSeeded2: Bool
     /// Empty means the Projects list, not a drilled-in folder.
     var focusedProjectPath: String {
         didSet { defaults.set(focusedProjectPath, forKey: Key.focusedProjectPath) }
@@ -250,8 +250,18 @@ final class AppSettings {
         didSet { defaults.set(kimiModel, forKey: Key.kimiModel) }
     }
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        persistSigilOwnership: ((UserDefaults, [String: Any]) -> Bool)? = nil
+    ) {
         self.defaults = defaults
+        self.persistSigilOwnership =
+            persistSigilOwnership ?? { defaults, values in
+                for (key, value) in values { defaults.set(value, forKey: key) }
+                // Only ownership commits need a checked persistence barrier; ordinary
+                // preferences keep UserDefaults' normal asynchronous persistence.
+                return defaults.synchronize()
+            }
         fontSize =
             defaults.object(forKey: Key.fontSize) == nil
             ? 13
@@ -271,6 +281,7 @@ final class AppSettings {
         sigilConversations = started
         sigilConversationIDs = Set(started)
         sigilConversationsSeeded = defaults.bool(forKey: Key.sigilConversationsSeeded)
+        sigilConversationsSeeded2 = defaults.bool(forKey: Key.sigilConversationsSeeded2)
         optionAsMetaKey = defaults.bool(forKey: Key.optionAsMeta)
         focusedProjectPath = defaults.string(forKey: Key.focusedProjectPath) ?? ""
         if let data = defaults.data(forKey: Key.pinnedConversations),
@@ -329,12 +340,15 @@ final class AppSettings {
         kimiSignIn =
             defaults.string(forKey: Key.kimiSignIn).flatMap(KimiSignIn.init(rawValue:)) ?? .kimiAccount
         kimiModel = defaults.string(forKey: Key.kimiModel) ?? KimiCode.defaultModel
+        seedSigilConversationOwnership()
     }
 
     /// Re-reads the pin, archive, name and color lists, which another running
     /// copy of the app may have changed since launch. Call it before a change,
     /// so the write keeps that copy's edits instead of replacing them.
     func reloadSharedLists() {
+        // Capture opaque ownership IDs before display decoders skip unknown values.
+        seedSigilConversationOwnership()
         func stored<Value: Decodable>(_ key: String) -> [Value] {
             defaults.data(forKey: key).flatMap { try? JSONDecoder().decode([Value].self, from: $0) } ?? []
         }
@@ -355,25 +369,96 @@ final class AppSettings {
         {
             tabColors = colors
         }
-        let started: [String] = stored(Key.sigilConversations)
-        if started != sigilConversations { sigilConversations = started }
     }
 
     func isSigilConversation(_ sidebarID: String) -> Bool {
         sigilConversationIDs.contains(sidebarID)
     }
 
-    /// Adds chats to the list of those Sigil started. Known ids are skipped.
-    /// Another running copy may have added some since this one last read the
-    /// list, so the saved list is merged in first and nothing is dropped.
-    func recordSigilConversations(_ sidebarIDs: [String]) {
-        let saved =
-            defaults.data(forKey: Key.sigilConversations)
-            .flatMap { try? JSONDecoder().decode([String].self, from: $0) } ?? []
+    /// Independent, never-pruned ID keys preserve simultaneous additions even
+    /// when copies overwrite the compatibility list with overlapping snapshots.
+    @discardableResult
+    func recordSigilConversations(_ sidebarIDs: [String], confirmPersistence: Bool = false) -> Bool {
         var merged = sigilConversations
-        var seen = sigilConversationIDs
-        for id in saved + sidebarIDs where seen.insert(id).inserted { merged.append(id) }
+        var seen = Set(merged)
+        func append(_ ids: [String]) {
+            for id in ids where seen.insert(id).inserted { merged.append(id) }
+        }
+        let savedData = defaults.data(forKey: Key.sigilConversations)
+        let saved: [String]
+        if defaults.object(forKey: Key.sigilConversations) == nil {
+            saved = []
+        } else if let savedData, let decoded = try? JSONDecoder().decode([String].self, from: savedData) {
+            saved = decoded
+        } else {
+            // Malformed preferences are not permission to overwrite unseen IDs.
+            append(sidebarIDs)
+            if merged != sigilConversations { sigilConversations = merged }
+            sigilPersistencePending = true
+            return false
+        }
+        let records = defaults.dictionaryRepresentation().filter { $0.key.hasPrefix(Key.sigilConversationPrefix) }
+        let recorded = records.sorted { $0.key < $1.key }.compactMap { $0.value as? String }
+        append(saved + recorded + sidebarIDs)
         if merged != sigilConversations { sigilConversations = merged }
+        guard recorded.count == records.count, let data = try? JSONEncoder().encode(merged) else {
+            sigilPersistencePending = true
+            return false
+        }
+        var writes: [String: Any] = [:]
+        for id in merged where records[Self.sigilConversationKey(id)] as? String != id {
+            writes[Self.sigilConversationKey(id)] = id
+        }
+        if savedData == nil || Set(saved) != seen { writes[Key.sigilConversations] = data }
+        guard !writes.isEmpty || sigilPersistencePending || confirmPersistence else { return true }
+        guard persistSigilOwnership(defaults, writes),
+            let readback = defaults.data(forKey: Key.sigilConversations)
+                .flatMap({ try? JSONDecoder().decode([String].self, from: $0) }),
+            seen.isSubset(of: Set(readback)),
+            merged.allSatisfy({ defaults.string(forKey: Self.sigilConversationKey($0)) == $0 })
+        else {
+            sigilPersistencePending = true
+            return false
+        }
+        sigilPersistencePending = false
+        return true
+    }
+
+    private static func sigilConversationKey(_ id: String) -> String {
+        Key.sigilConversationPrefix + Data(id.utf8).base64EncodedString()
+    }
+
+    /// Ownership preferences already contain sidebar IDs, including provider
+    /// prefixes. No history lookup, cwd match, provider validation or notes scan.
+    /// Reconciliation after completion recovers failed actions and other copies.
+    @discardableResult
+    func seedSigilConversationOwnership() -> Bool {
+        struct OwnedRow: Decodable { let sessionID: String }
+        var ids =
+            pinnedConversations.map(\.sessionID) + archivedConversations.map(\.sessionID)
+            + conversationNames.map(\.sessionID) + tabColors.map(\.sessionID)
+        var readable = true
+        for key in [Key.pinnedConversations, Key.archivedConversations, Key.conversationNames, Key.tabColors] {
+            guard defaults.object(forKey: key) != nil else { continue }
+            if let data = defaults.data(forKey: key), let rows = try? JSONDecoder().decode([OwnedRow].self, from: data)
+            {
+                ids += rows.map(\.sessionID)
+            } else {
+                readable = false
+            }
+        }
+        let persisted = recordSigilConversations(ids, confirmPersistence: !sigilConversationsSeeded2)
+        guard readable, persisted else { return false }
+        if !defaults.bool(forKey: Key.sigilConversationsSeeded2) {
+            guard persistSigilOwnership(defaults, [Key.sigilConversationsSeeded2: true]),
+                defaults.bool(forKey: Key.sigilConversationsSeeded2)
+            else {
+                defaults.set(false, forKey: Key.sigilConversationsSeeded2)
+                return false
+            }
+        }
+        sigilConversationsSeeded2 = true
+        return true
     }
 
     var theme: TerminalTheme {

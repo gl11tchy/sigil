@@ -490,6 +490,7 @@ final class AppModel {
         unarchive(session)
         settings.pinnedConversations = SidebarOrganization.inserting(
             session, onto: settings.pinnedConversations, samePath: samePath)
+        settings.recordSigilConversations([session.id])
     }
 
     func unpin(_ session: GrokSession) {
@@ -557,6 +558,7 @@ final class AppModel {
         }
         settings.pinnedConversations = pinned
         settings.archivedConversations = archived
+        settings.recordSigilConversations(sessions.map(\.id))
         stopAndWait(
             tabs.filter { tab in
                 sessions.contains { tabMatches(tab, sessionID: $0.id, cwd: $0.cwd) }
@@ -1291,6 +1293,7 @@ final class AppModel {
     /// Chats Sigil started before it kept a list: saved open tabs and chats
     /// in Sigil's own worktrees. Completes once a scan verifies all history coverage.
     func seedSigilConversations() {
+        settings.seedSigilConversationOwnership()
         // A scan with a read error may have missed chats; wait for a clean one.
         guard !settings.sigilConversationsSeeded, store.appliedScanSequence > 0, store.loadError == nil,
             !store.hasUnvalidatedHistory
@@ -1301,9 +1304,9 @@ final class AppModel {
         let worktrees = store.sessions
             .filter { SigilWorktree.projectPath(of: $0.cwd) != nil && !$0.isSubagent }
             .map(\.id)
-        settings.recordSigilConversations(saved + worktrees)
+        let persisted = settings.recordSigilConversations(saved + worktrees)
         // Seed verified chats now, and retry when incomplete files become readable.
-        if store.canPruneMissingProjects { settings.sigilConversationsSeeded = true }
+        if persisted, store.canPruneMissingProjects { settings.sigilConversationsSeeded = true }
     }
 
     /// A Codex tab can be renamed and colored before its chat id exists.
@@ -1570,6 +1573,7 @@ final class AppModel {
                 next: next, current: settings.conversationNames)
         else { return }
         settings.conversationNames = next
+        settings.recordSigilConversations([session.id])
         applyNameToOpenTabs(session)
     }
 
@@ -2215,6 +2219,7 @@ final class AppModel {
             samePath: samePath)
         guard next != settings.tabColors else { return }
         settings.tabColors = next
+        settings.recordSigilConversations([id])
     }
 
     func hasCustomTabName(_ tab: TerminalTab) -> Bool {
@@ -2247,6 +2252,7 @@ final class AppModel {
                 samePath: samePath)
             guard next != settings.conversationNames else { return }
             settings.conversationNames = next
+            settings.recordSigilConversations([id])
             return
         }
         let trimmed = ConversationNaming.normalized(raw)
