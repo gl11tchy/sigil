@@ -45,7 +45,8 @@ struct RemotePushReadinessTests {
         #expect(await readinessEventually { context.relay.heldRouteCount >= 2 })
         try context.relay.releaseRoute()
         #expect(await readinessEventually { context.relay.captureCount == 1 })
-        let alert = try #require(context.relay.firstAlert(key: context.device))
+        let capturedAlert = try context.relay.firstAlert(key: context.device)
+        let alert = try #require(capturedAlert)
         #expect(alert.issuedAt == Int(context.clock.now.timeIntervalSince1970))
         #expect(context.relay.allocationCount == 1 && !context.relay.sawPolicyClose)
     }

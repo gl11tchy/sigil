@@ -1022,6 +1022,12 @@ fixtures use actual RemoteControl/relay capture, a fake clock and owned write
 barriers. Local formatting, JavaScript syntax and diff checks passed; final
 exact-head integrated evidence will be recorded in the PR after observation.
 
+First candidate `ed384512fba419d469851ff265b4098aedab6f2e`, CI38415786835,
+stopped at test compilation: mutating queue calls and a throwing fixture read
+were wrapped by Swift Testing macros. Those calls now precede their assertions;
+production behavior is unchanged by this repair. No Swift test pass is claimed
+for the first gate. The next gate follows this relevant repair, without overlap.
+
 No local AppTests/build, denial retry, personal history, real provider/Apple
 calls, process inventory, security/credential or public distribution changes.
 Relay allocation/proxy policy, APNs TTL policy and HTTP/2 retry remain separate.
