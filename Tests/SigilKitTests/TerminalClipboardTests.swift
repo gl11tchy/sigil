@@ -120,8 +120,8 @@ struct TerminalClipboardTests {
         #expect(await TerminalTestSupport.waitUntil { title == "Working" })
     }
 
-    @Test(arguments: [false, true], [false, true])
-    func finderFolderAndMixedPathsStayLiteral(bracketedPaste: Bool, drop: Bool) async throws {
+    @Test(arguments: [false, true], ["copy-folder", "drop-folder", "drop-mixed"])
+    func finderFolderAndMixedPathsStayLiteral(bracketedPaste: Bool, action: String) async throws {
         let controller = TerminalController()
         let capture = try await TerminalTestSupport.startInputCapture(
             in: controller, bracketedPaste: bracketedPaste)
@@ -141,18 +141,18 @@ struct TerminalClipboardTests {
         try Data("hi".utf8).write(to: notes)
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: folder)
         // Finder's text rendition is the item name, not a usable absolute path.
-        let items = drop ? [folder, photo, link, notes] : [folder]
+        let items = action == "drop-mixed" ? [folder, photo, link, notes] : [folder]
         let pasteboard = NSPasteboard.withUniqueName()
         defer { pasteboard.releaseGlobally() }
         pasteboard.clearContents()
         #expect(pasteboard.writeObjects(items.map { $0 as NSURL }))
         pasteboard.setString(items.map(\.lastPathComponent).joined(separator: " "), forType: .string)
 
-        if drop {
-            let drag = FinderFolderDrag(pasteboard: pasteboard)
-            #expect(view.draggingEntered(drag) == .copy)
-            #expect(view.draggingUpdated(drag) == .copy)
-            #expect(view.prepareForDragOperation(drag))
+        let drag = FinderFolderDrag(pasteboard: pasteboard)
+        #expect(view.draggingEntered(drag) == .copy)
+        #expect(view.draggingUpdated(drag) == .copy)
+        #expect(view.prepareForDragOperation(drag))
+        if action != "copy-folder" {
             #expect(view.performDragOperation(drag))
         } else {
             view.paste(from: pasteboard)
