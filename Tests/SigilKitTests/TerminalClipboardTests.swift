@@ -212,7 +212,7 @@ private final class FinderFolderDrag: NSObject, NSDraggingInfo {
     }
 
     func slideDraggedImage(to screenPoint: NSPoint) {}
-    nonisolated func namesOfPromisedFilesDropped(atDestination dropDestination: URL) -> [String]? { nil }
+    nonisolated override func namesOfPromisedFilesDropped(atDestination dropDestination: URL) -> [String]? { nil }
     func resetSpringLoading() {}
     func enumerateDraggingItems(
         options: NSDraggingItemEnumerationOptions, for view: NSView?, classes classArray: [AnyClass],
