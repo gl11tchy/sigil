@@ -472,7 +472,11 @@ final class RemoteControl {
 
     /// A tab's status or screen changed. Reads the tab shortly after, so a burst
     /// of output is one look, and sends what the phone would otherwise miss.
-    func noteTab(_ tab: TerminalTab, model: AppModel) {
+    func noteTab(_ tab: TerminalTab, model: AppModel, suppressAlerts: Bool = false) {
+        if suppressAlerts {
+            evaluate(tab, model: model, allowAlerts: false)
+            return
+        }
         let id = tab.id.uuidString
         // The first look sets the baseline at once, so the next change is a transition.
         if !planner.knownTabs.contains(id) { evaluate(tab, model: model) }
@@ -486,7 +490,7 @@ final class RemoteControl {
         }
     }
 
-    private func evaluate(_ tab: TerminalTab, model: AppModel) {
+    private func evaluate(_ tab: TerminalTab, model: AppModel, allowAlerts: Bool = true) {
         let id = tab.id.uuidString
         let prompt = RemoteCommands.prompt(for: tab)
         let snapshot = RemoteAlertPlanner.Snapshot(
@@ -495,7 +499,7 @@ final class RemoteControl {
             interactionID: prompt?.id, verified: prompt?.verified == true)
         let plan = planner.plan(tabID: id, snapshot)
         // A phone on the socket sees the change itself; alerts are for a phone that is away.
-        guard peer == nil, let socket else { return }
+        guard allowAlerts, peer == nil, let socket else { return }
         if let alert = plan.alert, push != nil, let deviceKey {
             if let sealed = try? RemoteCrypto.seal(alert, key: deviceKey, direction: RemoteAlert.direction) {
                 let frame = Frame(push: .init(data: sealed, thread: id))

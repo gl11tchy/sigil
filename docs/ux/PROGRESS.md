@@ -954,3 +954,29 @@ shared copies, file/pin preservation and accessible state text. Manual mounted
 image/native UI/VoiceOver observations remain unobserved. Build308 and blocked
 PR162 remain untouched. Stop for parent personal final-code review; no merge,
 installation or next ticket.
+
+## 2026-10-13 — REA-1218: attach verified late Codex lifecycle
+
+Isolated `fix/rea-1218-late-codex-lifecycle` starts from main
+`18d6a17411a0a69726ccdc050e9c4c73170c71f6`. The test-only
+`dce595abf850fe7f01d79f7e80a7539ba3e60949` reproduced three issues in
+[CI38394128901](https://github.com/gl11tchy-team/sigil/actions/runs/38394128901):
+validated explicit linking left lifecycle false, no watcher, and lifecycle false
+in the phone snapshot. The other 1,284 Swift tests and all 37 XCTest cases passed.
+
+The candidate carries opaque exact file/process receipts into late attachment,
+silently catches up the final post-launch state, and retains the transcript on
+Restart. Replaced files, rewritten prefixes, appended headers, ambiguous ownership
+and stale process/session generations end observation. Mid-turn Return preserves
+the existing watcher; a fresh reader after interruption tails current history.
+Generated Kit fixtures and CI-only App fixtures cover the first turn, delayed
+identity, completed-before-attachment, background unread completion, phone
+capabilities, queued turns and delayed results after close/restart. New kernel
+observations are synthetic. Strict local formatting and diff checks passed;
+the applicable candidate CI gate remains pending until recorded in the PR.
+
+No local AppTests/app build, prior cache/process/build-denial retry, live process
+inventory, personal histories, real model calls or daily-app interaction. Actual
+Codex, real-phone alerts and renamed-debug AX/window-ID UI remain unobserved.
+Protected PR162 and prior manual-review tickets are preserved. Parent personal
+final-code review is required before merge, installation or another ticket.

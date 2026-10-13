@@ -88,8 +88,9 @@ struct CodexTabBindingTests {
         #expect(fixture.source.settings.openTabs.tabs.map(\.sessionID) == [firstID, secondID])
         #expect(fixture.source.settings.isSigilConversation("codex:\(firstID)"))
         #expect(fixture.source.settings.isSigilConversation("codex:\(secondID)"))
-        // Identity alone does not attach a lifecycle journal (REA-1218).
-        #expect(!first.capabilities.lifecycle)
+        // Exact ownership and validated metadata enable tracking, not completion.
+        #expect(first.capabilities.lifecycle && second.capabilities.lifecycle)
+        #expect(first.activity == .unknown && second.activity == .unknown)
     }
 
     @Test func multipleFilesNeedAnExplicitUserLink() async throws {

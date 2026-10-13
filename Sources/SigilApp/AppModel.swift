@@ -139,6 +139,10 @@ final class AppModel {
     @ObservationIgnored private let providerChecks: ProviderChecks
     @ObservationIgnored private let hasInjectedProviderProbe: Bool
     @ObservationIgnored private(set) var codexBindingTask: Task<Void, Never>?
+    @ObservationIgnored var codexTranscriptResolver:
+        @Sendable (ChildProcessGeneration, URL, [GrokSession], URL) -> CodexSessionBinding.Transcript? = {
+            CodexSessionBinding.resolveTranscript(process: $0, historyRoot: $1, sessions: $2, workingDirectory: $3)
+        }
 
     init(
         settings: AppSettings = AppSettings(),
@@ -1313,13 +1317,15 @@ final class AppModel {
     /// Those values move onto the chat once the id is known, or the next
     /// summary replaces the name and the color disappears.
     private func adoptLearnedCodexSession(
-        _ tab: TerminalTab, session: GrokSession, generation: ChildProcessGeneration? = nil
+        _ tab: TerminalTab, transcript: CodexSessionBinding.Transcript, generation: ChildProcessGeneration?
     ) {
+        let session = transcript.session
         let chosenName = tab.sessionTitle
         let chosenColor = tab.markColor
         tab.learnedSessionReference = ProviderSessionReference(
             provider: .codex, sessionID: session.nativeSessionID, cwd: tab.workingDirectory.path)
         tab.codexBindingGeneration = generation
+        tab.adoptTranscript(transcript, generation: generation ?? tab.controller.processGeneration)
         if let chosenName, chosenName != tab.automaticTitle {
             renameTab(tab, to: chosenName)
         }
@@ -1349,12 +1355,13 @@ final class AppModel {
         }
         guard !waiting.isEmpty else { return }
         let sessions = store.sessions
+        let resolver = codexTranscriptResolver
         codexBindingTask = Task { [weak self] in
             let matches = await Task.detached(priority: .utility) {
-                waiting.compactMap { id, generation, cwd -> (UUID, ChildProcessGeneration, GrokSession)? in
+                waiting.compactMap {
+                    id, generation, cwd -> (UUID, ChildProcessGeneration, CodexSessionBinding.Transcript)? in
                     guard
-                        let match = CodexSessionBinding.resolve(
-                            process: generation, historyRoot: historyRoot, sessions: sessions, workingDirectory: cwd)
+                        let match = resolver(generation, historyRoot, sessions, cwd)
                     else { return nil }
                     return (id, generation, match)
                 }
@@ -1363,28 +1370,29 @@ final class AppModel {
             self.codexBindingTask = nil
             // Two process trees holding the same conversation are ambiguous,
             // regardless of tab order. Neither gets to claim it first.
-            let claims = Dictionary(grouping: matches, by: { $0.2.id })
-            let unambiguous = matches.filter { claims[$0.2.id]?.count == 1 }
+            let claims = Dictionary(grouping: matches, by: { $0.2.session.id })
+            let unambiguous = matches.filter { claims[$0.2.session.id]?.count == 1 }
             for (id, generation, _) in waiting {
                 guard let tab = self.tabs.first(where: { $0.id == id }), tab.controller.isRunning,
                     tab.controller.processGeneration == generation, tab.codexBindingGeneration == generation,
-                    unambiguous.first(where: { $0.0 == id })?.2.id != tab.sessionID
+                    unambiguous.first(where: { $0.0 == id })?.2.session.id != tab.sessionID
                 else { continue }
                 // `/new` can leave several files open. Earlier proof must not
                 // keep presenting the old conversation as this live process.
                 tab.markColor = self.tabColor(for: tab)
                 tab.learnedSessionReference = nil
                 tab.codexBindingGeneration = nil
+                tab.revokeTranscript()
                 self.persistOpenTabs()
                 self.remoteControl.noteChange()
                 self.remoteControl.noteTab(tab, model: self)
             }
-            for (id, generation, session) in unambiguous {
+            for (id, generation, transcript) in unambiguous {
                 guard let tab = self.tabs.first(where: { $0.id == id }), tab.controller.isRunning,
                     tab.controller.processGeneration == generation, tab.sessionReference == nil,
-                    self.canLinkCodexSession(session, to: tab)
+                    self.canLinkCodexSession(transcript.session, to: tab)
                 else { continue }
-                self.adoptLearnedCodexSession(tab, session: session, generation: generation)
+                self.adoptLearnedCodexSession(tab, transcript: transcript, generation: generation)
             }
         }
     }
@@ -1418,17 +1426,19 @@ final class AppModel {
         guard let tab = tabs.first(where: { $0.id == tabID }),
             codexLinkCandidates(for: tab).contains(where: { $0 == session })
         else { return false }
+        let process = tab.controller.processGeneration
         let validated = await Task.detached(priority: .utility) {
-            CodexSessionBinding.validateForExplicitLink(session)
+            CodexSessionBinding.transcriptForExplicitLink(session)
         }.value
         guard tabs.contains(where: { $0 === tab }), tab.sessionReference == nil,
+            tab.controller.processGeneration == process,
             canLinkCodexSession(session, to: tab)
         else { return false }
         guard let validated else {
             showError(title: "Conversation is unavailable", message: "Read history again, then try linking this tab.")
             return false
         }
-        adoptLearnedCodexSession(tab, session: validated)
+        adoptLearnedCodexSession(tab, transcript: validated, generation: nil)
         return true
     }
 
@@ -2150,7 +2160,7 @@ final class AppModel {
         tab.onActivityChange = { [weak self, weak tab] in
             guard let self, let tab else { return }
             self.remoteControl.noteChange()
-            self.remoteControl.noteTab(tab, model: self)
+            self.remoteControl.noteTab(tab, model: self, suppressAlerts: tab.isCatchingUpLifecycle)
         }
         tab.controller.onRemoteOutput = { [weak self, weak tab] in
             guard let self, let tab else { return }
@@ -2617,6 +2627,7 @@ final class AppModel {
         }
         if spec.provider != .grokBuild, let reference = old.sessionReference {
             spec.mode = .resume(sessionID: reference.sessionID)
+            spec.sessionFile = old.completionEventsURL ?? old.spec.sessionFile
         }
         // A restart follows the current Kimi sign-in, not the one it started with.
         spec.providerEnvironment = providerEnvironment(for: spec.provider) ?? [:]
