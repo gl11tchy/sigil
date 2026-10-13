@@ -410,6 +410,7 @@ enum RemoteCommands {
     private static func projectRecords(_ model: AppModel) -> [RemoteProject] {
         SidebarOrganization.merging(
             added: model.settings.addedProjects, into: projectSessions(model),
+            isAvailable: AppModel.isProjectDirectoryAvailable,
             canonicalPath: GrokPaths.canonicalPath
         ).compactMap { project in
             guard project.cwd.utf8.count <= 4_000, !project.cwd.isEmpty else { return nil }

@@ -32,6 +32,8 @@ struct SidebarProject: Identifiable, Equatable, Sendable {
     var cwd: String
     var sessions: [GrokSession]
     var updatedAt: Date
+    /// Availability of an explicitly added folder; never authorization to forget it.
+    var isAvailable = true
 
     var count: Int { sessions.count }
 }
@@ -464,14 +466,18 @@ enum SidebarOrganization {
         paths.filter { !samePath($0, path) }
     }
 
-    /// Projects that still exist, in stored pin order.
+    /// One row per canonical project, in first matching pin order. Saved aliases may converge.
     static func matching(
         projects: [SidebarProject],
         paths: [String],
         samePath: (String, String) -> Bool
     ) -> [SidebarProject] {
-        paths.compactMap { path in
-            projects.first { samePath($0.cwd, path) }
+        var seen: Set<String> = []
+        return paths.compactMap { path in
+            guard let project = projects.first(where: { samePath($0.cwd, path) }),
+                seen.insert(project.id).inserted
+            else { return nil }
+            return project
         }
     }
 
@@ -529,6 +535,7 @@ enum SidebarOrganization {
     static func merging(
         added: [AddedProject],
         into projects: [SidebarProject],
+        isAvailable: (String) -> Bool,
         canonicalPath: (String) -> String
     ) -> [SidebarProject] {
         var result = projects
@@ -536,6 +543,7 @@ enum SidebarOrganization {
             let key = canonicalPath(entry.path)
             if let index = result.firstIndex(where: { $0.id == key }) {
                 result[index].updatedAt = max(result[index].updatedAt, entry.addedAt)
+                result[index].isAvailable = isAvailable(entry.path)
                 continue
             }
             let name = URL(fileURLWithPath: entry.path).lastPathComponent
@@ -554,7 +562,8 @@ enum SidebarOrganization {
                     displayPath: displayPath,
                     cwd: entry.path,
                     sessions: [],
-                    updatedAt: entry.addedAt
+                    updatedAt: entry.addedAt,
+                    isAvailable: isAvailable(entry.path)
                 ))
         }
         return result.enumerated()

@@ -853,3 +853,30 @@ personal histories or daily-app interaction. Synthetic files and an owned fake
 CLI exercise the regressions in CI. Native visual/notification delivery remains
 unobserved. REA-1273's manual Finder verification and PR162 remain separate.
 No merge, installation or next-ticket work before parent personal final review.
+
+## REA-1227: unavailable added projects
+
+On isolated branch `fix/rea-1227-retain-unavailable-projects`, based on main
+`aaef908`, successful scans keep added project references and pins through folder
+absence or access failure. Legacy worktree entries still fold into their project.
+Literal reference folding preserves aliases/pins through canonical convergence;
+display matching emits one pinned row until the paths separate again.
+Cached sidebar projections mark unavailable added folders and expose Retry in
+the row, context menu, accessibility actions and focused-project notice. Retry
+rechecks filesystem/canonical state without a history traversal. Explicit
+Remove/Archive preserve files and unrelated shared-list entries. Filtered groups
+keep their prior order/dates; snapshot cache and watcher policy are unchanged.
+
+[QA evidence](../qa/rea-1227.md) records test-only CI38338985238 on `027419e`:
+37 XCTest cases passed; 1,233 Swift tests in 109 suites completed with 11 issues,
+all in the two new retention cases. A scan erased references/pins/focus, and
+remount did not restore them. Both explicit Remove/Archive controls passed.
+PR165 records the final candidate and exact-head integrated CI result.
+
+No local AppTests/app build, denied cache/process retry, personal histories,
+real model calls or daily-app interaction. Generated CI fixtures cover missing,
+non-directory and permission-denied folders, remount/Retry, symlink retargeting,
+shared copies, file/pin preservation and accessible state text. Manual mounted
+image/native UI/VoiceOver observations remain unobserved. Build308 and blocked
+PR162 remain untouched. Stop for parent personal final-code review; no merge,
+installation or next ticket.

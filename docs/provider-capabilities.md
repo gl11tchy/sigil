@@ -416,6 +416,18 @@ Synthetic tests prove the recorded cases, not every external editor's save proto
 
 ## Verification limits
 
+Folders explicitly added to Projects retain their saved reference, pin and
+focused path when missing or inaccessible. Successful history scans still fold
+legacy Sigil worktrees into their project but do not discard an added folder
+because it is unavailable. Distinct saved alias references/pins remain even when
+their canonical paths temporarily converge; pin display emits one row per project.
+The Mac's project row marks that state and offers
+Retry; a usable directory requires existence, directory type and read/traverse
+access. Retry rechecks the cached filesystem projection without rebuilding
+history. Explicit Remove/Archive retain their existing shared-list behavior and
+do not delete project files. These are folder facts, not new provider conversation
+identity evidence.
+
 Deterministic fixtures cover format changes, identity mismatch, delayed journals,
 partial lines, oversized records, duplicate completion, replacement, truncation,
 and real subprocess writes. Version probes never make model calls. These checks
