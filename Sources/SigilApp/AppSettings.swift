@@ -384,6 +384,8 @@ final class AppSettings {
         func append(_ ids: [String]) {
             for id in ids where seen.insert(id).inserted { merged.append(id) }
         }
+        let records = defaults.dictionaryRepresentation().filter { $0.key.hasPrefix(Key.sigilConversationPrefix) }
+        let recorded = records.sorted { $0.key < $1.key }.compactMap { $0.value as? String }
         let savedData = defaults.data(forKey: Key.sigilConversations)
         let saved: [String]
         if defaults.object(forKey: Key.sigilConversations) == nil {
@@ -392,13 +394,11 @@ final class AppSettings {
             saved = decoded
         } else {
             // Malformed preferences are not permission to overwrite unseen IDs.
-            append(sidebarIDs)
+            append(recorded + sidebarIDs)
             if merged != sigilConversations { sigilConversations = merged }
             sigilPersistencePending = true
             return false
         }
-        let records = defaults.dictionaryRepresentation().filter { $0.key.hasPrefix(Key.sigilConversationPrefix) }
-        let recorded = records.sorted { $0.key < $1.key }.compactMap { $0.value as? String }
         append(saved + recorded + sidebarIDs)
         if merged != sigilConversations { sigilConversations = merged }
         guard recorded.count == records.count, let data = try? JSONEncoder().encode(merged) else {

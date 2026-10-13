@@ -390,6 +390,9 @@ struct SigilOnlyHistoryTests {
         let suite = "SigilOnlyHistoryTests.REA1229.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
+        let prior = AppSettings(defaults: defaults)
+        #expect(prior.recordSigilConversations(["claudeCode:recorded"]))
+        defaults.set(false, forKey: "session.sigilConversationsSeeded2")
         let malformed = Data("not readable JSON".utf8)
         defaults.set(malformed, forKey: "session.sigilConversations")
         defaults.set(
@@ -399,9 +402,11 @@ struct SigilOnlyHistoryTests {
         settings.reloadSharedLists()
         #expect(defaults.data(forKey: "session.sigilConversations") == malformed)
         #expect(!settings.sigilConversationsSeeded2)
+        #expect(settings.isSigilConversation("claudeCode:recorded"))
         defaults.set(try JSONEncoder().encode(["futureProvider:unreadable"]), forKey: "session.sigilConversations")
         #expect(settings.seedSigilConversationOwnership())
-        #expect(Set(settings.sigilConversations) == ["codex:owned", "futureProvider:unreadable"])
+        #expect(
+            Set(settings.sigilConversations) == ["claudeCode:recorded", "codex:owned", "futureProvider:unreadable"])
     }
 
     @Test(arguments: [CLIProvider.grokBuild, .claudeCode, .codex])
