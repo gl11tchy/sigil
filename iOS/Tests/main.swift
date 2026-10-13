@@ -27,6 +27,7 @@ enum TestMain {
         run("emphasis steps up for bold text") { try ThemeTests.emphasisStepsUp() }
 
         run("alert receipts reject duplicates and stay bounded") { try ProtocolTests.alertReceiptsRejectDuplicatesAndStayBounded() }
+        run("a retried sealed alert keeps one actionable receipt") { try ProtocolTests.aRetriedSealedAlertKeepsIdentityAndOnlyOneActionableReceipt() }
         run("alerts reject expired and legacy payloads") { try ProtocolTests.alertsRejectExpiredAndLegacyPayloads() }
         run("selection menu has no invented approval") { try ProtocolTests.selectionMenuHasNoInventedApproval() }
         run("crypto round trip") { try ProtocolTests.cryptoRoundTrip() }
