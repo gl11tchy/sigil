@@ -136,11 +136,15 @@ struct RemoteControlView: View {
     @ViewBuilder
     private var actions: some View {
         if model.remoteControl.isEnabled {
-            // Before a phone has paired there is nothing to revoke yet.
-            Button(model.remoteControl.isPaired ? "Disconnect" : "Cancel", role: .destructive) {
-                model.remoteControl.stop(revoke: true)
+            if model.remoteControl.isPaired {
+                Button("Disconnect", role: .destructive) { model.remoteControl.stop(revoke: true) }
+                    .buttonStyle(.destructive)
+            } else if let pending = model.remoteControl.pendingPairingGeneration {
+                // Keep this rendered intent even if confirmation arrives before
+                // the view redraws. Cancel must never become Disconnect.
+                Button("Cancel", role: .cancel) { model.remoteControl.cancelPairing(generation: pending) }
+                    .buttonStyle(.secondary)
             }
-            .buttonStyle(.destructive)
         } else {
             if model.remoteControl.revokeFailed {
                 Button("Disconnect", role: .destructive) { model.remoteControl.stop(revoke: true) }
