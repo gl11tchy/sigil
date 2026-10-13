@@ -249,11 +249,13 @@ struct TerminalTabTests {
         tab.noteTurnStarted()
         #expect(tab.activity == .unknown)
         #expect(tab.isWatchingForCompletion)
+        let generation = try #require(tab.completionWatchGeneration)
         try append(try codexEvent(type: "task_started", turn: "t1"), to: journal)
         #expect(await waitUntil { tab.activity == .working })
         let workingSince = tab.workingSince
 
         tab.noteTurnStarted()
+        #expect(tab.completionWatchGeneration == generation)
         #expect(tab.workingSince == workingSince)
         let complete1 = try codexEvent(type: "task_complete", turn: "t1")
         try append(complete1, to: journal)
@@ -263,6 +265,7 @@ struct TerminalTabTests {
 
         tab.noteTurnStarted()
         #expect(tab.activity == .idle)  // Queuing input does not prove t2 was accepted.
+        #expect(tab.completionWatchGeneration == generation)
         let start2 = try codexEvent(type: "task_started", turn: "t2")
         try append(start2, to: journal)
         #expect(await waitUntil { tab.activity == .working })
@@ -288,13 +291,17 @@ struct TerminalTabTests {
         let tab = makeCodexTab(journal: journal, sessionID: sessionID)
         defer { tab.terminate() }
         tab.noteTurnStarted()
+        let generation = try #require(tab.completionWatchGeneration)
         try append(try codexEvent(type: "task_started", turn: "t1"), to: journal)
         #expect(await waitUntil { tab.activity == .working })
         tab.noteInterrupted()
         #expect(!tab.isWatchingForCompletion)
+        #expect(tab.completionWatchGeneration == nil)
         try append(try codexEvent(type: "task_complete", turn: "t1"), to: journal)
         tab.noteTurnStarted()
         #expect(tab.activity == .unknown)
+        let nextGeneration = try #require(tab.completionWatchGeneration)
+        #expect(nextGeneration != generation)
         try append(try codexEvent(type: "task_complete", turn: "t1"), to: journal)
         try await Task.sleep(for: .milliseconds(400))
         #expect(tab.activity == .unknown && !tab.hasUnseenActivity)
@@ -305,7 +312,8 @@ struct TerminalTabTests {
         #expect(!tab.hasUnseenActivity)
     }
 
-    @Test func aPollBatchCannotUpdateATabAfterItsProcessIsReplaced() async throws {
+    @Test(arguments: [TerminalTab.Activity.working, .idle])
+    func aPollBatchCannotUpdateATabAfterItsProcessIsReplaced(replaceOn: TerminalTab.Activity) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -325,7 +333,7 @@ struct TerminalTabTests {
         var completions = 0
         tab.onSettle = { completions += 1 }
         tab.onActivityChange = {
-            guard tab.activity == .working, !replaced else { return }
+            guard tab.activity == replaceOn, !replaced else { return }
             replaced = true
             // Replace during application of a real multi-event journal poll.
             tab.terminateAndWait()

@@ -830,3 +830,26 @@ general clipboard inspection, daily-app interaction, merge or installation.
 The manual Finder drag/window-ID screenshot remains unobserved. REA-1230's branch
 and uncommitted blocked note are preserved. One worker and ticket remain active
 until parent personal final-diff review; no next ticket was selected.
+
+## REA-1265: Return during a Codex turn
+
+On isolated branch `fix/rea-1265-preserve-turn-watcher`, based on main `eaa36d0`,
+Return retains the validated lifecycle watcher instead of reopening the journal
+after the running turn's start event. Codex stays at its last observed state until
+provider events arrive; Grok keeps its submission/chunk behavior. A watcher
+generation fences every applied state and completion callback, including a
+process replaced synchronously during a multi-event poll. Capability and native
+identity validation remain required; REA-1218 is separate.
+
+[QA evidence](../qa/rea-1265.md) records test-only CI38331238246 on `2c48757`:
+37 XCTest cases passed, and 1,230 Swift tests completed with 14 issues, all in
+the targeted TerminalTab cases. The second Return lost t1 completion, and
+process replacement allowed stale completion state. The added journal controls
+passed, so SessionLifecycle needs no parser or continuation-initializer change.
+PR164 records the final exact-head integrated verification result.
+
+No local AppTests, application build, compiler/cache retry, process enumeration,
+personal histories or daily-app interaction. Synthetic files and an owned fake
+CLI exercise the regressions in CI. Native visual/notification delivery remains
+unobserved. REA-1273's manual Finder verification and PR162 remain separate.
+No merge, installation or next-ticket work before parent personal final review.

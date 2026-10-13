@@ -344,6 +344,19 @@ the owned file's validated session identity, supported `event_msg` types, a vali
 post-submission timestamp and matching nonempty native turn IDs. Unknown or
 malformed event shapes cannot complete a turn. A new appended metadata header
 invalidates the current reader's writer/turn evidence.
+
+A validated Codex watcher keeps its reader across Return, including its active
+turn ID, original submission boundary, file offset and duplicate-event memory.
+Return during a turn preserves the observed state and elapsed time; Return on
+an idle tab stays idle until `task_started` confirms the next turn. The running
+turn's matching completion can still finish and notify once, while a later
+queued turn requires its own matching events. Interruption stops the watcher;
+the next submission opens a fresh reader at the current file end. Each watcher
+generation fences poll results and completion callbacks, so replaced processes
+cannot apply a stale batch or completion notification. Grok retains its input
+and chunk-event behavior. Newly bound Codex tabs remain the separate REA-1218
+scope; this does not expand conversation identity evidence.
+
 These journal formats are version-sensitive, not promised stable provider APIs.
 Grok tab-message delivery waits for confirmed idle. An unknown or active tab
 keeps queued messages rather than typing them into an uncertain prompt.
