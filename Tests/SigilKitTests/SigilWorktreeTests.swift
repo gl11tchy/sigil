@@ -69,6 +69,44 @@ struct SigilWorktreeTests {
         #expect(!SigilWorktree.isInRepository(base))
     }
 
+    @Test(arguments: [false, true])
+    func missingChosenSubfolderIsRejectedBeforeCreatingResources(ignored: Bool) async throws {
+        let base = try scratch()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let repo = base.appendingPathComponent("repo")
+        let selected = repo.appendingPathComponent("chosen package")
+        try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: true)
+        try git(["init", "-q"], in: repo)
+        if ignored {
+            try Data("chosen package/\n".utf8).write(to: repo.appendingPathComponent(".gitignore"))
+            try git(["add", ".gitignore"], in: repo)
+        }
+        try git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"], in: repo)
+        let root = base.appendingPathComponent("worktrees")
+        do {
+            _ = try await SigilWorktree.create(for: selected, root: root, name: "missing")
+            Issue.record("A selected folder absent from HEAD must not start at the checkout root")
+        } catch let error as SigilWorktree.Failure {
+            #expect(error.message.contains(selected.path))
+        }
+        #expect(!FileManager.default.fileExists(atPath: root.path))
+        #expect(try git(["branch", "--list", "sigil/*"], in: repo).isEmpty)
+    }
+
+    @Test func unbornRepositoryCreatesNoWorktreeParentOrBranch() async throws {
+        let base = try scratch()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let repo = base.appendingPathComponent("repo")
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        try git(["init", "-q"], in: repo)
+        let root = base.appendingPathComponent("worktrees")
+        await #expect(throws: SigilWorktree.Failure.self) {
+            _ = try await SigilWorktree.create(for: repo, root: root, name: "unborn")
+        }
+        #expect(!FileManager.default.fileExists(atPath: root.path))
+        #expect(try git(["branch", "--list", "sigil/*"], in: repo).isEmpty)
+    }
+
     @Test func createReportsGitFailures() async throws {
         let base = try scratch()
         defer { try? FileManager.default.removeItem(at: base) }
