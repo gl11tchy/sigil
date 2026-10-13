@@ -160,6 +160,51 @@ struct ProviderLifecycleJournalTests {
         #expect(reader.poll() == [.idle])
     }
 
+    @Test func continuedCodexReaderKeepsTheActiveTurnAndTracksTheQueuedTurn() throws {
+        let metadata = try line([
+            "type": "session_meta", "payload": ["id": session, "cwd": "/tmp", "cli_version": "0.158.0"],
+        ])
+        let fixture = try JournalFixture(initial: metadata)
+        defer { fixture.cleanup() }
+        var reader = ProviderLifecycleJournal(url: fixture.file, provider: .codex, sessionID: session, notBefore: now)
+        try fixture.append(try codex(type: "task_started", turn: "t1"))
+        #expect(reader.poll() == [.working])
+
+        // A second submission keeps this reader, including its active turn and offset.
+        var continued = reader
+        let complete1 = try codex(type: "task_complete", turn: "t1")
+        try fixture.append(complete1)
+        #expect(continued.poll() == [.idle])
+        try fixture.append(complete1)
+        #expect(continued.poll().isEmpty)
+        let start2 = try codex(type: "task_started", turn: "t2")
+        try fixture.append(start2)
+        #expect(continued.poll() == [.working])
+        try fixture.append(start2 + complete1)
+        #expect(continued.poll().isEmpty)
+        try fixture.append(try codex(type: "task_complete", turn: "t2"))
+        #expect(continued.poll() == [.idle])
+    }
+
+    @Test func endingThePreviousCodexTurnCannotCompleteTheQueuedTurn() throws {
+        let metadata = try line([
+            "type": "session_meta", "payload": ["id": session, "cwd": "/tmp", "cli_version": "0.158.0"],
+        ])
+        let fixture = try JournalFixture(initial: metadata)
+        defer { fixture.cleanup() }
+        var reader = ProviderLifecycleJournal(url: fixture.file, provider: .codex, sessionID: session, notBefore: now)
+        try fixture.append(try codex(type: "task_started", turn: "t1"))
+        #expect(reader.poll() == [.working])
+        try fixture.append(try codex(type: "task_started", turn: "t2"))
+        #expect(reader.poll() == [.working])
+        try fixture.append(try codex(type: "task_complete", turn: "t1"))
+        #expect(reader.poll().isEmpty)
+        try fixture.append(try codex(type: "turn_aborted", turn: "t2"))
+        #expect(reader.poll() == [.interrupted])
+        try fixture.append(try codex(type: "task_complete", turn: "t2"))
+        #expect(reader.poll().isEmpty)
+    }
+
     @Test(arguments: ["1.0.0", "malformed"])
     func unsupportedOrBrokenMetadataCannotValidateLifecycle(version: String) throws {
         let meta = try line([

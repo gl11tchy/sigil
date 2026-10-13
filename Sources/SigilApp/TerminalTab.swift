@@ -54,6 +54,7 @@ final class TerminalTab: Identifiable {
     private var isSelected: () -> Bool = { false }
     private let completionEventsURL: URL?
     private var completionWatchTask: Task<Void, Never>?
+    private(set) var completionWatchGeneration: UUID?
     private var hasObservableLifecycle = false
     var isWatchingForCompletion: Bool { completionWatchTask != nil }
 
@@ -137,6 +138,7 @@ final class TerminalTab: Identifiable {
     }
 
     func start(isSelected: @escaping () -> Bool) {
+        if !controller.isRunning { stopTurnTracking() }
         self.isSelected = isSelected
         controller.onUserSubmit = { [weak self] in self?.noteTurnStarted() }
         controller.onActivity = { [weak self] in self?.noteTerminalOutput() }
@@ -159,15 +161,21 @@ final class TerminalTab: Identifiable {
     /// Return means input was submitted, not accepted or completed.
     func noteTurnStarted() {
         if case .exited = activity { return }
-        stopTurnTracking()
         lastSubmittedAt = Date()
+        if capabilities.lifecycle, completionWatchTask != nil {
+            // Keep the reader's active turn, offset and duplicate-event memory.
+            // Codex confirms accepted work with task_started; Return is only input.
+            if spec.provider == .grokBuild { activity = .working }
+            return
+        }
+        stopTurnTracking()
         let journal = makeLifecycleJournal()
         hasObservableLifecycle = journal?.canObserve == true
         guard capabilities.lifecycle, let journal else {
             activity = .unknown
             return
         }
-        activity = .working
+        activity = spec.provider == .codex ? .unknown : .working
         watchForTurnCompletion(journal)
     }
 
@@ -234,6 +242,8 @@ final class TerminalTab: Identifiable {
 
     private func watchForTurnCompletion(_ initialJournal: ProviderLifecycleJournal) {
         guard completionWatchTask == nil, capabilities.lifecycle else { return }
+        let generation = UUID()
+        completionWatchGeneration = generation
         var journal = initialJournal
         completionWatchTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -245,13 +255,21 @@ final class TerminalTab: Identifiable {
                 }.value
                 guard !Task.isCancelled else { return }
                 journal = result.0
-                guard let self else { return }
+                guard let self, self.completionWatchGeneration == generation else { return }
                 for state in result.1 {
-                    if state == .idle { self.noteTurnCompleted() } else { self.activity = state }
+                    // Activity callbacks can synchronously interrupt or replace the process.
+                    guard !Task.isCancelled, self.completionWatchGeneration == generation else { return }
+                    if state == .idle {
+                        self.noteTurnCompleted(generation: generation)
+                    } else {
+                        self.activity = state
+                    }
                 }
+                guard !Task.isCancelled, self.completionWatchGeneration == generation else { return }
                 if !journal.canObserve {
                     self.hasObservableLifecycle = false
                     self.completionWatchTask = nil
+                    self.completionWatchGeneration = nil
                     return
                 }
                 try? await Task.sleep(for: .milliseconds(250))
@@ -259,16 +277,19 @@ final class TerminalTab: Identifiable {
         }
     }
 
-    private func noteTurnCompleted() {
+    private func noteTurnCompleted(generation: UUID) {
         guard activity == .working || activity == .waitingForApproval else { return }
         activity = .idle
+        guard completionWatchGeneration == generation else { return }
         if !isSelected() { markUnseenTurnCompletion() }
+        guard completionWatchGeneration == generation else { return }
         onSettle?()
     }
 
     private func stopTurnTracking() {
         completionWatchTask?.cancel()
         completionWatchTask = nil
+        completionWatchGeneration = nil
     }
 
     func enqueueBridgePrompt(
