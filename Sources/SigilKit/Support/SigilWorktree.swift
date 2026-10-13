@@ -32,7 +32,7 @@ public enum SigilWorktree {
         fileprivate let parents: [OwnedDirectory]
 
         public var recovery: String {
-            "Worktree retained at \(checkout.path) (branch \(branch)). Open it in Sigil to recover the session."
+            "Recovery: checkout \(checkout.path), branch \(branch) in \(repository.path). Inspect them on the Mac before cleanup."
         }
     }
 
@@ -197,11 +197,15 @@ public enum SigilWorktree {
                 message: error.localizedDescription,
                 recovery: "Recovery: \(checkout.path) (branch \(branch)) in \(repository).")
         }
-        let checkoutHead = try await git(["-C", checkout.path, "rev-parse", "HEAD"])
-        let checkoutBranch = try await git(["-C", checkout.path, "symbolic-ref", "HEAD"])
-        guard checkoutHead.status == 0, checkoutHead.output == receipt.originalHead,
-            checkoutBranch.status == 0, checkoutBranch.output == ref
-        else { throw Failure(message: "The worktree changed before launch.", recovery: receipt.recovery) }
+        do {
+            let checkoutHead = try await git(["-C", checkout.path, "rev-parse", "HEAD"])
+            let checkoutBranch = try await git(["-C", checkout.path, "symbolic-ref", "HEAD"])
+            guard checkoutHead.status == 0, checkoutHead.output == receipt.originalHead,
+                checkoutBranch.status == 0, checkoutBranch.output == ref
+            else { throw Failure(message: "The worktree changed before launch.") }
+        } catch {
+            throw Failure(message: error.localizedDescription, recovery: receipt.recovery)
+        }
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: target.path, isDirectory: &isDirectory), isDirectory.boolValue,
             GrokPaths.canonicalPath(target.path) == target.path
@@ -220,6 +224,7 @@ public enum SigilWorktree {
     public static func rollback(_ receipt: Creation, processMayHaveStarted: Bool) async -> Rollback {
         func retained(_ reason: String) -> Rollback { .retained("\(reason) \(receipt.recovery)") }
         guard !processMayHaveStarted else { return retained("A process may have started.") }
+        var checkoutRemoved = false
         do {
             guard try DirectoryIdentity(receipt.checkout) == receipt.checkoutIdentity,
                 try DirectoryIdentity(receipt.gitDirectory) == receipt.gitIdentity,
@@ -256,6 +261,7 @@ public enum SigilWorktree {
             guard removed.status == 0 else {
                 return retained("Git could not remove the unused worktree: \(removed.error)")
             }
+            checkoutRemoved = true
             guard try await branchCheckouts(ref, in: receipt.repository).isEmpty else {
                 return .retained(
                     "The unused checkout was removed, but branch \(receipt.branch) is in use in \(receipt.repository.path)."
@@ -272,6 +278,11 @@ public enum SigilWorktree {
             removeEmptyParents(receipt.parents)
             return .removed
         } catch {
+            if checkoutRemoved {
+                return .retained(
+                    "The unused checkout was removed, but branch \(receipt.branch) could not be verified in \(receipt.repository.path). \(error.localizedDescription)"
+                )
+            }
             return retained("Could not verify cleanup: \(error.localizedDescription)")
         }
     }

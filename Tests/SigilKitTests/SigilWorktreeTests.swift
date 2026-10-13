@@ -198,6 +198,33 @@ struct SigilWorktreeTests {
         #expect(try git(["branch", "--list", made.branch], in: fixture.repo).contains(made.branch))
     }
 
+    @Test func failedRefDeletionReportsTheRemainingBranchAfterCheckoutRemoval() async throws {
+        let fixture = try WorktreeFixture()
+        defer { fixture.cleanup() }
+        let made = try #require(
+            await SigilWorktree.createAttempt(for: fixture.repo, root: fixture.root, name: "ref-failure"))
+        let hook = fixture.repo.appendingPathComponent(".git/hooks/reference-transaction")
+        let zero = String(repeating: "0", count: made.originalHead.count)
+        let script = """
+            #!/bin/sh
+            if [ "$1" = "prepared" ]; then
+              while read -r old new ref; do
+                [ "$new" = "\(zero)" ] && [ "$ref" = "refs/heads/\(made.branch)" ] && exit 1
+              done
+            fi
+            exit 0
+            """
+        try Data(script.utf8).write(to: hook)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: hook.path)
+        let result = await SigilWorktree.rollback(made, processMayHaveStarted: false)
+        #expect(!FileManager.default.fileExists(atPath: made.checkout.path))
+        #expect(try git(["branch", "--list", made.branch], in: fixture.repo).contains(made.branch))
+        #expect(result.recoveryMessage?.contains("checkout was removed") == true)
+        #expect(result.recoveryMessage?.contains(made.branch) == true)
+        #expect(result.recoveryMessage?.contains(fixture.repo.path) == true)
+        #expect(result.recoveryMessage?.contains("Worktree retained") == false)
+    }
+
     @Test(arguments: [false, true])
     func collisionsPreserveExistingFoldersAndBranches(branchCollision: Bool) async throws {
         let fixture = try WorktreeFixture()
