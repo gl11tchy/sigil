@@ -9,6 +9,247 @@ import Testing
 
 @Suite(.serialized)
 struct RemoteControlTests {
+    @Test @MainActor func cancellingPendingOriginBPreservesOriginAAndAnotherCopy() throws {
+        let fixture = try PairingCancellationFixture()
+        defer { fixture.cleanup() }
+        let pairing = RemotePairing(
+            origin: "https://pairing-a.invalid", deviceKey: RemoteCrypto.randomKey(), ticket: RemoteCrypto.randomKey())
+        let store = InMemoryRemotePairingStore()
+        store.save(pairing)
+        let center = NotificationCenter()
+        let notices = PairingRevokeLog()
+        let token = center.addObserver(forName: RemoteControl.revokedNotification, object: nil, queue: nil) { _ in
+            notices.record()
+        }
+        defer { center.removeObserver(token) }
+        let existing = RemoteControl(store: store, notifications: center)
+        let pending = RemoteControl(store: store, notifications: center)
+        defer {
+            existing.stop()
+            pending.stop()
+        }
+        // No actor suspension: these synthetic starts are cancelled before
+        // their queued network tasks can execute or contact these .invalid hosts.
+        existing.resumeIfPaired(model: fixture.model)
+        pending.start(urlText: "https://pairing-b.invalid", model: fixture.model)
+        #expect(existing.isPaired)
+        #expect(!pending.isPaired)
+        pending.cancelPairing()
+        #expect(store.load() == pairing)
+        #expect(notices.count == 0)
+        #expect(existing.isEnabled && existing.isPaired)
+        #expect(!pending.isEnabled)
+        let reopened = RemoteControl(store: store, notifications: center)
+        reopened.resumeIfPaired(model: fixture.model)
+        defer { reopened.stop() }
+        #expect(reopened.isPaired)
+    }
+
+    @Test @MainActor func anOldCancelCannotStopAReopenedPendingGeneration() throws {
+        let fixture = try PairingCancellationFixture()
+        defer { fixture.cleanup() }
+        let saved = fakePairing(origin: "https://pairing-a.invalid")
+        let store = PairingCancellationStore(saved: saved)
+        let remote = RemoteControl(store: store)
+        defer { remote.stop() }
+        remote.start(urlText: "https://pairing-b.invalid", model: fixture.model)
+        let old = try #require(remote.pendingPairingGeneration)
+        remote.cancelPairing(generation: old)
+        #expect(!remote.isEnabled)
+        remote.start(urlText: "https://pairing-b.invalid", model: fixture.model)
+        let fresh = try #require(remote.pendingPairingGeneration)
+        #expect(fresh != old)
+        remote.cancelPairing(generation: old)
+        #expect(remote.isEnabled && !remote.isPaired)
+        #expect(remote.pendingPairingGeneration == fresh)
+        #expect(store.saved == saved)
+        #expect(store.clears == 0 && store.saves == 0)
+        remote.cancelPairing(generation: fresh)
+        #expect(!remote.isEnabled)
+        remote.cancelPairing()
+        #expect(store.clears == 0)
+    }
+
+    @Test @MainActor func cancelDoesNotReadOrClearAnUnreadableSavedPairing() throws {
+        let fixture = try PairingCancellationFixture()
+        defer { fixture.cleanup() }
+        let saved = fakePairing(origin: "https://pairing-a.invalid")
+        let store = PairingCancellationStore(saved: saved)
+        store.readFails = true
+        let remote = RemoteControl(store: store)
+        defer { remote.stop() }
+        remote.start(urlText: "https://pairing-b.invalid", model: fixture.model)
+        let reads = store.loads
+        #expect(!remote.isPaired)
+        remote.cancelPairing()
+        #expect(store.loads == reads)
+        #expect(store.clears == 0 && store.saves == 0)
+        #expect(store.saved == saved)
+        store.readFails = false
+        remote.resumeIfPaired(model: fixture.model)
+        #expect(remote.isPaired)
+    }
+
+    @Test @MainActor func cancelKeepsARetiredOriginsSavedPairing() throws {
+        let fixture = try PairingCancellationFixture()
+        defer { fixture.cleanup() }
+        for origin in [RemoteControl.legacyRailwayOrigin, RemoteControl.legacyApexOrigin] {
+            let saved = fakePairing(origin: origin)
+            let store = PairingCancellationStore(saved: saved)
+            let remote = RemoteControl(store: store)
+            defer { remote.stop() }
+            // This synchronous attempt never reaches the retired or live relay.
+            remote.start(urlText: "https://pairing-b.invalid", model: fixture.model)
+            #expect(remote.isEnabled && !remote.isPaired)
+            remote.cancelPairing()
+            #expect(store.saved == saved)
+            #expect(store.clears == 0 && store.saves == 0)
+            #expect(!remote.isEnabled)
+        }
+    }
+
+    @Test @MainActor func cancelPreservesTheFailedDisconnectRetryUntilExplicitDisconnectSucceeds() throws {
+        let fixture = try PairingCancellationFixture()
+        defer { fixture.cleanup() }
+        let saved = fakePairing(origin: "https://pairing-a.invalid")
+        let store = PairingCancellationStore(saved: saved)
+        store.clearSucceeds = false
+        let remote = RemoteControl(store: store)
+        defer { remote.stop() }
+        remote.resumeIfPaired(model: fixture.model)
+        remote.stop(revoke: true)
+        #expect(store.revokeFailed && remote.revokeFailed)
+        remote.start(urlText: "https://pairing-b.invalid", model: fixture.model)
+        #expect(!remote.isPaired)
+        let clears = store.clears
+        remote.cancelPairing()
+        #expect(store.clears == clears)
+        #expect(store.saved == saved)
+        #expect(store.revokeFailed && remote.revokeFailed)
+        remote.cancelPairing()
+        #expect(remote.revokeFailed)
+        store.clearSucceeds = true
+        remote.stop(revoke: true)
+        #expect(store.saved == nil)
+        #expect(!store.revokeFailed && !remote.revokeFailed)
+    }
+
+    @Test(arguments: [false, true]) @MainActor
+    func confirmationJustBeforeCancelKeepsTheLivePairingEvenWhenSaveFails(saveSucceeds: Bool) async throws {
+        let relay = try await RelayFixture()
+        defer { relay.stop() }
+        let fixture = try PairingCancellationFixture()
+        defer { fixture.cleanup() }
+        let old = fakePairing(origin: "https://pairing-a.invalid")
+        let store = PairingCancellationStore(saved: old)
+        store.saveSucceeds = saveSucceeds
+        let center = NotificationCenter()
+        let notices = PairingRevokeLog()
+        let observer = center.addObserver(forName: RemoteControl.revokedNotification, object: nil, queue: nil) { _ in
+            notices.record()
+        }
+        defer { center.removeObserver(observer) }
+        let remote = RemoteControl(store: store, notifications: center)
+        defer { remote.stop() }
+        remote.start(urlText: relay.origin, model: fixture.model)
+        let pending = try #require(remote.pendingPairingGeneration)
+        let renderedCancel = { remote.cancelPairing(generation: pending) }
+        let paired = try await relay.pair(remote)
+        defer { paired.phone.close() }
+        renderedCancel()
+        remote.cancelPairing()
+        #expect(remote.isEnabled && remote.isPaired)
+        #expect(remote.pendingPairingGeneration == nil)
+        #expect(store.clears == 0 && store.saves == 1)
+        #expect(notices.count == 0)
+        let expected =
+            saveSucceeds
+            ? RemotePairing(origin: relay.origin, deviceKey: paired.device, ticket: paired.ticket) : old
+        #expect(store.saved == expected)
+        #expect((remote.error != nil) == !saveSucceeds)
+        let state = try await paired.phone.request(
+            RemoteRequest(challenge: paired.challenge, sequence: 2, action: "state"), key: paired.device)
+        #expect(state.ok)
+        #expect(remote.status == "Phone connected")
+    }
+
+    @Test @MainActor func cancellationBeforeConfirmationRejectsLateOldCodeTraffic() async throws {
+        let relay = try await RelayFixture()
+        defer { relay.stop() }
+        let fixture = try PairingCancellationFixture()
+        defer { fixture.cleanup() }
+        let saved = fakePairing(origin: "https://pairing-a.invalid")
+        let store = PairingCancellationStore(saved: saved)
+        let remote = RemoteControl(store: store)
+        defer { remote.stop() }
+        remote.start(urlText: relay.origin, model: fixture.model)
+        try await waitForPairing { remote.pairingURL != nil }
+        let link = try #require(remote.pairingURL)
+        var parts = URLComponents()
+        parts.query = try #require(URLComponents(url: link, resolvingAgainstBaseURL: false)?.fragment)
+        let room = try #require(parts.queryItems?.first { $0.name == "room" }?.value)
+        let key = try #require(parts.queryItems?.first { $0.name == "key" }?.value)
+        let phone = try RelayPhone(relay: relay)
+        defer { phone.close() }
+        let challenge = try await phone.route(["room": room])
+        let old = try #require(remote.pendingPairingGeneration)
+        remote.cancelPairing(generation: old)
+        #expect(!remote.isEnabled && !remote.isPaired)
+        remote.start(urlText: relay.origin, model: fixture.model)
+        try await waitForPairing { remote.pairingURL != nil }
+        let freshLink = remote.pairingURL
+        let fresh = try #require(remote.pendingPairingGeneration)
+        #expect(fresh != old && freshLink != link)
+        let late = RemoteRequest(challenge: challenge, sequence: 1, action: "pair", text: RemoteCrypto.randomKey())
+        try? await phone.send(["data": RemoteCrypto.seal(late, key: key, direction: "phone")])
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(remote.isEnabled && !remote.isPaired)
+        #expect(remote.pendingPairingGeneration == fresh)
+        #expect(remote.pairingURL == freshLink)
+        #expect(store.saved == saved)
+        #expect(store.saves == 0 && store.clears == 0)
+    }
+
+    @Test @MainActor func aCancelledGenerationsLateFailureCannotCloseTheReopenedSavedConnection() async throws {
+        let a = try await RelayFixture()
+        defer { a.stop() }
+        let b = try await RelayFixture()
+        defer { b.stop() }
+        let fixture = try PairingCancellationFixture()
+        defer { fixture.cleanup() }
+        let saved = fakePairing(origin: a.origin)
+        let store = PairingCancellationStore(saved: saved)
+        let remote = RemoteControl(store: store)
+        let gate = PairingFailureGate()
+        defer {
+            gate.release()
+            remote.beforeConnectionFailureHandling = nil
+            remote.stop()
+        }
+        remote.beforeConnectionFailureHandling = { await gate.hold() }
+        remote.start(urlText: b.origin, model: fixture.model)
+        try await waitForPairing { remote.pairingURL != nil }
+        remote.cancelPairing()
+        try await waitForPairing { gate.arrived }
+        remote.beforeConnectionFailureHandling = nil
+        remote.resumeIfPaired(model: fixture.model)
+        try await waitForPairing { remote.status == "Phone disconnected" }
+        let phone = try RelayPhone(relay: a)
+        defer { phone.close() }
+        let challenge = try await phone.route(["ticket": saved.ticket])
+        let first = try await phone.request(
+            RemoteRequest(challenge: challenge, sequence: 1, action: "state"), key: saved.deviceKey)
+        #expect(first.ok && remote.isPaired)
+        gate.release()
+        try await waitForPairing { gate.returned }
+        let after = try await phone.request(
+            RemoteRequest(challenge: challenge, sequence: 2, action: "state"), key: saved.deviceKey)
+        #expect(after.ok)
+        #expect(remote.isEnabled && remote.isPaired)
+        #expect(remote.status == "Phone connected")
+        #expect(store.saved == saved && store.saves == 0 && store.clears == 0)
+    }
+
     @Test @MainActor func memoryStoreRoundTripsAndClearsPairing() {
         let store = InMemoryRemotePairingStore()
         let pairing = RemotePairing(
@@ -338,6 +579,100 @@ struct RemoteControlTests {
             RemoteReply.self, from: try JSONEncoder().encode(RemoteReply(challenge: "c", sequence: 2)))
         #expect(bare.ticket == nil)
     }
+}
+
+@MainActor
+private final class PairingCancellationFixture {
+    let root: URL
+    let suite: String
+    let store: SessionStore
+    let model: AppModel
+
+    init() throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent("sigil-pairing-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        suite = "sigil-pairing-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        let settings = AppSettings(defaults: defaults)
+        settings.defaultDirectory = root.path
+        settings.isTabMessagingEnabled = false
+        store = SessionStore(root: root.appendingPathComponent("sessions"))
+        model = AppModel(
+            settings: settings, store: store, presentError: { _ in }, panel: RightPanel(defaults: defaults),
+            pairingStore: InMemoryRemotePairingStore(), kimiKeyStore: InMemoryKimiKeyStore(), providerInstallations: [:]
+        )
+    }
+
+    func cleanup() {
+        model.remoteControl.stop()
+        model.closeAllTabsAndWait()
+        store.stop()
+        UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+        try? FileManager.default.removeItem(at: root)
+    }
+}
+
+private final class PairingRevokeLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    var count: Int { lock.withLock { value } }
+    func record() { lock.withLock { value += 1 } }
+}
+
+private final class PairingCancellationStore: RemotePairingStore {
+    private let memory = InMemoryRemotePairingStore()
+    var revokeFailed = false
+    var readFails = false
+    var saveSucceeds = true
+    var clearSucceeds = true
+    private(set) var loads = 0
+    private(set) var saves = 0
+    private(set) var clears = 0
+    var saved: RemotePairing? { memory.load() }
+    init(saved: RemotePairing) { memory.save(saved) }
+    func load() throws -> RemotePairing? {
+        loads += 1
+        if readFails { throw KeychainRemotePairingStore.ReadError(status: errSecAuthFailed) }
+        return memory.load()
+    }
+    func save(_ pairing: RemotePairing) -> Bool {
+        saves += 1
+        return saveSucceeds && memory.save(pairing)
+    }
+    func clear() -> Bool {
+        clears += 1
+        return clearSucceeds && memory.clear()
+    }
+}
+
+@MainActor
+private final class PairingFailureGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private(set) var arrived = false
+    private(set) var returned = false
+    func hold() async {
+        arrived = true
+        await withCheckedContinuation { continuation = $0 }
+        returned = true
+    }
+    func release() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+private func fakePairing(origin: String) -> RemotePairing {
+    RemotePairing(origin: origin, deviceKey: RemoteCrypto.randomKey(), ticket: RemoteCrypto.randomKey())
+}
+
+@MainActor
+private func waitForPairing(_ condition: () -> Bool) async throws {
+    let deadline = ContinuousClock.now + .seconds(5)
+    while !condition(), ContinuousClock.now < deadline {
+        try await Task.sleep(for: .milliseconds(20))
+    }
+    #expect(condition())
+    guard condition() else { throw RemoteError.invalidMessage }
 }
 
 private final class FailingClearStore: RemotePairingStore {

@@ -1,3 +1,23 @@
+## REA-1222: Cancel preserves a saved pairing (2026-10-13)
+
+Cancel now stops only its pending generation without clearing saved credentials
+or notifying other copies. A completed or reopened generation is protected;
+old connection failures check identity before closing sockets. Explicit Disconnect
+and failed-revoke retry keep their existing behavior.
+
+Unchanged-code test-only CI38375377798 reproduced four issues exclusively in the
+new origin-A/origin-B cancellation test: deletion, two notices, another copy stopped
+and restore failed. The other 1,272 Swift tests and all 37 XCTest cases passed.
+Focused in-memory/loopback fixtures and limits are in [QA](../qa/rea-1222.md).
+AppTests remain CI-only; real phone, rendered UI and daily-app behavior are
+unobserved. Await candidate CI and parent personal final-diff review. No merge,
+installation, actual Keychain/phone state or personal histories were touched.
+
+First candidate CI38377097064 failed compiling a test argument provider's
+main-actor origin constants. Moving the same two examples into the test body
+repairs that isolation error; production code is unchanged. The failed run remains
+in QA evidence, and corrected-head CI is required.
+
 ## REA-1225: selected folders and unused worktree attempts (2026-10-13)
 
 Candidate for parent personal review; no merge, installation or manual UI

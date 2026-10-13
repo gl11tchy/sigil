@@ -33,6 +33,10 @@ final class RemoteControl {
     @ObservationIgnored private var flushWaiters: [CheckedContinuation<Void, Never>] = []
     /// A deterministic socket-write pause for revocation race tests.
     @ObservationIgnored var afterPushRegistrationSend: (@MainActor () async -> Void)?
+    #if DEBUG
+        /// Holds an old connection failure while a test reopens a new generation.
+        @ObservationIgnored var beforeConnectionFailureHandling: (@MainActor () async -> Void)?
+    #endif
     @ObservationIgnored private var lastSentTabs: [RemoteState.Tab]?
     @ObservationIgnored private var lastSentSelection: String?
     @ObservationIgnored private var lastSentPrompt: RemotePrompt?
@@ -331,9 +335,12 @@ final class RemoteControl {
                     self.peer = nil
                     self.stopWatching()
                 } catch {
+                    #if DEBUG
+                        if let beforeConnectionFailureHandling { await beforeConnectionFailureHandling() }
+                    #endif
+                    guard self.generation == current, !Task.isCancelled else { return }
                     self.stopWatching()
                     self.socket?.cancel(with: .goingAway, reason: nil)
-                    guard self.generation == current, !Task.isCancelled else { return }
                     failures += 1
                     // A route refused before ready means the relay no longer has the room.
                     let refused = !ready && self.socket?.closeCode == .policyViolation
@@ -347,6 +354,19 @@ final class RemoteControl {
                 }
             }
         }
+    }
+
+    /// A rendered Cancel is bound to the pending attempt, not a saved pairing.
+    var pendingPairingGeneration: UUID? { isEnabled && !isPaired ? generation : nil }
+
+    func cancelPairing() {
+        guard let pending = pendingPairingGeneration else { return }
+        cancelPairing(generation: pending)
+    }
+
+    func cancelPairing(generation pending: UUID) {
+        guard pendingPairingGeneration == pending else { return }
+        stop()
     }
 
     func stop(revoke: Bool = false) {
