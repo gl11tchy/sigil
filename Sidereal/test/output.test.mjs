@@ -1,6 +1,85 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readableOutput } from '../public/output.mjs';
+import { readableOutput as fullReadableOutput, createReadableOutput, commonPrefixLength } from '../public/output.mjs';
+
+// Every existing expected-output fixture also checks incremental/full equivalence
+// across unrelated snapshots, without changing the full formatter oracle.
+const fixtureReader = createReadableOutput();
+function readableOutput(snapshot) {
+  const full = fullReadableOutput(snapshot);
+  assert.equal(fixtureReader.update(snapshot), full);
+  return full;
+}
+
+test('REA-1194 checkpoints preserve formatter state across adversarial line and character edits', () => {
+  const reader = createReadableOutput();
+  const parts = ['\n', '┌────┐\n', '│  A wrapped paragraph with many words\n', '│  continues without a paragraph break\n',
+    '\n', '9:46 AM\n', '∴ Thinking... 1s\n', '⠋\n', '| ─ ─ ─ ─ ─ |\n', 'a lowercase continuation\n',
+    '  if (ready) {\n', '    send();\n', '  }\n', '🙂 é क्‍ष 日本\n', footer, '\nResult after composer\n'];
+  const text = parts.join('');
+  for (let length = 0; length <= text.length; length++) assert.equal(reader.update(text.slice(0, length)), fullReadableOutput(text.slice(0, length)));
+  for (let at = text.length; at >= 0; at -= 7) {
+    const changed = text.slice(0, at) + 'changed\n' + text.slice(at);
+    assert.equal(reader.update(changed), fullReadableOutput(changed));
+    assert.equal(reader.update(text), fullReadableOutput(text));
+  }
+  for (const suffix of [footer, '\n'.repeat(100), 'Grok 4.6\nCtrl+x:shortcuts', '\n❯ typed draft\n' + footer, '\nFinal result']) {
+    assert.equal(reader.update(text + suffix), fullReadableOutput(text + suffix));
+    assert.equal(reader.update(text), fullReadableOutput(text));
+  }
+  reader.reset();
+  assert.equal(reader.update(text), fullReadableOutput(text));
+  assert.equal(reader.update(''), '');
+});
+
+test('REA-1194 changed tails format bounded lines in a 400KB history and reset safely', () => {
+  const reader = createReadableOutput();
+  const history = Array.from({ length: 5000 }, (_, index) => `│  Result ${index}: a synthetic paragraph with enough words to retain bubble state. │\n`).join('');
+  assert.ok(history.length > 400_000);
+  let snapshot = history + '│  Current result has enough words\n│  and continues here\n' + footer;
+  assert.equal(reader.update(snapshot), fullReadableOutput(snapshot));
+  for (let index = 0; index < 40; index++) {
+    snapshot = history + `│  Current result ${index} has enough words\n│  and continues here\n` + footer;
+    assert.equal(reader.update(snapshot), fullReadableOutput(snapshot));
+    assert.ok(reader.lastWork.parsedLines < 20);
+    assert.ok(reader.lastWork.formattedLines < 20);
+  }
+  for (const next of ['prepended\n' + snapshot, snapshot.slice(180), 'different session\n', snapshot]) {
+    assert.equal(reader.update(next, { reset: true }), fullReadableOutput(next));
+  }
+});
+
+test('REA-1194 native prefix comparisons retain exact UTF16 boundaries', () => {
+  const start = 'a'.repeat(4095) + '🙂é';
+  assert.equal(commonPrefixLength(start + 'left', start + 'right'), start.length);
+  assert.equal(commonPrefixLength(start, start + 'tail'), start.length);
+  assert.equal(commonPrefixLength('abc', 'ab'), 2);
+});
+
+test('REA-1194 retained states equal full formatting across generated rewrites and chrome boundaries', () => {
+  const reader = createReadableOutput();
+  const rows = ['', ' ', '│', '┌──┐', '| ─ ─ ─ ─ ─ |', '9:46 AM', '⠋', '⣿ GPU utilization',
+    '│  This paragraph has at least five words', '│  a continuation without punctuation', 'result.',
+    '    SELECT data FROM table', '🙂 é 👩‍💻 क्‍ष', '❯ unsent draft', 'Grok 4.6', 'Shift+Tab:mode | Ctrl+x:shortcuts'];
+  let seed = 1194, snapshot = '';
+  const next = max => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed % max; };
+  for (let step = 0; step < 1200; step++) {
+    const at = next(snapshot.length + 1), inserted = rows[next(rows.length)] + '\n';
+    snapshot = step % 5 ? snapshot.slice(0, at) + inserted + snapshot.slice(at) : snapshot.slice(0, at);
+    assert.equal(reader.update(snapshot), fullReadableOutput(snapshot), `rewrite ${step}`);
+  }
+});
+
+test('REA-1194 a long reflowing paragraph retains bounded mutable checkpoints and replays older edits', () => {
+  const reader = createReadableOutput();
+  const text = '│  This paragraph starts with enough words\n' + '│  a continuation with many more words\n'.repeat(2200);
+  assert.equal(reader.update(text), fullReadableOutput(text));
+  assert.ok(reader.retainedCheckpointCount <= 4);
+  const changed = text.slice(0, 20_000) + '\nNew paragraph.\n' + text.slice(20_000);
+  assert.equal(reader.update(changed), fullReadableOutput(changed));
+  assert.equal(reader.update(text), fullReadableOutput(text));
+  assert.ok(reader.retainedCheckpointCount <= 4);
+});
 
 const footer = '\n' + '─'.repeat(70) + '\n│ ❯ Build anything\n                 Grok 4.6\n(xhigh) · always-approve\n\n→:expand | Ctrl+e:collapse thinking | Ctrl+x:shortcuts';
 

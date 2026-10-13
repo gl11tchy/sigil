@@ -224,3 +224,99 @@ export function readableOutput(snapshot) {
   const output = compact.join('\n');
   return new RegExp(`^[\\s┌┐└┘│─━${SPINNER}]*$`).test(output) ? '' : output;
 }
+
+// Compare every character, using native substring comparisons for the stable
+// prefix. These chunks are comparison units, never formatter overlap guesses.
+export function commonPrefixLength(left, right) {
+  const count = Math.min(left.length, right.length);
+  let at = 0;
+  while (at + 4096 <= count && right.startsWith(left.slice(at, at + 4096), at)) at += 4096;
+  while (at < count && left[at] === right[at]) at++;
+  return at;
+}
+
+// A checkpoint owns the exact state before a raw line: blank compression,
+// bubble continuation, and the last output line (which prose reflow may change).
+// Completed output before that line is an immutable string shared by checkpoints.
+// End-only composer recognition still sees the whole cached line sequence; if
+// its boundary moves backwards, formatting rolls back to that exact boundary.
+export function createReadableOutput() {
+  let input = null, lines = [], starts = [], checkpoints = [], head = 0, end = 0, output = '';
+  let work = { parsedLines: 0, formattedLines: 0 };
+  const hasInk = new RegExp(`[^\\s┌┐└┘│─━${SPINNER}]`);
+  const initial = () => ({ prefix: '', last: null, lastFrom: -1, blanks: 0, inBubble: false, hasInk: false });
+  const reset = () => { input = null; lines = []; starts = []; checkpoints = []; head = end = 0; output = ''; };
+  return {
+    reset,
+    get lastWork() { return work; },
+    get retainedCheckpointCount() { return checkpoints.filter(Boolean).length; },
+    update(snapshot, options = {}) {
+      if (options.reset) reset();
+      work = { parsedLines: 0, formattedLines: 0 };
+      if (snapshot === input) return output;
+      const shared = input === null ? 0 : commonPrefixLength(input, snapshot);
+      let changed = 0;
+      if (input !== null) {
+        let high = starts.length - 1;
+        while (changed < high) {
+          const middle = (changed + high + 1) >> 1;
+          if (starts[middle] <= shared) changed = middle; else high = middle - 1;
+        }
+      }
+      let offset = starts[changed] ?? 0;
+      lines.length = starts.length = changed;
+      for (const line of snapshot.slice(offset).split('\n')) {
+        starts.push(offset); lines.push(tidy(line)); offset += line.length + 1; work.parsedLines++;
+      }
+      const composer = trailingComposerStart(lines);
+      let nextEnd = composer >= 0 ? composer : lines.length;
+      if (composer >= 0) while (nextEnd && (isPadding(lines[nextEnd - 1]) || isBoxLine(lines[nextEnd - 1]))) nextEnd--;
+      while (nextEnd && isPadding(lines[nextEnd - 1])) nextEnd--;
+      let nextHead = 0;
+      while (nextHead < nextEnd && isPadding(lines[nextHead])) nextHead++;
+      let from = Math.min(changed, end, nextEnd);
+      if (input === null || nextHead !== head || from < nextHead) {
+        checkpoints = []; from = nextHead; checkpoints[from] = initial();
+      }
+      // A mutable prose paragraph retains its start and two recent states, not
+      // every progressively larger version. Earlier edits conservatively replay
+      // from the nearest surviving exact state.
+      while (from > nextHead && !checkpoints[from]) from--;
+      checkpoints.length = from + 1;
+      let state = { ...checkpoints[from] };
+      const push = (line, at) => {
+        if (state.last === null && !line) return; // Full formatting trims leading blank output.
+        if (state.last !== null) state.prefix += state.last + '\n';
+        state.last = line;
+        state.lastFrom = at;
+        state.hasInk ||= hasInk.test(line);
+      };
+      for (let at = from; at < nextEnd; at++) {
+        const line = lines[at], unwrapped = unwrapTuiFrame(peelLeadingSpinner(line));
+        const cleaned = stripClock(unwrapped.line), previous = state.last;
+        if (isTurnChrome(cleaned, previous && previous !== '' ? previous : '')) {
+          if (++state.blanks === 1) push('', at);
+          state.inBubble = false;
+        } else if (isSpinnerRow(line, cleaned)) {
+          // A spinner row has no effect on the retained paragraph state.
+        } else if (isPadding(cleaned) || isTreeOnly(cleaned)) {
+          if (++state.blanks === 1) push('', at);
+          state.inBubble = false;
+        } else {
+          state.blanks = 0;
+          const bubble = unwrapped.bubble || /^\s{6,}/.test(line) || state.inBubble;
+          if (state.inBubble && isProseWrap(previous, cleaned)) {
+            state.last = `${previous.trim()} ${cleaned.trim()}`;
+            if (at - 1 > state.lastFrom) delete checkpoints[at - 1];
+          } else { push(unindentBubble(cleaned), at); state.inBubble = unwrapped.bubble || (bubble && /^[A-Z]/.test(cleaned.trim())); }
+        }
+        state.hasInk ||= hasInk.test(state.last ?? '');
+        work.formattedLines++;
+        checkpoints[at + 1] = { ...state };
+      }
+      input = snapshot; head = nextHead; end = nextEnd;
+      output = !state.hasInk ? '' : state.last === '' ? state.prefix.slice(0, -1) : state.prefix + (state.last ?? '');
+      return output;
+    },
+  };
+}
