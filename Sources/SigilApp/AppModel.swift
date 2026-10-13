@@ -1198,16 +1198,17 @@ final class AppModel {
         // Earlier builds added a Sigil worktree as its own project, which
         // could then be pinned or left open. Each becomes its project.
         // Folder availability is transient; only explicit Remove/Archive drops an added reference.
+        // Distinct saved aliases can converge temporarily; fold/deduplicate literal references only.
         let remainingAdded = SidebarOrganization.foldingWorktrees(
             settings.addedProjects, path: \.path,
-            moving: { AddedProject(path: $1, addedAt: $0.addedAt) }, samePath: samePath
+            moving: { AddedProject(path: $1, addedAt: $0.addedAt) }, samePath: ==
         )
         if remainingAdded != settings.addedProjects {
             settings.addedProjects = remainingAdded
         }
         let remainingProjectPins = pruningMissingProjects(
             SidebarOrganization.foldingWorktrees(
-                settings.pinnedProjects, path: { $0 }, moving: { $1 }, samePath: samePath))
+                settings.pinnedProjects, path: { $0 }, moving: { $1 }, samePath: ==))
         if remainingProjectPins != settings.pinnedProjects {
             settings.pinnedProjects = remainingProjectPins
         }

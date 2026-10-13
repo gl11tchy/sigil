@@ -466,14 +466,18 @@ enum SidebarOrganization {
         paths.filter { !samePath($0, path) }
     }
 
-    /// Projects that still exist, in stored pin order.
+    /// One row per canonical project, in first matching pin order. Saved aliases may converge.
     static func matching(
         projects: [SidebarProject],
         paths: [String],
         samePath: (String, String) -> Bool
     ) -> [SidebarProject] {
-        paths.compactMap { path in
-            projects.first { samePath($0.cwd, path) }
+        var seen: Set<String> = []
+        return paths.compactMap { path in
+            guard let project = projects.first(where: { samePath($0.cwd, path) }),
+                seen.insert(project.id).inserted
+            else { return nil }
+            return project
         }
     }
 

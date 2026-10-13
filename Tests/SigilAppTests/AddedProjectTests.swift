@@ -184,12 +184,14 @@ struct AddedProjectTests {
         await fixture.store.reload()
         let model = fixture.model()
         defer { model.closeAllTabsAndWait() }
+        model.addProject(second)
         model.addProject(other)
         model.addProject(alias)
         let row = try #require(model.sidebarProjects.first { $0.cwd == alias.path })
         #expect(row.id == GrokPaths.canonicalPath(first.path))
         model.pin(row)
         model.pin(try #require(model.sidebarProjects.first { $0.cwd == other.path }))
+        model.pin(try #require(model.sidebarProjects.first { $0.cwd == second.path }))
         model.openProject(row)
         let saved = fixture.settings.addedProjects
         let pins = fixture.settings.pinnedProjects
@@ -203,15 +205,29 @@ struct AddedProjectTests {
         try fm.removeItem(at: alias)  // This is the generated symlink, never either target.
         try fm.createSymbolicLink(at: alias, withDestinationURL: second)
         model.retryProjectAvailability()
+        model.pruneMissingPins()
         let restored = try #require(model.sidebarSnapshot().projects.first { $0.cwd == alias.path })
         #expect(restored.isAvailable && restored.id == GrokPaths.canonicalPath(second.path))
         #expect(fixture.settings.addedProjects == saved && fixture.settings.pinnedProjects == pins)
-        model.removeProject(restored)
-        #expect(fixture.settings.addedProjects.map(\.path) == [other.path])
-        #expect(fixture.settings.pinnedProjects == [other.path])
-        #expect(try Data(contentsOf: detached.appendingPathComponent("keep.txt")) == bytes)
+        let converged = model.sidebarSnapshot()
+        #expect(converged.pinnedProjects.count == 2)
+        #expect(Set(converged.pinnedProjects.map(\.id)).count == 2)
+
+        try fm.moveItem(at: detached, to: first)
+        try fm.removeItem(at: alias)
+        try fm.createSymbolicLink(at: alias, withDestinationURL: first)
+        model.retryProjectAvailability()
+        model.pruneMissingPins()
+        let separated = model.sidebarSnapshot()
+        #expect(separated.pinnedProjects.count == 3)
+        #expect(fixture.settings.addedProjects == saved && fixture.settings.pinnedProjects == pins)
+        let original = try #require(separated.projects.first { $0.cwd == alias.path })
+        model.removeProject(original)
+        #expect(fixture.settings.addedProjects.map(\.path) == [other.path, second.path])
+        #expect(fixture.settings.pinnedProjects == [second.path, other.path])
+        #expect(try Data(contentsOf: first.appendingPathComponent("keep.txt")) == bytes)
         #expect(try Data(contentsOf: second.appendingPathComponent("keep.txt")) == bytes)
-        #expect(try fm.destinationOfSymbolicLink(atPath: alias.path) == second.path)
+        #expect(try fm.destinationOfSymbolicLink(atPath: alias.path) == first.path)
     }
 
     @Test func filteredAndFocusedProjectsKeepAvailabilityWithoutChangingHistoryDates() async throws {

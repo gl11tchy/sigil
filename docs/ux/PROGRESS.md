@@ -859,6 +859,8 @@ No merge, installation or next-ticket work before parent personal final review.
 On isolated branch `fix/rea-1227-retain-unavailable-projects`, based on main
 `aaef908`, successful scans keep added project references and pins through folder
 absence or access failure. Legacy worktree entries still fold into their project.
+Literal reference folding preserves aliases/pins through canonical convergence;
+display matching emits one pinned row until the paths separate again.
 Cached sidebar projections mark unavailable added folders and expose Retry in
 the row, context menu, accessibility actions and focused-project notice. Retry
 rechecks filesystem/canonical state without a history traversal. Explicit
