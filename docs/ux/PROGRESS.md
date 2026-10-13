@@ -25,7 +25,7 @@ still open. Nothing here is a timing; counts are counted actions.
 
 Retain exact conversation IDs from saved pins, archives, names and colors,
 including unknown or unreadable history. A separate preferences-only migration
-uses independent per-ID records plus the existing compatibility list, checks
+uses independent immutable addition records plus the existing compatibility list, checks
 persistence/readback before completion, and reconciles failed future actions
 and another copy's later arrivals. Opening alone and Notes alone stay excluded;
 provider identity/binding and history parsing are unchanged.

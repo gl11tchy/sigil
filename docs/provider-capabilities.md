@@ -319,9 +319,12 @@ unreadable history cannot remove an ownership ID, and an unknown display value
 (such as a future color) does not hide its saved ID from the migration. Opening
 an outside chat or writing a note alone does not establish ownership.
 
-Ownership membership has independent, never-pruned per-ID preference records;
+Ownership membership has independent, never-pruned addition records;
 the existing JSON list remains a compatibility projection. This prevents
 overlapping copies from losing distinct additions through a shared list write.
+One immutable record contains all new IDs in a commit, so bulk archive writes
+stay bounded instead of writing one preference for each chat. Record UUIDs are
+storage keys and cannot establish conversation identity.
 The `session.sigilConversationsSeeded2` marker follows a checked persistence
 barrier and identity readback. Failed writes retain in-memory IDs and retry on
 shared-list reload or store housekeeping; reconciliation also imports another

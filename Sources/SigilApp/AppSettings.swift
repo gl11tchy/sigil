@@ -375,8 +375,8 @@ final class AppSettings {
         sigilConversationIDs.contains(sidebarID)
     }
 
-    /// Independent, never-pruned ID keys preserve simultaneous additions even
-    /// when copies overwrite the compatibility list with overlapping snapshots.
+    /// Independent, never-pruned addition records preserve simultaneous writes
+    /// without making bulk actions write one preference per conversation.
     @discardableResult
     func recordSigilConversations(_ sidebarIDs: [String], confirmPersistence: Bool = false) -> Bool {
         var merged = sigilConversations
@@ -384,8 +384,7 @@ final class AppSettings {
         func append(_ ids: [String]) {
             for id in ids where seen.insert(id).inserted { merged.append(id) }
         }
-        let records = defaults.dictionaryRepresentation().filter { $0.key.hasPrefix(Key.sigilConversationPrefix) }
-        let recorded = records.sorted { $0.key < $1.key }.compactMap { $0.value as? String }
+        let (recorded, recordsReadable) = storedSigilConversationRecords()
         let savedData = defaults.data(forKey: Key.sigilConversations)
         let saved: [String]
         if defaults.object(forKey: Key.sigilConversations) == nil {
@@ -401,21 +400,31 @@ final class AppSettings {
         }
         append(saved + recorded + sidebarIDs)
         if merged != sigilConversations { sigilConversations = merged }
-        guard recorded.count == records.count, let data = try? JSONEncoder().encode(merged) else {
+        guard recordsReadable, let data = try? JSONEncoder().encode(merged) else {
             sigilPersistencePending = true
             return false
         }
         var writes: [String: Any] = [:]
-        for id in merged where records[Self.sigilConversationKey(id)] as? String != id {
-            writes[Self.sigilConversationKey(id)] = id
+        let registered = Set(recorded)
+        let additions = merged.filter { !registered.contains($0) }
+        if !additions.isEmpty {
+            // This UUID identifies an immutable preference record, never a chat.
+            let key = Key.sigilConversationPrefix + UUID().uuidString
+            guard defaults.object(forKey: key) == nil, let added = try? JSONEncoder().encode(additions) else {
+                sigilPersistencePending = true
+                return false
+            }
+            writes[key] = added
         }
         if savedData == nil || Set(saved) != seen { writes[Key.sigilConversations] = data }
         guard !writes.isEmpty || sigilPersistencePending || confirmPersistence else { return true }
-        guard persistSigilOwnership(defaults, writes),
+        let persisted = persistSigilOwnership(defaults, writes)
+        let persistedRecords = storedSigilConversationRecords()
+        guard persisted, persistedRecords.readable,
             let readback = defaults.data(forKey: Key.sigilConversations)
                 .flatMap({ try? JSONDecoder().decode([String].self, from: $0) }),
             seen.isSubset(of: Set(readback)),
-            merged.allSatisfy({ defaults.string(forKey: Self.sigilConversationKey($0)) == $0 })
+            seen.isSubset(of: Set(persistedRecords.ids))
         else {
             sigilPersistencePending = true
             return false
@@ -424,8 +433,18 @@ final class AppSettings {
         return true
     }
 
-    private static func sigilConversationKey(_ id: String) -> String {
-        Key.sigilConversationPrefix + Data(id.utf8).base64EncodedString()
+    private func storedSigilConversationRecords() -> (ids: [String], readable: Bool) {
+        let records = defaults.dictionaryRepresentation().filter { $0.key.hasPrefix(Key.sigilConversationPrefix) }
+        var ids: [String] = []
+        var readable = true
+        for (_, value) in records.sorted(by: { $0.key < $1.key }) {
+            if let data = value as? Data, let added = try? JSONDecoder().decode([String].self, from: data) {
+                ids += added
+            } else {
+                readable = false
+            }
+        }
+        return (ids, readable)
     }
 
     /// Ownership preferences already contain sidebar IDs, including provider
