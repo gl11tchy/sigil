@@ -2517,8 +2517,10 @@ final class AppModel {
             executable: session.provider == .grokBuild ? grokExecutableURL : nil,
             workingDirectory: workingDirectory,
             mode: .resume(sessionID: session.nativeSessionID),
-            model: session.provider == .grokBuild ? settings.model.nilIfEmpty : nil,
-            reasoningEffort: session.provider == .grokBuild ? settings.effort.nilIfEmpty : nil,
+            model: session.provider == .grokBuild ? (session.modelID?.nilIfEmpty ?? settings.model.nilIfEmpty) : nil,
+            reasoningEffort: session.provider == .grokBuild
+                ? (session.reasoningEffort.flatMap { AppSettings.effortOptions.contains($0) ? $0.nilIfEmpty : nil }
+                    ?? settings.effort.nilIfEmpty) : nil,
             themeName: settings.theme.grokThemeName,
             themeVariables: settings.theme.grokThemeEnvironment,
             provider: session.provider, sessionFile: session.provider == .grokBuild ? nil : session.directory

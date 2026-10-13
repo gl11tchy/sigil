@@ -10,6 +10,174 @@ import Testing
 struct AppModelTests {
 
     @Test @MainActor
+    func savedGrokHistoryReopensWithItsOwnModelAndEffort() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        defer { fixture.store.stop() }
+        fixture.settings.isTabMessagingEnabled = false
+        fixture.settings.model = "grok-4.7"
+        fixture.settings.effort = "low"
+        let cwd = try fixture.directory("saved-grok-project")
+        try fixture.writeListedSession(
+            id: "saved-grok", cwd: cwd.path,
+            modelID: "grok-4.7-build-fast", reasoningEffort: "xhigh")
+        await fixture.store.reload()
+        let saved = try #require(fixture.store.sessions.first { $0.id == "saved-grok" })
+        #expect(saved.isHistoryValidated)
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        model.open(saved)
+        let tab = try #require(model.tabs.first)
+        #expect(tab.spec.model == "grok-4.7-build-fast")
+        #expect(tab.spec.reasoningEffort == "xhigh")
+        #expect(
+            tab.spec.arguments() == [
+                "--cwd", cwd.path, "--resume", "saved-grok",
+                "--model", "grok-4.7-build-fast", "--reasoning-effort", "xhigh",
+            ])
+    }
+
+    @Test @MainActor
+    func savedGrokMetadataFallsBackIndependentlyForEachOption() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        defer { fixture.store.stop() }
+        fixture.settings.isTabMessagingEnabled = false
+        let cases: [(String?, String?, String, String, String?, String?)] = [
+            (nil, "high", "grok-4.7", "low", "grok-4.7", "high"),
+            ("grok-saved", nil, "grok-4.7", "low", "grok-saved", "low"),
+            (nil, nil, "grok-4.7", "low", "grok-4.7", "low"),
+            ("", "", "grok-4.7", "low", "grok-4.7", "low"),
+            (" \t ", " \t ", "grok-4.7", "low", "grok-4.7", "low"),
+            ("grok-saved", "invalid", "grok-4.7", "low", "grok-saved", "low"),
+            ("grok-saved", " high ", "grok-4.7", "low", "grok-saved", "low"),
+            ("  grok-saved  ", "high", "grok-4.7", "low", "grok-saved", "high"),
+            ("grok-saved", nil, "", "", "grok-saved", nil),
+            (nil, "high", "", "", nil, "high"),
+            (nil, "invalid", "", "", nil, nil),
+        ]
+        for (index, options) in cases.enumerated() {
+            let (savedModel, savedEffort, defaultModel, defaultEffort, expectedModel, expectedEffort) = options
+            fixture.settings.model = defaultModel
+            fixture.settings.effort = defaultEffort
+            let cwd = try fixture.directory("metadata-\(index)")
+            let id = "metadata-\(index)"
+            try fixture.writeListedSession(
+                id: id, cwd: cwd.path, modelID: savedModel, reasoningEffort: savedEffort)
+            await fixture.store.reload()
+            let saved = try #require(fixture.store.sessions.first { $0.id == id })
+            let model = fixture.model()
+            defer { model.closeAllTabsAndWait() }
+            model.open(saved)
+            let tab = try #require(model.tabs.first)
+            #expect(tab.spec.model == expectedModel, "metadata case \(index)")
+            #expect(tab.spec.reasoningEffort == expectedEffort, "metadata case \(index)")
+            var expected = ["--cwd", cwd.path, "--resume", id]
+            if let expectedModel { expected += ["--model", expectedModel] }
+            if let expectedEffort { expected += ["--reasoning-effort", expectedEffort] }
+            #expect(tab.spec.arguments() == expected, "metadata case \(index)")
+            #expect(fixture.settings.model == defaultModel && fixture.settings.effort == defaultEffort)
+        }
+    }
+
+    @Test @MainActor
+    func desktopAndRemoteOpenKeepSavedGrokModelAcrossCatalogUncertaintyAndCLIRejection() async throws {
+        let priorCatalog = RemoteCommands.listedModels
+        defer { RemoteCommands.listedModels = priorCatalog }
+        for remotely in [false, true] {
+            for catalog in ["missing", "stale", "failed"] {
+                let fixture = try ModelFixture(
+                    script: """
+                        #!/bin/sh
+                        if [ "$1" = models ]; then
+                          echo 'fixture model list unavailable' >&2
+                          exit 1
+                        fi
+                        printf 'fixture unsupported saved model: %s\n' "$*" >&2
+                        exit 2
+                        """)
+                defer { fixture.cleanup() }
+                defer { fixture.store.stop() }
+                fixture.settings.isTabMessagingEnabled = false
+                fixture.settings.model = "grok-4.7"
+                fixture.settings.effort = "low"
+                let savedModel = "grok-saved-not-listed"
+                let cwd = try fixture.directory("catalog-project")
+                try fixture.writeListedSession(
+                    id: "catalog-chat", cwd: cwd.path, modelID: savedModel, reasoningEffort: "high")
+                await fixture.store.reload()
+                let saved = try #require(fixture.store.sessions.first { $0.id == "catalog-chat" })
+                switch catalog {
+                case "missing": RemoteCommands.listedModels = nil
+                case "stale":
+                    RemoteCommands.listedModels = (fixture.executable.path, ["grok-4.7"])
+                default:
+                    let failed = await GrokModelCatalog.load(executable: fixture.executable, shellPath: "/bin/sh")
+                    #expect(failed.isEmpty)
+                    RemoteCommands.listedModels = (fixture.executable.path, failed)
+                }
+                let model = fixture.model()
+                defer { model.closeAllTabsAndWait() }
+                #expect(!RemoteCommands.newSessionOptions(model).models.contains(savedModel))
+                if remotely {
+                    let reply = await RemoteCommands.execute(
+                        RemoteRequest(
+                            challenge: "test", sequence: 1, action: "open", text: cwd.path, name: saved.id),
+                        model: model)
+                    #expect(reply.ok)
+                } else {
+                    model.open(saved)
+                }
+                let tab = try #require(model.tabs.first)
+                #expect(tab.spec.model == savedModel && tab.spec.reasoningEffort == "high")
+                #expect(await waitUntil { tab.controller.remoteSnapshot().contains("fixture unsupported saved model") })
+                #expect(await waitUntil { tab.activity == .exited(code: 2) })
+                #expect(tab.spec.model == savedModel)
+                #expect(model.tabs.count == 1)
+                #expect(fixture.settings.model == "grok-4.7" && fixture.settings.effort == "low")
+                #expect(fixture.store.sessions.first?.modelID == savedModel)
+            }
+        }
+    }
+
+    @Test @MainActor
+    func restoringAReopenedGrokChatKeepsItsTabOptionsWhenDefaultsAndSummaryChange() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        defer { fixture.store.stop() }
+        fixture.settings.isTabMessagingEnabled = false
+        fixture.settings.model = "grok-4.7"
+        fixture.settings.effort = "low"
+        let cwd = try fixture.directory("restore-saved-grok")
+        try fixture.writeListedSession(
+            id: "restored-grok", cwd: cwd.path, modelID: "grok-4.7-build-fast", reasoningEffort: "high")
+        await fixture.store.reload()
+        let saved = try #require(fixture.store.sessions.first)
+        let first = fixture.model()
+        defer { first.closeAllTabsAndWait() }
+        first.open(saved)
+        let opened = try #require(first.tabs.first)
+        let snapshot = fixture.settings.openTabs
+        #expect(opened.spec.model == "grok-4.7-build-fast" && opened.spec.reasoningEffort == "high")
+        first.closeAllTabsAndWait()
+        fixture.settings.model = "grok-4.6"
+        fixture.settings.effort = "medium"
+        try fixture.writeListedSession(
+            id: "restored-grok", cwd: cwd.path, modelID: "grok-summary-changed", reasoningEffort: "low")
+        await fixture.store.reload()
+        fixture.settings.openTabs = snapshot
+        let second = fixture.model()
+        defer { second.closeAllTabsAndWait() }
+        second.restoreOpenTabs()
+        let restored = try #require(second.tabs.first)
+        #expect(restored.nativeSessionID == saved.nativeSessionID)
+        #expect(restored.spec.model == "grok-4.7-build-fast")
+        #expect(restored.spec.reasoningEffort == "high")
+        #expect(second.tabs.count == 1)
+        #expect(fixture.store.sessions.first?.modelID == "grok-summary-changed")
+    }
+
+    @Test @MainActor
     func savedDisplayCannotPruneMigrateOrRestoreWithoutFreshSourceIdentity() async throws {
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
@@ -4735,7 +4903,9 @@ final class ModelFixture {
         summary: String = "Session",
         messages: Int = 4,
         sessionKind: String? = nil,
-        updatedAt: String = "2026-08-01T00:00:00Z"
+        updatedAt: String = "2026-08-01T00:00:00Z",
+        modelID: String? = nil,
+        reasoningEffort: String? = nil
     ) throws {
         let dir = GrokPaths.sessionDirectory(cwd: cwd, sessionID: id)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -4749,6 +4919,8 @@ final class ModelFixture {
         if let sessionKind {
             json["session_kind"] = sessionKind
         }
+        if let modelID { json["current_model_id"] = modelID }
+        if let reasoningEffort { json["reasoning_effort"] = reasoningEffort }
         let data = try JSONSerialization.data(withJSONObject: json)
         try data.write(to: dir.appendingPathComponent("summary.json"), options: .atomic)
     }
