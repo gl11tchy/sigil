@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import SigilKit
 import Testing
@@ -163,6 +164,7 @@ final class RelayFixture {
 
     /// Pushes the relay would send to Apple, one JSON line each, when the fixture captures them.
     var apnsCapture: URL { root.appendingPathComponent("apns.jsonl") }
+    var roomCapture: URL { root.appendingPathComponent("rooms.txt") }
 
     init(captureAPNs: Bool = false) async throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -170,7 +172,11 @@ final class RelayFixture {
         let portFile = root.appendingPathComponent("port")
         process = try await Self.launch(
             [repo.appendingPathComponent("Sidereal/test/relay-fixture.mjs").path], portFile: portFile,
-            environment: captureAPNs ? ["SIGIL_TEST_APNS_CAPTURE": root.appendingPathComponent("apns.jsonl").path] : [:]
+            environment: captureAPNs
+                ? [
+                    "SIGIL_TEST_APNS_CAPTURE": root.appendingPathComponent("apns.jsonl").path,
+                    "SIGIL_TEST_ROOM_CAPTURE": root.appendingPathComponent("rooms.txt").path,
+                ] : [:]
         )
         origin = "http://127.0.0.1:\(try String(contentsOf: portFile, encoding: .utf8))"
     }
@@ -468,9 +474,15 @@ struct RemoteAlertDeliveryTests {
             let payload: Payload
         }
         let captured = try lines.map { try JSONDecoder().decode(Captured.self, from: Data($0.utf8)) }
+        // Pairing retires the QR room. Use the fixture's actual replacement
+        // allocation, keeping an exact assertion on the room/tab namespace.
+        let rooms = try String(contentsOf: relay.roomCapture, encoding: .utf8).split(separator: "\n")
+        let room = try #require(rooms.last)
+        let namespace = try JSONEncoder().encode([String(room), id])
+        let collapseID = SHA256.hash(data: namespace).map { String(format: "%02x", $0) }.joined()
         var alerts: [RemoteAlert] = []
         for entry in captured where entry.pushType == "alert" {
-            #expect(entry.token == token && entry.environment == "development" && entry.collapseId == id)
+            #expect(entry.token == token && entry.environment == "development" && entry.collapseId == collapseID)
             alerts.append(
                 try RemoteCrypto.open(
                     try #require(entry.payload.sigil?.data), key: paired.device, direction: RemoteAlert.direction))

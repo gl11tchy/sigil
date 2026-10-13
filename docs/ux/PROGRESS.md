@@ -8,6 +8,11 @@ frames retain zero storage, activity timestamps freeze, and alert collapse keys
 separate rooms/tabs. Sealed bytes, identity, client freshness and permissions stay
 intact. All 46 focused Node tests and strict local formatting/syntax/diff checks
 passed. [QA](../qa/rea-1210.md) records synthetic checks and provider limits.
+First candidate CI38430272868 compiled and ran 1,316 Swift tests/113 suites
+with two existing bare-tab collapse-ID expectations failing; new timing suites,
+37 XCTest, Node192+58 and browser219 passed (one skip), native checks skipped.
+Test-only room capture now preserves exact replacement-room hash checks, with
+all other assertions retained and production unchanged.
 Exact-head CI and parent personal review remain pending; no merge/installation,
 actual provider calls, personal data, process inventory or denied retry.
 
