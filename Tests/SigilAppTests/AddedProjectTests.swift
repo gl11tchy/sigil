@@ -142,7 +142,6 @@ struct AddedProjectTests {
         let initial = try #require(model.sidebarSnapshot().projects.first { $0.cwd == project.path })
         #expect(initial.isAvailable)
         model.pin(initial)
-        model.openProject(initial)
         let saved = fixture.settings.addedProjects
         let sequence = fixture.store.scanSequence
         let detached = fixture.root.appendingPathComponent("detached-project")
@@ -160,6 +159,7 @@ struct AddedProjectTests {
         #expect(!unavailable.isAvailable)
         #expect(snapshot.rowIDs.contains(unavailable.id))
         #expect(snapshot.pinnedProjects.contains { $0.cwd == project.path })
+        model.openProject(unavailable)
         #expect(model.focusedProject?.isAvailable == false)
         #expect(fixture.settings.addedProjects == saved)
         #expect(fixture.settings.pinnedProjects == [project.path])
