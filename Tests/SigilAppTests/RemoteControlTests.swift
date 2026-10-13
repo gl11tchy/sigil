@@ -9,6 +9,43 @@ import Testing
 
 @Suite(.serialized)
 struct RemoteControlTests {
+    @Test @MainActor func cancellingPendingOriginBPreservesOriginAAndAnotherCopy() throws {
+        let fixture = try PairingCancellationFixture()
+        defer { fixture.cleanup() }
+        let pairing = RemotePairing(
+            origin: "https://pairing-a.invalid", deviceKey: RemoteCrypto.randomKey(), ticket: RemoteCrypto.randomKey())
+        let store = InMemoryRemotePairingStore()
+        store.save(pairing)
+        let center = NotificationCenter()
+        let notices = PairingRevokeLog()
+        let token = center.addObserver(forName: RemoteControl.revokedNotification, object: nil, queue: nil) { _ in
+            notices.record()
+        }
+        defer { center.removeObserver(token) }
+        let existing = RemoteControl(store: store, notifications: center)
+        let pending = RemoteControl(store: store, notifications: center)
+        defer {
+            existing.stop()
+            pending.stop()
+        }
+        // No actor suspension: these synthetic starts are cancelled before
+        // their queued network tasks can execute or contact these .invalid hosts.
+        existing.resumeIfPaired(model: fixture.model)
+        pending.start(urlText: "https://pairing-b.invalid", model: fixture.model)
+        #expect(existing.isPaired)
+        #expect(!pending.isPaired)
+        // Current main's Cancel button invokes this same revoke route.
+        pending.stop(revoke: true)
+        #expect(store.load() == pairing)
+        #expect(notices.count == 0)
+        #expect(existing.isEnabled && existing.isPaired)
+        #expect(!pending.isEnabled)
+        let reopened = RemoteControl(store: store, notifications: center)
+        reopened.resumeIfPaired(model: fixture.model)
+        defer { reopened.stop() }
+        #expect(reopened.isPaired)
+    }
+
     @Test @MainActor func memoryStoreRoundTripsAndClearsPairing() {
         let store = InMemoryRemotePairingStore()
         let pairing = RemotePairing(
@@ -338,6 +375,44 @@ struct RemoteControlTests {
             RemoteReply.self, from: try JSONEncoder().encode(RemoteReply(challenge: "c", sequence: 2)))
         #expect(bare.ticket == nil)
     }
+}
+
+@MainActor
+private final class PairingCancellationFixture {
+    let root: URL
+    let suite: String
+    let store: SessionStore
+    let model: AppModel
+
+    init() throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent("sigil-pairing-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        suite = "sigil-pairing-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        let settings = AppSettings(defaults: defaults)
+        settings.defaultDirectory = root.path
+        settings.isTabMessagingEnabled = false
+        store = SessionStore(root: root.appendingPathComponent("sessions"))
+        model = AppModel(
+            settings: settings, store: store, presentError: { _ in }, panel: RightPanel(defaults: defaults),
+            pairingStore: InMemoryRemotePairingStore(), kimiKeyStore: InMemoryKimiKeyStore(), providerInstallations: [:]
+        )
+    }
+
+    func cleanup() {
+        model.remoteControl.stop()
+        model.closeAllTabsAndWait()
+        store.stop()
+        UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+        try? FileManager.default.removeItem(at: root)
+    }
+}
+
+private final class PairingRevokeLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    var count: Int { lock.withLock { value } }
+    func record() { lock.withLock { value += 1 } }
 }
 
 private final class FailingClearStore: RemotePairingStore {
