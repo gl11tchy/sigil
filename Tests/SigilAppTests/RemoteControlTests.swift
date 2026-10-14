@@ -9,6 +9,26 @@ import Testing
 
 @Suite(.serialized)
 struct RemoteControlTests {
+    @Test(arguments: [false, true], [false, true])
+    @MainActor func alertPathSkipsPromptReadsWithoutConsumers(enabled: Bool, suppressAlerts: Bool) throws {
+        let fixture = try PhoneCommandFixture()
+        defer { fixture.cleanup() }
+        let tab = try #require(fixture.model.newTab(in: fixture.directory("alert-evaluation")))
+        let remote = RemoteControl(store: InMemoryRemotePairingStore())
+        defer { remote.stop() }
+        if enabled {
+            // This synchronous actor turn stops the queued connection before
+            // it can execute. No request is sent to this generated invalid host.
+            remote.start(urlText: "https://alert-evaluation.invalid", model: fixture.model)
+        }
+        var reads = 0
+        remote.beforeAlertPromptRead = { _ in reads += 1 }
+        for _ in 0..<25 {
+            remote.noteTab(tab, model: fixture.model, suppressAlerts: suppressAlerts)
+        }
+        #expect(reads == 0, "Twenty-five generated events need no alert-path prompt read without a consumer")
+    }
+
     @Test @MainActor func cancellingPendingOriginBPreservesOriginAAndAnotherCopy() throws {
         let fixture = try PairingCancellationFixture()
         defer { fixture.cleanup() }

@@ -53,6 +53,8 @@ final class RemoteControl {
         /// Suspends an owned push write while the socket reader processes a
         /// generation/token/peer change. Nil in ordinary operation.
         @ObservationIgnored var beforeQueuedPushSend: (@MainActor () async -> Void)?
+        /// Counts alert-path prompt reads from generated tabs in CI only.
+        @ObservationIgnored var beforeAlertPromptRead: ((TerminalTab.ID) -> Void)?
     #endif
     @ObservationIgnored private var lastSentTabs: [RemoteState.Tab]?
     @ObservationIgnored private var lastSentSelection: String?
@@ -586,6 +588,9 @@ final class RemoteControl {
 
     private func evaluate(_ tab: TerminalTab, model: AppModel, allowAlerts: Bool = true) {
         let id = tab.id.uuidString
+        #if DEBUG
+            beforeAlertPromptRead?(tab.id)
+        #endif
         let prompt = RemoteCommands.prompt(for: tab)
         let snapshot = RemoteAlertPlanner.Snapshot(
             status: tab.activity.statusName, since: Int((tab.workingSince ?? Date()).timeIntervalSince1970),
