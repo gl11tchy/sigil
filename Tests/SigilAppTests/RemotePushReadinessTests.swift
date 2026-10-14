@@ -27,7 +27,7 @@ struct RemotePushReadinessTests {
         defer { gate.release() }
         context.remote.beforeQueuedPushSend = { await gate.holdOnce() }
         let issued = Int(context.clock.now.timeIntervalSince1970)
-        await context.interrupt()
+        try await context.interrupt()
         #expect(await readinessEventually { gate.paused })
         if ending {
             context.fixture.model.closeTab(context.tab.id)
@@ -50,7 +50,7 @@ struct RemotePushReadinessTests {
         let context = try await ReadyPushContext()
         defer { context.cleanup() }
         let issued = Int(context.clock.now.timeIntervalSince1970)
-        await context.interrupt()
+        try await context.interrupt()
         #expect(context.remote.pendingPushCount == 1)
         context.clock.now = context.clock.now.addingTimeInterval(30)
         try context.relay.releaseRoute()
@@ -66,7 +66,7 @@ struct RemotePushReadinessTests {
     @Test func expiredQueuedAlertsDoNotGainANewLifetimeWhenReadyArrives() async throws {
         let context = try await ReadyPushContext()
         defer { context.cleanup() }
-        await context.interrupt()
+        try await context.interrupt()
         // The batching callback is asynchronous: never advance its clock until
         // the original event has actually entered the queue. A fixed sleep can
         // otherwise create a future-dated event rather than expire an old one.
@@ -82,7 +82,7 @@ struct RemotePushReadinessTests {
     func stopAndDisconnectClearQueuedPushes(revoke: Bool) async throws {
         let context = try await ReadyPushContext()
         defer { context.cleanup() }
-        await context.interrupt()
+        try await context.interrupt()
         #expect(context.remote.pendingPushCount == 1)
         context.remote.stop(revoke: revoke)
         #expect(context.remote.pendingPushCount == 0 && !context.remote.isHostReadyForPushes)
@@ -99,7 +99,7 @@ struct RemotePushReadinessTests {
         try context.relay.holdRoute()
         try context.relay.dropHost()
         #expect(await readinessEventually { context.remote.status == "Reconnecting…" })
-        await context.interrupt()
+        try await context.interrupt()
         #expect(context.remote.pendingPushCount == 1 && context.relay.captureCount == 0)
         #expect(await readinessEventually { context.relay.heldRouteCount >= 2 })
         try context.relay.releaseRoute()
@@ -131,7 +131,7 @@ struct RemotePushReadinessTests {
         let gate = ReadyPushGate()
         defer { gate.release() }
         context.remote.beforeQueuedPushSend = { await gate.holdOnce() }
-        await context.interrupt()
+        try await context.interrupt()
         #expect(await readinessEventually { gate.paused })
         context.fixture.model.closeTab(context.tab.id)
         context.remote.forgetTab(context.tab.id)
@@ -179,7 +179,7 @@ struct RemotePushReadinessTests {
         let gate = ReadyPushGate()
         defer { gate.release() }
         context.remote.beforeQueuedPushSend = { await gate.holdOnce() }
-        await context.interrupt()
+        try await context.interrupt()
         #expect(await readinessEventually { gate.paused })
         let replacementPhone = try RelayPhone(origin: context.relay.origin)
         defer { replacementPhone.close() }
@@ -205,7 +205,7 @@ struct RemotePushReadinessTests {
         let gate = ReadyPushGate()
         defer { gate.release() }
         context.remote.beforeQueuedPushSend = { await gate.holdOnce() }
-        await context.interrupt()
+        try await context.interrupt()
         #expect(await readinessEventually { gate.paused })
         if repair {
             context.store.save(
@@ -357,10 +357,14 @@ private final class ReadyPushContext {
         remote.resumeIfPaired(model: fixture.model)
         #expect(await readinessEventually { relay.hasHeldRoute })
     }
-    func interrupt() async {
+    func interrupt() async throws {
         tab.noteInterrupted()
         remote.noteTab(tab, model: fixture.model)
-        try? await Task.sleep(for: .milliseconds(400))
+        // noteTab batches evaluation asynchronously. A sleep longer than its
+        // 300 ms delay does not prove the callback ran on a busy CI actor.
+        // Every caller holds routing or a send gate, so the queued push stays
+        // observable until the test deliberately releases it.
+        try #require(await readinessEventually { remote.pendingPushCount > 0 })
     }
     func cleanup() {
         remote.stop()
