@@ -1173,3 +1173,22 @@ native build/AppTests, process enumeration, binding retry, live relay/APNs exerc
 or customer data. Installed build360, protected PR162 and prior manual records remain
 intact. See [QA evidence and limits](../qa/rea-1207.md). Parent exact-head review
 is required before merge.
+
+
+### REA-1217 eligible alert evaluation · 2026-10-14
+
+Generated native counter fixtures reproduced prompt invocations on fresh main
+a815c58 while remote was off or enabled without consumers: ordinary25-event
+paths invoked once, suppressed paths25 times. Baseline PR178 CI38521292698 had
+exactly these four expected issues and no other Swift failure. The same branch
+now gates reads/scheduling by per-tab consumers, keeps alert/activity baselines
+independent, preserves unchanged-token baselines and owns each delayed callback.
+Last-consumer removal cancels only unneeded tasks; watch streaming remains separate.
+
+Queue/drain, watch/protocol and existing generation assignments are byte-identical.
+Compatibility fixtures establish baselines after eligibility, with original
+queue/generation/timing/expiry assertions preserved. New deterministic lifecycle
+and encrypted watch cases are added; repaired-head normal CI is pending. No local
+native command, process enumeration, denied retry, personal agent data, model
+switch, extra worker, power measurement, deployment, merge or app replacement.
+Installed build364 and held PR162 remain untouched. See [QA evidence](../qa/rea-1217.md).

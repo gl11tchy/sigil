@@ -3,6 +3,7 @@ import Foundation
 import Network
 import Security
 import SigilKit
+import SwiftTerm
 import Testing
 
 @testable import SigilApp
@@ -10,23 +11,201 @@ import Testing
 @Suite(.serialized)
 struct RemoteControlTests {
     @Test(arguments: [false, true], [false, true])
-    @MainActor func alertPathSkipsPromptReadsWithoutConsumers(enabled: Bool, suppressAlerts: Bool) throws {
-        let fixture = try PhoneCommandFixture()
-        defer { fixture.cleanup() }
-        let tab = try #require(fixture.model.newTab(in: fixture.directory("alert-evaluation")))
-        let remote = RemoteControl(store: InMemoryRemotePairingStore())
-        defer { remote.stop() }
-        if enabled {
-            // This synchronous actor turn stops the queued connection before
-            // it can execute. No request is sent to this generated invalid host.
-            remote.start(urlText: "https://alert-evaluation.invalid", model: fixture.model)
-        }
+    @MainActor func alertPathSkipsPromptReadsWithoutConsumers(enabled: Bool, suppressAlerts: Bool) async throws {
+        let context = try await AlertEvaluationContext()
+        defer { context.cleanup() }
+        let remote = context.remote
+        if !enabled { remote.stop() }
+        let gate = AlertEvaluationGate()
+        defer { gate.release() }
+        remote.beforeAlertEvaluation = { await gate.hold() }
         var reads = 0
         remote.beforeAlertPromptRead = { _ in reads += 1 }
         for _ in 0..<25 {
-            remote.noteTab(tab, model: fixture.model, suppressAlerts: suppressAlerts)
+            remote.noteTab(context.tab, model: context.fixture.model, suppressAlerts: suppressAlerts)
+        }
+        let scheduled = remote.pendingAlertEvaluationCount
+        // Flush any wrongly scheduled work through the deterministic gate;
+        // cleanup must not conceal a delayed no-consumer prompt read.
+        if scheduled > 0 {
+            try await alertEvaluationUntil { gate.arrivals == scheduled }
+            gate.release()
+            try await alertEvaluationUntil { gate.returned == scheduled }
         }
         #expect(reads == 0, "Twenty-five generated events need no alert-path prompt read without a consumer")
+        #expect(scheduled == 0 && remote.pendingAlertEvaluationCount == 0)
+    }
+
+    @Test @MainActor func firstEligibleAlertObservationIsSilentAndTheNextTransitionAlerts() async throws {
+        let context = try await AlertEvaluationContext()
+        defer { context.cleanup() }
+        try await context.command("notify", text: context.pushToken)
+        try await context.closePhone()
+        context.observe(context.tab)
+        #expect(context.reads[context.tab.id] == 1)
+        #expect(context.remote.pendingPushCount == 0 && context.requests.isEmpty)
+        context.tab.noteInterrupted()
+        try await context.evaluateChange(context.tab)
+        try await alertEvaluationUntil { context.requests.count == 1 }
+        #expect(context.reads[context.tab.id] == 2)
+        #expect(try context.alerts().map(\.kind) == [.stopped])
+    }
+
+    @Test(arguments: [false, true])
+    @MainActor func registeringOneConsumerPreservesTheOtherBaseline(addPush: Bool) async throws {
+        let context = try await AlertEvaluationContext()
+        defer { context.cleanup() }
+        if addPush {
+            try await context.command("activity", tab: context.tab, text: context.activityToken)
+        } else {
+            try await context.command("notify", text: context.pushToken)
+        }
+        context.observe(context.tab)
+        if addPush {
+            let other = try context.addTab()
+            try await context.command("activity", tab: other, text: String(repeating: "ef", count: 40))
+            try await context.command("notify", text: context.pushToken)
+            try await context.command("activity", tab: other, text: "")
+        } else {
+            try await context.command("activity", tab: context.tab, text: context.activityToken)
+        }
+        try await context.closePhone()
+        context.tab.noteInterrupted()
+        try await context.evaluateChange(context.tab)
+        try await alertEvaluationUntil { context.requests.count == 1 }
+        if addPush {
+            #expect(try context.alerts().isEmpty)
+            #expect(context.activityStatuses == ["interrupted"])
+        } else {
+            #expect(try context.alerts().map(\.kind) == [.stopped])
+            #expect(context.activityStatuses.isEmpty)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    @MainActor func refreshingAnUnchangedConsumerKeepsItsBaseline(activity: Bool) async throws {
+        let context = try await AlertEvaluationContext()
+        defer { context.cleanup() }
+        let action = activity ? "activity" : "notify"
+        let token = activity ? context.activityToken : context.pushToken
+        try await context.command(action, tab: activity ? context.tab : nil, text: token)
+        context.observe(context.tab)
+        try await context.command(action, tab: activity ? context.tab : nil, text: token)
+        try await context.closePhone()
+        context.tab.noteInterrupted()
+        try await context.evaluateChange(context.tab)
+        #expect(context.reads[context.tab.id] == 2)
+        if activity {
+            #expect(context.remote.pendingPushCount == 1)
+        } else {
+            try await alertEvaluationUntil { context.requests.count == 1 }
+            #expect(try context.alerts().map(\.kind) == [.stopped])
+        }
+    }
+
+    @Test(arguments: [false, true])
+    @MainActor func lastConsumerRemovalCancelsEvaluationWithoutClearingItsReplacement(activity: Bool) async throws {
+        let context = try await AlertEvaluationContext()
+        defer { context.cleanup() }
+        let action = activity ? "activity" : "notify"
+        let token = activity ? context.activityToken : context.pushToken
+        let target = activity ? context.tab : nil
+        try await context.command(action, tab: target, text: token)
+        context.observe(context.tab)
+        let old = AlertEvaluationGate()
+        let replacement = AlertEvaluationGate()
+        defer {
+            old.release()
+            replacement.release()
+        }
+        context.remote.beforeAlertEvaluation = { await old.hold() }
+        context.remote.noteTab(context.tab, model: context.fixture.model)
+        try await alertEvaluationUntil { old.arrivals == 1 }
+        #expect(context.remote.pendingAlertEvaluationCount == 1)
+        try await context.command(action, tab: target, text: "")
+        #expect(context.remote.pendingAlertEvaluationCount == 0)
+        try await context.command(action, tab: target, text: token)
+        context.remote.beforeAlertEvaluation = { await replacement.hold() }
+        context.remote.noteTab(context.tab, model: context.fixture.model)
+        try await alertEvaluationUntil { replacement.arrivals == 1 }
+        #expect(context.reads[context.tab.id] == 2)
+        old.release()
+        try await alertEvaluationUntil { old.returned == 1 }
+        #expect(context.reads[context.tab.id] == 2)
+        #expect(context.remote.hasPendingAlertEvaluation(for: context.tab.id))
+        replacement.release()
+        try await alertEvaluationUntil { replacement.returned == 1 }
+        #expect(context.reads[context.tab.id] == 3)
+        #expect(context.remote.pendingAlertEvaluationCount == 0)
+    }
+
+    @Test @MainActor func removingAlertsRetainsOnlyTheActiveActivityEvaluation() async throws {
+        let context = try await AlertEvaluationContext()
+        defer { context.cleanup() }
+        let other = try context.addTab()
+        try await context.command("notify", text: context.pushToken)
+        try await context.command("activity", tab: context.tab, text: context.activityToken)
+        context.observe(context.tab)
+        context.observe(other)
+        let gate = AlertEvaluationGate()
+        defer { gate.release() }
+        context.remote.beforeAlertEvaluation = { await gate.hold() }
+        context.remote.noteTab(context.tab, model: context.fixture.model)
+        context.remote.noteTab(other, model: context.fixture.model)
+        try await alertEvaluationUntil { gate.arrivals == 2 }
+        try await context.command("notify", text: "")
+        #expect(context.remote.hasPendingAlertEvaluation(for: context.tab.id))
+        #expect(!context.remote.hasPendingAlertEvaluation(for: other.id))
+        try await context.closePhone()
+        context.tab.noteInterrupted()
+        gate.release()
+        try await alertEvaluationUntil { gate.returned == 2 }
+        #expect(context.reads[context.tab.id] == 2 && context.reads[other.id] == 1)
+        #expect(context.remote.pendingPushCount == 1)
+        #expect(context.remote.pendingAlertEvaluationCount == 0)
+    }
+
+    @Test @MainActor func activityOnlyReadsItsTabAndEndingWorkRetainsTheQueuedEnd() async throws {
+        let context = try await AlertEvaluationContext()
+        defer { context.cleanup() }
+        let other = try context.addTab()
+        try await context.command("activity", tab: context.tab, text: context.activityToken)
+        for _ in 0..<25 { context.observe(other) }
+        #expect(context.reads[other.id] == nil)
+        context.observe(context.tab)
+        try await context.closePhone()
+        context.tab.noteInterrupted()
+        try await context.evaluateChange(context.tab)
+        #expect(context.reads[context.tab.id] == 2 && context.remote.pendingPushCount == 1)
+        let gate = AlertEvaluationGate()
+        defer { gate.release() }
+        context.remote.beforeAlertEvaluation = { await gate.hold() }
+        context.remote.noteTab(context.tab, model: context.fixture.model)
+        try await alertEvaluationUntil { gate.arrivals == 1 }
+        context.fixture.model.closeTab(context.tab.id)
+        context.remote.forgetTab(context.tab.id)
+        #expect(context.remote.pendingAlertEvaluationCount == 0 && context.remote.pendingPushCount == 1)
+        gate.release()
+        try await alertEvaluationUntil { gate.returned == 1 }
+        for _ in 0..<25 { context.observe(context.tab) }
+        #expect(context.reads[context.tab.id] == 2)
+        #expect(context.remote.pendingPushCount == 1)
+    }
+
+    @Test @MainActor func selectedWatchStreamsWithoutAnyAlertConsumer() async throws {
+        let context = try await AlertEvaluationContext(useModelRemote: true)
+        defer { context.cleanup() }
+        try await context.command("watch")
+        let view = try #require(context.tab.controller.view as? LocalProcessTerminalView)
+        view.feed(text: "REA_1217_SELECTED_WATCH")
+        context.tab.controller.onRemoteOutput?()
+        await context.remote.changesSent()
+        let pair = try #require(context.pair)
+        let phone = try #require(context.phone)
+        let event: RemoteReply = try RemoteCrypto.open(
+            try #require(try await phone.receive()["data"]), key: pair.device, direction: "mac")
+        #expect(event.event == true && event.state?.terminal.contains("REA_1217_SELECTED_WATCH") == true)
+        #expect(context.reads.isEmpty && context.remote.pendingAlertEvaluationCount == 0)
     }
 
     @Test @MainActor func cancellingPendingOriginBPreservesOriginAAndAnotherCopy() throws {
@@ -599,6 +778,137 @@ struct RemoteControlTests {
             RemoteReply.self, from: try JSONEncoder().encode(RemoteReply(challenge: "c", sequence: 2)))
         #expect(bare.ticket == nil)
     }
+}
+
+@MainActor
+private final class AlertEvaluationContext {
+    let relay: RelayFixture
+    let fixture: PhoneCommandFixture
+    let tab: TerminalTab
+    let remote: RemoteControl
+    let pushToken = String(repeating: "ab", count: 32)
+    let activityToken = String(repeating: "cd", count: 40)
+    var pair: PairedPhone?
+    var phone: RelayPhone?
+    var reads: [TerminalTab.ID: Int] = [:]
+    private var challenge = ""
+    private var sequence = 2
+
+    init(useModelRemote: Bool = false) async throws {
+        relay = try await RelayFixture(captureAPNs: true)
+        fixture = try PhoneCommandFixture()
+        tab = try #require(fixture.model.newTab(in: fixture.directory("alert-consumers")))
+        remote = useModelRemote ? fixture.model.remoteControl : RemoteControl(store: InMemoryRemotePairingStore())
+        remote.start(urlText: relay.origin, model: fixture.model)
+        let paired = try await relay.pair(remote)
+        pair = paired
+        phone = paired.phone
+        challenge = paired.challenge
+        remote.beforeAlertPromptRead = { [weak self] id in
+            guard let self else { return }
+            self.reads[id, default: 0] += 1
+        }
+    }
+
+    func addTab() throws -> TerminalTab {
+        try #require(fixture.model.newTab(in: fixture.directory("alert-other-\(UUID().uuidString)")))
+    }
+
+    func command(_ action: String, tab: TerminalTab? = nil, text: String? = nil) async throws {
+        let phone = try #require(phone)
+        let pair = try #require(pair)
+        let reply = try await phone.request(
+            RemoteRequest(
+                challenge: challenge, sequence: sequence, action: action, tabID: tab?.id.uuidString,
+                text: text, name: action == "notify" ? "development" : nil), key: pair.device)
+        sequence += 1
+        try #require(reply.ok)
+    }
+
+    func closePhone() async throws {
+        phone?.close()
+        phone = nil
+        try await alertEvaluationUntil { remote.status == "Phone disconnected" }
+    }
+
+    func observe(_ tab: TerminalTab) {
+        remote.noteTab(tab, model: fixture.model, suppressAlerts: true)
+    }
+
+    func evaluateChange(_ tab: TerminalTab) async throws {
+        let gate = AlertEvaluationGate()
+        defer { gate.release() }
+        remote.beforeAlertEvaluation = { await gate.hold() }
+        remote.noteTab(tab, model: fixture.model)
+        try await alertEvaluationUntil { gate.arrivals == 1 }
+        gate.release()
+        try await alertEvaluationUntil { gate.returned == 1 && !remote.hasPendingAlertEvaluation(for: tab.id) }
+        remote.beforeAlertEvaluation = nil
+    }
+
+    var requests: [[String: Any]] {
+        guard let text = try? String(contentsOf: relay.apnsCapture, encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").compactMap {
+            try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
+        }
+    }
+
+    var activityStatuses: [String] {
+        requests.filter { $0["pushType"] as? String == "liveactivity" }.compactMap {
+            let payload = $0["payload"] as? [String: Any]
+            let aps = payload?["aps"] as? [String: Any]
+            let state = aps?["content-state"] as? [String: Any]
+            return state?["status"] as? String
+        }
+    }
+
+    func alerts() throws -> [RemoteAlert] {
+        let pair = try #require(pair)
+        return try requests.filter { $0["pushType"] as? String == "alert" }.map {
+            let payload = $0["payload"] as? [String: Any]
+            let sigil = payload?["sigil"] as? [String: Any]
+            return try RemoteCrypto.open(
+                try #require(sigil?["data"] as? String), key: pair.device, direction: RemoteAlert.direction)
+        }
+    }
+
+    func cleanup() {
+        remote.beforeAlertEvaluation = nil
+        remote.beforeAlertPromptRead = nil
+        phone?.close()
+        pair?.phone.close()
+        remote.stop()
+        fixture.cleanup()
+        relay.stop()
+    }
+}
+
+@MainActor
+private final class AlertEvaluationGate {
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+    private(set) var arrivals = 0
+    private(set) var returned = 0
+
+    func hold() async {
+        arrivals += 1
+        await withCheckedContinuation { waiting.append($0) }
+        returned += 1
+    }
+
+    func release() {
+        let continuations = waiting
+        waiting.removeAll()
+        for continuation in continuations { continuation.resume() }
+    }
+}
+
+@MainActor
+private func alertEvaluationUntil(_ predicate: () -> Bool) async throws {
+    let deadline = ContinuousClock.now + .seconds(5)
+    while !predicate(), ContinuousClock.now < deadline {
+        try await Task.sleep(for: .milliseconds(20))
+    }
+    try #require(predicate())
 }
 
 @MainActor
