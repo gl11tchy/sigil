@@ -124,5 +124,8 @@ public struct RemoteAlertPlanner: Sendable, Equatable {
         last[tabID] = nil
     }
 
+    /// Membership without constructing the inspection-only knownTabs set.
+    public func knows(tabID: String) -> Bool { last[tabID] != nil }
+
     public var knownTabs: Set<String> { Set(last.keys) }
 }

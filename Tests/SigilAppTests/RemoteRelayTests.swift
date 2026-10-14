@@ -483,6 +483,9 @@ struct RemoteAlertDeliveryTests {
             RemoteRequest(challenge: paired.challenge, sequence: 4, action: "activity", tabID: id, text: activityToken),
             key: paired.device)
         #expect(activity.ok)
+        // Observe READY after the consumers become eligible, before the
+        // generated prompt. Disabled output no longer supplies their baseline.
+        remote.noteTab(tab, model: fixture.model, suppressAlerts: true)
         // The phone leaves; from now on the Mac has to push.
         paired.phone.close()
         for _ in 0..<100 {

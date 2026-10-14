@@ -53,6 +53,15 @@ final class RemoteControl {
         /// Suspends an owned push write while the socket reader processes a
         /// generation/token/peer change. Nil in ordinary operation.
         @ObservationIgnored var beforeQueuedPushSend: (@MainActor () async -> Void)?
+        /// Counts alert-path prompt reads from generated tabs in CI only.
+        @ObservationIgnored var beforeAlertPromptRead: ((TerminalTab.ID) -> Void)?
+        /// A deterministic scheduling gate; nil keeps the ordinary 300 ms delay.
+        @ObservationIgnored var beforeAlertEvaluation: (@MainActor () async -> Void)?
+        var pendingAlertEvaluationCount: Int { alertTasks.count }
+
+        func hasPendingAlertEvaluation(for tabID: TerminalTab.ID) -> Bool {
+            alertTasks[tabID.uuidString] != nil
+        }
     #endif
     @ObservationIgnored private var lastSentTabs: [RemoteState.Tab]?
     @ObservationIgnored private var lastSentSelection: String?
@@ -71,7 +80,8 @@ final class RemoteControl {
     }
     @ObservationIgnored private var activities: [String: ActivityRegistration] = [:]
     @ObservationIgnored private var planner = RemoteAlertPlanner()
-    @ObservationIgnored private var alertTasks: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var activityPlanner = RemoteAlertPlanner()
+    @ObservationIgnored private var alertTasks: [String: (id: UUID, task: Task<Void, Never>)] = [:]
     @ObservationIgnored private var deviceKey: String?
     /// The relay's answer to the last push, for tests and the settings page.
     @ObservationIgnored private(set) var lastPushResult: String?
@@ -165,7 +175,8 @@ final class RemoteControl {
         } else {
             push = nil
         }
-        // Tabs keep their alert baseline and activity tokens across relay connections.
+        // Enabled relay reconnects keep baselines and activity tokens. A new
+        // start observes fresh baselines after the disabled interval.
         let network = URLSession(configuration: .ephemeral)
         self.network = network
         isEnabled = true
@@ -319,6 +330,8 @@ final class RemoteControl {
                                 if firstPair, let key = session.deviceKey {
                                     retireRoom = true
                                     self.push = nil
+                                    self.planner = RemoteAlertPlanner()
+                                    self.cancelUnneededAlertTasks()
                                     self.pushGeneration = UUID()
                                     self.registeredPushGeneration = nil
                                     if self.store.save(
@@ -439,8 +452,10 @@ final class RemoteControl {
         activities = activities.filter { !$0.value.ending }
         currentRoom = nil
         authenticatedPeer = nil
-        for pending in alertTasks.values { pending.cancel() }
+        for pending in alertTasks.values { pending.task.cancel() }
         alertTasks.removeAll()
+        planner = RemoteAlertPlanner()
+        activityPlanner = RemoteAlertPlanner()
         task?.cancel()
         task = nil
         stopWatching()
@@ -480,6 +495,7 @@ final class RemoteControl {
     ) async throws -> RemoteReply {
         let token = (command.text ?? "").lowercased()
         let environment = command.name ?? "production"
+        let previous = push
         let registration: Frame
         if token.isEmpty {
             push = nil
@@ -495,6 +511,10 @@ final class RemoteControl {
             push = (token, environment)
             registration = Frame(pushToken: token, pushEnvironment: environment)
         }
+        if previous?.token != push?.token || previous?.environment != push?.environment {
+            planner = RemoteAlertPlanner()
+        }
+        cancelUnneededAlertTasks()
         pushGeneration = UUID()
         registeredPushGeneration = nil
         pushDrain?.cancel()
@@ -540,6 +560,7 @@ final class RemoteControl {
         }
         if token.isEmpty {
             activities[tabID] = nil
+            activityPlanner.forget(tabID: tabID)
             pendingPushes.removeActivity(tabID)
         } else {
             guard token.utf8.count >= 64, token.utf8.count <= 200, RemoteCrypto.isLowerHex(token) else {
@@ -554,9 +575,13 @@ final class RemoteControl {
                     error: "Too many activities are waiting to finish. Try again after they catch up.")
             }
             pendingPushes.removeActivity(tabID)
+            if activities[tabID]?.token != token || activities[tabID]?.ending == true {
+                activityPlanner.forget(tabID: tabID)
+            }
             activities[tabID] = ActivityRegistration(
                 token: token, generation: UUID(), environment: push?.environment)
         }
+        cancelUnneededAlertTasks()
         var reply = RemoteReply(challenge: command.challenge, sequence: command.sequence)
         reply.state = RemoteCommands.snapshot(model)
         return RemoteCommands.fitting(reply)
@@ -565,36 +590,68 @@ final class RemoteControl {
     /// A tab's status or screen changed. Reads the tab shortly after, so a burst
     /// of output is one look, and sends what the phone would otherwise miss.
     func noteTab(_ tab: TerminalTab, model: AppModel, suppressAlerts: Bool = false) {
+        guard isEnabled else { return }
+        let id = tab.id.uuidString
+        guard needsEvaluation(tabID: id) else { return }
         if suppressAlerts {
             evaluate(tab, model: model, allowAlerts: false)
             return
         }
-        let id = tab.id.uuidString
         let schedulingGeneration = generation
         // The first look sets the baseline at once, so the next change is a transition.
-        if !planner.knownTabs.contains(id) { evaluate(tab, model: model) }
+        if (push != nil && !planner.knows(tabID: id))
+            || (activities[id]?.ending == false && !activityPlanner.knows(tabID: id))
+        {
+            evaluate(tab, model: model)
+        }
         guard alertTasks[id] == nil else { return }
-        alertTasks[id] = Task { @MainActor [weak self, weak tab, weak model] in
-            try? await Task.sleep(for: .milliseconds(300))
-            guard let self else { return }
+        let evaluationID = UUID()
+        let evaluationTask = Task { @MainActor [weak self, weak tab, weak model] in
+            #if DEBUG
+                if let beforeAlertEvaluation = self?.beforeAlertEvaluation {
+                    await beforeAlertEvaluation()
+                } else {
+                    try? await Task.sleep(for: .milliseconds(300))
+                }
+            #else
+                try? await Task.sleep(for: .milliseconds(300))
+            #endif
+            guard let self, self.alertTasks[id]?.id == evaluationID else { return }
             self.alertTasks[id] = nil
             guard !Task.isCancelled, let tab, let model else { return }
             guard self.generation == schedulingGeneration else { return }
             self.evaluate(tab, model: model)
         }
+        alertTasks[id] = (id: evaluationID, task: evaluationTask)
+    }
+
+    private func needsEvaluation(tabID: String) -> Bool {
+        isEnabled && (push != nil || activities[tabID]?.ending == false)
+    }
+
+    private func cancelUnneededAlertTasks() {
+        for (id, pending) in alertTasks where !needsEvaluation(tabID: id) {
+            pending.task.cancel()
+            alertTasks[id] = nil
+        }
     }
 
     private func evaluate(_ tab: TerminalTab, model: AppModel, allowAlerts: Bool = true) {
+        guard isEnabled else { return }
         let id = tab.id.uuidString
+        guard needsEvaluation(tabID: id) else { return }
+        #if DEBUG
+            beforeAlertPromptRead?(tab.id)
+        #endif
         let prompt = RemoteCommands.prompt(for: tab)
         let snapshot = RemoteAlertPlanner.Snapshot(
             status: tab.activity.statusName, since: Int((tab.workingSince ?? Date()).timeIntervalSince1970),
             question: prompt?.question, title: RemoteCommands.bounded(model.title(for: tab), bytes: 96),
             interactionID: prompt?.id, verified: prompt?.verified == true)
-        let plan = planner.plan(tabID: id, snapshot)
+        let alert = push != nil ? planner.plan(tabID: id, snapshot).alert : nil
         // A phone on the socket sees the change itself; alerts are for a phone that is away.
         guard isEnabled else { return }
-        if allowAlerts, authenticatedPeer == nil, var alert = plan.alert, let push, let deviceKey {
+        if allowAlerts, authenticatedPeer == nil, var alert, let push, let deviceKey {
             alert.issuedAt = Int(pushClock().timeIntervalSince1970)
             if let sealed = try? RemoteCrypto.seal(alert, key: deviceKey, direction: RemoteAlert.direction) {
                 let frame = Frame(push: .init(data: sealed, thread: id))
@@ -603,14 +660,20 @@ final class RemoteControl {
                     environment: push.environment, issuedAt: Date(timeIntervalSince1970: Double(alert.issuedAt)))
             }
         }
-        if let state = plan.activity, let activity = activities[id], !activity.ending,
-            authenticatedPeer == nil || plan.ends
-        {
-            let frame = Frame(push: .init(activity: activity.token, state: state, event: plan.ends ? "end" : "update"))
-            if plan.ends { activities[id]?.ending = true }
-            enqueuePush(
-                frame, kind: plan.ends ? .end : .update, tabID: id,
-                tokenGeneration: activity.generation, environment: activity.environment, issuedAt: pushClock())
+        if let activity = activities[id], !activity.ending {
+            let plan = activityPlanner.plan(tabID: id, snapshot)
+            if let state = plan.activity, authenticatedPeer == nil || plan.ends {
+                let frame = Frame(
+                    push: .init(activity: activity.token, state: state, event: plan.ends ? "end" : "update"))
+                if plan.ends {
+                    activities[id]?.ending = true
+                    activityPlanner.forget(tabID: id)
+                    cancelUnneededAlertTasks()
+                }
+                enqueuePush(
+                    frame, kind: plan.ends ? .end : .update, tabID: id,
+                    tokenGeneration: activity.generation, environment: activity.environment, issuedAt: pushClock())
+            }
         }
     }
 
@@ -628,7 +691,8 @@ final class RemoteControl {
                 environment: activity.environment, issuedAt: pushClock())
         }
         planner.forget(tabID: key)
-        alertTasks[key]?.cancel()
+        activityPlanner.forget(tabID: key)
+        alertTasks[key]?.task.cancel()
         alertTasks[key] = nil
     }
 

@@ -21,6 +21,7 @@ struct RemotePushReadinessTests {
                 challenge: challenge, sequence: 1, action: "activity", tabID: context.tab.id.uuidString,
                 text: String(repeating: "cd", count: 40)), key: context.device)
         #expect(registered.ok)
+        context.remote.noteTab(context.tab, model: context.fixture.model, suppressAlerts: true)
         phone.close()
         #expect(await readinessEventually { context.remote.status == "Phone disconnected" })
         let gate = ReadyPushGate()
@@ -126,6 +127,7 @@ struct RemotePushReadinessTests {
                 challenge: firstChallenge, sequence: 2, action: "activity", tabID: context.tab.id.uuidString,
                 text: String(repeating: "cd", count: 40)), key: context.device)
         #expect(activity.ok)
+        context.remote.noteTab(context.tab, model: context.fixture.model, suppressAlerts: true)
         first.close()
         #expect(await readinessEventually { context.remote.status == "Phone disconnected" })
         let gate = ReadyPushGate()
@@ -174,6 +176,7 @@ struct RemotePushReadinessTests {
             .init(
                 challenge: challenge, sequence: 2, action: "activity", tabID: context.tab.id.uuidString,
                 text: String(repeating: "cd", count: 40)), key: context.device)
+        context.remote.noteTab(context.tab, model: context.fixture.model, suppressAlerts: true)
         phone.close()
         #expect(await readinessEventually { context.remote.status == "Phone disconnected" })
         let gate = ReadyPushGate()
@@ -234,8 +237,8 @@ struct RemotePushReadinessTests {
                 pushToken: String(repeating: "ab", count: 32), pushEnvironment: "development"))
         let remote = RemoteControl(store: store)
         defer { remote.stop() }
-        remote.noteTab(tab, model: fixture.model)
         remote.resumeIfPaired(model: fixture.model)
+        remote.noteTab(tab, model: fixture.model)
         #expect(await readinessEventually { relay.hasHeldRoute })
         tab.noteInterrupted()
         remote.noteTab(tab, model: fixture.model)
@@ -353,8 +356,8 @@ private final class ReadyPushContext {
             RemotePairing(
                 origin: relay.origin, deviceKey: device, ticket: ticket,
                 pushToken: String(repeating: "ab", count: 32), pushEnvironment: "development"))
-        remote.noteTab(tab, model: fixture.model)
         remote.resumeIfPaired(model: fixture.model)
+        remote.noteTab(tab, model: fixture.model)
         #expect(await readinessEventually { relay.hasHeldRoute })
     }
     func interrupt() async throws {
