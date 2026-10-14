@@ -1411,6 +1411,32 @@ test('REA-1206 Cancel during creation does not cancel dispatch or reopen the she
     await expect(page.getByRole('button', { name: 'New session', exact: true })).toBeEnabled();
     await expect(page.locator('#project-dialog')).not.toBeVisible();
     expect(mac.actions.filter(request => request.action === 'createProject')).toHaveLength(1);
+    expect(mac.actions.filter(request => request.action === 'projects')).toHaveLength(1);
     expect(mac.actions.filter(request => request.action === 'new')).toHaveLength(0);
   } finally { release(); mac.close(); }
+});
+
+test('REA-1206 a pre-existing second tab cannot repeat a start after taking the connection', async ({ page, baseURL }) => {
+  const frozen = new Date('2026-10-14T00:00:00Z'), paused = new Date('2026-10-14T00:01:00Z');
+  await page.clock.install({ time: frozen }); await page.clock.pauseAt(paused);
+  const mac = await pair(page, baseURL, undefined, { state: webNewState(), sessionOptions: { ...webNewOptions, model: '' }, projects: webNewProjects,
+    onRequest(request) { if (request.action === 'new') return false; } });
+  const second = await page.context().newPage();
+  try {
+    // Playwright's clock is shared by pages in this isolated browser context.
+    await second.goto(baseURL); await expect(second.locator('#status')).toHaveText('Connected');
+    await expect(page.getByRole('button', { name: 'New session', exact: true })).toBeDisabled();
+    await page.clock.runFor(500); await expect(page.locator('#status')).toHaveText('Connected');
+    await expect(second.getByRole('button', { name: 'New session', exact: true })).toBeDisabled();
+    await page.getByRole('button', { name: 'New session', exact: true }).click();
+    await expect(page.getByLabel('Model', { exact: true })).toHaveValue('');
+    await page.getByRole('button', { name: 'Start session', exact: true }).click();
+    await expect.poll(() => mac.actions.filter(request => request.action === 'new').length).toBe(1);
+    await second.clock.runFor(500); await expect(second.locator('#status')).toHaveText('Connected');
+    await second.getByRole('button', { name: 'New session', exact: true }).click();
+    await expect(second.locator('#new-outcome')).toContainText('session start result is unknown');
+    await expect(second.getByRole('button', { name: 'Start session', exact: true })).toBeDisabled();
+    expect(mac.actions.filter(request => request.action === 'new')).toHaveLength(1);
+    expect(mac.actions.find(request => request.action === 'new').model).toBe('');
+  } finally { await second.close(); mac.close(); }
 });

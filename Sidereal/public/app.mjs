@@ -67,10 +67,33 @@ async function storage(mode, value) {
     return await new Promise((resolve, reject) => {
       const transaction = db.transaction('pairing', mode === 'get' ? 'readonly' : 'readwrite');
       const store = transaction.objectStore('pairing');
-      const request = mode === 'get' ? store.get('mac') : mode === 'delete' ? store.delete('mac') : store.put(value, 'mac');
-      transaction.oncomplete = () => resolve(request.result);
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error);
+      let result, failure;
+      transaction.oncomplete = () => resolve(result);
+      transaction.onerror = transaction.onabort = () => reject(failure || transaction.error);
+      if (mode === 'delete') { store.delete('mac'); return; }
+      const request = store.get('mac');
+      request.onsuccess = () => {
+        try {
+          const saved = request.result;
+          if (mode === 'get') { result = saved; return; }
+          if (mode === 'put') {
+            // A stale tab saving its ticket must not erase another context's pending start.
+            result = saved?.room === value.room ? { ...value, pendingNew: saved.pendingNew } : value;
+          } else {
+            if (!saved || saved.room !== value.room) throw new Error('The saved pairing changed. Reload this page before starting.');
+            if (mode === 'claim') {
+              if (saved.pendingNew != null) { result = { claimed: false, pairing: saved }; return; }
+              const pairing = { ...saved, pendingNew: value.pendingNew };
+              store.put(pairing, 'mac'); result = { claimed: true, pairing }; return;
+            }
+            if (mode !== 'settle') throw new Error('Invalid storage operation.');
+            result = { ...saved };
+            if (!sameNewAttempt(saved.pendingNew, value.pendingNew)) return;
+            delete result.pendingNew;
+          }
+          store.put(result, 'mac');
+        } catch (error) { failure = error; transaction.abort(); }
+      };
     });
   } finally { db.close(); }
 }
@@ -523,10 +546,25 @@ function allowsWorktree() { return canUseSessionOps && newOptions && projectTarg
 function defaultWorktree() { return projectTarget?.worktreeDefault ?? newOptions?.startsInWorktree ?? true; }
 function pendingNew() {
   const attempt = credential?.pendingNew;
-  if (!attempt) return null;
+  if (attempt == null) return null;
   // Invalid stored markers still block creation; never interpret corruption as a resolved result.
   return attempt && typeof attempt === 'object' && ['new', 'createProject'].includes(attempt.action)
     && (attempt.folder === undefined || validPath(attempt.folder)) ? attempt : { action: 'unknown' };
+}
+function sameNewAttempt(left, right) {
+  if (!left || !right) return false;
+  if (left.id || right.id) return typeof left.id === 'string' && left.id === right.id;
+  // Legacy markers predate claim IDs. No new claim can replace one until it is settled.
+  return left.action === right.action && left.folder === right.folder;
+}
+async function refreshNewPending() {
+  const owner = credential;
+  const saved = await storage('get');
+  if (owner !== credential || newFlight) return;
+  if (!saved || saved.room !== owner.room) throw new Error('The saved pairing changed. Reload this page before starting.');
+  if (saved.pendingNew != null) owner.pendingNew = saved.pendingNew;
+  else delete owner.pendingNew;
+  updateNewControls();
 }
 function showNewOutcome() {
   const attempt = pendingNew();
@@ -579,36 +617,41 @@ function chooseProject(project) {
   // Older Macs keep the existing one-tap project flow and apply their own defaults.
   if (!newOptions) void perform(() => startProject());
 }
-async function settleNew(attempt) {
-  const owner = credential;
-  if (owner?.pendingNew !== attempt) return;
-  delete owner.pendingNew;
-  try { await storage('put', owner); }
-  catch {
-    owner.pendingNew = attempt;
+async function settleNew(attempt, owner = credential) {
+  if (!sameNewAttempt(owner?.pendingNew, attempt)) return;
+  try {
+    const saved = await storage('settle', { room: owner.room, pendingNew: attempt });
+    if (saved.pendingNew != null) owner.pendingNew = saved.pendingNew;
+    else delete owner.pendingNew;
+  } catch {
     throw new Error('Could not save the result. New remains blocked; inspect Sigil on your Mac.');
   }
 }
 async function newCommand(action, text, extra = {}) {
   if (pendingNew()) throw new Error('A previous result is still unknown. Inspect Sigil on your Mac before starting again.');
-  const attempt = { action, ...(text ? { folder: action === 'createProject' ? `${text.replace(/\/$/, '')}/${extra.name}` : text } : {}) };
+  const attempt = { id: randomKey(), action, ...(text ? { folder: action === 'createProject' ? `${text.replace(/\/$/, '')}/${extra.name}` : text } : {}) };
   const owner = credential;
   const flight = newFlight = { attempt, dispatched: false };
   owner.pendingNew = attempt;
   updateNewControls();
   try {
     // A reload must not turn a lost reply into permission to create a duplicate.
-    try { await storage('put', owner); } catch { throw new Error('Could not save the pending request. Nothing was sent.'); }
+    let claim;
+    try { claim = await storage('claim', { room: owner.room, pendingNew: attempt }); }
+    catch { delete owner.pendingNew; throw new Error('Could not save the pending request. Nothing was sent.'); }
+    owner.pendingNew = claim.pairing.pendingNew;
+    if (!claim.claimed) throw new Error('Another page has a pending result. New stays blocked; inspect Sigil on your Mac.');
+    flight.claimed = true;
     if (credential !== owner) throw new Error('The paired Mac changed. Nothing was sent.');
     const reply = await request(action, text, undefined, false, extra);
     if (action === 'createProject' && projectRecord(reply.project)?.folder !== attempt.folder) {
       throw new Error('The Mac returned an unexpected project. Check projects before trying again.');
     }
-    await settleNew(attempt);
+    await settleNew(attempt, owner);
     return reply;
   } catch (error) {
     // A verified failure or a request never sent is conclusive. Connection failures are not.
-    if (!flight.dispatched || error.verifiedReply) await settleNew(attempt);
+    if (flight.claimed && (!flight.dispatched || error.verifiedReply)) await settleNew(attempt, owner);
     throw error;
   } finally {
     if (newFlight === flight) newFlight = null;
@@ -696,6 +739,8 @@ function renderProviders(options) {
   }
   const models = [...new Set((Array.isArray(options?.models) ? options.models : []).slice(0, 100)
     .filter(model => typeof model === 'string' && new TextEncoder().encode(model).length <= 64 && !model.startsWith('-') && !/[\s\u0000-\u001F\u007F]/.test(model)))];
+  // The Mac advertises CLI default as its selected model, outside the named-model list.
+  if (options?.model === '' && !models.includes('')) models.unshift('');
   const efforts = (Array.isArray(options?.efforts) ? options.efforts : []).slice(0, 20)
     .filter(effort => effort && typeof effort.id === 'string' && /^[a-zA-Z0-9_-]{0,32}$/.test(effort.id)
       && typeof effort.name === 'string' && effort.name.length <= 96 && !/[\u0000-\u001F\u007F]/.test(effort.name));
@@ -1622,6 +1667,7 @@ $('compose').onsubmit = event => { event.preventDefault(); void perform(() => se
 $('paste').onclick = () => void perform(() => sendText(false));
 $('tabs').onchange = () => void perform(() => changeSession('select', undefined, $('tabs').value));
 $('new').onclick = () => void perform(async () => {
+  await refreshNewPending();
   projectTarget = null; worktreeChoice = null;
   const sheet = ++newSheetEpoch;
   $('new-project-form').hidden = true; $('new-choices').hidden = false;
@@ -1664,6 +1710,7 @@ $('new-project-form').onsubmit = event => {
   const sheet = newSheetEpoch;
   void perform(async () => {
     const reply = await newCommand('createProject', location.folder, { name });
+    if (sheet !== newSheetEpoch || !$('project-dialog').open) return;
     const project = await findProject(reply.project.folder);
     if (sheet !== newSheetEpoch || !$('project-dialog').open) return;
     // Use authoritative repository metadata before offering a worktree for the new folder.

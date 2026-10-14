@@ -1124,3 +1124,12 @@ dispatch, waits for actual synthetic receipt before testing lost replies, and
 reuses the CLI picker with 44px geometry assertions. Exact-head CI after that
 repair remains the acceptance gate; no native success was claimed from the
 browser-failed run.
+
+
+Automatic-review regressions on REA-1206 were reproduced against `543a6b3` (four
+new cases fail), then repaired within the existing frontend protocol. The menu
+preserves the advertised empty model, initial failed persistence leaves no false
+unknown outcome, an atomic shared-origin IndexedDB claim prevents two contexts
+from dispatching, and dismissed project success skips metadata reads. Settlement
+uses the exact claim ID and stale ticket writes preserve it. Focused157 tests
+pass; two-page encrypted browser coverage and final screenshots await fresh CI.

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
+import { pairingDatabase, pairingIndexedDB } from './support/pairing-idb.mjs';
 import { createReadableOutput, commonPrefixLength } from '../public/output.mjs';
 import { pairingFromText } from '../public/pairing.mjs';
 
@@ -18,10 +19,9 @@ async function skipOptions(socket) {
 }
 
 // Run the real handlers; only browser services and encryption are replaced.
-async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { device: true } }, faults = {} } = {}) {
+async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { device: true } }, faults = {}, database = pairingDatabase(saved) } = {}) {
   const elements = new Map(), events = new Map(), timers = new Map(), sockets = [];
   let nextTimer = 0, reloads = 0, randomCounter = 0;
-  let stored = saved;
   const sealed = [];
   const element = id => {
     if (!elements.has(id)) elements.set(id, {
@@ -77,32 +77,7 @@ async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { devic
     }
     close() { this.readyState = 3; this.onclose?.(); }
   }
-  const indexedDB = {
-    open() {
-      const request = {};
-      queueMicrotask(() => {
-        request.result = {
-          close() {},
-          transaction() {
-            const transaction = {
-              objectStore: () => ({
-                get: () => ({ result: structuredClone(stored) }),
-                put: value => { if (faults.storage) throw new Error('Storage unavailable'); stored = structuredClone(value); return {}; },
-                delete: () => { stored = undefined; return {}; },
-              }),
-            };
-            queueMicrotask(() => {
-              if (faults.holdCompletion) faults.pending.push(transaction);
-              else transaction.oncomplete?.();
-            });
-            return transaction;
-          },
-        };
-        request.onsuccess();
-      });
-      return request;
-    },
-  };
+  const indexedDB = pairingIndexedDB(database, faults);
   const app = {
     createReadableOutput, commonPrefixLength, pairingFromText, document, location, history: { replaceState() {} }, indexedDB,
     window: { addEventListener: (name, callback) => events.set(name, callback) },
@@ -138,7 +113,7 @@ async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { devic
     element('compose').onsubmit({ preventDefault() { prevented = true; } });
     assert.equal(prevented, true);
   }
-  return { app, element, events, location, sockets, authorize, fireTimer, submit, sealed, timers, stored: () => structuredClone(stored), reloads: () => reloads };
+  return { app, element, events, location, sockets, authorize, fireTimer, submit, sealed, timers, stored: () => structuredClone(database.value), reloads: () => reloads };
 }
 
 test('attached file names keep their extension and non-Latin letters', async () => {
@@ -1608,4 +1583,56 @@ test('REA-1206 preparation is not described as a sent request while persistence 
   assert.match(page.element('new-outcome').textContent, /Waiting for the Mac/);
   assert.equal(socket.sent.filter(request => request.action === 'new').length, 1);
   await newReply(socket);
+});
+
+test('REA-1206 preserves the Mac-advertised CLI-default model outside the named list', async () => {
+  const page = await browser(), socket = await page.authorize();
+  await openNewSheet(page, socket, { options: { ...newSessionOptions, model: '' } });
+  assert.equal(page.element('new-model').value, '');
+  assert.equal(page.element('new-model').children[0].textContent, 'CLI default');
+  page.element('project-start').onclick(); await settle();
+  assert.equal(socket.sent.at(-1).model, ''); await newReply(socket);
+});
+
+test('REA-1206 initial persistence failure leaves no unknown marker and can retry after storage recovers', async () => {
+  const faults = {}, page = await browser({ faults }), socket = await page.authorize();
+  await openNewSheet(page, socket); faults.storage = true;
+  page.element('project-start').onclick(); await settle();
+  assert.equal(page.app.pendingNew(), null);
+  assert.match(page.element('project-error').textContent, /Nothing was sent/);
+  assert.equal(page.stored().pendingNew, undefined);
+  assert.equal(socket.sent.filter(item => item.action === 'new').length, 0);
+  faults.storage = false; page.element('project-start').onclick(); await settle();
+  assert.equal(socket.sent.filter(item => item.action === 'new').length, 1); await newReply(socket);
+});
+
+test('REA-1206 two pre-existing contexts atomically claim one start and stale ticket writes preserve it', async () => {
+  const database = pairingDatabase({ room: 'a'.repeat(32), key: { device: true } });
+  const first = await browser({ database }), second = await browser({ database });
+  const a = await first.authorize(), b = await second.authorize();
+  await openNewSheet(first, a); await openNewSheet(second, b);
+  second.app.randomKey = () => '9'.repeat(64);
+  first.element('project-start').onclick(); second.element('project-start').onclick(); await settle();
+  assert.equal(a.sent.filter(item => item.action === 'new').length + b.sent.filter(item => item.action === 'new').length, 1);
+  const pending = structuredClone(database.value.pendingNew);
+  await second.app.storage('put', { room: 'a'.repeat(32), key: { device: true }, ticket: 'f'.repeat(64) });
+  assert.deepEqual(database.value.pendingNew, pending);
+  await second.app.storage('settle', { room: 'a'.repeat(32), pendingNew: { ...pending, id: '0'.repeat(64) } });
+  assert.deepEqual(database.value.pendingNew, pending);
+  a.close(); await settle();
+  second.element('project-start').onclick(); await settle();
+  assert.equal(b.sent.filter(item => item.action === 'new').length, 0);
+  const restored = await browser({ database }), c = await restored.authorize();
+  await openNewSheet(restored, c);
+  assert.equal(restored.element('project-start').disabled, true);
+});
+
+test('REA-1206 a late project success skips metadata refresh when its sheet is already closed', async () => {
+  const page = await browser(), socket = await page.authorize();
+  await openNewSheet(page, socket); creationForm(page); submitProject(page); await settle();
+  const before = socket.sent.filter(item => item.action === 'projects').length;
+  page.element('project-dialog').open = false;
+  await newReply(socket, { project: { name: 'fresh', folder: '/tmp/code/fresh' } });
+  assert.equal(socket.sent.filter(item => item.action === 'projects').length, before);
+  assert.equal(page.stored().pendingNew, undefined);
 });
