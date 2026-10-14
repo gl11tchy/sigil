@@ -17,7 +17,9 @@ struct ProviderLifecycleJournalTests {
         try fixture.append(Data("not JSON\n".utf8))
         try fixture.append(try grok(type: "agent_message_chunk", turn: "wrong", nativeID: UUID().uuidString))
         #expect(reader.poll().isEmpty && reader.validatedWorkRevision == nil)
-        let start = try provider == .codex ? codex(type: "task_started", turn: "one")
+        let start =
+            try provider == .codex
+            ? codex(type: "task_started", turn: "one")
             : grok(type: "agent_message_chunk", turn: "one")
         try fixture.append(start)
         #expect(reader.poll() == [.working])
@@ -25,11 +27,15 @@ struct ProviderLifecycleJournalTests {
         #expect(reader.poll().isEmpty && reader.validatedWorkRevision == revision)
         try fixture.append(start)
         #expect(reader.poll().isEmpty && reader.validatedWorkRevision == revision)
-        let wrongCompletion = try provider == .codex ? codex(type: "task_complete", turn: "other")
+        let wrongCompletion =
+            try provider == .codex
+            ? codex(type: "task_complete", turn: "other")
             : grok(type: "turn_completed", turn: "other")
         try fixture.append(wrongCompletion)
         #expect(reader.poll().isEmpty && reader.validatedWorkRevision == revision)
-        let complete = try provider == .codex ? codex(type: "task_complete", turn: "one")
+        let complete =
+            try provider == .codex
+            ? codex(type: "task_complete", turn: "one")
             : grok(type: "turn_completed", turn: "one")
         try fixture.append(complete)
         #expect(reader.poll() == [.idle] && reader.validatedWorkRevision == nil)
@@ -40,7 +46,9 @@ struct ProviderLifecycleJournalTests {
         let fixture = try JournalFixture(initial: provider == .codex ? metadata() : Data())
         defer { fixture.cleanup() }
         var reader = ProviderLifecycleJournal(url: fixture.file, provider: provider, sessionID: session, notBefore: now)
-        let start = try provider == .codex ? codex(type: "task_started", turn: "one")
+        let start =
+            try provider == .codex
+            ? codex(type: "task_started", turn: "one")
             : grok(type: "agent_message_chunk", turn: "one")
         try fixture.append(start)
         #expect(reader.poll() == [.working] && reader.validatedWorkRevision != nil)

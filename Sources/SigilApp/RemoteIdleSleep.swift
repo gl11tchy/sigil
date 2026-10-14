@@ -67,7 +67,8 @@ final class RemoteIdleSleep {
         }
         // Repeated observations, quiet polls and relay reconnects do not renew
         // this policy window. Only a new validated progress revision does.
-        let deadline = alertsArmed
+        let deadline =
+            alertsArmed
             ? workingTabs.compactMap { progress[$0.id]?.observedAt }.map { $0 + Self.inactivityLimit }
                 .filter { $0 > now }.max() : nil
         reviewAt = phoneConnected ? nil : deadline

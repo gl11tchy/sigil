@@ -259,14 +259,22 @@ struct RemoteIdleSleepTests {
         watch.start(fixture.model)
         #expect(record.createdIDs == [1] && !remote.alertsArmed)
         let added = IdleSleepObservationCount()
-        withObservationTracking { _ = remote.alertsArmed } onChange: { added.increment() }
+        withObservationTracking {
+            _ = remote.alertsArmed
+        } onChange: {
+            added.increment()
+        }
         let reply = try await paired.phone.request(
             .init(
                 challenge: paired.challenge, sequence: 2, action: "notify",
                 text: String(repeating: "ab", count: 32), name: "development"), key: paired.device)
         #expect(reply.ok && remote.alertsArmed && added.count == 1)
         let removed = IdleSleepObservationCount()
-        withObservationTracking { _ = remote.alertsArmed } onChange: { removed.increment() }
+        withObservationTracking {
+            _ = remote.alertsArmed
+        } onChange: {
+            removed.increment()
+        }
         let cleared = try await paired.phone.request(
             .init(challenge: paired.challenge, sequence: 3, action: "notify", text: ""), key: paired.device)
         #expect(cleared.ok && !remote.alertsArmed && removed.count == 1)
@@ -417,7 +425,6 @@ private final class IdleSleepRecord {
     }
 }
 
-
 @MainActor
 private final class IdleSleepFixture {
     let root: URL
@@ -505,7 +512,6 @@ private func idleSleepUntil(_ condition: () -> Bool) async throws {
     }
     try #require(condition())
 }
-
 
 @MainActor
 private final class IdleSleepClock {
