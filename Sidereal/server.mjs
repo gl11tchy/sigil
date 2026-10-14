@@ -8,6 +8,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { importKey, open } from './public/crypto.mjs';
 import { loadRevision } from './revision.mjs';
 import { createAPNs } from './apns.mjs';
+import { isIP } from 'node:net';
 
 const revision = await loadRevision(undefined, { required: process.env.SIGIL_REQUIRE_REVISION === '1' });
 
@@ -68,7 +69,102 @@ function publicFiles() {
   };
 }
 
+// Only the transport peer is established here. Forwarding headers and a boolean
+// proxy flag cannot authenticate a source. IPv6 privacy addresses share a /64;
+// IPv4-mapped IPv6 uses the same budget as its ordinary IPv4 spelling.
+export function clientAddress(request) {
+  const value = request.socket?.remoteAddress;
+  if (typeof value !== 'string' || value.length > 128) return null;
+  const version = isIP(value);
+  if (version === 4) return `4:${value}`;
+  if (version !== 6) return null;
+  const halves = value.toLowerCase().split('%')[0].split('::');
+  const words = part => !part ? [] : part.split(':').flatMap(word => {
+    if (!word.includes('.')) return [Number.parseInt(word, 16)];
+    const bytes = word.split('.').map(Number);
+    return [bytes[0] * 256 + bytes[1], bytes[2] * 256 + bytes[3]];
+  });
+  const left = words(halves[0]), right = words(halves[1]);
+  const address = halves.length === 1 ? left : [...left, ...Array(8 - left.length - right.length).fill(0), ...right];
+  if (address.slice(0, 5).every(word => word === 0) && address[5] === 0xffff) {
+    return `4:${address[6] >> 8}.${address[6] & 255}.${address[7] >> 8}.${address[7] & 255}`;
+  }
+  return `6:${address.slice(0, 4).map(word => word.toString(16).padStart(4, '0')).join(':')}`;
+}
+
+export class SourceLimits {
+  #sources = new Map();
+  #now;
+  #maxSources;
+
+  constructor({ now = Date.now, maxSources = 1024 } = {}) {
+    if (!Number.isInteger(maxSources) || maxSources < 1 || maxSources > 1024) throw new RangeError('Invalid source capacity.');
+    this.#now = now;
+    this.#maxSources = maxSources;
+  }
+
+  #entry(source) {
+    if (!source) return null;
+    let entry = this.#sources.get(source);
+    const time = this.#now();
+    if (!entry) {
+      if (this.#sources.size >= this.#maxSources) this.sweep({ reclaim: true });
+      if (this.#sources.size >= this.#maxSources) return null;
+      entry = { tokens: 5, refill: time, touched: time, rooms: 0, sockets: 0 };
+      this.#sources.set(source, entry);
+    }
+    entry.tokens = Math.min(5, entry.tokens + Math.max(0, time - entry.refill) / 12000);
+    entry.refill = Math.max(entry.refill, time);
+    entry.touched = Math.max(entry.touched, time);
+    return entry;
+  }
+
+  allocate(source) {
+    const entry = this.#entry(source);
+    // Room slots include five-minute reconnect grace. Leave room for a NAT's
+    // recoveries while one source can own at most a fifth of global capacity.
+    if (!entry || entry.rooms >= 20 || entry.tokens < 1) return false;
+    entry.tokens -= 1;
+    entry.rooms += 1;
+    return true;
+  }
+
+  releaseRoom(source) {
+    const entry = this.#sources.get(source);
+    if (!entry || entry.rooms === 0) return;
+    entry.rooms -= 1;
+    entry.touched = Math.max(entry.touched, this.#now());
+  }
+
+  reserveConnection(source) {
+    const entry = this.#entry(source);
+    if (!entry || entry.sockets >= 20) return null;
+    entry.sockets += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      entry.sockets -= 1;
+      entry.touched = Math.max(entry.touched, this.#now());
+    };
+  }
+
+  sweep({ reclaim = false } = {}) {
+    const time = this.#now();
+    for (const [source, entry] of this.#sources) {
+      // An idle minute also fully replenishes the five-token bucket. Never
+      // evict occupied entries or let eviction grant an early fresh budget.
+      // Under pressure, closed connection-only entries need no grace period;
+      // fully replenished allocation entries are equally safe to reclaim.
+      const replenished = entry.tokens + Math.max(0, time - entry.refill) / 12000 >= 5;
+      if (!entry.rooms && !entry.sockets &&
+          (time - entry.touched >= 60000 || (reclaim && replenished))) this.#sources.delete(source);
+    }
+  }
+}
+
 export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns = null } = {}) {
+  if (!Number.isInteger(maxRooms) || maxRooms < 1 || maxRooms > 100) throw new RangeError('Room capacity must be between 1 and 100.');
   const origin = new URL(publicOrigin);
   if (origin.origin !== publicOrigin || !(origin.protocol === 'https:' ||
       (origin.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(origin.hostname)))) {
@@ -76,7 +172,7 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
   }
   const rooms = new Map();
   const tickets = new Map();
-  let creationWindow = now(), creations = 0;
+  const limits = new SourceLimits({ now });
   const wss = new WebSocketServer({ noServer: true, maxPayload: 110000, perMessageDeflate: false });
   const files = publicFiles();
   // No request, header, or frame logging. Proxies must log paths only, never queries.
@@ -97,10 +193,12 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
       if (req.headers.origin || Number(req.headers['content-length'] || 0) > 0 || req.headers['transfer-encoding']) {
         res.writeHead(403).end(); return;
       }
-      if (now() - creationWindow >= 60000) { creationWindow = now(); creations = 0; }
-      if (rooms.size >= maxRooms || ++creations > 20) { res.writeHead(429).end(); return; }
+      const source = clientAddress(req);
+      if (!source) { res.writeHead(403).end(); return; }
+      expireRooms();
+      if (rooms.size >= maxRooms || !limits.allocate(source)) { res.writeHead(429).end(); return; }
       const room = randomBytes(16).toString('hex'), hostToken = token();
-      rooms.set(room, { hostToken, created: now(), disconnectedAt: now(), host: null, phone: null });
+      rooms.set(room, { hostToken, source, created: now(), disconnectedAt: now(), hosted: false, host: null, phone: null });
       res.writeHead(201, { 'Content-Type': 'application/json' }).end(JSON.stringify({ room, hostToken }));
       return;
     }
@@ -264,6 +362,7 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
     const room = rooms.get(id);
     if (!room) return;
     rooms.delete(id);
+    limits.releaseRoom(room.source);
     clearTimeout(room.dropPhone);
     // Queued pushes not yet with Apple are not sent; the host hears so before its socket goes.
     room.closed = true;
@@ -277,7 +376,10 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
   server.on('upgrade', (req, socket, head) => {
     // Node removes its socket error listener before 'upgrade'; a peer reset would crash the relay.
     socket.on('error', () => socket.destroy());
-    const reject = () => { socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); };
+    const reject = (status = 403) => {
+      socket.once('finish', () => socket.destroy());
+      socket.end(`HTTP/1.1 ${status} ${status === 429 ? 'Too Many Requests' : 'Forbidden'}\r\nConnection: close\r\n\r\n`);
+    };
     const rawURL = req.url;
     req.url = rawURL.split('?')[0]; // Downstream diagnostics must not retain queries.
     let url;
@@ -292,7 +394,12 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
     } else if (role === 'phone') {
       if (req.headers.origin !== publicOrigin) { reject(); return; }
     } else { reject(); return; }
-    wss.handleUpgrade(req, socket, head, ws => {
+    const source = clientAddress(req);
+    if (!source) { reject(); return; }
+    const release = limits.reserveConnection(source);
+    if (!release) { reject(429); return; }
+    socket.once('close', release);
+    try { wss.handleUpgrade(req, socket, head, ws => {
       ws.on('error', () => {});
       ws.alive = true;
       ws.on('pong', () => { ws.alive = true; });
@@ -339,12 +446,14 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
               else if (room.claimedBy && room.claimedBy === room.ticket) { ws.close(1008); return; }
             } else {
               id = route.room; room = rooms.get(id);
+              if (room && !room.hosted && now() - room.created >= 30000) { deleteRoom(id); room = undefined; }
               if (!room || !equal(req.headers.authorization, `Bearer ${room.hostToken}`)) { ws.close(1008); return; }
             }
             routed = true;
             routingKey = null;
             clearTimeout(routeTimer);
             if (role === 'host') {
+              room.hosted = true;
               take('host');
               clearTimeout(room.dropPhone);
               room.dropPhone = undefined;
@@ -400,12 +509,17 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
           send(room.host, { type: 'left', peer });
         }
       });
-    });
+    }); } catch { release(); socket.destroy(); }
   });
-  const timer = setInterval(() => {
+  function expireRooms() {
     for (const [id, room] of rooms) {
-      if ((!room.host && now() - room.disconnectedAt > 300000) || now() - room.created > 86400000) deleteRoom(id);
+      if ((!room.hosted && now() - room.created >= 30000) ||
+          (!room.host && now() - room.disconnectedAt > 300000) || now() - room.created > 86400000) deleteRoom(id);
     }
+  }
+  const timer = setInterval(() => {
+    expireRooms();
+    limits.sweep();
     for (const ws of wss.clients) {
       if (!ws.alive) ws.terminate();
       else { ws.alive = false; ws.ping(); }

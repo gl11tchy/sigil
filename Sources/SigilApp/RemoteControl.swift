@@ -7,6 +7,10 @@ import os
 @MainActor
 @Observable
 final class RemoteControl {
+    private enum AllocationError: Error, Equatable {
+        case busy
+    }
+    private static let allocationBusyMessage = "The relay is busy. Retrying."
     private(set) var isEnabled = false
     private(set) var isPaired = false
     private(set) var pairingURL: URL?
@@ -391,10 +395,15 @@ final class RemoteControl {
                     // A route refused before ready means the relay no longer has the room.
                     let refused = !ready && self.socket?.closeCode == .policyViolation
                     if refused || RemoteReconnectPolicy.shouldReallocate(failures: failures) { room = nil }
-                    self.status = "Reconnecting…"
-                    if !session.isPaired {
-                        self.pairingURL = nil
+                    let busy = (error as? AllocationError) == .busy
+                    self.status = busy ? Self.allocationBusyMessage : "Reconnecting…"
+                    if !session.isPaired { self.pairingURL = nil }
+                    if busy {
+                        self.error = Self.allocationBusyMessage
+                    } else if !session.isPaired {
                         self.error = "Could not reach the companion. Retrying."
+                    } else if self.error == Self.allocationBusyMessage {
+                        self.error = unsaved
                     }
                     try? await Task.sleep(for: .seconds(RemoteReconnectPolicy.retrySeconds(failures: failures)))
                 }
@@ -987,6 +996,7 @@ final class RemoteControl {
         request.httpMethod = "POST"
         request.timeoutInterval = 15
         let (data, response) = try await network.data(for: request)
+        if (response as? HTTPURLResponse)?.statusCode == 429 { throw AllocationError.busy }
         guard (response as? HTTPURLResponse)?.statusCode == 201, data.count <= 1024 else {
             throw RemoteError.invalidMessage
         }
