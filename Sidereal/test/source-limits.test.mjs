@@ -119,8 +119,7 @@ test('source-state cardinality is bounded; idle expiry cannot evict occupied bud
   let time = 0;
   const limits = new SourceLimits({ now: () => time, maxSources: 2 });
   for (let i = 0; i < 5; i++) assert.equal(limits.allocate('A'), true);
-  assert.equal(limits.allocate('B'), true);
-  limits.releaseRoom('B');
+  for (let i = 0; i < 5; i++) { assert.equal(limits.allocate('B'), true); limits.releaseRoom('B'); }
   assert.equal(limits.allocate('C'), false);
   time = 59999; limits.sweep();
   assert.equal(limits.allocate('C'), false);
@@ -139,9 +138,19 @@ test('released room slots retain token debt, and backwards time creates no refil
   assert.equal(limits.allocate('A'), false);
 });
 
+test('capacity pressure reclaims idle connections without resetting allocation debt', () => {
+  const limits = new SourceLimits({ now: () => 0, maxSources: 2 });
+  for (let i = 0; i < 5; i++) { assert.equal(limits.allocate('A'), true); limits.releaseRoom('A'); }
+  const release = limits.reserveConnection('B'); assert.equal(typeof release, 'function'); release();
+  assert.equal(limits.allocate('C'), true); // B was closed and never spent an allocation token.
+  assert.equal(limits.allocate('D'), false); // A retains its debt; C has a room.
+  assert.equal(limits.allocate('A'), false);
+  release(); // A stale duplicate release cannot affect C's newly occupied entry.
+  assert.equal(limits.allocate('D'), false);
+});
+
 test('the default source table refuses entry1025 and reuses fully idle capacity', () => {
-  let time = 0;
-  const limits = new SourceLimits({ now: () => time });
+  const limits = new SourceLimits({ now: () => 0 });
   const releases = [];
   for (let i = 0; i < 1024; i++) {
     const release = limits.reserveConnection(`source-${i}`);
@@ -149,7 +158,7 @@ test('the default source table refuses entry1025 and reuses fully idle capacity'
   }
   assert.equal(limits.reserveConnection('overflow'), null);
   releases.forEach(release => release());
-  time = 60000; limits.sweep();
+  // A closed connection-only table cannot lock out a new peer for a minute.
   const reused = limits.reserveConnection('overflow'); assert.equal(typeof reused, 'function'); reused();
 });
 

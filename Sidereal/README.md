@@ -150,8 +150,10 @@ limits too. The room allowance includes disconnected rooms during the existing
 five-minute grace, leaving recovery headroom while one source can occupy at most
 one fifth of global room capacity. Source state is capped at 1,024 entries;
 entries with no rooms or sockets expire after an idle minute, pruned by the
-15-second sweep. Occupied counters are retained. Room-allocation limits and per-source WebSocket admission
-return 429; the global TCP ceiling still drops excess connections. The Mac reports
+15-second sweep. Capacity pressure also reclaims fully idle entries whose token
+buckets are full, including closed connection-only entries; occupied counters and
+allocation debt are retained. Room-allocation limits and per-source WebSocket
+admission return 429; the global TCP ceiling still drops excess connections. The Mac reports
 room-allocation 429 as “The relay is busy. Retrying.”
 
 Source identity currently comes **only from `req.socket.remoteAddress`**.

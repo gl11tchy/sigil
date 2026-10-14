@@ -108,7 +108,7 @@ export class SourceLimits {
     let entry = this.#sources.get(source);
     const time = this.#now();
     if (!entry) {
-      if (this.#sources.size >= this.#maxSources) this.sweep();
+      if (this.#sources.size >= this.#maxSources) this.sweep({ reclaim: true });
       if (this.#sources.size >= this.#maxSources) return null;
       entry = { tokens: 5, refill: time, touched: time, rooms: 0, sockets: 0 };
       this.#sources.set(source, entry);
@@ -149,12 +149,16 @@ export class SourceLimits {
     };
   }
 
-  sweep() {
+  sweep({ reclaim = false } = {}) {
     const time = this.#now();
     for (const [source, entry] of this.#sources) {
       // An idle minute also fully replenishes the five-token bucket. Never
       // evict occupied entries or let eviction grant an early fresh budget.
-      if (!entry.rooms && !entry.sockets && time - entry.touched >= 60000) this.#sources.delete(source);
+      // Under pressure, closed connection-only entries need no grace period;
+      // fully replenished allocation entries are equally safe to reclaim.
+      const replenished = entry.tokens + Math.max(0, time - entry.refill) / 12000 >= 5;
+      if (!entry.rooms && !entry.sockets &&
+          (time - entry.touched >= 60000 || (reclaim && replenished))) this.#sources.delete(source);
     }
   }
 }

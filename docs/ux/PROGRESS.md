@@ -1162,9 +1162,12 @@ seconds. Forwarded headers are never trusted without a verified ingress rule;
 none is enabled, so proxy/NAT users share one peer budget. Docker, deployment,
 proxy/network/security settings and dependency versions remain unchanged.
 
-Afterward A accepted 5 requests and B returned 201. Fifteen no-listener synthetic
+Afterward A accepted 5 requests and B returned 201. Sixteen no-listener synthetic
 tests pass. Removing the connection reservation fails the actual upgrade-admission
-case; byte-for-byte restoration passes. Native 429/recovery cases and encrypted
+case; byte-for-byte restoration passes. Automatic review identified pressure from
+closed connection-only entries; full idle buckets now reclaim under capacity
+pressure without erasing allocation debt. Proxy identity and distributed exhaustion
+remain explicit limits. Native 429/recovery cases and encrypted
 expiry/grace integration are added for the normal PR CI gate, pending. No local
 native build/AppTests, process enumeration, binding retry, live relay/APNs exercise
 or customer data. Installed build360, protected PR162 and prior manual records remain
