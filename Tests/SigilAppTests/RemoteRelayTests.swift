@@ -7,6 +7,41 @@ import Testing
 
 @Suite(.serialized)
 struct RemoteRelayTests {
+    @Test(arguments: [false, true])
+    @MainActor func allocation429ShowsBusyAndRecoversWithoutLosingPairing(paired: Bool) async throws {
+        let relay = try await RelayFixture(allocationStatus: 429)
+        defer { relay.stop() }
+        let model = AppModel()
+        let store = InMemoryRemotePairingStore()
+        let device = RemoteCrypto.randomKey()
+        if paired {
+            store.save(RemotePairing(origin: relay.origin, deviceKey: device, ticket: RemoteCrypto.randomKey()))
+        }
+        let remote = RemoteControl(store: store)
+        defer { remote.stop() }
+        remote.start(urlText: relay.origin, model: model)
+        let busy = "The relay is busy. Retrying."
+        try await waitUntil { remote.status == busy && remote.error == busy }
+        try #require(remote.status == busy && remote.error == busy)
+        #expect(remote.isEnabled && remote.isPaired == paired && remote.pairingURL == nil)
+        if paired {
+            #expect(store.load()?.deviceKey == device)
+        }
+
+        try relay.setAllocationStatus(503)
+        try await waitUntil(for: .seconds(12)) { remote.status == "Reconnecting…" && remote.error != busy }
+        try #require(remote.status == "Reconnecting…" && remote.error != busy)
+        try relay.setAllocationStatus(201)
+        let ready = paired ? "Phone disconnected" : "Scan to connect"
+        try await waitUntil(for: .seconds(12)) { remote.status == ready }
+        #expect(remote.status == ready && remote.error == nil && remote.isPaired == paired)
+        if paired {
+            #expect(store.load()?.deviceKey == device)
+        } else {
+            #expect(remote.pairingURL != nil)
+        }
+    }
+
     @Test @MainActor func disconnectTellsTheConnectedPhoneItsPairingIsRevoked() async throws {
         let relay = try await RelayFixture()
         defer { relay.stop() }
@@ -166,19 +201,29 @@ final class RelayFixture {
     var apnsCapture: URL { root.appendingPathComponent("apns.jsonl") }
     var roomCapture: URL { root.appendingPathComponent("rooms.txt") }
 
-    init(captureAPNs: Bool = false) async throws {
+    init(captureAPNs: Bool = false, allocationStatus: Int? = nil) async throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let portFile = root.appendingPathComponent("port")
+        var environment: [String: String] = captureAPNs
+            ? [
+                "SIGIL_TEST_APNS_CAPTURE": root.appendingPathComponent("apns.jsonl").path,
+                "SIGIL_TEST_ROOM_CAPTURE": root.appendingPathComponent("rooms.txt").path,
+            ] : [:]
+        if let allocationStatus {
+            try Data(String(allocationStatus).utf8).write(
+                to: root.appendingPathComponent("allocation-status"), options: .atomic)
+            environment["SIGIL_TEST_ALLOCATION_STATUS"] = root.appendingPathComponent("allocation-status").path
+        }
         process = try await Self.launch(
             [repo.appendingPathComponent("Sidereal/test/relay-fixture.mjs").path], portFile: portFile,
-            environment: captureAPNs
-                ? [
-                    "SIGIL_TEST_APNS_CAPTURE": root.appendingPathComponent("apns.jsonl").path,
-                    "SIGIL_TEST_ROOM_CAPTURE": root.appendingPathComponent("rooms.txt").path,
-                ] : [:]
+            environment: environment
         )
         origin = "http://127.0.0.1:\(try String(contentsOf: portFile, encoding: .utf8))"
+    }
+
+    func setAllocationStatus(_ status: Int) throws {
+        try Data(String(status).utf8).write(to: root.appendingPathComponent("allocation-status"), options: .atomic)
     }
 
     /// Replaces the relay on the same port. Every room is gone and the host is

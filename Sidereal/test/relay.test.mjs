@@ -185,6 +185,24 @@ test('an older room survives a brief host disconnect and accepts reconnect', asy
   assert.equal((await message(restored)).type, 'ready');
 });
 
+test('a first host cannot authenticate an abandoned room after its deadline', async t => {
+  let clock = 0;
+  const { base, room, hostToken } = await setup(t, { now: () => clock, maxRooms: 1 });
+  clock = 30000;
+  const late = connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` } });
+  assert.equal((await once(late, 'close'))[0], 1008);
+  assert.equal((await fetch(`${base}/rooms`, { method: 'POST' })).status, 201);
+});
+
+test('a rejected host route cannot extend an unhosted room lifetime', async t => {
+  let clock = 0;
+  const { base, room } = await setup(t, { now: () => clock, maxRooms: 1 });
+  const bad = connect(base, room, 'host', { headers: { Authorization: `Bearer ${'ab'.repeat(32)}` } });
+  assert.equal((await once(bad, 'close'))[0], 1008);
+  clock = 30000;
+  assert.equal((await fetch(`${base}/rooms`, { method: 'POST' })).status, 201);
+});
+
 test('a second phone takes over the occupied slot', async t => {
   const { base, room, hostToken } = await setup(t);
   const host = connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` } });
@@ -419,10 +437,10 @@ test('ticket connects reject a short token and a missing host', async t => {
   );
 });
 
-test('room allocation rejects browser requests and excessive creation', async t => {
+test('room allocation rejects browser requests and excessive creation from one peer', async t => {
   const { base } = await setup(t);
   assert.equal((await fetch(`${base}/rooms`, { method: 'POST', headers: { Origin: 'http://localhost:3099' } })).status, 403);
-  for (let i = 0; i < 19; i++) assert.equal((await fetch(`${base}/rooms`, { method: 'POST' })).status, 201);
+  for (let i = 0; i < 4; i++) assert.equal((await fetch(`${base}/rooms`, { method: 'POST' })).status, 201);
   assert.equal((await fetch(`${base}/rooms`, { method: 'POST' })).status, 429);
 });
 

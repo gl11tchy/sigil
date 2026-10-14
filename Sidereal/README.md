@@ -139,13 +139,40 @@ phone as access to your Mac's open sessions. Do not share pairing QR screenshots
 No commands are queued offline or automatically retried. After a lost response,
 check the terminal before manually resending.
 
-The relay limits itself to 100 rooms, 20 room allocations/minute, one phone per room,
+The relay retains its global ceiling of 100 rooms and 300 TCP connections. Each
+source has a five-token room-allocation bucket, replenished at one token per
+12 seconds, at most 20 allocated live rooms, and at most 20 open WebSockets,
+including connections still waiting to route. WebSocket admission is checked
+before the upgrade. Closing a socket frees only its connection slot; deleting a
+room frees its room slot without erasing token debt. IPv4-mapped IPv6 shares the
+IPv4 budget; native IPv6 addresses share a /64 budget. A shared NAT shares these
+limits too. The room allowance includes disconnected rooms during the existing
+five-minute grace, leaving recovery headroom while one source can occupy at most
+one fifth of global room capacity. Source state is capped at 1,024 entries;
+entries with no rooms or sockets expire after an idle minute, pruned by the
+15-second sweep. Occupied counters are retained. Room-allocation limits and per-source WebSocket admission
+return 429; the global TCP ceiling still drops excess connections. The Mac reports
+room-allocation 429 as “The relay is busy. Retrying.”
+
+Source identity currently comes **only from `req.socket.remoteAddress`**.
+`X-Forwarded-For`, `Forwarded`, `X-Real-IP`, and a boolean `TRUST_PROXY` setting do
+not establish trust and are not used. Behind a reverse proxy, its transport peer
+shares one budget across the users it represents. End-user isolation behind
+Railway or another proxy is therefore not established by this change. Supporting
+forwarded addresses requires a separately verified ingress peer and precise
+header/hop contract; do not enable header trust based on a boolean or guessed
+proxy range. This PR changes no deployment, ingress or proxy configuration.
+
+Rooms that never authenticate a host expire at 30 seconds. The 15-second sweep
+removes them, and allocation/first-host authentication also checks expiry.
+After an authenticated host disconnects, the existing five-minute grace interval
+preserves its room. After that the Mac allocates a new room and re-registers the
+same ticket. Rooms still expire after 24 hours. Limits remain one phone per room,
 30 frames/second per socket, 110 KB frames, 60 pushes/minute per room, and bounded
-outgoing buffers. These are
-single-process limits, not a replacement for an internet-edge DoS/WAF policy.
-Pending rooms and disconnected hosts expire after five minutes. Host reconnection
-within that grace interval preserves the room. After that the Mac allocates a
-new room and re-registers the same ticket. Rooms expire after 24 hours.
+outgoing buffers. These single-process limits mitigate one source's starvation;
+they do not guarantee availability against distributed exhaustion or replace an
+internet-edge DoS/WAF policy. APNs token registration and abuse are separate
+exposures, not fixed by room-allocation limits.
 
 ## Verify
 

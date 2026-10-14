@@ -1149,3 +1149,24 @@ execution remains prohibited; normal follow-up PR CI is pending. No further
 unchanged-main rerun, merge, release, app replacement or REA-1207 implementation.
 Actual official build352 remains installed and verified; web deployment and prior
 device/manual acceptance remain open. See the [release-gate evidence](../qa/rea-1206-release-gate.md).
+
+### REA-1207 transport-peer limits · 2026-10-14
+
+On fresh main 139bf43, generated in-process HTTP requests reproduced A consuming
+all 20 shared allocation tokens and B receiving 429. Admission now uses canonical
+socket peers (/64 for IPv6, unified IPv4-mapped forms), a five-token burst/refill,
+20 allocated rooms and 20 WebSockets per source, and a bounded 1,024-entry source
+table. The room allowance includes existing five-minute reconnect grace and NAT
+headroom; global 100 rooms/300 TCP connections remain. Unhosted rooms expire at 30
+seconds. Forwarded headers are never trusted without a verified ingress rule;
+none is enabled, so proxy/NAT users share one peer budget. Docker, deployment,
+proxy/network/security settings and dependency versions remain unchanged.
+
+Afterward A accepted 5 requests and B returned 201. Fifteen no-listener synthetic
+tests pass. Removing the connection reservation fails the actual upgrade-admission
+case; byte-for-byte restoration passes. Native 429/recovery cases and encrypted
+expiry/grace integration are added for the normal PR CI gate, pending. No local
+native build/AppTests, process enumeration, binding retry, live relay/APNs exercise
+or customer data. Installed build360, protected PR162 and prior manual records remain
+intact. See [QA evidence and limits](../qa/rea-1207.md). Parent exact-head review
+is required before merge.
