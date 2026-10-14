@@ -579,11 +579,12 @@ function chooseProject(project) {
   if (!newOptions) void perform(() => startProject());
 }
 async function settleNew(attempt) {
-  if (credential?.pendingNew !== attempt) return;
-  delete credential.pendingNew;
-  try { await storage('put', credential); }
+  const owner = credential;
+  if (owner?.pendingNew !== attempt) return;
+  delete owner.pendingNew;
+  try { await storage('put', owner); }
   catch {
-    credential.pendingNew = attempt;
+    owner.pendingNew = attempt;
     throw new Error('Could not save the result. New remains blocked; inspect Sigil on your Mac.');
   }
 }
@@ -628,7 +629,7 @@ async function findProject(folder) {
   for (let index = 0; index < 400; index += 40) {
     const reply = await request('projects', undefined, undefined, false, { index });
     if (credential !== owner || generation !== current) throw new Error('The connection changed. Check projects again after reconnecting.');
-    const projects = (Array.isArray(reply.projects) ? reply.projects : []).map(projectRecord).filter(Boolean);
+    const projects = (Array.isArray(reply.projects) ? reply.projects : []).slice(0, 40).map(projectRecord).filter(Boolean);
     const found = projects.find(project => project.folder === folder);
     if (found) return found;
     if (reply.projectsTruncated !== true && projects.length < 40) break;

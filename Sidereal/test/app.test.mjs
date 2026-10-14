@@ -91,7 +91,10 @@ async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { devic
                 delete: () => { stored = undefined; return {}; },
               }),
             };
-            queueMicrotask(() => { transaction.oncomplete?.(); });
+            queueMicrotask(() => {
+              if (faults.holdCompletion) faults.pending.push(transaction);
+              else transaction.oncomplete?.();
+            });
             return transaction;
           },
         };
@@ -1580,4 +1583,17 @@ test('REA-1206 connection replacement cannot settle an old project attempt or re
   await settle();
   assert.equal(page.stored().pendingNew.action, 'createProject');
   assert.equal(next.sent.filter(item => ['new', 'createProject'].includes(item.action)).length, 0);
+});
+
+test('REA-1206 a failed result write cannot attach the old Mac attempt to a replacement pairing', async () => {
+  const faults = { pending: [] }, page = await browser({ faults }), socket = await page.authorize();
+  await openNewSheet(page, socket); page.element('project-start').onclick(); await settle();
+  faults.holdCompletion = true;
+  await newReply(socket);
+  assert.equal(faults.pending.length, 1);
+  faults.holdCompletion = false;
+  await page.app.beginPair({ room: 'd'.repeat(32), key: 'f'.repeat(64) });
+  const write = faults.pending[0]; write.error = new Error('Write failed'); write.onabort();
+  await settle();
+  assert.equal(page.app.pendingNew(), null);
 });

@@ -1105,8 +1105,8 @@ authenticated project record can reconcile folder adoption; a lost session start
 has no authoritative outcome receipt in this protocol and remains blocked with
 Mac recovery guidance. Closing a sheet does not cancel a dispatched action.
 
-The baseline's two New tests passed. Focused synthetic Node checks passed (151
-tests); local Playwright was blocked at server bind (`EPERM`, port 3099), without
+The baseline's two New tests passed. Focused synthetic Node checks passed (152
+tests, including replacement-pairing storage failure); local Playwright was blocked at server bind (`EPERM`, port 3099), without
 retry or permission expansion. Local Chromium/WebKit screenshots remain unverified. Following direct owner
 approval on October 14, one commit/status retry succeeded; ordinary exact-head
 PR CI will supply browser screenshots and the integrated native checks. Scope, bounded
