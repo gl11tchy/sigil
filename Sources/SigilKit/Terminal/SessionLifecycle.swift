@@ -44,6 +44,8 @@ public struct ProviderLifecycleJournal: Sendable {
     private var discardingLine = false
     private var validatedCodexIdentity = false
     private var activeTurnID: String?
+    private var hasCurrentReadEvidence = false
+    private var workRevision: UInt64 = 0
     private var seenEvents = Set<String>()
     private var seenOrder: [String] = []
     private var transcript: CodexSessionBinding.Transcript?
@@ -55,6 +57,13 @@ public struct ProviderLifecycleJournal: Sendable {
 
     /// Catch-up restores state, not historical completion notifications.
     public var isCatchingUp: Bool { catchUpBoundary != nil }
+
+    /// Current readable-file evidence plus a session/turn-validated work event.
+    /// Nominal provider support, a path or an empty/missing journal is insufficient.
+    /// Quiet successful polls preserve the revision rather than invent progress.
+    public var validatedWorkRevision: UInt64? {
+        hasCurrentReadEvidence && canObserve && !isCatchingUp && activeTurnID != nil ? workRevision : nil
+    }
 
     /// A journal path alone does not establish an observable provider lifecycle.
     /// Grok may create its journal later; Codex must already have validated metadata.
@@ -125,6 +134,7 @@ public struct ProviderLifecycleJournal: Sendable {
     }
 
     public mutating func poll() -> [SessionLifecycleState] {
+        hasCurrentReadEvidence = false
         guard canObserve else { return [] }
         let before = transcript?.lease()
         if transcript != nil, before == nil { return invalidateObservation() }
@@ -182,6 +192,7 @@ public struct ProviderLifecycleJournal: Sendable {
             }
             inode = current.inode
             device = current.device
+            hasCurrentReadEvidence = true
             guard current.size > offset else { return [] }
             try handle.seek(toOffset: offset)
             let limit = catchUpBoundary.map { Int(min($0 - offset, 256 * 1024)) } ?? (256 * 1024)
@@ -211,10 +222,14 @@ public struct ProviderLifecycleJournal: Sendable {
                 return catchUpState.map { [$0] } ?? []
             }
             return events
-        } catch { return transcript == nil ? [] : invalidateObservation() }
+        } catch {
+            hasCurrentReadEvidence = false
+            return transcript == nil ? [] : invalidateObservation()
+        }
     }
 
     private mutating func invalidateObservation() -> [SessionLifecycleState] {
+        hasCurrentReadEvidence = false
         validatedCodexIdentity = false
         activeTurnID = nil
         catchUpBoundary = nil
@@ -285,6 +300,7 @@ public struct ProviderLifecycleJournal: Sendable {
                 let turnID = meta?["promptId"] as? String, !turnID.isEmpty
             {
                 activeTurnID = turnID
+                workRevision += 1
                 return .working
             }
             guard type == "turn_completed", let turnID = update["prompt_id"] as? String,
@@ -307,6 +323,7 @@ public struct ProviderLifecycleJournal: Sendable {
             guard remember("\(turnID):\(type)") else { return nil }
             if type == "task_started" {
                 activeTurnID = turnID
+                workRevision += 1
                 return .working
             }
             guard turnID == activeTurnID else { return nil }

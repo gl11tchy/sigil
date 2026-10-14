@@ -106,7 +106,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        MainActor.assumeIsolated { model?.closeAllTabsAndWait() }
+        MainActor.assumeIsolated {
+            remoteIdleSleep?.stop()
+            model?.closeAllTabsAndWait()
+        }
     }
 
     @MainActor func startRemoteIdleSleep(_ model: AppModel) {
@@ -117,32 +120,102 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-/// Forwards `RemoteControl.status` for as long as the app delegate lives.
+/// Tracks registration and effective journal work independently of phone status.
+/// The timer only revisits power policy; it never settles a session.
 @MainActor
 final class RemoteIdleSleepWatch {
-    private let sleep: RemoteIdleSleep
-    private var started = false
+    typealias Wait = @MainActor (Duration) async throws -> Void
 
-    init(sleep: RemoteIdleSleep? = nil) {
+    private struct Input {
+        let phoneConnected: Bool
+        let alertsArmed: Bool
+        let workingTabs: [RemoteIdleSleep.WorkingTab]
+        let liveTabIDs: Set<UUID>
+    }
+
+    private let sleep: RemoteIdleSleep
+    private let wait: Wait
+    private var started = false
+    private var generation = UUID()
+    private var reviewTask: Task<Void, Never>?
+    private var reviewID: UUID?
+
+    init(sleep: RemoteIdleSleep? = nil, wait: Wait? = nil) {
         self.sleep = sleep ?? RemoteIdleSleep()
+        self.wait = wait ?? { try await Task.sleep(for: $0) }
     }
 
     func start(_ model: AppModel) {
         guard !started else { return }
         started = true
+        generation = UUID()
         track(model)
     }
 
+    func stop() {
+        started = false
+        generation = UUID()
+        reviewTask?.cancel()
+        reviewTask = nil
+        reviewID = nil
+        sleep.stop()
+    }
+
+    /// A timer reads fresh inputs without installing another observation, so
+    /// quiet reviews cannot accumulate duplicate observation callbacks.
+    func review(_ model: AppModel) {
+        guard started else { return }
+        apply(Self.input(model), model: model)
+    }
+
+    private static func input(_ model: AppModel) -> Input {
+        let remote = model.remoteControl
+        return Input(
+            phoneConnected: remote.isEnabled && remote.isPaired && remote.status == "Phone connected",
+            alertsArmed: remote.alertsArmed, workingTabs: model.tabs.compactMap { $0.idleSleepWorkingTab },
+            liveTabIDs: Set(model.tabs.map(\.id)))
+    }
+
     private func track(_ model: AppModel) {
-        let status = withObservationTracking {
-            model.remoteControl.status
+        guard started else { return }
+        let current = generation
+        let input = withObservationTracking {
+            Self.input(model)
         } onChange: { [weak self, weak model] in
             Task { @MainActor [weak self, weak model] in
-                guard let model else { return }
-                self?.track(model)
+                guard let self, self.started, self.generation == current else { return }
+                guard let model else {
+                    self.stop()
+                    return
+                }
+                self.track(model)
             }
         }
-        sleep.apply(status: status)
+        apply(input, model: model)
+    }
+
+    private func apply(_ input: Input, model: AppModel) {
+        sleep.apply(
+            phoneConnected: input.phoneConnected, alertsArmed: input.alertsArmed, workingTabs: input.workingTabs,
+            liveTabIDs: input.liveTabIDs)
+        reviewTask?.cancel()
+        reviewTask = nil
+        reviewID = nil
+        guard let delay = sleep.nextReviewDelay else { return }
+        let id = UUID()
+        reviewID = id
+        let wait = self.wait
+        reviewTask = Task { [weak self, weak model] in
+            do { try await wait(.seconds(delay)) } catch { return }
+            guard !Task.isCancelled, let self, self.started, self.reviewID == id else { return }
+            self.reviewTask = nil
+            self.reviewID = nil
+            guard let model else {
+                self.stop()
+                return
+            }
+            self.review(model)
+        }
     }
 }
 
