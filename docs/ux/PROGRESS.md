@@ -1094,3 +1094,42 @@ Relay allocation/proxy policy, APNs TTL policy and HTTP/2 retry remain separate.
 Physical delivery and rendered Settings/AX/window-ID behavior are unobserved.
 Protected PR162 and all ten earlier manual-review records remain preserved.
 Stop for parent personal final-code review; no merge/install or next ticket.
+
+## REA-1206: web New session choices (2026-10-13)
+
+The web New sheet retains repository metadata and uses REA-1225's per-project
+worktree default, with explicit choices, advertised Grok model/effort and a small
+New project form restricted to advertised locations. A persisted pending result
+prevents duplicate creation across connection loss and reload. An exact
+authenticated project record can reconcile folder adoption; a lost session start
+has no authoritative outcome receipt in this protocol and remains blocked with
+Mac recovery guidance. Closing a sheet does not cancel a dispatched action.
+
+The baseline's two New tests passed. Focused synthetic Node checks passed (153
+tests, including replacement-pairing storage failure and pending preparation); local Playwright was blocked at server bind (`EPERM`, port 3099), without
+retry or permission expansion. Local Chromium/WebKit screenshots remain unverified. Following direct owner
+approval on October 14, one commit/status retry succeeded; ordinary exact-head
+PR CI will supply browser screenshots and the integrated native checks. Scope, bounded
+reconciliation and limits are in [REA-1206 QA](../qa/rea-1206.md). No native app,
+backend protocol, cleanup, installed bundle or earlier manual-review record was
+changed. The prior approval hold and original patch/test evidence are preserved. No
+Linear comment was written or retried; only the explicitly approved existing
+record status changed.
+
+
+REA-1206's first completed browser gate passed 233 cases with two skips and one
+Chromium lost-project reload failure. Its six phone-size screenshots exposed a
+WebKit select-height mismatch. The focused repair distinguishes preparation from
+dispatch, waits for actual synthetic receipt before testing lost replies, and
+reuses the CLI picker with 44px geometry assertions. Exact-head CI after that
+repair remains the acceptance gate; no native success was claimed from the
+browser-failed run.
+
+
+Automatic-review regressions on REA-1206 were reproduced against `543a6b3` (four
+new cases fail), then repaired within the existing frontend protocol. The menu
+preserves the advertised empty model, initial failed persistence leaves no false
+unknown outcome, an atomic shared-origin IndexedDB claim prevents two contexts
+from dispatching, and dismissed project success skips metadata reads. Settlement
+uses the exact claim ID and stale ticket writes preserve it. Focused157 tests
+pass; two-page encrypted browser coverage and final screenshots await fresh CI.

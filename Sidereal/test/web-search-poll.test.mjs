@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
+import { pairingDatabase, pairingIndexedDB } from './support/pairing-idb.mjs';
 import { readableOutput, createReadableOutput, commonPrefixLength } from '../public/output.mjs';
 import { pairingFromText } from '../public/pairing.mjs';
 
@@ -68,25 +69,7 @@ async function browser() {
     }
     close() { this.readyState = 3; this.onclose?.(); }
   }
-  const indexedDB = {
-    open() {
-      const request = {};
-      queueMicrotask(() => {
-        request.result = {
-          close() {},
-          transaction() {
-            const transaction = {
-              objectStore: () => ({ get: () => ({ result: structuredClone(stored) }), put: () => ({}), delete: () => ({}) }),
-            };
-            queueMicrotask(() => { transaction.oncomplete?.(); });
-            return transaction;
-          },
-        };
-        request.onsuccess();
-      });
-      return request;
-    },
-  };
+  const indexedDB = pairingIndexedDB(pairingDatabase(stored));
   const app = {
     commonPrefixLength,
     createReadableOutput: () => {
