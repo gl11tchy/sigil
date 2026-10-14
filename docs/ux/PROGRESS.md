@@ -1107,11 +1107,11 @@ Mac recovery guidance. Closing a sheet does not cancel a dispatched action.
 
 The baseline's two New tests passed. Focused synthetic Node checks passed (151
 tests); local Playwright was blocked at server bind (`EPERM`, port 3099), without
-retry or permission expansion. Chromium/WebKit screenshots and integrated
-native checks remain unverified: automatic approval review rejected committing
-REA-1206 as outside trusted REA-1214 authorization, before the command ran. No
-commit, push, PR, exact-head CI or retry occurred. Scope, bounded
+retry or permission expansion. Local Chromium/WebKit screenshots remain unverified. Following direct owner
+approval on October 14, one commit/status retry succeeded; ordinary exact-head
+PR CI will supply browser screenshots and the integrated native checks. Scope, bounded
 reconciliation and limits are in [REA-1206 QA](../qa/rea-1206.md). No native app,
 backend protocol, cleanup, installed bundle or earlier manual-review record was
-changed. Linear's In Progress update was rejected by automatic approval review;
-it was not retried or replaced with a comment.
+changed. The prior approval hold and original patch/test evidence are preserved. No
+Linear comment was written or retried; only the explicitly approved existing
+record status changed.
