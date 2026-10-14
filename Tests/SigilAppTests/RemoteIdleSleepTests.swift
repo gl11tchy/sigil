@@ -192,7 +192,8 @@ private final class IdleSleepFixture {
                 pushToken: String(repeating: "ab", count: 32), pushEnvironment: "development"))
         model = AppModel(
             settings: settings, store: store, presentError: { _ in }, panel: RightPanel(defaults: defaults),
-            pairingStore: pairing, kimiKeyStore: InMemoryKimiKeyStore(), providerInstallations: [:])
+            pairingStore: pairing, kimiKeyStore: InMemoryKimiKeyStore(),
+            providerInstallations: fixtureProviderInstallations(executable))
     }
 
     func newTab() throws -> TerminalTab {

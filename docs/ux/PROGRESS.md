@@ -1203,3 +1203,8 @@ does not change the old status-only power policy. Native validation is CI-only;
 manual real-app pmset/Grok verification remains unverified under current local
 execution/active-session constraints. No merge or app replacement before parent
 personal review. See [QA record](../qa/rea-1215.md).
+
+REA-1215 baseline correction: CI38535865150 stopped at the fixture's provider
+availability gate before the power expectation. The corrected fake availability
+is supplied explicitly. The local implementation is retained in a hashed
+workspace snapshot while the same PR establishes the intended failure.
