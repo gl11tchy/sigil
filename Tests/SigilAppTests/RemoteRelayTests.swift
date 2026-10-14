@@ -205,7 +205,8 @@ final class RelayFixture {
         root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let portFile = root.appendingPathComponent("port")
-        var environment: [String: String] = captureAPNs
+        var environment: [String: String] =
+            captureAPNs
             ? [
                 "SIGIL_TEST_APNS_CAPTURE": root.appendingPathComponent("apns.jsonl").path,
                 "SIGIL_TEST_ROOM_CAPTURE": root.appendingPathComponent("rooms.txt").path,
