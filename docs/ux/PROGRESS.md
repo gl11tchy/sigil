@@ -1192,3 +1192,14 @@ and encrypted watch cases are added; repaired-head normal CI is pending. No loca
 native command, process enumeration, denied retry, personal agent data, model
 switch, extra worker, power measurement, deployment, merge or app replacement.
 Installed build364 and held PR162 remain untouched. See [QA evidence](../qa/rea-1217.md).
+
+
+## REA-1215 — remote idle-sleep ownership (2026-10-14)
+
+Started from main `671f7a4` in one isolated worktree. Baseline CI reproduction
+uses a generated current-turn journal, fake child/throwaway CLI home and an
+in-memory saved alert registration while the phone is away. Watcher injection
+does not change the old status-only power policy. Native validation is CI-only;
+manual real-app pmset/Grok verification remains unverified under current local
+execution/active-session constraints. No merge or app replacement before parent
+personal review. See [QA record](../qa/rea-1215.md).

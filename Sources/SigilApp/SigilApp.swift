@@ -119,9 +119,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 /// Forwards `RemoteControl.status` for as long as the app delegate lives.
 @MainActor
-private final class RemoteIdleSleepWatch {
-    private let sleep = RemoteIdleSleep()
+final class RemoteIdleSleepWatch {
+    private let sleep: RemoteIdleSleep
     private var started = false
+
+    init(sleep: RemoteIdleSleep? = nil) {
+        self.sleep = sleep ?? RemoteIdleSleep()
+    }
 
     func start(_ model: AppModel) {
         guard !started else { return }
