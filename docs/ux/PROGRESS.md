@@ -1133,3 +1133,19 @@ unknown outcome, an atomic shared-origin IndexedDB claim prevents two contexts
 from dispatching, and dismissed project success skips metadata reads. Settlement
 uses the exact claim ID and stale ticket writes preserve it. Focused157 tests
 pass; two-page encrypted browser coverage and final screenshots await fresh CI.
+
+
+### REA-1206 release-gate fixture synchronization · 2026-10-14
+
+PR175 merged at c4dec35 with the reviewed tree. Main CI38501085476 attempts1/2
+failed different immediate pending-queue assertions in the existing
+RemotePushReadinessTests helper. Both follow its fixed 400 ms wait after
+asynchronous 300 ms alert batching. The original failed receipts are preserved.
+
+A bounded fixture-only follow-up now requires the observable pending event using
+the existing 4-second readiness helper. All eight callers and their original
+safety assertions remain. No production or CI-policy change. Local native
+execution remains prohibited; normal follow-up PR CI is pending. No further
+unchanged-main rerun, merge, release, app replacement or REA-1207 implementation.
+Actual official build352 remains installed and verified; web deployment and prior
+device/manual acceptance remain open. See the [release-gate evidence](../qa/rea-1206-release-gate.md).
