@@ -204,7 +204,8 @@ struct RemoteControlTests {
         let phone = try #require(context.phone)
         let event: RemoteReply = try RemoteCrypto.open(
             try #require(try await phone.receive()["data"]), key: pair.device, direction: "mac")
-        #expect(event.event == true && event.state?.terminal.contains("REA_1217_SELECTED_WATCH") == true)
+        #expect(event.event == true && event.state?.screen?.tab == context.tab.id.uuidString)
+        #expect(event.state?.screen?.rows.contains { $0.t.contains("REA_1217_SELECTED_WATCH") } == true)
         #expect(context.reads.isEmpty && context.remote.pendingAlertEvaluationCount == 0)
     }
 
