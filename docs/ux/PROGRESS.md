@@ -1094,3 +1094,24 @@ Relay allocation/proxy policy, APNs TTL policy and HTTP/2 retry remain separate.
 Physical delivery and rendered Settings/AX/window-ID behavior are unobserved.
 Protected PR162 and all ten earlier manual-review records remain preserved.
 Stop for parent personal final-code review; no merge/install or next ticket.
+
+## REA-1206: web New session choices (2026-10-13)
+
+The web New sheet retains repository metadata and uses REA-1225's per-project
+worktree default, with explicit choices, advertised Grok model/effort and a small
+New project form restricted to advertised locations. A persisted pending result
+prevents duplicate creation across connection loss and reload. An exact
+authenticated project record can reconcile folder adoption; a lost session start
+has no authoritative outcome receipt in this protocol and remains blocked with
+Mac recovery guidance. Closing a sheet does not cancel a dispatched action.
+
+The baseline's two New tests passed. Focused synthetic Node checks passed (151
+tests); local Playwright was blocked at server bind (`EPERM`, port 3099), without
+retry or permission expansion. Chromium/WebKit screenshots and integrated
+native checks remain unverified: automatic approval review rejected committing
+REA-1206 as outside trusted REA-1214 authorization, before the command ran. No
+commit, push, PR, exact-head CI or retry occurred. Scope, bounded
+reconciliation and limits are in [REA-1206 QA](../qa/rea-1206.md). No native app,
+backend protocol, cleanup, installed bundle or earlier manual-review record was
+changed. Linear's In Progress update was rejected by automatic approval review;
+it was not retried or replaced with a comment.

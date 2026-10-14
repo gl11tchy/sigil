@@ -34,6 +34,9 @@ let freshHandshake = false;
 const histories = new Map();
 let pendingEarlier = null, earlierFlight = false, searchToken = 0;
 let providerChoice = '', providerProblems = new Map();
+let newOptions = null, newProjects = [], projectTarget = null, worktreeChoice = null, canUseSessionOps = false;
+let newFlight = null;
+let newSheetEpoch = 0;
 let findIndex = 0, findMatches = [], displayedOutput = null;
 let rawOutput = '', rawMode = false;
 let credential, bootstrap, newDeviceKey, replacingMemory, socket, challenge, clientNonce, sequence = 0, selected;
@@ -120,6 +123,7 @@ function updateControls() {
     const hint = $(id);
     if (hint) hint.hidden = !standalone;
   }
+  updateNewControls();
 }
 function hasFinePointer() {
   return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
@@ -293,6 +297,7 @@ function render(state) {
   const previousTab = sessionTabs.find(tab => tab.id === selected);
   sessionTabs = state.tabs;
   canRestart = Array.isArray(state.capabilities) && state.capabilities.includes('restart');
+  canUseSessionOps = Array.isArray(state.capabilities) && state.capabilities.includes('sessionOps');
   const bucket = nextSelected ? historyFor(nextSelected) : null;
   let prepended = false;
   if (bucket) {
@@ -503,26 +508,161 @@ function projectButton(nameText, folderText, onClick) {
   button.onclick = onClick;
   return button;
 }
-function renderProjects(projects, offset = 0, truncated = false) {
-  const safe = [];
-  for (const project of (Array.isArray(projects) ? projects : []).slice(0, 40)) {
-    if (!project || typeof project.name !== 'string' || typeof project.folder !== 'string') continue;
-    if (!project.name || !project.folder || project.folder.length > 4_096) continue;
-    if (/[\u0000-\u001F]/.test(project.folder)) continue;
-    safe.push({ name: project.name, folder: project.folder });
+const validPath = path => typeof path === 'string' && path.startsWith('/') && path.length <= 4_096 && !/[\u0000-\u001F\u007F]/.test(path);
+function projectRecord(project) {
+  if (!project || typeof project.name !== 'string' || !project.name || project.name.length > 96 || !validPath(project.folder)) return null;
+  return { name: project.name, folder: project.folder, repository: project.repository === true,
+    ...(typeof project.worktreeDefault === 'boolean' ? { worktreeDefault: project.worktreeDefault } : {}) };
+}
+function folderName(value) {
+  const name = value.trim();
+  return name && new TextEncoder().encode(name).length <= 80 && !name.startsWith('.') && !/[/:\p{Cc}\p{Cf}]/u.test(name) ? name : null;
+}
+function selectedProvider() { return newOptions?.providers.find(provider => provider.id === $('provider').value); }
+function allowsWorktree() { return canUseSessionOps && newOptions && projectTarget?.repository === true; }
+function defaultWorktree() { return projectTarget?.worktreeDefault ?? newOptions?.startsInWorktree ?? true; }
+function pendingNew() {
+  const attempt = credential?.pendingNew;
+  if (!attempt) return null;
+  // Invalid stored markers still block creation; never interpret corruption as a resolved result.
+  return attempt && typeof attempt === 'object' && ['new', 'createProject'].includes(attempt.action)
+    && (attempt.folder === undefined || validPath(attempt.folder)) ? attempt : { action: 'unknown' };
+}
+function showNewOutcome() {
+  const attempt = pendingNew();
+  const notice = $('new-outcome');
+  notice.hidden = !attempt;
+  notice.textContent = !attempt ? '' : newFlight ? 'Waiting for the Mac. Closing this sheet will not cancel the request.'
+    : attempt.action === 'createProject'
+      ? `The project result is unknown: ${attempt.folder}. Check projects to look for that exact folder. New creation and session starts stay blocked until it is found.`
+      : `The session start result is unknown${attempt.folder ? ` for ${attempt.folder}` : ''}. Open Sigil on your Mac and inspect its tabs and worktrees. Start sessions there while this result is unresolved; this phone will not retry it.`;
+  $('project-check').hidden = !attempt || attempt.action !== 'createProject' || Boolean(newFlight);
+}
+function updateNewControls() {
+  const locked = !connected || busy || Boolean(pendingNew());
+  const provider = selectedProvider();
+  const takesModel = provider?.takesModel === true;
+  $('model-field').hidden = $('effort-field').hidden = !takesModel;
+  const choiceProblem = takesModel && (!newOptions.models.includes($('new-model').value)
+    || !newOptions.efforts.some(effort => effort.id === $('new-effort').value));
+  const problem = providerProblem() || (newOptions?.providers.length && !provider ? 'Choose a CLI from the Mac’s list.'
+    : choiceProblem ? 'The Mac did not advertise a model and effort to use.' : '');
+  $('provider-problem').textContent = problem;
+  $('provider-problem').hidden = !problem;
+  for (const id of ['provider', 'new-model', 'new-effort', 'new-worktree', 'project-name', 'project-location']) $(id).disabled = locked;
+  for (const button of Array.from($('project-list').children || [])) {
+    button.disabled = locked || (button.dataset.more !== 'true' && Boolean(problem));
+    if (button.dataset.more !== 'true') button.setAttribute('aria-pressed', String(button.dataset.folder === projectTarget?.folder));
   }
+  $('worktree-field').hidden = !allowsWorktree();
+  $('new-worktree').checked = worktreeChoice ?? defaultWorktree();
+  $('worktree-detail').hidden = !projectTarget;
+  $('worktree-detail').textContent = allowsWorktree()
+    ? $('new-worktree').checked ? 'A fresh checkout on its own branch, as the Mac does.' : 'Start in the selected project folder.'
+    : 'The Mac applies its worktree default for this folder.';
+  $('project-start').hidden = !newOptions;
+  $('project-start').disabled = locked || !projectTarget || Boolean(problem);
+  $('project-add').hidden = !canUseSessionOps || !newOptions?.locations.length;
+  $('project-add').disabled = locked;
+  $('project-create').disabled = locked || !folderName($('project-name').value)
+    || !newOptions?.locations.some(location => location.folder === $('project-location').value);
+  $('project-back').disabled = Boolean(newFlight);
+  $('project-check').disabled = !connected || busy;
+  showNewOutcome();
+}
+function chooseProject(project) {
+  if (!connected || busy || pendingNew() || providerProblem()) return;
+  projectTarget = project;
+  worktreeChoice = null;
+  updateNewControls();
+  // Older Macs keep the existing one-tap project flow and apply their own defaults.
+  if (!newOptions) void perform(() => startProject());
+}
+async function settleNew(attempt) {
+  if (credential?.pendingNew !== attempt) return;
+  delete credential.pendingNew;
+  try { await storage('put', credential); }
+  catch {
+    credential.pendingNew = attempt;
+    throw new Error('Could not save the result. New remains blocked; inspect Sigil on your Mac.');
+  }
+}
+async function newCommand(action, text, extra = {}) {
+  if (pendingNew()) throw new Error('A previous result is still unknown. Inspect Sigil on your Mac before starting again.');
+  const attempt = { action, ...(text ? { folder: action === 'createProject' ? `${text.replace(/\/$/, '')}/${extra.name}` : text } : {}) };
+  const owner = credential;
+  const flight = newFlight = { attempt, dispatched: false };
+  owner.pendingNew = attempt;
+  updateNewControls();
+  try {
+    // A reload must not turn a lost reply into permission to create a duplicate.
+    try { await storage('put', owner); } catch { throw new Error('Could not save the pending request. Nothing was sent.'); }
+    if (credential !== owner) throw new Error('The paired Mac changed. Nothing was sent.');
+    const reply = await request(action, text, undefined, false, extra);
+    if (action === 'createProject' && projectRecord(reply.project)?.folder !== attempt.folder) {
+      throw new Error('The Mac returned an unexpected project. Check projects before trying again.');
+    }
+    await settleNew(attempt);
+    return reply;
+  } catch (error) {
+    // A verified failure or a request never sent is conclusive. Connection failures are not.
+    if (!flight.dispatched || error.verifiedReply) await settleNew(attempt);
+    throw error;
+  } finally {
+    if (newFlight === flight) newFlight = null;
+    updateNewControls();
+  }
+}
+async function startProject() {
+  if (pendingNew() || !projectTarget || providerProblem()) return;
+  if (newOptions?.providers.length && !selectedProvider()) return;
+  const extra = providerField();
+  if (selectedProvider()?.takesModel && (!newOptions.models.includes(extra.model)
+    || !newOptions.efforts.some(effort => effort.id === extra.effort))) return;
+  await newCommand('new', projectTarget.folder || undefined, extra);
+  $('project-dialog').close();
+}
+async function findProject(folder) {
+  const owner = credential, current = generation;
+  // Authoritative project pages, bounded to 400 rows. Absence is never proof of failure.
+  for (let index = 0; index < 400; index += 40) {
+    const reply = await request('projects', undefined, undefined, false, { index });
+    if (credential !== owner || generation !== current) throw new Error('The connection changed. Check projects again after reconnecting.');
+    const projects = (Array.isArray(reply.projects) ? reply.projects : []).map(projectRecord).filter(Boolean);
+    const found = projects.find(project => project.folder === folder);
+    if (found) return found;
+    if (reply.projectsTruncated !== true && projects.length < 40) break;
+    if (!projects.length) break;
+  }
+  return null;
+}
+async function reconcileProject() {
+  const attempt = pendingNew();
+  if (attempt?.action !== 'createProject') return;
+  const sheet = newSheetEpoch;
+  const project = await findProject(attempt.folder);
+  if (!project) throw new Error('That exact folder is not in the Mac’s project list. The result stays unknown; inspect the folder in Sigil on your Mac.');
+  await settleNew(attempt);
+  if (sheet !== newSheetEpoch || !$('project-dialog').open) return;
+  renderProjects([project]);
+  projectTarget = project;
+  $('new-project-form').hidden = true; $('new-choices').hidden = false;
+  updateNewControls();
+}
+function renderProjects(projects, offset = 0, truncated = false) {
+  const safe = (Array.isArray(projects) ? projects : []).slice(0, 40).map(projectRecord).filter(Boolean);
+  newProjects = offset === 0 ? safe : [...newProjects, ...safe];
   const list = $('project-list');
   const kept = offset === 0 ? [] : Array.from(list.children || []).filter(button => button.dataset.more !== 'true');
-  const buttons = safe.map(project => projectButton(project.name, project.folder, () => {
-    if (!connected || busy || providerProblem()) return;
-    const folderPath = project.folder, extra = providerField();
-    $('project-dialog').close();
-    void perform(() => request('new', folderPath, undefined, false, extra));
-  }));
+  const buttons = safe.map(project => {
+    const button = projectButton(project.name, project.folder, () => chooseProject(project));
+    button.dataset.folder = project.folder;
+    return button;
+  });
   if (safe.length > 0 && (safe.length === 40 || truncated)) {
     const next = offset + safe.length;
     const more = projectButton('More projects', 'Show the next folders', () => {
-      if (!connected || busy) return;
+      if (!connected || busy || pendingNew()) return;
       void perform(async () => {
         const reply = await request('projects', undefined, undefined, false, { index: next });
         renderProjects(reply.projects, next, reply.projectsTruncated === true);
@@ -533,16 +673,14 @@ function renderProjects(projects, offset = 0, truncated = false) {
   }
   if (offset === 0 && safe.length === 0) {
     buttons.push(projectButton('Current folder', 'The folder Sigil uses for a new session', () => {
-      if (!connected || busy || providerProblem()) return;
-      const extra = providerField();
-      $('project-dialog').close();
-      void perform(() => request('new', undefined, undefined, false, extra));
+      chooseProject({ name: 'Current folder', folder: '' });
     }));
   }
   list.replaceChildren(...kept, ...buttons);
   const empty = $('project-empty');
   if (empty) empty.hidden = list.children.length > 0;
-  showProviderProblem();
+  if (newOptions && !projectTarget) projectTarget = safe[0] || { name: 'Current folder', folder: '' };
+  updateNewControls();
   if (!$('project-dialog').open) $('project-dialog').showModal();
 }
 // The CLIs the Mac offers. A Mac from before the choice sends none, and New starts its default.
@@ -550,10 +688,18 @@ function renderProviders(options) {
   const providers = [];
   for (const provider of (Array.isArray(options?.providers) ? options.providers : []).slice(0, 20)) {
     if (!provider || typeof provider.id !== 'string' || typeof provider.name !== 'string') continue;
-    if (!provider.id || provider.id.length > 32 || !provider.name || provider.name.length > 96) continue;
+    if (!/^[a-zA-Z0-9_-]{1,32}$/.test(provider.id) || !provider.name || provider.name.length > 96 || /[\u0000-\u001F\u007F]/.test(provider.name)) continue;
     const problem = typeof provider.problem === 'string' ? provider.problem.slice(0, 300) : '';
-    providers.push({ id: provider.id, name: provider.name, problem });
+    providers.push({ id: provider.id, name: provider.name, problem, takesModel: provider.takesModel === true });
   }
+  const models = [...new Set((Array.isArray(options?.models) ? options.models : []).slice(0, 100)
+    .filter(model => typeof model === 'string' && new TextEncoder().encode(model).length <= 64 && !model.startsWith('-') && !/[\s\u0000-\u001F\u007F]/.test(model)))];
+  const efforts = (Array.isArray(options?.efforts) ? options.efforts : []).slice(0, 20)
+    .filter(effort => effort && typeof effort.id === 'string' && /^[a-zA-Z0-9_-]{0,32}$/.test(effort.id)
+      && typeof effort.name === 'string' && effort.name.length <= 96 && !/[\u0000-\u001F\u007F]/.test(effort.name));
+  const locations = (Array.isArray(options?.locations) ? options.locations : []).slice(0, 8).map(projectRecord).filter(Boolean);
+  newOptions = options && typeof options === 'object' && !Array.isArray(options) ? { providers, models, efforts, locations,
+    ...(typeof options.startsInWorktree === 'boolean' ? { startsInWorktree: options.startsInWorktree } : {}) } : null;
   providerProblems = new Map(providers.map(provider => [provider.id, provider.problem]));
   $('provider').replaceChildren(...providers.map(provider => {
     const option = document.createElement('option');
@@ -565,21 +711,28 @@ function renderProviders(options) {
   const fallback = typeof options?.provider === 'string' ? options.provider : '';
   $('provider').value = [providerChoice, fallback].find(id => providerProblems.has(id)) || providers[0]?.id || '';
   $('provider-field').hidden = providers.length === 0;
-  showProviderProblem();
+  function choices(id, values, chosen) {
+    $(id).replaceChildren(...values.map(value => {
+      const option = document.createElement('option'); option.value = value.id; option.textContent = value.name || 'CLI default'; return option;
+    }));
+    $(id).value = values.some(value => value.id === chosen) ? chosen : values[0]?.id ?? '';
+  }
+  choices('new-model', models.map(model => ({ id: model, name: model })), options?.model);
+  choices('new-effort', efforts, options?.effort);
+  choices('project-location', locations.map(location => ({ id: location.folder, name: location.name })), locations[0]?.folder);
+  updateNewControls();
 }
 function providerField() {
-  return $('provider-field').hidden || !$('provider').value ? {} : { provider: $('provider').value };
+  const provider = selectedProvider();
+  return { ...(provider ? { provider: provider.id } : {}),
+    ...(provider?.takesModel ? { model: $('new-model').value, effort: $('new-effort').value } : {}),
+    ...(allowsWorktree() ? { worktree: worktreeChoice ?? defaultWorktree() } : {}) };
 }
 function providerProblem() {
   return $('provider-field').hidden ? '' : providerProblems.get($('provider').value) || '';
 }
 function showProviderProblem() {
-  const problem = providerProblem();
-  $('provider-problem').textContent = problem;
-  $('provider-problem').hidden = !problem;
-  for (const button of Array.from($('project-list').children || [])) {
-    if (button.dataset.more !== 'true') button.disabled = Boolean(problem);
-  }
+  updateNewControls();
 }
 // Find keeps every match as text offsets and highlights only the matches in view. A mark per
 // match made each keystroke rebuild and lay out the whole history.
@@ -1084,6 +1237,7 @@ async function transmit(action, text, tabID, pairing, extra = {}) {
       ws.close();
     }, 10000);
     pending.set(seq, { resolve, reject, timer, action, tabID });
+    if (newFlight?.attempt.action === action && ['new', 'createProject'].includes(action)) newFlight.dispatched = true;
     ws.send(JSON.stringify({ data }));
   });
 }
@@ -1191,7 +1345,9 @@ function connect() {
         if (reply.challenge !== challenge) return; // A delayed reply from an earlier Mac epoch.
         if (reply.ok !== true) {
           pending.delete(reply.sequence); clearTimeout(item.timer);
-          item.reject(new Error(reply.error || 'The Mac could not complete this action.'));
+          const error = new Error(reply.error || 'The Mac could not complete this action.');
+          error.verifiedReply = true;
+          item.reject(error);
           return;
         }
         if (typeof reply.ticket === 'string' && /^[a-f0-9]{64}$/.test(reply.ticket)
@@ -1462,11 +1618,17 @@ $('compose').onsubmit = event => { event.preventDefault(); void perform(() => se
 $('paste').onclick = () => void perform(() => sendText(false));
 $('tabs').onchange = () => void perform(() => changeSession('select', undefined, $('tabs').value));
 $('new').onclick = () => void perform(async () => {
+  projectTarget = null; worktreeChoice = null;
+  const sheet = ++newSheetEpoch;
+  $('new-project-form').hidden = true; $('new-choices').hidden = false;
   let reply;
   try { reply = await request('projects'); } catch (error) {
     // A Mac without the project list starts New in its current folder.
     if (error.message !== 'Unknown action.') throw error;
-    await request('new');
+    if (pendingNew()) {
+      renderProviders(null); renderProjects([]); return;
+    }
+    await newCommand('new');
     return;
   }
   let options;
@@ -1474,11 +1636,43 @@ $('new').onclick = () => void perform(async () => {
     if (error.message !== 'Unknown action.') throw error;
   }
   renderProviders(options);
+  if (sheet !== newSheetEpoch) return;
   renderProjects(reply.projects, 0, reply.projectsTruncated === true);
 });
 $('provider').onchange = () => { providerChoice = $('provider').value; showProviderProblem(); };
+$('new-model').onchange = $('new-effort').onchange = () => updateNewControls();
+$('new-worktree').onchange = () => { worktreeChoice = $('new-worktree').checked; updateNewControls(); };
+$('project-start').onclick = () => void perform(() => startProject());
+$('project-add').onclick = () => {
+  if (!connected || busy || pendingNew() || !canUseSessionOps || !newOptions?.locations.length) return;
+  $('new-choices').hidden = true; $('new-project-form').hidden = false;
+  $('project-name').value = ''; updateNewControls(); $('project-name').focus();
+};
+$('project-back').onclick = () => {
+  if (newFlight) return;
+  $('new-project-form').hidden = true; $('new-choices').hidden = false; $('project-add').focus();
+};
+$('project-name').oninput = $('project-location').onchange = () => updateNewControls();
+$('new-project-form').onsubmit = event => {
+  event.preventDefault();
+  const name = folderName($('project-name').value), location = newOptions?.locations.find(item => item.folder === $('project-location').value);
+  if (!connected || busy || pendingNew() || !canUseSessionOps || !name || !location) return;
+  const sheet = newSheetEpoch;
+  void perform(async () => {
+    const reply = await newCommand('createProject', location.folder, { name });
+    const project = await findProject(reply.project.folder);
+    if (sheet !== newSheetEpoch || !$('project-dialog').open) return;
+    // Use authoritative repository metadata before offering a worktree for the new folder.
+    renderProjects(project ? [project, ...newProjects.filter(item => item.folder !== project.folder)] : [reply.project, ...newProjects]);
+    projectTarget = project || projectRecord(reply.project);
+    worktreeChoice = null;
+    $('new-project-form').hidden = true; $('new-choices').hidden = false; updateNewControls();
+    $('project-start').focus();
+  });
+};
+$('project-check').onclick = () => void perform(() => reconcileProject());
 $('project-cancel').onclick = () => $('project-dialog').close();
-$('project-dialog').addEventListener('close', () => { if (!$('new').disabled) $('new').focus(); });
+$('project-dialog').addEventListener('close', () => { ++newSheetEpoch; if (!$('new').disabled) $('new').focus(); });
 async function interrupt() {
   if (!connected || !selected || selectingSession) return;
   try { await request('key', 'interrupt'); }

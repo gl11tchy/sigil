@@ -42,7 +42,7 @@ async function pair(page, origin, initialOutput, options = {}) {
           ws.send(JSON.stringify({ peer, data: replayData })); return;
         }
         actions.push(request);
-        await options.onRequest?.(request);
+        if (await options.onRequest?.(request) === false) return;
         if (request.action === 'pair') key = await importKey(request.text);
         if (request.action === 'select' && options.rejectAction !== 'select') selected = request.tabID;
         if (request.action === 'new') selected = 'two';
@@ -69,9 +69,10 @@ async function pair(page, origin, initialOutput, options = {}) {
           selectedTabID: selected, terminal: outputs[selected], capabilities: options.restart ? ['restart'] : [] };
         const payload = { challenge, sequence: request.sequence, clientNonce: options.omitNonce ? undefined : request.clientNonce, ok: true, ticket, state, restartedTabID: request.action === 'restart' && options.restart ? 'restarted' : undefined, restartedSession: request.action === 'restart' && options.restart ? { provider: 'grokBuild', sessionID: 'native-one', cwd: '/tmp/one' } : undefined };
         if (projects) payload.projects = projects;
-        if (request.action === 'options' && options.providers) {
-          payload.options = { providers: options.providers, provider: options.providers[0].id, models: [], model: '', efforts: [], effort: '', locations: [] };
+        if (request.action === 'options' && (options.providers || options.sessionOptions)) {
+          payload.options = options.sessionOptions ?? { providers: options.providers, provider: options.providers[0].id, models: [], model: '', efforts: [], effort: '', locations: [] };
         }
+        if (request.action === 'createProject' && options.createProject) payload.project = options.createProject(request);
         if (chats) payload.chats = chats;
         if (earlier !== undefined) payload.earlier = earlier;
         const sealedReply = await seal(payload, key, 'mac');
@@ -1248,4 +1249,163 @@ test('an old Mac without the authenticated client nonce gets a clear upgrade err
     await expect(page.locator('#error')).toContainText('Update Sigil on your Mac');
     await expect(page.locator('#controls')).toBeHidden();
   } finally { mac.close(); }
+});
+
+const webNewOptions = {
+  providers: [{ id: 'grokBuild', name: 'Grok Build', takesModel: true }, { id: 'claudeCode', name: 'Claude Code', takesModel: false },
+    { id: 'kimi', name: 'Kimi Code', takesModel: false, problem: 'Set up Kimi Code sign-in in Sigil on your Mac, then try again.' }],
+  provider: 'grokBuild', models: ['grok-4.6', 'grok-fast'], model: 'grok-4.6',
+  efforts: [{ id: '', name: 'CLI default' }, { id: 'high', name: 'High' }], effort: 'high',
+  locations: [{ name: '~/Code', folder: '/tmp/code' }], startsInWorktree: true,
+};
+const webNewProjects = [
+  { name: 'Sigil', folder: '/tmp/code/sigil', repository: true, worktreeDefault: true },
+  { name: 'Home repository', folder: '/tmp/home', repository: true, worktreeDefault: false },
+  { name: 'Notes', folder: '/tmp/notes', repository: false },
+];
+function webNewState() {
+  return { tabs: [{ id: 'one', title: 'Synthetic task', status: 'idle', provider: 'grokBuild', sessionID: 'fixture-session', cwd: '/tmp/code/sigil' }],
+    selectedTabID: 'one', terminal: 'Synthetic output', capabilities: ['sessionOps'] };
+}
+
+test('REA-1206 New sheet sends advertised choices and shows repository defaults at phone size', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  const mac = await pair(page, baseURL, undefined, { state: webNewState(), sessionOptions: webNewOptions, projects: webNewProjects });
+  try {
+    await page.getByRole('button', { name: 'New session', exact: true }).click();
+    const dialog = page.locator('#project-dialog'); await expect(dialog).toBeVisible();
+    await expect(page.getByLabel('Model', { exact: true })).toHaveValue('grok-4.6');
+    const worktree = page.getByRole('switch', { name: 'Start in a new worktree' });
+    await expect(worktree).toBeChecked();
+    await page.screenshot({ path: testInfo.outputPath('rea-1206-new-session.png'), animations: 'disabled' });
+    await testInfo.attach('New session · 390×844', { path: testInfo.outputPath('rea-1206-new-session.png'), contentType: 'image/png' });
+    await page.getByRole('button', { name: 'Home repository /tmp/home' }).click();
+    await expect(worktree).not.toBeChecked();
+    await worktree.check();
+    await page.getByLabel('Model', { exact: true }).selectOption('grok-fast');
+    await page.getByLabel('Effort', { exact: true }).selectOption('');
+    await page.getByRole('button', { name: 'Start session', exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    expect(mac.actions.filter(request => request.action === 'new')).toMatchObject([
+      { text: '/tmp/home', provider: 'grokBuild', model: 'grok-fast', effort: '', worktree: true },
+    ]);
+    await page.getByRole('button', { name: 'New session', exact: true }).click();
+    await page.getByLabel('CLI', { exact: true }).selectOption('kimi');
+    await expect(page.getByRole('button', { name: 'Start session', exact: true })).toBeDisabled();
+    await expect(page.locator('#provider-problem')).toContainText('Set up Kimi Code');
+    await page.getByLabel('CLI', { exact: true }).selectOption('claudeCode');
+    await expect(page.getByLabel('Model', { exact: true })).not.toBeVisible();
+    await page.getByRole('button', { name: 'Notes /tmp/notes' }).click();
+    await expect(worktree).not.toBeVisible();
+    await page.getByRole('button', { name: 'Start session', exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    const last = mac.actions.filter(request => request.action === 'new').at(-1);
+    expect(last.provider).toBe('claudeCode'); expect(last.model).toBeUndefined(); expect(last.effort).toBeUndefined(); expect(last.worktree).toBeUndefined();
+    expect(errors).toEqual([]);
+  } finally { mac.close(); }
+});
+
+test('REA-1206 New project validates, adopts an existing folder and selects without starting', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const existing = { name: 'existing', folder: '/tmp/code/existing', repository: true, worktreeDefault: false };
+  const options = { state: webNewState(), sessionOptions: webNewOptions, projects: webNewProjects, createProject() { options.projects = [existing, ...webNewProjects]; return existing; } };
+  const mac = await pair(page, baseURL, undefined, options);
+  try {
+    await page.getByRole('button', { name: 'New session', exact: true }).click();
+    await page.getByRole('button', { name: 'New project', exact: true }).click();
+    await page.getByLabel('Folder name').fill('../escape');
+    await expect(page.getByRole('button', { name: 'Create project', exact: true })).toBeDisabled();
+    await page.getByLabel('Folder name').fill('existing');
+    await expect(page.getByLabel('Location', { exact: true })).toHaveValue('/tmp/code');
+    await page.screenshot({ path: testInfo.outputPath('rea-1206-new-project.png'), animations: 'disabled' });
+    await testInfo.attach('New project · 390×844', { path: testInfo.outputPath('rea-1206-new-project.png'), contentType: 'image/png' });
+    await page.getByRole('button', { name: 'Back', exact: true }).click();
+    expect(mac.actions.filter(request => request.action === 'createProject')).toHaveLength(0);
+    await page.getByRole('button', { name: 'New project', exact: true }).click();
+    await page.getByLabel('Folder name').fill(' existing ');
+    await page.getByRole('button', { name: 'Create project', exact: true }).click();
+    await expect(page.locator('#new-project-form')).not.toBeVisible();
+    await expect(page.locator('#project-list button').first()).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('switch')).not.toBeChecked();
+    expect(mac.actions.filter(request => request.action === 'createProject')).toMatchObject([{ text: '/tmp/code', name: 'existing' }]);
+    expect(mac.actions.filter(request => request.action === 'new')).toHaveLength(0);
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    expect(mac.actions.filter(request => request.action === 'new')).toHaveLength(0);
+  } finally { mac.close(); }
+});
+
+test('REA-1206 a lost start stays blocked after reconnect and reload without matching by folder or title', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  let hold = true;
+  const mac = await pair(page, baseURL, undefined, { state: webNewState(), sessionOptions: webNewOptions, projects: webNewProjects,
+    onRequest(request) { if (hold && request.action === 'new') return false; } });
+  try {
+    await page.getByRole('button', { name: 'New session', exact: true }).click();
+    await page.getByRole('button', { name: 'Start session', exact: true }).click();
+    await expect(page.locator('#new-outcome')).toContainText('Waiting for the Mac');
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.reload(); hold = false;
+    await expect(page.locator('#status')).toHaveText('Connected');
+    await page.getByRole('button', { name: 'New session', exact: true }).click();
+    await expect(page.locator('#new-outcome')).toContainText('session start result is unknown');
+    await expect(page.getByRole('button', { name: 'Start session', exact: true })).toBeDisabled();
+    await expect(page.getByLabel('CLI', { exact: true })).toBeDisabled();
+    await page.screenshot({ path: testInfo.outputPath('rea-1206-unknown-start.png'), animations: 'disabled' });
+    await testInfo.attach('Unknown start · 390×844', { path: testInfo.outputPath('rea-1206-unknown-start.png'), contentType: 'image/png' });
+    expect(mac.actions.filter(request => request.action === 'new')).toHaveLength(1);
+  } finally { mac.close(); }
+});
+
+test('REA-1206 a lost project result uses exact authoritative project pages without another create', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  let hold = true;
+  const created = { name: 'fresh', folder: '/tmp/code/fresh', repository: false };
+  const options = { state: webNewState(), sessionOptions: webNewOptions, projects: webNewProjects,
+    onRequest(request) { if (hold && request.action === 'createProject') return false; } };
+  const mac = await pair(page, baseURL, undefined, options);
+  try {
+    await page.getByRole('button', { name: 'New session', exact: true }).click();
+    await page.getByRole('button', { name: 'New project', exact: true }).click();
+    await page.getByLabel('Folder name').fill('fresh');
+    await page.getByRole('button', { name: 'Create project', exact: true }).click();
+    await expect(page.locator('#new-outcome')).toContainText('Waiting for the Mac');
+    await page.reload(); hold = false;
+    await expect(page.locator('#status')).toHaveText('Connected');
+    await page.getByRole('button', { name: 'New session', exact: true }).click();
+    options.projects = [{ ...created, folder: '/other/fresh' }];
+    await page.getByRole('button', { name: 'Check projects', exact: true }).click();
+    await expect(page.locator('#project-error')).toContainText('exact folder is not');
+    await expect(page.getByRole('button', { name: 'Start session', exact: true })).toBeDisabled();
+    options.projects = [created];
+    await page.getByRole('button', { name: 'Check projects', exact: true }).click();
+    await expect(page.locator('#new-outcome')).not.toBeVisible();
+    await expect(page.getByRole('button', { name: 'Start session', exact: true })).toBeEnabled();
+    expect(mac.actions.filter(request => request.action === 'createProject')).toHaveLength(1);
+  } finally { mac.close(); }
+});
+
+test('REA-1206 Cancel during creation does not cancel dispatch or reopen the sheet on a late reply', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const created = { name: 'fresh', folder: '/tmp/code/fresh', repository: false };
+  const options = { state: webNewState(), sessionOptions: webNewOptions, projects: webNewProjects,
+    async onRequest(request) { if (request.action === 'createProject') await gate; },
+    createProject() { options.projects = [created]; return created; } };
+  const mac = await pair(page, baseURL, undefined, options);
+  try {
+    await page.getByRole('button', { name: 'New session', exact: true }).click();
+    await page.getByRole('button', { name: 'New project', exact: true }).click();
+    await page.getByLabel('Folder name').fill('fresh');
+    await page.getByRole('button', { name: 'Create project', exact: true }).click();
+    await expect(page.locator('#new-outcome')).toContainText('Waiting for the Mac');
+    await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeDisabled();
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    release();
+    await expect(page.getByRole('button', { name: 'New session', exact: true })).toBeEnabled();
+    await expect(page.locator('#project-dialog')).not.toBeVisible();
+    expect(mac.actions.filter(request => request.action === 'createProject')).toHaveLength(1);
+    expect(mac.actions.filter(request => request.action === 'new')).toHaveLength(0);
+  } finally { release(); mac.close(); }
 });

@@ -50,12 +50,29 @@
     <p id="saved-empty" hidden>No matching chats.</p>
   </dialog>
   <dialog id="project-dialog" class="sheet" aria-labelledby="project-heading">
-    <div class="sheet-heading"><h2 id="project-heading">Choose a project</h2><button id="project-cancel" type="button">Cancel</button></div>
+    <div class="sheet-heading"><h2 id="project-heading">New session</h2><button id="project-cancel" type="button">Cancel</button></div>
     <p id="project-error" class="sheet-error" role="alert" hidden></p>
+    <p id="new-outcome" class="sheet-notice" role="status" hidden></p>
+    <button id="project-check" type="button" hidden>Check projects</button>
+    <div id="new-choices">
     <div id="provider-field" hidden><label for="provider">CLI</label><div class="provider-picker"><select id="provider" aria-describedby="provider-problem"></select><span class="chevron" aria-hidden="true"></span></div></div>
     <p id="provider-problem" hidden></p>
+    <div id="model-field" class="new-field" hidden><label for="new-model">Model</label><select id="new-model"></select></div>
+    <div id="effort-field" class="new-field" hidden><label for="new-effort">Effort</label><select id="new-effort"></select></div>
+    <button id="project-add" type="button" hidden>New project</button>
     <div id="project-list"></div>
     <p id="project-empty" hidden>No projects yet.</p>
+    <label id="worktree-field" class="worktree-row" hidden><span>Start in a new worktree</span><input id="new-worktree" type="checkbox" role="switch"></label>
+    <p id="worktree-detail" class="sheet-notice" hidden></p>
+    <button id="project-start" class="primary" type="button" hidden>Start session</button>
+    </div>
+    <form id="new-project-form" hidden>
+      <div class="sheet-heading"><h3>New project</h3><button id="project-back" type="button">Back</button></div>
+      <label for="project-name">Folder name</label><input id="project-name" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="project-name-help">
+      <p id="project-name-help" class="sheet-notice">Use a name without slashes, colons or a leading dot.</p>
+      <label for="project-location">Location</label><select id="project-location"></select>
+      <button id="project-create" class="primary" type="submit">Create project</button>
+    </form>
   </dialog>
   <dialog id="replace-dialog" class="confirm" aria-labelledby="replace-heading" aria-describedby="replace-detail">
     <form method="dialog">
