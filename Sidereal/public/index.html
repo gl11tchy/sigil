@@ -57,8 +57,8 @@
     <div id="new-choices">
     <div id="provider-field" hidden><label for="provider">CLI</label><div class="provider-picker"><select id="provider" aria-describedby="provider-problem"></select><span class="chevron" aria-hidden="true"></span></div></div>
     <p id="provider-problem" hidden></p>
-    <div id="model-field" class="new-field" hidden><label for="new-model">Model</label><select id="new-model"></select></div>
-    <div id="effort-field" class="new-field" hidden><label for="new-effort">Effort</label><select id="new-effort"></select></div>
+    <div id="model-field" class="new-field" hidden><label for="new-model">Model</label><div class="provider-picker"><select id="new-model"></select><span class="chevron" aria-hidden="true"></span></div></div>
+    <div id="effort-field" class="new-field" hidden><label for="new-effort">Effort</label><div class="provider-picker"><select id="new-effort"></select><span class="chevron" aria-hidden="true"></span></div></div>
     <button id="project-add" type="button" hidden>New project</button>
     <div id="project-list"></div>
     <p id="project-empty" hidden>No projects yet.</p>
@@ -70,7 +70,7 @@
       <div class="sheet-heading"><h3>New project</h3><button id="project-back" type="button">Back</button></div>
       <label for="project-name">Folder name</label><input id="project-name" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="project-name-help">
       <p id="project-name-help" class="sheet-notice">Use a name without slashes, colons or a leading dot.</p>
-      <label for="project-location">Location</label><select id="project-location"></select>
+      <label for="project-location">Location</label><div class="provider-picker"><select id="project-location"></select><span class="chevron" aria-hidden="true"></span></div>
       <button id="project-create" class="primary" type="submit">Create project</button>
     </form>
   </dialog>

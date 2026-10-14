@@ -1597,3 +1597,15 @@ test('REA-1206 a failed result write cannot attach the old Mac attempt to a repl
   await settle();
   assert.equal(page.app.pendingNew(), null);
 });
+
+test('REA-1206 preparation is not described as a sent request while persistence is pending', async () => {
+  const faults = { pending: [] }, page = await browser({ faults }), socket = await page.authorize();
+  await openNewSheet(page, socket); faults.holdCompletion = true;
+  page.element('project-start').onclick(); await settle();
+  assert.match(page.element('new-outcome').textContent, /Preparing/);
+  assert.equal(socket.sent.filter(request => request.action === 'new').length, 0);
+  faults.holdCompletion = false; faults.pending[0].oncomplete(); await settle();
+  assert.match(page.element('new-outcome').textContent, /Waiting for the Mac/);
+  assert.equal(socket.sent.filter(request => request.action === 'new').length, 1);
+  await newReply(socket);
+});

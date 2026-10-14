@@ -1105,8 +1105,8 @@ authenticated project record can reconcile folder adoption; a lost session start
 has no authoritative outcome receipt in this protocol and remains blocked with
 Mac recovery guidance. Closing a sheet does not cancel a dispatched action.
 
-The baseline's two New tests passed. Focused synthetic Node checks passed (152
-tests, including replacement-pairing storage failure); local Playwright was blocked at server bind (`EPERM`, port 3099), without
+The baseline's two New tests passed. Focused synthetic Node checks passed (153
+tests, including replacement-pairing storage failure and pending preparation); local Playwright was blocked at server bind (`EPERM`, port 3099), without
 retry or permission expansion. Local Chromium/WebKit screenshots remain unverified. Following direct owner
 approval on October 14, one commit/status retry succeeded; ordinary exact-head
 PR CI will supply browser screenshots and the integrated native checks. Scope, bounded
@@ -1115,3 +1115,12 @@ backend protocol, cleanup, installed bundle or earlier manual-review record was
 changed. The prior approval hold and original patch/test evidence are preserved. No
 Linear comment was written or retried; only the explicitly approved existing
 record status changed.
+
+
+REA-1206's first completed browser gate passed 233 cases with two skips and one
+Chromium lost-project reload failure. Its six phone-size screenshots exposed a
+WebKit select-height mismatch. The focused repair distinguishes preparation from
+dispatch, waits for actual synthetic receipt before testing lost replies, and
+reuses the CLI picker with 44px geometry assertions. Exact-head CI after that
+repair remains the acceptance gate; no native success was claimed from the
+browser-failed run.

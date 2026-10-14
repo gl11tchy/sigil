@@ -1276,6 +1276,8 @@ test('REA-1206 New sheet sends advertised choices and shows repository defaults 
     await page.getByRole('button', { name: 'New session', exact: true }).click();
     const dialog = page.locator('#project-dialog'); await expect(dialog).toBeVisible();
     await expect(page.getByLabel('Model', { exact: true })).toHaveValue('grok-4.6');
+    for (const label of ['Model', 'Effort']) expect((await page.getByLabel(label, { exact: true }).boundingBox()).height).toBeGreaterThanOrEqual(44);
+    expect((await page.locator('#worktree-field').boundingBox()).height).toBeGreaterThanOrEqual(44);
     const worktree = page.getByRole('switch', { name: 'Start in a new worktree' });
     await expect(worktree).toBeChecked();
     await page.screenshot({ path: testInfo.outputPath('rea-1206-new-session.png'), animations: 'disabled' });
@@ -1318,6 +1320,7 @@ test('REA-1206 New project validates, adopts an existing folder and selects with
     await expect(page.getByRole('button', { name: 'Create project', exact: true })).toBeDisabled();
     await page.getByLabel('Folder name').fill('existing');
     await expect(page.getByLabel('Location', { exact: true })).toHaveValue('/tmp/code');
+    expect((await page.getByLabel('Location', { exact: true }).boundingBox()).height).toBeGreaterThanOrEqual(44);
     await page.screenshot({ path: testInfo.outputPath('rea-1206-new-project.png'), animations: 'disabled' });
     await testInfo.attach('New project · 390×844', { path: testInfo.outputPath('rea-1206-new-project.png'), contentType: 'image/png' });
     await page.getByRole('button', { name: 'Back', exact: true }).click();
@@ -1344,6 +1347,7 @@ test('REA-1206 a lost start stays blocked after reconnect and reload without mat
     await page.getByRole('button', { name: 'New session', exact: true }).click();
     await page.getByRole('button', { name: 'Start session', exact: true }).click();
     await expect(page.locator('#new-outcome')).toContainText('Waiting for the Mac');
+    await expect.poll(() => mac.actions.filter(request => request.action === 'new').length).toBe(1);
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.reload(); hold = false;
     await expect(page.locator('#status')).toHaveText('Connected');
@@ -1370,6 +1374,7 @@ test('REA-1206 a lost project result uses exact authoritative project pages with
     await page.getByLabel('Folder name').fill('fresh');
     await page.getByRole('button', { name: 'Create project', exact: true }).click();
     await expect(page.locator('#new-outcome')).toContainText('Waiting for the Mac');
+    await expect.poll(() => mac.actions.filter(request => request.action === 'createProject').length).toBe(1);
     await page.reload(); hold = false;
     await expect(page.locator('#status')).toHaveText('Connected');
     await page.getByRole('button', { name: 'New session', exact: true }).click();

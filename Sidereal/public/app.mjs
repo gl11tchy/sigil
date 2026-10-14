@@ -532,7 +532,8 @@ function showNewOutcome() {
   const attempt = pendingNew();
   const notice = $('new-outcome');
   notice.hidden = !attempt;
-  notice.textContent = !attempt ? '' : newFlight ? 'Waiting for the Mac. Closing this sheet will not cancel the request.'
+  notice.textContent = !attempt ? '' : newFlight ? newFlight.dispatched
+    ? 'Waiting for the Mac. Closing this sheet will not cancel the request.' : 'Preparing the request. Closing this sheet will not cancel it.'
     : attempt.action === 'createProject'
       ? `The project result is unknown: ${attempt.folder}. Check projects to look for that exact folder. New creation and session starts stay blocked until it is found.`
       : `The session start result is unknown${attempt.folder ? ` for ${attempt.folder}` : ''}. Open Sigil on your Mac and inspect its tabs and worktrees. Start sessions there while this result is unresolved; this phone will not retry it.`;
@@ -1238,8 +1239,10 @@ async function transmit(action, text, tabID, pairing, extra = {}) {
       ws.close();
     }, 10000);
     pending.set(seq, { resolve, reject, timer, action, tabID });
-    if (newFlight?.attempt.action === action && ['new', 'createProject'].includes(action)) newFlight.dispatched = true;
+    const flight = newFlight?.attempt.action === action && ['new', 'createProject'].includes(action) ? newFlight : null;
+    if (flight) flight.dispatched = true;
     ws.send(JSON.stringify({ data }));
+    if (flight) updateNewControls();
   });
 }
 function poll() {
