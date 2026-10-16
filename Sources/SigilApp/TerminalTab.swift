@@ -65,6 +65,16 @@ final class TerminalTab: Identifiable {
         }
     }
     var isWatchingForCompletion: Bool { completionWatchTask != nil }
+    /// Power policy input only; it does not change the displayed lifecycle.
+    private(set) var lifecycleWorkRevision: UInt64?
+
+    var idleSleepWorkingTab: RemoteIdleSleep.WorkingTab? {
+        guard controller.isRunning, capabilities.lifecycle,
+            activity == .starting || activity == .working,
+            let generation = completionWatchGeneration, let revision = lifecycleWorkRevision
+        else { return nil }
+        return .init(id: id, generation: generation, revision: revision)
+    }
 
     init(
         id: UUID = UUID(),
@@ -322,6 +332,10 @@ final class TerminalTab: Identifiable {
                     }
                 }
                 guard !Task.isCancelled, self.completionWatchGeneration == generation else { return }
+                let workRevision = journal.validatedWorkRevision
+                if self.lifecycleWorkRevision != workRevision {
+                    self.lifecycleWorkRevision = workRevision
+                }
                 if !journal.canObserve {
                     self.hasObservableLifecycle = false
                     self.completionWatchTask = nil
@@ -343,6 +357,7 @@ final class TerminalTab: Identifiable {
     }
 
     private func stopTurnTracking() {
+        lifecycleWorkRevision = nil
         completionWatchTask?.cancel()
         completionWatchTask = nil
         completionWatchGeneration = nil

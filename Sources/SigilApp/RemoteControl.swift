@@ -70,7 +70,11 @@ final class RemoteControl {
     /// Changes are batched this long, so a burst of output is one frame.
     static let changeDelay: Duration = .milliseconds(80)
     /// The phone's push token, kept with the pairing and re-sent to the relay on every connect.
-    @ObservationIgnored private var push: (token: String, environment: String)?
+    private var push: (token: String, environment: String)?
+
+    /// Registration survives ordinary relay reconnects. Observation includes
+    /// token changes even while status/enabled/pairing stay unchanged.
+    var alertsArmed: Bool { isEnabled && isPaired && push != nil }
     /// Live Activity push tokens by tab id, for as long as the phone keeps one running.
     private struct ActivityRegistration {
         let token: String

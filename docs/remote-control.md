@@ -6,6 +6,39 @@ Pair a phone from Sigil Settings and control this Mac using the Sidereal PWA.
 The default is internet access through an HTTPS/WebSocket relay, not an exposed
 Mac listening port. Sigil must stay open and the Mac must stay awake.
 
+### Staying awake for phone alerts
+
+Sigil owns one `PreventUserIdleSystemSleep` request while an authenticated phone
+is connected, or while remote control is enabled, a paired phone has registered
+an alert token and at least one running tab has current validated lifecycle work.
+A Starting/Working label or the provider's nominal capability is insufficient:
+the owned journal must have a readable current file and a supported work event
+with matching session and turn identity. Grok and Codex can supply that evidence;
+Claude Code, Devin, Cursor and Kimi currently cannot. Missing or lost journal
+observation, interruption, disconnection, failure, process exit, all-idle tabs or
+turning alerts off release the work request. A connected phone independently
+keeps the same single request, including while its tabs are idle.
+
+For away work, each tab has a two-hour window from its last newly validated
+lifecycle progress, measured with a continuous monotonic clock that includes
+time asleep. Quiet reads, terminal output, alert-token refresh and ordinary
+relay reconnects do not renew it. The timer releases the power request when all
+eligible windows expire; it does not change Working to Idle, mark anything
+finished or send a completion alert. A quiet task can still be working after the
+request expires. A later validated progress event can renew the request.
+
+Only this instance's successful assertion ID is released. Other Sigil copies and
+other apps keep their own requests. Failed creation is retried after 30 seconds;
+a failed release retains ownership and live watches retry the same ID, preventing
+a duplicate assertion. App termination explicitly releases its request; macOS
+also owns process-exit cleanup. No Battery/Energy settings are changed.
+
+The request leaves the display free to sleep. Closing the lid, choosing Sleep,
+low battery and thermal sleep remain controlled by macOS; phone alerts cannot
+promise delivery through those conditions. See [Apple's sleep guidance](https://developer.apple.com/library/archive/qa/qa1340/_index.html).
+The Phone Settings footer explains the work limit and explicit sleep/lid behavior.
+
+
 The companion can list and select open tabs, read bounded terminal text, send
 text, keys, and phone photos/files, and create a session in the current folder.
 Phone files are written into the local drop cache and pasted as paths. It does not

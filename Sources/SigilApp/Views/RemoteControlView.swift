@@ -14,7 +14,11 @@ struct RemoteControlView: View {
         SettingsPage {
             SettingsSection(
                 title: "Phone",
-                footer: "Scan once to pair. Disconnect revokes your phone’s access."
+                footer: "Scan once to pair. Disconnect revokes your phone’s access. "
+                    + "Sigil asks macOS to stay awake while your phone is connected "
+                    + "or a verified task works with alerts on. "
+                    + "After two hours without verified task progress, the work request ends. "
+                    + "Closing the lid or choosing Sleep can still put the Mac to sleep."
             ) {
                 HStack(spacing: 10) {
                     Image(systemName: "iphone")

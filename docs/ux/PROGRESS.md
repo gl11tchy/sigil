@@ -1192,3 +1192,40 @@ and encrypted watch cases are added; repaired-head normal CI is pending. No loca
 native command, process enumeration, denied retry, personal agent data, model
 switch, extra worker, power measurement, deployment, merge or app replacement.
 Installed build364 and held PR162 remain untouched. See [QA evidence](../qa/rea-1217.md).
+
+
+## REA-1215 — remote idle-sleep ownership (2026-10-14)
+
+Started from main `671f7a4` in one isolated worktree. PR179 baseline `7f83fb5`
+uses a generated current-turn journal, fake child/throwaway CLI home and an
+in-memory saved alert registration while the phone is away; CI38535865150 is
+red at fixture setup (unknown provider availability), before the intended
+power expectation. The corrected fake availability and full repair are local
+only. Only watcher injection changed the baseline production source.
+
+Repair uses separate effective validated-work revisions, observable alert arming,
+one process-owned assertion and an injected monotonic power-policy deadline.
+Quiet polls and relay reconnects cannot renew it or imply completion. Current
+journal/lease loss removes only power eligibility. A failed release preserves
+ownership for retry, and independent Sigil copies never release each other's ID.
+New CI fixtures cover the policy table, missing journal, quiet long turns/timer,
+consumer transitions, independent copies, interruption/disconnection, assertion
+failures and encrypted registration observation. UI change is explanatory copy
+only. Native tests/build/formatting remain CI-only; manual Grok/pmset acceptance
+is unverified. No merge or app replacement before parent personal review.
+See [QA record](../qa/rea-1215.md).
+
+REA-1215 approval record: exact remote/private ADMIN/push checks resolved the
+initial trust rejection. Parent supplied the owner's standing next-ticket
+instruction after the scope-authorization denial; the same denied call was
+retried once with this evidence and allowed. Corrected baseline `0c34b9b` is
+submitted on PR179. Preserve the original fixture setup failure; corrected
+behavior reproduction remains pending. No denial bypass or local native retry.
+
+REA-1215 corrected baseline verified: CI38539738876 at `0c34b9b` recorded exactly
+the intended missing-assertion issue (created[] instead of one), after all
+current-turn/paired-alert/fake-child setup checks passed. Actual checkout
+`f582a8fb` has expected parents and head-tree parity. 1327Swift tests/113suites,
+one intended issue;37XCTest,248relay,58site,236browser/two skips passed. Later
+native checks skipped after the expected failure. Full repair is now ready for
+its exact-head CI; no local native execution or manual pmset claim.
