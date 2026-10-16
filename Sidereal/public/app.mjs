@@ -44,6 +44,8 @@ let selectedStatus = null, selectedRunning, selectedCapabilities, currentPrompt 
 let connected = false, busy = false, selectingSession = false, stopped = false, revoked = false, unsaved = false, reconnectTimer, pollTimer, connectTimer, generation = 0;
 let commandEpoch = 0, queuedCommands = 0, reconnectDelay = 500;
 let incoming = Promise.resolve(), outgoing = Promise.resolve(), pending = new Map();
+const RETURN_RECONNECT_AFTER = 30_000;
+let hiddenAt = document.hidden ? Date.now() : null, pageEpoch = 0, refreshing = false, refreshFlight = null;
 // A modal sheet makes the page inert, so its errors show inside the sheet.
 const sheetErrors = { 'sessions-dialog': 'sessions-error', 'project-dialog': 'project-error' };
 const showError = text => {
@@ -98,7 +100,7 @@ async function storage(mode, value) {
   } finally { db.close(); }
 }
 function updateControls() {
-  const disabled = !connected || busy;
+  const disabled = !connected || busy || refreshing;
   const ended = selectedRunning === false || selectedStatus === 'exited';
   document.querySelectorAll('#controls button, #controls textarea, #session-toolbar button, #session-toolbar select').forEach(element => {
     // Never disable a focused editor while a command is pending: it closes the phone keyboard.
@@ -108,7 +110,7 @@ function updateControls() {
     if (element.id === 'new') { element.disabled = disabled; return; }
     if (element.id === 'tabs') { element.disabled = disabled || tabCount === 0; return; }
     if (element.id === 'stop' || element.id === 'interrupt') {
-      element.disabled = !connected || !selected || ended || Boolean(selectingSession); return;
+      element.disabled = !connected || refreshing || !selected || ended || Boolean(selectingSession); return;
     }
     // Keys queue behind each other, but never land between a send's files and its Enter.
     if (element.dataset.key) { element.disabled = disabled || !selected || ended; return; }
@@ -119,11 +121,11 @@ function updateControls() {
   $('restart').hidden = !ended || !canRestart || selectedCapabilities?.resume === false;
   $('copy-output').hidden = !selected;
   $('sessions-toggle').hidden = !connected;
-  $('session-status').textContent = !connected ? 'Reconnecting…' : (STATUS_LABELS[selectedStatus] || 'No session');
-  $('session-status').dataset.state = connected ? selectedStatus || '' : 'offline';
-  if (document.body) document.body.dataset.connected = String(connected && !$('controls').hidden);
+  $('session-status').textContent = refreshing ? 'Refreshing…' : !connected ? 'Reconnecting…' : (STATUS_LABELS[selectedStatus] || 'No session');
+  $('session-status').dataset.state = refreshing ? 'refreshing' : connected ? selectedStatus || '' : 'offline';
+  if (document.body) document.body.dataset.connected = String(connected && !refreshing && !$('controls').hidden);
   // An ended session already says so in the bar above, and Send is off.
-  const composeStatus = selectingSession ? 'Switching…' : busy ? 'Sending…' : !connected && selected ? 'Offline · draft kept' : '';
+  const composeStatus = selectingSession ? 'Switching…' : busy ? 'Sending…' : refreshing ? 'Refreshing…' : !connected && selected ? 'Offline · draft kept' : '';
   $('compose-status').textContent = composeStatus;
   // The row under the composer only exists when it has something to say: a
   // status on the phone, or the send shortcut where a hardware keyboard is likely.
@@ -141,6 +143,9 @@ function updateControls() {
   $('welcome').querySelector('h2').textContent = revoked && credential ? 'Pair again' : credential ? 'Reconnecting to your Mac' : 'Pick up where you left off.';
   $('welcome').querySelector('p').textContent = waiting ? 'Keep Sigil open and your Mac awake.' : 'Your sessions. Your tools. Away from your desk.';
   $('welcome').querySelector('.pairing-steps').hidden = waiting;
+  for (const id of ['session-list', 'saved-list']) {
+    for (const button of Array.from($(id).children || [])) button.disabled = disabled;
+  }
   const standalone = isStandaloneApp();
   for (const id of ['standalone-hint', 'standalone-panel-hint']) {
     const hint = $(id);
@@ -163,6 +168,7 @@ function offline(message = 'Disconnected') {
   if (selectingSession) $('tabs').value = selected || '';
   selectingSession = false;
   connected = false;
+  refreshing = false; refreshFlight = null;
   commandEpoch++;
   $('status').textContent = $('status-live').textContent = message;
   $('status').dataset.connected = 'false';
@@ -442,6 +448,7 @@ function renderSessionList() {
   $('session-list').replaceChildren(...matches.map(tab => {
     const button = document.createElement('button');
     button.type = 'button';
+    button.disabled = !connected || busy || refreshing;
     button.setAttribute('aria-current', String(tab.id === selected));
     button.dataset.tabId = tab.id;
     if (tab.id === focusedID) nextFocus = button;
@@ -451,7 +458,7 @@ function renderSessionList() {
     status.textContent = STATUS_LABELS[tab.status] ?? 'Status unknown';
     button.append(title, status);
     button.onclick = () => {
-      if (!connected || busy) return;
+      if (!connected || busy || refreshing) return;
       void perform(async () => {
         if (!await changeSession('select', undefined, tab.id)) return;
         if ($('sessions-dialog').open) { $('sessions-dialog').close(); $('sessions-toggle').focus(); }
@@ -504,13 +511,14 @@ function renderSaved(chats, options = {}) {
   $('saved-list').replaceChildren(...safe.map(chat => {
     const button = document.createElement('button');
     button.type = 'button';
+    button.disabled = !connected || busy || refreshing;
     const title = document.createElement('span');
     title.textContent = chat.title;
     const folder = document.createElement('small');
     folder.textContent = chat.folder;
     button.append(title, folder);
     button.onclick = () => {
-      if (!connected || busy) return;
+      if (!connected || busy || refreshing) return;
       const id = chat.id, folderPath = chat.folder;
       void perform(async () => {
         if (!await changeSession('open', folderPath, undefined, { name: id, ...(chat.provider ? { provider: chat.provider } : {}) })) return;
@@ -578,7 +586,7 @@ function showNewOutcome() {
   $('project-check').hidden = !attempt || attempt.action !== 'createProject' || Boolean(newFlight);
 }
 function updateNewControls() {
-  const locked = !connected || busy || Boolean(pendingNew());
+  const locked = !connected || busy || refreshing || Boolean(pendingNew());
   const provider = selectedProvider();
   const takesModel = provider?.takesModel === true;
   $('model-field').hidden = $('effort-field').hidden = !takesModel;
@@ -606,11 +614,11 @@ function updateNewControls() {
   $('project-create').disabled = locked || !folderName($('project-name').value)
     || !newOptions?.locations.some(location => location.folder === $('project-location').value);
   $('project-back').disabled = Boolean(newFlight);
-  $('project-check').disabled = !connected || busy;
+  $('project-check').disabled = !connected || busy || refreshing;
   showNewOutcome();
 }
 function chooseProject(project) {
-  if (!connected || busy || pendingNew() || providerProblem()) return;
+  if (!connected || busy || refreshing || pendingNew() || providerProblem()) return;
   projectTarget = project;
   worktreeChoice = null;
   updateNewControls();
@@ -707,7 +715,7 @@ function renderProjects(projects, offset = 0, truncated = false) {
   if (safe.length > 0 && (safe.length === 40 || truncated)) {
     const next = offset + safe.length;
     const more = projectButton('More projects', 'Show the next folders', () => {
-      if (!connected || busy || pendingNew()) return;
+      if (!connected || busy || refreshing || pendingNew()) return;
       void perform(async () => {
         const reply = await request('projects', undefined, undefined, false, { index: next });
         renderProjects(reply.projects, next, reply.projectsTruncated === true);
@@ -1234,9 +1242,9 @@ $('connection').addEventListener('toggle', () => { if ($('connection').open) $('
 let waitingSearch = null;
 // A cleared box or a closed sheet ends the query; skip it at its turn.
 function dropWaitingSearch() { if (waitingSearch) waitingSearch.stale = true; waitingSearch = null; }
-function request(action, text, tabID = selected, pairing = false, extra = {}) {
+function request(action, text, tabID = selected, pairing = false, extra = {}, returnRefresh) {
   if (!connected && !pairing && action !== 'state') return Promise.reject(new Error('Not connected.'));
-  if (action !== 'chats') return enqueue(() => transmit(action, text, tabID, pairing, extra));
+  if (action !== 'chats') return enqueue(() => transmit(action, text, tabID, pairing, extra, returnRefresh));
   // Typing can outrun the Mac. Last in line, the waiting search takes the newest query;
   // behind a later command it is skipped at its turn. Its callers see a stale token.
   const waiting = waitingSearch;
@@ -1269,7 +1277,8 @@ async function enqueue(send) {
     return await send();
   } finally { queuedCommands--; release(); }
 }
-async function transmit(action, text, tabID, pairing, extra = {}) {
+async function transmit(action, text, tabID, pairing, extra = {}, returnRefresh) {
+  if (returnRefresh && !currentReturnRefresh(returnRefresh)) return { stale: true };
   if (!socket || socket.readyState !== WebSocket.OPEN || !challenge || (!connected && !pairing && action !== 'state')) throw new Error('Not connected.');
   const ws = socket, current = generation, epoch = commandEpoch, seq = ++sequence;
   const message = { challenge, clientNonce, sequence: seq, action, ...(tabID ? { tabID } : {}), ...(text !== undefined ? { text } : {}), ...extra };
@@ -1283,7 +1292,8 @@ async function transmit(action, text, tabID, pairing, extra = {}) {
       commandEpoch++;
       ws.close();
     }, 10000);
-    pending.set(seq, { resolve, reject, timer, action, tabID });
+    // The view token stays local; it is never part of the authenticated wire message.
+    pending.set(seq, { resolve, reject, timer, action, tabID, returnRefresh });
     const flight = newFlight?.attempt.action === action && ['new', 'createProject'].includes(action) ? newFlight : null;
     if (flight) flight.dispatched = true;
     ws.send(JSON.stringify({ data }));
@@ -1292,18 +1302,20 @@ async function transmit(action, text, tabID, pairing, extra = {}) {
 }
 function poll() {
   clearTimeout(pollTimer);
+  if (!connected || document.hidden || refreshing) return;
   pollTimer = setTimeout(async () => {
     if (!connected || document.hidden) return;
     if (!busy) { try { await request('state'); } catch (error) { showError(error.message); } }
     if (connected) poll();
   }, 1000);
 }
-function connect() {
+function connect(isReturning = false) {
   clearTimeout(reconnectTimer);
   if (!credential || stopped) return;
   const current = ++generation;
   socket?.close();
-  offline('Connecting…');
+  const connectingMessage = isReturning ? 'Refreshing…' : 'Connecting…';
+  offline(connectingMessage);
   challenge = null; sequence = 0;
   const url = new URL('/connect', location.origin);
   url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -1332,7 +1344,7 @@ function connect() {
         ws.send(JSON.stringify({ route }));
       } else if (typeof frame.hello === 'string' && /^[a-f0-9]{64}$/.test(frame.hello)) {
         if (challenge === frame.hello) return;
-        offline('Connecting…');
+        offline(connectingMessage);
         for (const item of pending.values()) {
           clearTimeout(item.timer);
           item.reject(new Error('Connection changed. Check the terminal before sending again.'));
@@ -1344,8 +1356,12 @@ function connect() {
         freshHandshake = true;
         const authorizationEpoch = commandEpoch;
         const authorization = bootstrap ? request('pair', newDeviceKey, undefined, true) : request('state');
-        authorization.then(() => {
+        authorization.then(reply => {
           if (current !== generation || authorizationEpoch !== commandEpoch) return;
+          if (!reply.state) {
+            const error = new Error('The Mac did not return a fresh state.');
+            error.missingState = true; throw error;
+          }
           bootstrap = null; newDeviceKey = null;
           if (replacingMemory) {
             for (const list of replacingMemory.attachments.values()) for (const item of list) if (item.preview) URL.revokeObjectURL(item.preview);
@@ -1369,6 +1385,7 @@ function connect() {
             connect();
           }
           showError(error.message);
+          if (error.missingState) ws.close();
         });
       } else if (frame.error === 'unauthorized') {
         // A dropped pairing acknowledgement can leave the Mac already using the device key.
@@ -1406,6 +1423,10 @@ function connect() {
         }
         if (current !== generation || reply.clientNonce !== clientNonce || reply.challenge !== challenge
           || socket !== ws || ws.readyState !== WebSocket.OPEN) return;
+        if (item.returnRefresh && !currentReturnRefresh(item.returnRefresh)) {
+          pending.delete(reply.sequence); clearTimeout(item.timer);
+          item.resolve({ stale: true }); return;
+        }
         if (item.action === 'earlier') pendingEarlier = {
           tabID: item.tabID, slice: typeof reply.earlier === 'string' ? reply.earlier : '',
         };
@@ -1426,6 +1447,7 @@ function connect() {
             }
           }
           render(reply.state);
+          if (item.returnRefresh) item.returnRefresh.appliedTabID = selected;
           if (movedRestart) drafts.delete(item.tabID);
         }
         pending.delete(reply.sequence); clearTimeout(item.timer);
@@ -1466,12 +1488,16 @@ async function changeSession(action, text, tabID, extra = {}) {
   }
 }
 async function perform(work) {
-  if (!connected || busy) return;
+  if (!connected || busy || refreshing) return;
   const current = generation, epoch = commandEpoch;
   busy = true; updateControls(); showError('');
   try { await work(); }
   catch (error) { showError(error.message); $('tabs').value = selected || ''; }
-  finally { if (generation === current && commandEpoch === epoch) { busy = false; updateControls(); } }
+  finally {
+    if (generation === current && commandEpoch === epoch) {
+      busy = false; updateControls(); refreshReturnedState();
+    }
+  }
 }
 function isImageFile(file) {
   return (file.type || '').startsWith('image/') || /\.(png|jpe?g|gif|webp|heic|heif|bmp|tiff?)$/i.test(file.name || '');
@@ -1639,7 +1665,7 @@ $('raw-toggle').onclick = () => {
 $('message').oninput = () => { resizeMessage(); updateControls(); };
 function maybeLoadEarlier() {
   const terminal = $('terminal');
-  if (!connected || !selected || earlierFlight) return;
+  if (!connected || refreshing || !selected || earlierFlight) return;
   const bucket = historyFor(selected);
   if (bucket.exhausted || terminal.scrollHeight <= terminal.clientHeight || terminal.scrollTop > 48) return;
   const loaded = bucket.history + bucket.tail;
@@ -1694,7 +1720,7 @@ $('new-model').onchange = $('new-effort').onchange = () => updateNewControls();
 $('new-worktree').onchange = () => { worktreeChoice = $('new-worktree').checked; updateNewControls(); };
 $('project-start').onclick = () => void perform(() => startProject());
 $('project-add').onclick = () => {
-  if (!connected || busy || pendingNew() || !canUseSessionOps || !newOptions?.locations.length) return;
+  if (!connected || busy || refreshing || pendingNew() || !canUseSessionOps || !newOptions?.locations.length) return;
   $('new-choices').hidden = true; $('new-project-form').hidden = false;
   $('project-name').value = ''; updateNewControls(); $('project-name').focus();
 };
@@ -1706,7 +1732,7 @@ $('project-name').oninput = $('project-location').onchange = () => updateNewCont
 $('new-project-form').onsubmit = event => {
   event.preventDefault();
   const name = folderName($('project-name').value), location = newOptions?.locations.find(item => item.folder === $('project-location').value);
-  if (!connected || busy || pendingNew() || !canUseSessionOps || !name || !location) return;
+  if (!connected || busy || refreshing || pendingNew() || !canUseSessionOps || !name || !location) return;
   const sheet = newSheetEpoch;
   void perform(async () => {
     const reply = await newCommand('createProject', location.folder, { name });
@@ -1725,7 +1751,7 @@ $('project-check').onclick = () => void perform(() => reconcileProject());
 $('project-cancel').onclick = () => $('project-dialog').close();
 $('project-dialog').addEventListener('close', () => { ++newSheetEpoch; if (!$('new').disabled) $('new').focus(); });
 async function interrupt() {
-  if (!connected || !selected || selectingSession) return;
+  if (!connected || refreshing || !selected || selectingSession) return;
   try { await request('key', 'interrupt'); }
   catch (error) { showError(error.message); }
 }
@@ -1757,7 +1783,9 @@ $('message').addEventListener('keydown', event => {
   void perform(() => sendText(true));
 });
 // request() already sends in order, so a quick tap is queued instead of dropped.
-document.querySelectorAll('[data-key]').forEach(button => { button.onclick = () => request('key', button.dataset.key).catch(error => showError(error.message)); });
+document.querySelectorAll('[data-key]').forEach(button => { button.onclick = () => {
+  if (!refreshing) void request('key', button.dataset.key).catch(error => showError(error.message));
+}; });
 $('reconnect').onclick = $('welcome-reconnect').onclick = () => { stopped = false; revoked = false; reconnectDelay = 500; connect(); };
 // Forgetting cannot be undone from the phone, so it asks first.
 $('forget').onclick = () => {
@@ -1937,14 +1965,56 @@ document.addEventListener('pointerdown', event => {
   const details = $('connection');
   if (details.open && !details.contains(event.target)) details.open = false;
 });
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    clearTimeout(pollTimer);
-    if ($('scanner') && !$('scanner').hidden) stopScan();
+function pausePage() {
+  // visibilitychange and pagehide describe the same hidden interval.
+  if (hiddenAt === null) { hiddenAt = Date.now(); pageEpoch++; }
+  clearTimeout(pollTimer);
+  if ($('scanner') && !$('scanner').hidden) stopScan();
+}
+function currentReturnRefresh(flight, tabID = flight.tabID) {
+  return refreshFlight === flight && refreshing && connected && !document.hidden && !stopped && !revoked
+    && flight.generation === generation && flight.epoch === commandEpoch && flight.socket === socket
+    && flight.pageEpoch === pageEpoch && tabID === selected;
+}
+function refreshReturnedState() {
+  if (!refreshing || refreshFlight || busy || document.hidden || !connected || stopped || revoked) return;
+  const flight = refreshFlight = { socket, generation, epoch: commandEpoch, pageEpoch, tabID: selected };
+  void request('state', undefined, selected, false, {}, flight).then(reply => {
+    if (reply.stale) return;
+    if (!reply.state) {
+      if (currentReturnRefresh(flight)) throw new Error('The Mac did not return a fresh state.');
+      return;
+    }
+    if (!currentReturnRefresh(flight, flight.appliedTabID)) return;
+    refreshing = false;
+    $('status').textContent = $('status-live').textContent = 'Connected'; $('status').dataset.connected = 'true';
+    updateControls(); poll();
+  }).catch(error => {
+    if (!currentReturnRefresh(flight)) return;
+    showError(error.message); connect(true);
+  }).finally(() => {
+    if (refreshFlight !== flight) return;
+    refreshFlight = null;
+    // A second hide or a selection change supersedes the old read, not a command.
+    refreshReturnedState();
+  });
+}
+function resumePage() {
+  if (document.hidden || hiddenAt === null) return;
+  const elapsed = Date.now() - hiddenAt;
+  hiddenAt = null;
+  if (!credential || stopped || revoked) return;
+  // A long suspension is a recovery heuristic, not proof that the socket died.
+  if (!connected || !Number.isFinite(elapsed) || elapsed < 0 || elapsed > RETURN_RECONNECT_AFTER) {
+    connect(true); return;
   }
-  else if (connected) poll();
-  else if (!stopped) connect();
-});
+  refreshing = true;
+  $('status').textContent = $('status-live').textContent = 'Refreshing…'; $('status').dataset.connected = 'false';
+  updateControls(); refreshReturnedState();
+}
+document.addEventListener('visibilitychange', () => document.hidden ? pausePage() : resumePage());
+window.addEventListener('pagehide', pausePage);
+window.addEventListener('pageshow', event => { if (event.persisted) resumePage(); });
 function confirmReplace() {
   const dialog = $('replace-dialog');
   dialog.returnValue = '';

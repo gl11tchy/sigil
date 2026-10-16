@@ -1229,3 +1229,12 @@ current-turn/paired-alert/fake-child setup checks passed. Actual checkout
 one intended issue;37XCTest,248relay,58site,236browser/two skips passed. Later
 native checks skipped after the expected failure. Full repair is now ready for
 its exact-head CI; no local native execution or manual pmset claim.
+
+
+## REA-1202 — bounded web page-return recovery (2026-10-16)
+
+- Sole worker; isolated `fix/rea-1202-resume-refresh` from current main `f4927a1d9657108bd87983ad0ba1e2c76f1cd328`. Linear dependencies empty; no duplicate open PR or active Sigil CI at selection. Protected PR162, existing REA1188 work and REA1215's manual sleep evidence remain untouched.
+- Reproduced before production edits: generated short hide/show sent no state immediately and kept green Connected over pre-hide output; one focused regression failed exactly. No physical-device impact claim.
+- Short returns now serialize one immediate fresh-state read after any in-flight transaction. Long suspensions replace the connection without command replay. Visibility/BFCache events coalesce; initial hidden loading, page/connection/selection identity, missing-state responses and editable drafts have explicit handling. The 30-second threshold is a recovery heuristic; the ten-second command deadline and wire/security contracts stay intact.
+- Local focused results:34Node cases passed (23new/11existing safety),8browser cases passed in Chromium/WebKit. Six390×844 screenshots captured on final source; [evidence and limits](../qa/rea-1202.md). Both owned local relays/browser runs ended; no local native build/test or active-app interaction.
+- Manual physical Safari/network handoff and production deployment remain unverified. Required CI is reported on the PR. Hold the next merge for parent personal exact-final-code/current-comments review; no next ticket or extra worker.

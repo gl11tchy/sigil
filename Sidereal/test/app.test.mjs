@@ -19,7 +19,7 @@ async function skipOptions(socket) {
 }
 
 // Run the real handlers; only browser services and encryption are replaced.
-async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { device: true } }, faults = {}, database = pairingDatabase(saved) } = {}) {
+async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { device: true } }, faults = {}, database = pairingDatabase(saved), clock, initiallyHidden = false } = {}) {
   const elements = new Map(), events = new Map(), timers = new Map(), sockets = [];
   let nextTimer = 0, reloads = 0, randomCounter = 0;
   const sealed = [];
@@ -45,7 +45,7 @@ async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { devic
     reload() { reloads++; },
   };
   const document = {
-    hidden: false, getElementById: element,
+    hidden: initiallyHidden, getElementById: element,
     createDocumentFragment: () => ({ parts: [], append(node) { this.parts.push(node); } }),
     createTextNode: text => ({ textContent: text }),
     createElement: () => ({
@@ -69,10 +69,10 @@ async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { devic
       (value.route ? this.routes : this.sent).push(JSON.parse(value.route || value.data));
     }
     receive(frame) { this.onmessage({ data: JSON.stringify(frame) }); }
-    reply(request = this.sent.at(-1)) {
+    reply(request = this.sent.at(-1), state = { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle', provider: 'grokBuild', sessionID: 'native-fixture', cwd: '/tmp/fixture' }], selectedTabID: 'tab-1', terminal: 'READY' }) {
       this.receive({ data: JSON.stringify({
         challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: true,
-        state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle', provider: 'grokBuild', sessionID: 'native-fixture', cwd: '/tmp/fixture' }], selectedTabID: 'tab-1', terminal: 'READY' },
+        state,
       }) });
     }
     close() { this.readyState = 3; this.onclose?.(); }
@@ -83,6 +83,7 @@ async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { devic
     window: { addEventListener: (name, callback) => events.set(name, callback) },
     navigator: {}, crypto: { subtle: {} }, URL, URLSearchParams, TextEncoder,
     WebSocket: FakeSocket,
+    ...(clock ? { Date: class extends Date { static now() { return clock.now; } } } : {}),
     importKey: async hex => ({ hex }), randomKey: () => ++randomCounter === 1 ? 'e'.repeat(64) : randomCounter.toString(16).padStart(64, '0'),
     seal: async (value, key, direction) => { sealed.push({ value, key, direction }); return JSON.stringify(value); },
     open: async frame => JSON.parse(frame),
@@ -115,6 +116,293 @@ async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { devic
   }
   return { app, element, events, location, sockets, authorize, fireTimer, submit, sealed, timers, stored: () => structuredClone(database.value), reloads: () => reloads };
 }
+
+test('REA-1202 short return refreshes immediately without claiming fresh output', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  const before = socket.sent.length;
+  page.app.document.hidden = true;
+  page.events.get('visibilitychange')();
+  page.app.document.hidden = false;
+  page.events.get('visibilitychange')();
+  await settle();
+  assert.deepEqual({
+    actions: socket.sent.slice(before).map(request => request.action),
+    label: page.element('status').textContent,
+    connected: page.element('status').dataset.connected,
+  }, { actions: ['state'], label: 'Refreshing…', connected: 'false' });
+  assert.deepEqual(Object.keys(socket.sent.at(-1)).sort(), ['action', 'challenge', 'clientNonce', 'sequence', 'tabID']);
+  assert.equal(socket.sent.at(-1).sequence, socket.sent[0].sequence + 1);
+  assert.equal(page.element('terminal').textContent, 'READY');
+  socket.reply();
+  await settle();
+  assert.equal(page.element('status').textContent, 'Connected');
+  assert.equal([...page.timers.values()].filter(timer => timer.delay === 1000).length, 1);
+});
+
+function hidePage(page) {
+  page.app.document.hidden = true;
+  page.events.get('visibilitychange')();
+}
+function showPage(page) {
+  page.app.document.hidden = false;
+  page.events.get('visibilitychange')();
+}
+const returnState = (id = 'tab-1', terminal = 'FRESH') => ({
+  tabs: ['tab-1', 'tab-2'].map(id => ({ id, title: id, status: 'idle' })), selectedTabID: id, terminal,
+});
+
+for (const duration of [-1, 0, 30_000, 30_001, 31_000]) test(`REA-1202 return after ${duration} ms uses the bounded recovery policy`, async () => {
+  const clock = { now: 0 };
+  const page = await browser({ clock });
+  const original = await page.authorize();
+  hidePage(page); clock.now += duration; showPage(page);
+  await settle();
+  assert.equal(page.element('status').textContent, 'Refreshing…');
+  assert.equal(page.element('status').dataset.connected, 'false');
+  if (duration < 0 || duration > 30_000) {
+    assert.equal(original.readyState, 3);
+    assert.equal(page.sockets.length, 2); // No reconnect-backoff timer has to fire.
+    assert.equal([...page.timers.values()].some(timer => timer.delay === 500), false);
+    const next = await page.authorize();
+    assert.deepEqual(next.sent.map(request => request.action), ['state']);
+  } else {
+    assert.equal(page.sockets.length, 1);
+    assert.deepEqual(original.sent.map(request => request.action), ['state', 'state']);
+    original.reply(); await settle();
+    assert.equal(page.element('status').textContent, 'Connected');
+  }
+});
+
+test('REA-1202 visibility and persisted pageshow coalesce, including duplicate notifications', async () => {
+  const clock = { now: 100_000 };
+  const page = await browser({ clock });
+  const socket = await page.authorize();
+  page.events.get('pageshow')({ persisted: false });
+  hidePage(page); clock.now += 1000;
+  page.events.get('pagehide')({ persisted: true });
+  page.app.document.hidden = false;
+  page.events.get('pageshow')({ persisted: true }); showPage(page);
+  page.events.get('pageshow')({ persisted: true });
+  await settle();
+  assert.deepEqual(socket.sent.map(request => request.action), ['state', 'state']);
+  socket.reply(); await settle();
+  page.events.get('pageshow')({ persisted: true }); showPage(page);
+  await settle();
+  assert.equal(socket.sent.length, 2);
+  assert.equal(page.element('status').textContent, 'Connected');
+});
+
+for (const duration of [0, 31_000]) test(`REA-1202 a page initially loaded hidden refreshes on its first return after ${duration} ms`, async () => {
+  const clock = { now: 0 };
+  const page = await browser({ clock, initiallyHidden: true });
+  const original = await page.authorize();
+  assert.equal([...page.timers.values()].some(timer => timer.delay === 1000), false);
+  clock.now = duration; showPage(page); await settle();
+  assert.equal(page.element('status').textContent, 'Refreshing…');
+  if (duration > 30_000) {
+    assert.equal(original.readyState, 3);
+    assert.equal(page.sockets.length, 2);
+    await page.authorize();
+  } else {
+    assert.deepEqual(original.sent.map(request => request.action), ['state', 'state']);
+    original.reply(); await settle();
+    assert.equal(page.element('status').textContent, 'Connected');
+  }
+});
+
+test('REA-1202 pagehide alone recovers BFCache and cannot shorten the hidden interval', async () => {
+  const clock = { now: 0 };
+  const page = await browser({ clock });
+  const original = await page.authorize();
+  page.events.get('pagehide')({ persisted: true });
+  clock.now = 20_000; hidePage(page);
+  clock.now = 31_000; page.app.document.hidden = false;
+  page.events.get('pageshow')({ persisted: true }); showPage(page);
+  assert.equal(original.readyState, 3);
+  assert.equal(page.sockets.length, 2);
+});
+
+test('REA-1202 a second hide supersedes an outstanding refresh without accumulating requests', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  hidePage(page); showPage(page); await settle();
+  const old = socket.sent.at(-1);
+  hidePage(page); showPage(page); await settle();
+  assert.equal(socket.sent.length, 2);
+  socket.reply(old, returnState('tab-1', 'OLD HIDDEN SNAPSHOT')); await settle();
+  assert.equal(page.element('terminal').textContent, 'READY');
+  assert.equal(page.element('status').textContent, 'Refreshing…');
+  assert.equal(socket.sent.length, 3);
+  socket.reply(undefined, returnState()); await settle();
+  assert.equal(page.element('terminal').textContent, 'READYFRESH');
+  assert.equal(page.element('status').textContent, 'Connected');
+});
+
+test('REA-1202 a pre-hide poll cannot claim freshness for the return', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  await page.fireTimer(1000);
+  const old = socket.sent.at(-1);
+  hidePage(page); showPage(page); await settle();
+  assert.equal(socket.sent.length, 2);
+  socket.reply(old, returnState('tab-1', 'PRE-HIDE')); await settle();
+  assert.equal(page.element('status').textContent, 'Refreshing…');
+  assert.equal(socket.sent.length, 3);
+  socket.reply(undefined, returnState()); await settle();
+  assert.equal(page.element('terminal').textContent, 'READYPRE-HIDEFRESH');
+  assert.equal(page.element('status').textContent, 'Connected');
+});
+
+test('REA-1202 a selection change during ticket persistence fences the old refresh snapshot', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const originalStorage = page.app.storage;
+  page.app.storage = async (mode, value) => { if (mode === 'put') await held; return originalStorage(mode, value); };
+  hidePage(page); showPage(page); await settle();
+  const request = socket.sent.at(-1);
+  socket.receive({ data: JSON.stringify({ challenge: request.challenge, clientNonce: request.clientNonce,
+    sequence: request.sequence, ok: true, ticket: 'f'.repeat(64), state: returnState('tab-1', 'WRONG TAB') }) });
+  await settle();
+  page.app.render(returnState('tab-2', 'CURRENT TAB'));
+  release(); await settle();
+  assert.equal(page.element('tabs').value, 'tab-2');
+  assert.equal(page.element('terminal').textContent, 'CURRENT TAB');
+  assert.equal(page.element('status').textContent, 'Refreshing…');
+  assert.equal(socket.sent.at(-1).tabID, 'tab-2');
+  socket.reply(undefined, returnState('tab-2', 'CURRENT TAB FRESH')); await settle();
+  assert.equal(page.element('status').textContent, 'Connected');
+});
+
+test('REA-1202 an authoritative fresh snapshot may select a different validated tab', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  hidePage(page); showPage(page); await settle();
+  socket.reply(undefined, returnState('tab-2', 'CURRENT TAB')); await settle();
+  assert.equal(page.element('tabs').value, 'tab-2');
+  assert.equal(page.element('terminal').textContent, 'CURRENT TAB');
+  assert.equal(page.element('status').textContent, 'Connected');
+  assert.equal(socket.sent.length, 2);
+});
+
+test('REA-1202 an authoritative empty state completes freshness without inventing a target', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  hidePage(page); showPage(page); await settle();
+  socket.reply(undefined, { tabs: [], selectedTabID: null, terminal: '' }); await settle();
+  assert.equal(page.element('status').textContent, 'Connected');
+  assert.equal(page.element('tabs').value, '');
+  assert.equal(page.element('send').disabled, true);
+  assert.equal(page.element('new').disabled, false);
+  assert.equal(socket.sent.length, 2);
+});
+
+test('REA-1202 a long return never replays an unacknowledged send or its Enter', async () => {
+  const clock = { now: 0 };
+  const page = await browser({ clock });
+  const original = await page.authorize();
+  page.submit(); await settle();
+  const lost = original.sent.at(-1);
+  assert.equal(lost.action, 'input');
+  hidePage(page); clock.now = 31_000; showPage(page); await settle();
+  const next = await page.authorize();
+  original.reply(lost, returnState('tab-1', 'LATE COMMAND')); await settle();
+  assert.deepEqual(original.sent.map(request => request.action), ['state', 'input']);
+  assert.deepEqual(next.sent.map(request => request.action), ['state']);
+  assert.equal(page.element('message').value, 'fixture input');
+  assert.equal(page.element('terminal').textContent, 'READY');
+  assert.match(page.element('error').textContent || '', /Connection lost|^$/);
+});
+
+test('REA-1202 a short return waits for an in-flight send and Enter before its fresh read', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.submit(); await settle();
+  hidePage(page); showPage(page); await settle();
+  page.element('message').value = 'Next draft';
+  assert.equal(page.element('status').textContent, 'Refreshing…');
+  assert.deepEqual(socket.sent.map(request => request.action), ['state', 'input']);
+  socket.reply(); await settle(); await page.fireTimer(100);
+  assert.deepEqual(socket.sent.map(request => request.action), ['state', 'input', 'key']);
+  socket.reply(); await settle();
+  assert.deepEqual(socket.sent.map(request => request.action), ['state', 'input', 'key', 'state']);
+  socket.reply(); await settle();
+  assert.equal(page.element('message').value, 'Next draft');
+  assert.equal(page.element('status').textContent, 'Connected');
+});
+
+test('REA-1202 refreshing disables new remote actions while keeping the draft editable', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('message').value = 'Draft';
+  hidePage(page); showPage(page); await settle();
+  for (const id of ['send', 'new', 'tabs', 'paste', 'stop', 'interrupt']) assert.equal(page.element(id).disabled, true, id);
+  assert.equal(page.element('message').disabled, false);
+  assert.equal(page.element('message').readOnly, false);
+  page.element('compose').onsubmit({ preventDefault() {} });
+  page.element('stop').onclick(); page.element('new').onclick();
+  await settle();
+  assert.equal(socket.sent.length, 2);
+  socket.reply(); await settle();
+  assert.equal(page.element('send').disabled, false);
+});
+
+for (const end of ['revoked', 'forgotten', 'legacy']) test(`REA-1202 return cannot reconnect a ${end} pairing`, async () => {
+  const clock = { now: 0 };
+  const page = await browser({ clock });
+  const socket = await page.authorize();
+  if (end === 'legacy') await page.fireTimer(1000);
+  hidePage(page);
+  if (end === 'revoked') socket.receive({ error: 'unauthorized' });
+  else if (end === 'forgotten') await page.app.forget();
+  else {
+    const request = socket.sent.at(-1);
+    socket.receive({ data: JSON.stringify({ challenge: request.challenge, sequence: request.sequence, ok: true }) });
+  }
+  await settle(); clock.now = 31_000; showPage(page);
+  page.events.get('pageshow')({ persisted: true }); await settle();
+  assert.equal(page.sockets.length, 1);
+  assert.equal(page.element('status').textContent, 'Disconnected');
+  assert.equal(page.timers.size, 0);
+});
+
+test('REA-1202 a stale decrypt completion cannot repaint or complete a newer connection refresh', async () => {
+  const page = await browser();
+  const original = await page.authorize();
+  hidePage(page); showPage(page); await settle();
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const originalOpen = page.app.open;
+  page.app.open = async frame => { await held; return originalOpen(frame); };
+  original.reply(undefined, returnState('tab-1', 'STALE SOCKET')); await settle();
+  page.app.open = originalOpen;
+  page.app.connect(true);
+  await page.authorize();
+  release(); await settle();
+  assert.equal(page.element('terminal').textContent, 'READY');
+  assert.equal(page.element('status').textContent, 'Connected');
+});
+
+test('REA-1202 missing state never turns a refresh or reconnect green', async () => {
+  const page = await browser();
+  const original = await page.authorize();
+  const noState = socket => {
+    const request = socket.sent.at(-1);
+    socket.receive({ data: JSON.stringify({ challenge: request.challenge, clientNonce: request.clientNonce,
+      sequence: request.sequence, ok: true }) });
+  };
+  hidePage(page); showPage(page); await settle(); noState(original); await settle();
+  assert.equal(page.sockets.length, 2);
+  const next = page.sockets.at(-1);
+  next.receive({ hello: 'c'.repeat(64) }); await settle(); noState(next); await settle();
+  assert.notEqual(page.element('status').textContent, 'Connected');
+  assert.equal(page.element('status').dataset.connected, 'false');
+  assert.match(page.element('error').textContent, /fresh state/);
+  assert.equal(next.readyState, 3);
+  assert.equal([...page.timers.values()].some(timer => timer.delay === 500), true);
+});
 
 test('attached file names keep their extension and non-Latin letters', async () => {
   const { app } = await browser();
