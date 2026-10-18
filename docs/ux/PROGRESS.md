@@ -346,7 +346,7 @@ The notes contract and limits are in [provider capabilities](../provider-capabil
 | M3 | Not started | Needs M1. Live review and a checks-source spec. |
 | M4 | Not started | Needs M3. Finish and worktree removal. |
 | M5 | Not started | Needs M1. Phone addresses tasks. |
-| M6 | Not started | Independent. Per-provider transcript decision records. |
+| M6 | Decisions recorded; integrations unimplemented | Independent. [REA-1175 evidence](#rea-1175-provider-transcript-decisions-2026-10-18); no uniform transcript promise. |
 
 Scope, write ownership and done criteria for M1–M6 are in the
 [missions table](EXPERIENCE.md#missions).
@@ -1337,3 +1337,41 @@ A held-request/cancel/drain test brings NativeFlow to44, with11focused cases.
 Only those two source/test files differ from the verified candidate; screen,
 capture, protocol and1198 lifecycle sources are unchanged. Required final-head
 CI and parent personal review remain pending. [QA and images](../qa/rea-1199.md).
+
+## REA-1175: provider transcript decisions (2026-10-18)
+
+Completed documentation decisions for [Grok Build](transcripts/grok-build.md),
+[Claude Code](transcripts/claude-code.md), [Codex](transcripts/codex.md),
+[Devin](transcripts/devin.md), [Cursor](transcripts/cursor.md) and
+[Kimi Code](transcripts/kimi-code.md). Research on 2026-10-18 used 27 official
+documentation pages and generated repository fixture source at main
+`aa06ac94aa0322d4c40b854e5aa2997e3c60de2a`. Each record separates headless/client
+modes from same-session hooks, states checked version/protocol references and
+unsupported assumptions, and gives identity/security boundaries, a decision and
+terminal fallback. No uniform transcript is promised.
+
+These decisions justify scoped read-only hook/export follow-up, not adoption of
+full transcripts or structured approvals. Devin's interactive ATIF turn-end
+export is a same-process transcript candidate, with schema/version, identity,
+atomicity and privacy limits; no CLI/export behavior was tested. No integration is
+implemented. Rolling documentation and fixture baselines do not certify installed CLI compatibility,
+complete message/lifecycle coverage or live approval authority. No provider CLI,
+hook, personal transcript/home, credential store or model call was used.
+
+Local document checks passed for scope, relative links/anchors, source domains,
+dates/version limits and whitespace. The prior decision-document head
+`a6bdb870ffde5dc596bb9fd914eb7f8d789916b5` passed
+[CI39116770149](https://github.com/gl11tchy-team/sigil/actions/runs/39116770149):
+the checkout's parents/tree were verified; 1,342 Swift tests/113 suites, 37 XCTest,
+271 Sidereal, 58 Site and 244 browser tests passed, as did native core/relay,
+app/extensions/simulator and TextKit checks. Two browser cases and four REA-1350
+pointer fixtures skipped; the latter lacked event-posting permission. No local
+native build/test, UI smoke or app replacement occurred. Revised-head CI is
+reported on [PR184](https://github.com/gl11tchy-team/sigil/pull/184).
+
+Only these decisions and this ledger change; production code, tests, scripts and
+workflows remain unchanged. [PR183](https://github.com/gl11tchy-team/sigil/pull/183)
+real-app acceptance remains blocked; this documentation supplies no acceptance
+for it. Protected PR162 and unrelated entries/work remain intact. Parent personal
+final review and required exact-head checks precede any merge; broader M6
+integrations, runtime validation and further implementation remain uncompleted.
