@@ -374,15 +374,39 @@ struct TerminalFindStreamingTests {
             let selected = try #require(view.getTerminal().bufferLine(atRow: view.selection.start.row))
             #expect(selected.translateToString(trimRight: true).contains("needle"))
         }
+        let navigationStart = ContinuousClock.now
+        var navigatedDuringStream = false
+        if progressed, view.selection.active {
+            let origin = view.selection.start.row + view.getTerminal().buffer.totalLinesTrimmed
+            controller.findPrevious()
+            navigatedDuringStream = await TerminalTestSupport.waitUntil(timeout: .milliseconds(1_500)) {
+                probe.active && view.selection.active
+                    && view.selection.start.row + view.getTerminal().buffer.totalLinesTrimmed == origin - 1
+            }
+        }
+        let navigationProgress = TerminalFindScan.milliseconds(navigationStart.duration(to: .now))
+        #expect(
+            navigatedDuringStream, "A visible partial hit must support verified navigation before output becomes quiet")
         await stream.value
         await heartbeat.value
         await settled(controller)
         #expect(controller.findMatchCount > 9_000)
+        let terminal = view.getTerminal()
+        var expectedMatches = 0
+        var row = 0
+        while let line = terminal.bufferLine(atRow: row) {
+            let text = line.translateToString(trimRight: true, characterProvider: { terminal.getCharacter(for: $0) })
+            if text.contains("needle") { expectedMatches += 1 }
+            row += 1
+        }
+        #expect(controller.findMatchCount == expectedMatches)
         #expect(probe.writes == 400)
         let delays = probe.heartbeatDelays.sorted()
         let receipt: [String: Any] = [
             "fixtureRows": 10_000, "streamWrites": probe.writes,
             "firstProgressMilliseconds": firstProgress,
+            "navigatedDuringStream": navigatedDuringStream,
+            "navigationProgressMilliseconds": navigationProgress,
             "heartbeatDelayP95Milliseconds": delays.isEmpty
                 ? 0 : delays[min(delays.count - 1, delays.count * 95 / 100)],
             "heartbeatDelayMaxMilliseconds": delays.last ?? 0,
@@ -391,6 +415,7 @@ struct TerminalFindStreamingTests {
             "lastScanMilliseconds": controller.findDiagnostics.lastScanMilliseconds,
             "acceptedResults": controller.findDiagnostics.acceptedResults,
             "finalMatches": controller.findMatchCount,
+            "expectedFinalMatches": expectedMatches,
         ]
         let data = try JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys])
         print("REA-1193 continuous output measurement \(String(decoding: data, as: UTF8.self))")

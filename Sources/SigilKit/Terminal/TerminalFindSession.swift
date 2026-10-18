@@ -235,6 +235,10 @@ final class TerminalFindSession {
         updateRanges(state)
         navigation &+= delta
         if isSearching || result == nil {
+            // Explicit navigation adopts the visible hit as its origin even
+            // before the first complete snapshot. Fresh row proof is still
+            // required before consuming the queued step.
+            if currentMatch != nil || selectionAnchor != nil { initialSelectionCompleted = true }
             needsWork = true
             schedule()
         } else {
