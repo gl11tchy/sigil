@@ -294,7 +294,8 @@ struct SidebarVersionNoticeTests {
             try await Task.sleep(for: .milliseconds(10))
         }
         guard ready() else {
-            throw NSError(domain: "Sigil.SearchHostFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: description])
+            throw NSError(
+                domain: "Sigil.SearchHostFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: description])
         }
     }
 

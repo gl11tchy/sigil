@@ -1408,3 +1408,14 @@ One bounded helper repair now requires actual published search focus and rendere
 keyboard fill before initial input. A two-survivor fixture proves rerank resets
 away from a still-visible prior row. Production remains unchanged. Updated CI
 pending; AX/window-ID acceptance stays incomplete, with no local app interaction.
+
+REA-1258 updated candidate 8e3e058 / CI39111723994 passed all 1,346 Swift tests
+in 113 suites, 37 XCTest cases, and all seven required hosted cases. Legacy
+readback confirms all five search cases passed, including two-survivor rerank
+and Return plus no-results arrows/Return. Only the four original pointer cases
+skipped. Checkout203070b has expected aa06/8e3e parents and identical treee6b6913.
+Shell syntax/shellcheck passed; two format diagnostics stopped the later gates.
+The final evidence revision fixes only those layouts, with full final-head CI
+still required. No private workbench artifact was produced by either failed
+candidate. Real-app AX/window-ID acceptance remains blocked/incomplete; no
+local native execution, app interaction, permission change, merge or next ticket.

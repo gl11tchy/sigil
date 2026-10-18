@@ -257,7 +257,8 @@ struct SidebarView: View {
                 .background(
                     SidebarSearchInputAnchor(input: searchInput)
                         .allowsHitTesting(false)
-                        .accessibilityHidden(true))
+                        .accessibilityHidden(true)
+                )
                 .onSubmit(activateSearchResult)
                 .onKeyPress(keys: [.upArrow, .downArrow], phases: [.down, .repeat]) { press in
                     handleSearchArrow(press)
