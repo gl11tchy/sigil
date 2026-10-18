@@ -1380,7 +1380,7 @@ integrations, runtime validation and further implementation remain uncompleted.
 
 The [checks-source decision](checks-source.md) chooses explicitly connected,
 read-only hosted GitHub checks and defers an opt-in local-command runner. It
-defines exact workspace/HEAD/repository/account/issuer/attempt identity,
+defines exact workspace/working-tree/HEAD/repository/account/issuer/attempt identity,
 complete evidence, stale/pending/failed/unknown/unavailable states, refresh/cost
 bounds and review-only attention mapping. Repository files cannot authorize
 execution; the proposed integration cannot trigger CI, create credentials or

@@ -59,21 +59,34 @@ manual is a documentation reference, not a tested installed-version compatibilit
 
 Before reading, capture the Sigil workspace identity, full Git HEAD object ID, explicitly
 confirmed GitHub repository ID/host, account identity, selected-source policy and request
-generation. A remote URL can suggest a repository for confirmation; it cannot choose a
-credential destination, execute SSH or authorize another host. Use a metadata reader that cannot
-execute repository-controlled hooks, filters, fsmonitor or command/config helpers. The existing
-[workspace reader](../../Sources/SigilKit/Workbench/WorkspaceChanges.swift) is not certified as
-that new security boundary by this document.
+generation, plus a separate working-tree/index/untracked-change generation. A remote URL can
+suggest a repository for confirmation; it cannot choose a credential destination, execute SSH or
+authorize another host. Use a metadata reader that cannot execute repository-controlled hooks,
+filters, fsmonitor or command/config helpers. The existing [workspace
+reader](../../Sources/SigilKit/Workbench/WorkspaceChanges.swift) is not certified as that new
+security boundary by this document.
 
 Publish only if that identity still matches the selected workspace and current HEAD. Cancel or
-discard late responses after HEAD, workspace, repository, account or policy changes. Cache by
-those identities, not branch name, tab title, directory/time similarity or provider
-conversation. Detached HEAD is valid if the exact commit exists in the confirmed repository.
-Unborn HEAD, unpublished/inaccessible commits and ambiguous fork/remote mappings remain
-unavailable/unknown. Checks on a PR's synthetic merge SHA, base branch, old HEAD or
-equal-content tree are **Other commit / stale**, not exact-HEAD success. Dirty/untracked
+discard late responses after HEAD, workspace, repository, account or policy changes. Cache
+remote evidence by workspace, full HEAD, confirmed repository/host, account and selected-source
+policy. The request generation fences late responses; the separate working-tree generation
+guards rendered coverage below. Never key evidence by branch name, tab title, directory/time
+similarity or provider conversation. Detached HEAD is valid if the exact commit exists in the
+confirmed repository. Unborn HEAD, unpublished/inaccessible commits and ambiguous fork/remote
+mappings remain unavailable/unknown. Checks on a PR's synthetic merge SHA, base branch, old HEAD
+or equal-content tree are **Other commit / stale**, not exact-HEAD success. Dirty/untracked
 working-tree changes are explicitly **Not checked** even when the committed HEAD has passing
 checks.
+
+The rendered coverage snapshot must also match the current working-tree change generation.
+Before publishing a fetched or cached result, obtain a fresh bounded dirty/index/untracked-state
+read through the hardened metadata reader. Reject a coverage snapshot if the generation changes
+during that read. A failed, truncated or unstable read means **Working-tree coverage unknown**,
+not clean. While Review is visible, working-tree/index change events immediately invalidate the
+coverage snapshot and request a new local metadata read, without waiting for the network refresh
+interval. Edits, deletions, staging changes and new untracked files must be observed even if
+HEAD does not move. A commit's cached remote result may be reused, but its working-tree coverage
+label must be revalidated rather than cached by HEAD alone.
 
 GitHub's commit association is not independent proof of the tested checkout. The official
 [workflow event
@@ -163,9 +176,10 @@ inference, or change billing/credentials. Existing CI costs remain the repositor
 This is a **GO for a separately implemented read-only hosted-check adapter**, not a working
 connection. Keep the current [Not connected
 UI](../../Sources/SigilApp/Workbench/ReviewRegion.swift) and the user's terminal as the fallback
-until implementation passes generated fixtures for: HEAD/workspace/account races; fork and
-synthetic-merge mismatch; dirty/unborn commits; missing authorization/404/rate limits;
-empty/partial evidence; spoofed contexts; pending reruns over old passes; skipped/unknown
-conclusions; and unchanged provider attention on every check outcome. No local runner, live API
-integration or provider/runtime behavior was implemented or tested for this record. Required
-repository PR CI is development evidence, not a checks integration.
+until implementation passes generated fixtures for: HEAD/workspace/account races; cached pass
+followed by edit/delete/stage/untracked changes with unchanged HEAD; unstable/failed/truncated
+working-tree reads; fork and synthetic-merge mismatch; dirty/unborn commits; missing
+authorization/404/rate limits; empty/partial evidence; spoofed contexts; pending reruns over old
+passes; skipped/unknown conclusions; and unchanged provider attention on every check outcome. No
+local runner, live API integration or provider/runtime behavior was implemented or tested for
+this record. Required repository PR CI is development evidence, not a checks integration.
