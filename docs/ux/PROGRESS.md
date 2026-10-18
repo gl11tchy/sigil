@@ -1238,3 +1238,56 @@ its exact-head CI; no local native execution or manual pmset claim.
 - Short returns now serialize one immediate fresh-state read after any in-flight transaction. Long suspensions replace the connection without command replay. Visibility/BFCache events coalesce; initial hidden loading, page/connection/selection identity, missing-state responses and editable drafts have explicit handling. The 30-second threshold is a recovery heuristic; the ten-second command deadline and wire/security contracts stay intact.
 - Local focused results:34Node cases passed (23new/11existing safety),8browser cases passed in Chromium/WebKit. Six390×844 screenshots captured on final source; [evidence and limits](../qa/rea-1202.md). Both owned local relays/browser runs ended; no local native build/test or active-app interaction.
 - Manual physical Safari/network handoff and production deployment remain unverified. Required CI is reported on the PR. Hold the next merge for parent personal exact-final-code/current-comments review; no next ticket or extra worker.
+
+## REA-1198 — background send lifetime (2026-10-18)
+
+Sole serial worker on verified main `cccbe4c08d902b9f07019ea32430d6caa701abb1`.
+Added a generated NativeFlow three-photo/two-chunks-each regression and minimal
+fixture acknowledgements; all production sources remain byte-identical to main.
+Native reproduction is pending the normal PR CI run; no local native execution.
+Expected current behavior is immediate socket stop and an incomplete send.
+REA-1199 keyboard behavior and protected PR162 are outside scope. Parent personal
+final review and required final-head checks precede any merge.
+
+REA-1198 baseline observed in CI39090877227: actual checkout9ee741b has expected
+CCCbe/8c48184 parents and identical head tree; production was unchanged. The new
+three-photo case delivered zero file/input/Enter frames and retained draft/files.
+Its eight assertions failed; a separate existing native test also hit accumulated
+fixture room quota. Verify/typecheck/shared relay passed; native full gate failed.
+No local native execution occurred. Legacy result-object reading confirmed values;
+new summary reader could not write its cache and was replaced by that read path.
+
+Implementation candidate owns the send/task/background assertion, preserves
+uncertainty and draft revisions, fences old callbacks, and suppresses background
+reconnect after a delegate stop. UIKit assertion is requested before work, following
+Apple guidance. Default teardown stays immediate; only app lifecycle opts in.
+Warning remains visible on revocation. Native fixture cases rotate serially over
+eight fresh loopback relays; production limits/grace/deadlines stay unchanged.
+Fifteen focused cases and two screenshot captures are implemented, runtime pending
+CI. Static shell/Node/Python parsing, whitespace and unchanged crypto/queue/deadline/
+terminal-key/production-relay source checks passed. Parent final review required.
+
+REA-1198 first candidate e428ab5 CI39092981215 passed full Verify/native gates,
+all33 NativeFlow cases including15new. Checkout2c2b961 has expected parents/tree.
+Visual review caught expiry warning replaced by an automatic read error
+after the test assertion; that PNG was rejected and is not acceptance evidence.
+Revocation warning was legible. Repair centralizes error presentation so every
+writer retains send uncertainty, adds post-layout assertions, models legacy
+options fallback, and covers both input/Enter lost acknowledgements plus later
+failed options reads. Replacement CI/images pending; no local native execution.
+
+REA-1198 repair f4f88a9 CI39094902441 passed the full general/native gate.
+Checkout15fcd7f has expected CCCbe/f4 parents and identical tree4133992. Legacy
+result readback confirms all33 NativeFlow cases successful, including15focused
+cases and both lost input/Enter reply scenarios. Both original828×1792 PNGs were
+visually accepted: expiry retains the full warning, draft and photo chips;
+revocation retains the warning alongside Pairing ended. The rejected first
+expiry image is excluded. [QA evidence and limits](../qa/rea-1198.md).
+
+The evidence commit adds only accepted PNGs and QA/progress documentation; all
+eight production/test/script source hashes match the passing repair head.
+Two existing browser skips and four existing REA-1350 pointer-fixture skips
+remain disclosed. No local native build/test/app launch occurred. Physical
+device suspension, OS allowance, network handoff, APNs and production deployment
+remain unverified. Parent personal review of exact final code/current comments
+and required final-head CI still precede merge; no next ticket or extra worker.

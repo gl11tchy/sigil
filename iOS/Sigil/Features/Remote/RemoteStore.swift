@@ -1,5 +1,21 @@
 import Foundation
 import Observation
+import UIKit
+
+/// The system may refuse or expire this time. Fixtures supply the same lifecycle
+/// without relying on a simulator's background allowance.
+@MainActor
+struct SendBackgroundTask {
+    let begin: @MainActor (@escaping @MainActor @Sendable () -> Void) -> (@MainActor () -> Void)?
+
+    static var system: Self {
+        Self { expiration in
+            let id = UIApplication.shared.beginBackgroundTask(withName: "Finish send", expirationHandler: expiration)
+            guard id != .invalid else { return nil }
+            return { UIApplication.shared.endBackgroundTask(id) }
+        }
+    }
+}
 
 struct Attachment: Identifiable, Equatable {
     let id = UUID()
@@ -24,6 +40,7 @@ final class RemoteStore {
     /// The Mac streams rows and takes close, rename and archive.
     private(set) var supportsSessionOps = false
     private(set) var busy = false
+    private(set) var sendMayBeIncomplete = false
     private(set) var loadingEarlier = false
     private(set) var macAddress: String?
     private(set) var macName: String?
@@ -33,9 +50,24 @@ final class RemoteStore {
     private(set) var cachedAt: Date?
     /// At launch, the screen waits for a cache on disk instead of showing an empty Mac.
     private(set) var awaitingCache = false
-    var errorMessage: String?
+    private var problem: String?
+    var errorMessage: String? {
+        get {
+            guard let problem else { return nil }
+            return sendMayBeIncomplete && !problem.hasPrefix(Self.incompleteSend)
+                ? Self.incompleteSend + " " + problem : problem
+        }
+        set { problem = newValue }
+    }
     var rawMode = false
-    var drafts: [String: String] = [:]
+    var drafts: [String: String] = [:] {
+        didSet {
+            for id in Set(oldValue.keys).union(drafts.keys) where oldValue[id] != drafts[id] {
+                draftRevisions[id] = drafts[id] == nil ? nil : UUID()
+            }
+        }
+    }
+    @ObservationIgnored private var draftRevisions: [String: UUID] = [:]
     private(set) var attachments: [String: [Attachment]] = [:]
     @ObservationIgnored private var draftsByMac: [String: [String: String]] = [:]
     @ObservationIgnored private var attachmentsByMac: [String: [String: [Attachment]]] = [:]
@@ -66,6 +98,22 @@ final class RemoteStore {
 
     let isDemo: Bool
     @ObservationIgnored private let connection: RemoteConnection
+    @ObservationIgnored private let backgroundTask: SendBackgroundTask
+    private struct PendingCommand {
+        let id: UUID
+        let macID: String?
+        let epoch: Int
+        let isSend: Bool
+    }
+    private struct SendLease {
+        let id = UUID()
+        let commandID: UUID
+        var end: (@MainActor () -> Void)?
+    }
+    @ObservationIgnored private var command: PendingCommand?
+    @ObservationIgnored private var commandTask: Task<Void, Never>?
+    @ObservationIgnored private var sendLease: SendLease?
+    @ObservationIgnored private var backgroundSend: UUID?
     /// The APNs token, once iOS gave one; sent to the Mac on every connection.
     @ObservationIgnored private var pushToken: String?
     /// A session a notification or widget chose before the socket was up.
@@ -105,9 +153,13 @@ final class RemoteStore {
     @ObservationIgnored private var streaming = false
     @ObservationIgnored private var credential: PairingCredential?
 
-    init(isDemo: Bool, restoreSavedPairings: Bool = true, connection: RemoteConnection? = nil) {
+    init(
+        isDemo: Bool, restoreSavedPairings: Bool = true, connection: RemoteConnection? = nil,
+        backgroundTask: SendBackgroundTask? = nil
+    ) {
         self.isDemo = isDemo
         self.connection = connection ?? RemoteConnection()
+        self.backgroundTask = backgroundTask ?? .system
         self.connection.delegate = self
         liveActivity.onToken = { [weak self] tabID, token in self?.sendActivityToken(token, for: tabID) }
         liveActivity.onEnd = { [weak self] tabID in self?.forgetActivityToken(for: tabID) }
@@ -156,6 +208,7 @@ final class RemoteStore {
 
     /// Preserve unsent work under its pairing, never a bare tab ID from another Mac.
     private func clearMacState() {
+        invalidateCommand()
         restoreGate.invalidate()
         if let activeMacID {
             draftsByMac[activeMacID] = drafts
@@ -182,6 +235,7 @@ final class RemoteStore {
         projects = []
         sessionOptions = nil
         errorMessage = nil
+        sendMayBeIncomplete = false
         appearanceGround = ""
         refreshOutput()
     }
@@ -247,7 +301,7 @@ final class RemoteStore {
     }
 
     func reconnect() {
-        errorMessage = nil
+        if !sendMayBeIncomplete { errorMessage = nil }
         connection.reconnect()
     }
 
@@ -285,7 +339,13 @@ final class RemoteStore {
     // MARK: Lifecycle
 
     func enterForeground() {
+        let returning = !foreground
         foreground = true
+        backgroundSend = nil
+        if returning {
+            endSendLease()
+            if let command, command.isSend, owns(command) { prepareSendLease(for: command) }
+        }
         guard !isDemo, hasPairing || connection.credential != nil else { return }
         switch phase {
         case .connected: if streaming { Task { await startStreaming() } } else { startPolling() }
@@ -294,12 +354,51 @@ final class RemoteStore {
         }
     }
 
-    /// iOS suspends the socket in the background anyway; closing it lets the Mac see the phone leave.
-    func enterBackground() {
+    /// The app opts into finishing an owned send. Teardown keeps the immediate path.
+    func enterBackground(finishingSend: Bool = false) {
         foreground = false
+        backgroundSend = nil
         pollTask?.cancel()
         saveCacheNow()
         guard !isDemo, phase != .revoked else { return }
+        if finishingSend, let command, command.isSend, owns(command),
+            let lease = sendLease, lease.commandID == command.id, lease.end != nil
+        {
+            backgroundSend = command.id
+            return
+        }
+        invalidateCommand()
+        connection.stop()
+    }
+
+    private func prepareSendLease(for work: PendingCommand) {
+        endSendLease()
+        guard !isDemo else { return }
+        let lease = SendLease(commandID: work.id)
+        let leaseID = lease.id
+        sendLease = lease
+        let end = backgroundTask.begin { [weak self] in self?.expireSendLease(leaseID) }
+        if sendLease?.id == leaseID {
+            sendLease?.end = end
+        } else {
+            // Expiration may arrive before begin returns.
+            end?()
+        }
+    }
+
+    private func endSendLease() {
+        let end = sendLease?.end
+        sendLease = nil
+        end?()
+    }
+
+    private func expireSendLease(_ id: UUID) {
+        guard let lease = sendLease, lease.id == id else { return }
+        let work = command
+        endSendLease()
+        guard let work, work.id == lease.commandID, owns(work),
+            !foreground, backgroundSend == work.id else { return }
+        invalidateCommand()
         connection.stop()
     }
 
@@ -696,28 +795,30 @@ final class RemoteStore {
             errorMessage = "Keep the message under 8 KB."
             return
         }
-        let epoch = connection.commandEpoch
-        perform { connection in
-            try connection.requireCurrentConnection(epoch)
+        let id = UUID()
+        let revision = draftRevisions[target]
+        perform(id: id, isSend: true, onSuccess: {
+            if self.drafts[target] == text, self.draftRevisions[target] == revision { self.drafts[target] = "" }
+        }) { connection in
+            try self.requireCommand(id)
             for file in files {
-                try await self.upload(file, to: target, over: connection, epoch: epoch)
-                try connection.requireCurrentConnection(epoch)
+                try await self.upload(file, to: target, over: connection, commandID: id)
+                try self.requireCommand(id)
                 // The Mac has pasted this file, so a retry must not send it again.
                 self.attachments[target]?.removeAll { $0.id == file.id }
             }
             if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                try connection.requireCurrentConnection(epoch)
+                try self.requireCommand(id)
                 _ = try await connection.request("input", text: payload, tabID: target)
             }
             try await Task.sleep(for: .milliseconds(100))
-            try connection.requireCurrentConnection(epoch)
+            try self.requireCommand(id)
             _ = try await connection.request("key", text: RemoteKey.enter.rawValue, tabID: target)
-            try connection.requireCurrentConnection(epoch)
-            if self.drafts[target] == text { self.drafts[target] = "" }
+            try self.requireCommand(id)
         }
     }
 
-    private func upload(_ file: Attachment, to tabID: String, over connection: RemoteConnection, epoch: Int) async throws {
+    private func upload(_ file: Attachment, to tabID: String, over connection: RemoteConnection, commandID: UUID) async throws {
         let transfer = RemoteFile.transferID()
         let name = RemoteFile.safeName(file.name)
         for chunk in RemoteFile.chunks(of: file.data) {
@@ -725,7 +826,7 @@ final class RemoteStore {
             let wait = lastChunkAt.addingTimeInterval(0.05).timeIntervalSinceNow
             if wait > 0 { try await Task.sleep(for: .seconds(wait)) }
             lastChunkAt = Date()
-            try connection.requireCurrentConnection(epoch)
+            try requireCommand(commandID)
             _ = try await connection.request(
                 "file", text: chunk.base64, tabID: tabID, name: name, index: chunk.index, count: chunk.count,
                 transfer: transfer)
@@ -734,18 +835,89 @@ final class RemoteStore {
 
     // MARK: Helpers
 
-    private func perform(_ work: @escaping (RemoteConnection) async throws -> Void) {
+    private func perform(
+        id: UUID = UUID(), isSend: Bool = false,
+        onSuccess: (@MainActor () -> Void)? = nil,
+        _ work: @escaping @MainActor (RemoteConnection) async throws -> Void
+    ) {
         guard isConnected, !busy else { return }
+        let pending = PendingCommand(id: id, macID: activeMacID, epoch: connection.commandEpoch, isSend: isSend)
+        command = pending
         busy = true
+        sendMayBeIncomplete = false
         errorMessage = nil
-        let epoch = connection.commandEpoch
-        Task {
-            await run {
-                try $0.requireCurrentConnection(epoch)
-                try await work($0)
+        // Ask before starting network work, while the app is still in front.
+        if isSend { prepareSendLease(for: pending) }
+        guard command?.id == id else { return }
+        commandTask = Task { @MainActor in
+            var failure: Error?
+            do {
+                if !self.isDemo {
+                    try self.requireCommand(id)
+                    try await work(self.connection)
+                }
+            } catch {
+                failure = error
             }
-            busy = false
+            self.completeCommand(pending, error: failure, onSuccess: onSuccess)
         }
+    }
+
+    private func owns(_ work: PendingCommand) -> Bool {
+        command?.id == work.id && activeMacID == work.macID
+            && connection.commandEpoch == work.epoch && isConnected && connection.phase == .connected
+    }
+
+    private func requireCommand(_ id: UUID) throws {
+        try Task.checkCancellation()
+        guard let command, command.id == id, activeMacID == command.macID else { throw RemoteConnectionError.changed }
+        try connection.requireCurrentConnection(command.epoch)
+    }
+
+    private static let incompleteSend = "Send may be incomplete. Check the terminal before sending again."
+
+    private func markIncompleteSend() {
+        sendMayBeIncomplete = true
+        errorMessage = Self.incompleteSend
+    }
+
+    private func invalidateCommand() {
+        let previous = command
+        command = nil
+        commandTask?.cancel()
+        commandTask = nil
+        backgroundSend = nil
+        endSendLease()
+        // A separate createProject operation may own busy without a perform task.
+        guard let previous else { return }
+        busy = false
+        if previous.macID == activeMacID, !isDemo {
+            if previous.isSend { markIncompleteSend() }
+            else { errorMessage = RemoteConnectionError.changed.localizedDescription }
+        }
+    }
+
+    private func completeCommand(_ work: PendingCommand, error: Error?, onSuccess: (@MainActor () -> Void)?) {
+        guard command?.id == work.id else { return }
+        let sameMac = activeMacID == work.macID
+        // Commit the draft and release busy in one actor turn. A disconnect
+        // between the async work and this completion must retain the draft.
+        if error == nil, owns(work) { onSuccess?() }
+        if work.isSend, !isDemo, sameMac, error != nil || !owns(work) {
+            markIncompleteSend()
+        } else if let error, sameMac {
+            errorMessage = error.localizedDescription
+        }
+        let stop = !foreground && backgroundSend == work.id && sameMac
+        let stopEpoch = connection.commandEpoch
+        command = nil
+        commandTask = nil
+        backgroundSend = nil
+        busy = false
+        endSendLease()
+        guard stop, !foreground, command == nil, activeMacID == work.macID,
+            connection.commandEpoch == stopEpoch, phase != .revoked else { return }
+        connection.stop()
     }
 
     private func run(_ work: (RemoteConnection) async throws -> Void) async {
@@ -1037,9 +1209,10 @@ final class RemoteStore {
 extension RemoteStore: RemoteConnectionDelegate {
     func connection(_ connection: RemoteConnection, didChange phase: RemoteConnection.Phase) {
         self.phase = phase
+        if phase != .connected { invalidateCommand() }
         switch phase {
         case .connected:
-            errorMessage = nil
+            if !sendMayBeIncomplete { errorMessage = nil }
             credential = connection.credential
             streaming = false
             if foreground { Task { await startStreaming() } }
@@ -1049,6 +1222,7 @@ extension RemoteStore: RemoteConnectionDelegate {
             freshHandshake = true
             streaming = false
             pollTask?.cancel()
+            if !foreground { connection.stop() }
         case .offline, .revoked:
             prompt = nil
             streaming = false

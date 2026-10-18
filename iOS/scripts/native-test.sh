@@ -52,7 +52,9 @@ for product in "$APP/Sigil" "$APP/PlugIns/SigilNotifications.appex/SigilNotifica
   test -f "$product" || { echo "Missing shipping product: $product" >&2; exit 1; }
 done
 RESULT="$ARTIFACTS/native-$(date +%Y%m%d-%H%M%S)-$$.xcresult"
-TEST_RUNNER_SIGIL_RELAY_PORT="$SIGIL_RELAY_PORT" xcodebuild -project Sigil.xcodeproj -scheme Sigil -sdk iphonesimulator \
+TEST_RUNNER_SIGIL_RELAY_PORT="$SIGIL_RELAY_PORT" \
+TEST_RUNNER_SIGIL_RELAY_PORTS="${SIGIL_RELAY_PORTS:-$SIGIL_RELAY_PORT}" \
+xcodebuild -project Sigil.xcodeproj -scheme Sigil -sdk iphonesimulator \
   -destination "platform=iOS Simulator,id=$SIMULATOR" -derivedDataPath "$WORK/DerivedData" \
   -parallel-testing-enabled NO -test-timeouts-enabled YES -default-test-execution-time-allowance 120 \
   -resultBundlePath "$RESULT" CODE_SIGNING_ALLOWED=NO SIGIL_RELAY_PORT="$SIGIL_RELAY_PORT" test-without-building -quiet

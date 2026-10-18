@@ -172,7 +172,7 @@ struct SessionScreen: View {
                 .surface(radius: Theme.Radius.card, elevation: .raised)
                 .accessibilityElement(children: .combine)
             }
-            if let error = store.errorMessage, !store.isRevoked {
+            if let error = store.errorMessage, !store.isRevoked || store.sendMayBeIncomplete {
                 Button {
                     store.errorMessage = nil
                 } label: {

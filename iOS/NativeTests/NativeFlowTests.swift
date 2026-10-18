@@ -6,10 +6,24 @@ import SwiftUI
 /// encryption, transport, relay and the app's connection implementation are real.
 @MainActor
 final class NativeFlowTests: XCTestCase {
+    private static var nextRelay = 0
+    private var assignedRelay: String?
     private var relayPort: String {
         get throws {
-            let value = ProcessInfo.processInfo.environment["SIGIL_RELAY_PORT"] ?? ""
-            return try XCTUnwrap(Int(value).map(String.init), "Run scripts/native-test.sh to start the real relay.")
+            if let assignedRelay { return assignedRelay }
+            let environment = ProcessInfo.processInfo.environment
+            let values = (environment["SIGIL_RELAY_PORTS"] ?? environment["SIGIL_RELAY_PORT"] ?? "").split(separator: ",")
+            let ports = values.compactMap { value -> String? in
+                guard let port = Int(value), (1...65535).contains(port) else { return nil }
+                return String(port)
+            }
+            guard !ports.isEmpty, ports.count == values.count else {
+                throw TestFailure("Run scripts/native-test.sh to start the real relay.")
+            }
+            let port = ports[Self.nextRelay % ports.count]
+            Self.nextRelay += 1
+            assignedRelay = port
+            return port
         }
     }
 
@@ -276,6 +290,384 @@ final class NativeFlowTests: XCTestCase {
         XCTAssertFalse(store.draft.isEmpty, "Uncertain submission retains the draft")
     }
 
+    func testBackgroundFinishesThreePhotoSendBeforeClosing() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        let store = fixture.store, mac = fixture.mac
+        let photos = syntheticPhotos()
+        store.draft = "Three synthetic photos"
+        XCTAssertNil(store.attach(photos))
+        store.sendDraft()
+        store.enterBackground(finishingSend: true)
+        try await RelayTests.until("background send settled") { !store.busy }
+        let dispatched = mac.requests.filter { $0.action == "file" || $0.action == "input" || $0.action == "key" }
+        let chunks = dispatched.filter { $0.action == "file" }
+        print("REA-1198 background fixture: actions=\(dispatched.map(\.action)), draftRetained=\(!store.draft.isEmpty), connected=\(store.isConnected)")
+        XCTAssertEqual(dispatched.map(\.action), Array(repeating: "file", count: 6) + ["input", "key"])
+        XCTAssertEqual(chunks.compactMap(\.index), [0, 1, 0, 1, 0, 1])
+        XCTAssertEqual(chunks.compactMap(\.count), Array(repeating: 2, count: 6))
+        XCTAssertEqual(Set(chunks.compactMap(\.transfer)).count, 3)
+        for photo in photos {
+            let parts = chunks.filter { $0.name == photo.name }
+            var received = Data()
+            for part in parts { received.append(Data(base64Encoded: part.text ?? "") ?? Data()) }
+            XCTAssertEqual(received, photo.data)
+            XCTAssertEqual(Set(parts.compactMap(\.tabID)), ["T1"])
+        }
+        XCTAssertEqual(dispatched.first { $0.action == "input" }?.text, " Three synthetic photos")
+        XCTAssertEqual(dispatched.last?.text, "enter")
+        XCTAssertEqual(store.draft, "")
+        XCTAssertTrue(store.selectedAttachments.isEmpty)
+        XCTAssertFalse(store.isConnected, "The background connection closes after the send settles")
+        XCTAssertEqual(fixture.budget.expirations.count, 1)
+        XCTAssertEqual(fixture.budget.ended, [0])
+        XCTAssertFalse(store.sendMayBeIncomplete)
+    }
+
+    func testBackgroundWithoutSendStopsImmediately() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        fixture.store.enterBackground(finishingSend: true)
+        XCTAssertEqual(fixture.store.phase, .offline)
+        XCTAssertTrue(fixture.budget.expirations.isEmpty)
+        XCTAssertFalse(fixture.store.sendMayBeIncomplete)
+    }
+
+    func testBackgroundTeardownStopsPendingSendImmediately() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        fixture.mac.pauseInput = true
+        fixture.store.draft = "Keep this draft"
+        fixture.store.sendDraft()
+        try await RelayTests.until("teardown input dispatched") { fixture.inputCount == 1 }
+        fixture.store.enterBackground()
+        XCTAssertEqual(fixture.store.phase, .offline)
+        XCTAssertFalse(fixture.store.busy)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(fixture.enterCount, 0)
+        XCTAssertEqual(fixture.store.draft, "Keep this draft")
+        XCTAssertEqual(fixture.budget.ended, [0])
+    }
+
+    func testBackgroundDeniedTimeRetainsDraftWithoutDispatch() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        fixture.budget.granted = false
+        fixture.store.draft = "Time was not granted"
+        fixture.store.sendDraft()
+        fixture.store.enterBackground(finishingSend: true)
+        XCTAssertEqual(fixture.store.phase, .offline)
+        XCTAssertFalse(fixture.store.busy)
+        XCTAssertTrue(fixture.store.sendMayBeIncomplete)
+        XCTAssertTrue(fixture.store.errorMessage?.contains("Send may be incomplete") == true)
+        XCTAssertEqual(fixture.store.draft, "Time was not granted")
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(fixture.inputCount, 0)
+        XCTAssertEqual(fixture.enterCount, 0)
+        XCTAssertTrue(fixture.budget.ended.isEmpty, "A refused assertion has no end operation")
+    }
+
+    func testForegroundSendFinishesWhenBackgroundTimeIsDenied() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        fixture.budget.granted = false
+        fixture.store.draft = "Still in front"
+        fixture.store.sendDraft()
+        try await RelayTests.until("foreground send finished") { !fixture.store.busy }
+        XCTAssertTrue(fixture.store.isConnected)
+        XCTAssertEqual(fixture.inputCount, 1)
+        XCTAssertEqual(fixture.enterCount, 1)
+        XCTAssertEqual(fixture.store.draft, "")
+        XCTAssertFalse(fixture.store.sendMayBeIncomplete)
+        XCTAssertTrue(fixture.budget.ended.isEmpty)
+    }
+
+    func testForegroundExpirationBeforeBeginReturnsKeepsSendUsable() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        fixture.budget.expireDuringBegin = true
+        fixture.store.draft = "An early expiration is balanced"
+        fixture.store.sendDraft()
+        try await RelayTests.until("send after early foreground expiration") { !fixture.store.busy }
+        XCTAssertTrue(fixture.store.isConnected)
+        XCTAssertEqual(fixture.inputCount, 1)
+        XCTAssertEqual(fixture.enterCount, 1)
+        XCTAssertEqual(fixture.store.draft, "")
+        XCTAssertFalse(fixture.store.sendMayBeIncomplete)
+        XCTAssertEqual(fixture.budget.ended, [0], "Even expiration before begin returns ends the granted assertion once")
+    }
+
+    func testBackgroundExpirationRetainsPhotosAndDraftWithoutReplay() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        let photos = syntheticPhotos()
+        fixture.mac.pauseFile = true
+        fixture.store.draft = "Inspect the terminal before sending again"
+        XCTAssertNil(fixture.store.attach(photos))
+        fixture.store.sendDraft()
+        try await RelayTests.until("first photo chunk pending") { fixture.mac.requests.contains { $0.action == "file" } }
+        fixture.store.enterBackground(finishingSend: true)
+        fixture.budget.expire(0)
+        XCTAssertEqual(fixture.store.phase, .offline)
+        XCTAssertFalse(fixture.store.busy)
+        XCTAssertTrue(fixture.store.sendMayBeIncomplete)
+        XCTAssertEqual(fixture.store.selectedAttachments, photos)
+        XCTAssertEqual(fixture.budget.ended, [0])
+        fixture.mac.pauseFile = false
+        fixture.store.enterForeground()
+        try await RelayTests.until("fresh connection after expired send") { fixture.store.isConnected && fixture.mac.connections == 2 }
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(fixture.mac.requests.filter { $0.action == "file" }.count, 1)
+        XCTAssertEqual(fixture.inputCount, 0)
+        XCTAssertEqual(fixture.enterCount, 0)
+        XCTAssertEqual(fixture.store.draft, "Inspect the terminal before sending again")
+        XCTAssertTrue(fixture.store.errorMessage?.contains("Send may be incomplete") == true)
+        try await captureSendScreen(fixture.store, named: "REA-1198 expired send retains draft and photos")
+    }
+
+    func testForegroundReturnKeepsTheSendAndRejectsOldExpiration() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        fixture.mac.pauseInput = true
+        fixture.store.draft = "Return during the send"
+        fixture.store.sendDraft()
+        try await RelayTests.until("input awaiting foreground return") { fixture.inputCount == 1 }
+        fixture.store.enterBackground(finishingSend: true)
+        XCTAssertTrue(fixture.store.isConnected)
+        fixture.store.enterForeground()
+        XCTAssertEqual(fixture.budget.expirations.count, 2)
+        XCTAssertEqual(fixture.budget.ended, [0])
+        fixture.budget.expire(0)
+        XCTAssertTrue(fixture.store.isConnected)
+        XCTAssertTrue(fixture.store.busy)
+        try await fixture.mac.releaseInput()
+        try await RelayTests.until("foreground send completed") { !fixture.store.busy }
+        XCTAssertTrue(fixture.store.isConnected, "Old completion cannot run a deferred background stop")
+        XCTAssertEqual(fixture.mac.connections, 1)
+        XCTAssertEqual(fixture.inputCount, 1)
+        XCTAssertEqual(fixture.enterCount, 1)
+        XCTAssertEqual(fixture.store.draft, "")
+        XCTAssertEqual(fixture.budget.ended, [0, 1])
+    }
+
+    func testOldExpirationCannotStopNewConnectionSend() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        fixture.mac.pauseInput = true
+        fixture.store.draft = "Original connection"
+        fixture.store.sendDraft()
+        try await RelayTests.until("original input pending") { fixture.inputCount == 1 }
+        fixture.store.reconnect()
+        try await RelayTests.until("replacement connection") { fixture.store.isConnected && fixture.mac.connections == 2 }
+        fixture.store.draft = "Replacement connection"
+        fixture.store.sendDraft()
+        try await RelayTests.until("replacement input pending") { fixture.inputCount == 2 }
+        fixture.store.enterBackground(finishingSend: true)
+        fixture.budget.expire(0)
+        XCTAssertTrue(fixture.store.isConnected)
+        XCTAssertTrue(fixture.store.busy)
+        XCTAssertEqual(fixture.budget.ended, [0])
+        try await fixture.mac.releaseInput()
+        try await RelayTests.until("replacement send finished") { !fixture.store.busy }
+        XCTAssertEqual(fixture.store.phase, .offline)
+        XCTAssertEqual(fixture.enterCount, 1, "The old send never adds Enter on the replacement connection")
+        XCTAssertEqual(fixture.mac.requests.filter { $0.action == "input" }.compactMap(\.text),
+                       ["Original connection", "Replacement connection"])
+        XCTAssertEqual(fixture.store.draft, "")
+        XCTAssertEqual(fixture.budget.ended, [0, 1])
+    }
+
+    func testBackgroundConnectionLossDoesNotReconnect() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        fixture.mac.pauseInput = true
+        fixture.store.draft = "A lost connection is uncertain"
+        fixture.store.sendDraft()
+        try await RelayTests.until("input before host loss") { fixture.inputCount == 1 }
+        fixture.store.enterBackground(finishingSend: true)
+        fixture.mac.stop()
+        try await RelayTests.until("background connection stopped") { fixture.store.phase == .offline && !fixture.store.busy }
+        try await Task.sleep(for: .seconds(1.1))
+        XCTAssertEqual(fixture.store.phase, .offline, "Background socket loss must not start reconnecting")
+        XCTAssertEqual(fixture.mac.connections, 1)
+        XCTAssertEqual(fixture.enterCount, 0)
+        XCTAssertEqual(fixture.store.draft, "A lost connection is uncertain")
+        XCTAssertTrue(fixture.store.sendMayBeIncomplete)
+        XCTAssertEqual(fixture.budget.ended, [0])
+    }
+
+    func testBackgroundRevocationKeepsSendUncertaintyVisible() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        fixture.mac.pauseInput = true
+        fixture.store.draft = "Retain this interrupted draft"
+        fixture.store.sendDraft()
+        try await RelayTests.until("input before revocation") { fixture.inputCount == 1 }
+        fixture.store.enterBackground(finishingSend: true)
+        fixture.mac.revoke()
+        try await RelayTests.until("send pairing revoked") { fixture.store.isRevoked && !fixture.store.busy }
+        fixture.store.enterForeground()
+        fixture.budget.expire(0)
+        try await Task.sleep(for: .milliseconds(650))
+        XCTAssertTrue(fixture.store.isRevoked)
+        XCTAssertEqual(fixture.mac.connections, 1)
+        XCTAssertEqual(fixture.enterCount, 0)
+        XCTAssertTrue(fixture.store.sendMayBeIncomplete)
+        XCTAssertTrue(fixture.store.errorMessage?.contains("Send may be incomplete") == true)
+        XCTAssertEqual(fixture.store.draft, "Retain this interrupted draft")
+        XCTAssertEqual(fixture.budget.ended, [0])
+        try await captureSendScreen(fixture.store, named: "REA-1198 revoked pairing keeps send uncertainty")
+    }
+
+    func testBackgroundLostRepliesRetainDraftWithoutReplay() async throws {
+        for lost in ["input", "Enter"] {
+            let fixture = try await backgroundFixture()
+            defer { fixture.stop() }
+            fixture.mac.pauseInput = lost == "input"
+            fixture.mac.pauseEnter = lost == "Enter"
+            let expectedEnter = lost == "Enter" ? 1 : 0
+            fixture.store.draft = "An \(lost) acknowledgement can be lost"
+            fixture.store.sendDraft()
+            try await RelayTests.until("unacknowledged \(lost)") {
+                fixture.inputCount == 1 && fixture.enterCount == expectedEnter
+            }
+            fixture.store.enterBackground(finishingSend: true)
+            try await RelayTests.until("normal command deadline settles \(lost)", timeout: 14) {
+                !fixture.store.busy && fixture.store.phase == .offline
+            }
+            XCTAssertTrue(fixture.store.sendMayBeIncomplete)
+            XCTAssertEqual(fixture.store.draft, "An \(lost) acknowledgement can be lost")
+            fixture.mac.pauseInput = false
+            fixture.mac.pauseEnter = false
+            fixture.store.enterForeground()
+            try await RelayTests.until("reconnected after lost \(lost)") { fixture.store.isConnected && fixture.mac.connections == 2 }
+            XCTAssertEqual(fixture.inputCount, 1)
+            XCTAssertEqual(fixture.enterCount, expectedEnter, "Reconnect cannot replay either stage")
+            XCTAssertTrue(fixture.store.errorMessage?.contains("Send may be incomplete") == true)
+            fixture.mac.optionsError = "Options could not be loaded."
+            _ = await fixture.store.loadSessionOptions()
+            XCTAssertTrue(fixture.store.errorMessage?.contains("Send may be incomplete") == true,
+                          "An automatic read error cannot hide the uncertain send")
+            XCTAssertTrue(fixture.store.errorMessage?.contains("Options could not be loaded.") == true)
+            XCTAssertEqual(fixture.budget.ended, [0])
+        }
+    }
+
+    func testNewDraftRevisionSurvivesOriginalSend() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        fixture.mac.pauseInput = true
+        fixture.store.draft = "Same words"
+        fixture.store.sendDraft()
+        try await RelayTests.until("original draft dispatched") { fixture.inputCount == 1 }
+        fixture.store.draft = "Edited while sending"
+        fixture.store.draft = "Same words"
+        let later = Attachment(name: "later.txt", data: Data("later attachment".utf8), preview: nil)
+        XCTAssertNil(fixture.store.attach([later]))
+        try await fixture.mac.releaseInput()
+        try await RelayTests.until("original draft acknowledged") { !fixture.store.busy }
+        XCTAssertEqual(fixture.store.draft, "Same words", "Editing away and back creates a newer draft")
+        XCTAssertEqual(fixture.store.selectedAttachments, [later])
+        XCTAssertEqual(fixture.inputCount, 1)
+        XCTAssertEqual(fixture.enterCount, 1)
+        XCTAssertFalse(fixture.store.sendMayBeIncomplete)
+    }
+
+    func testOldSendCompletionCannotReleaseNewBusy() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        let delegate = SwitchingDelegate(store: fixture.store)
+        fixture.connection.delegate = delegate
+        // Deliver lifecycle callbacks at the acknowledgement boundary while the
+        // transport remains valid. This isolates task ownership from wire epochs.
+        delegate.afterReply = { [weak delegate] action in
+            guard action == "key" else { return }
+            delegate?.afterReply = nil
+            fixture.store.connection(fixture.connection, didChange: .offline)
+            fixture.store.connection(fixture.connection, didChange: .connected)
+            fixture.mac.pauseInput = true
+            fixture.store.draft = "New busy operation"
+            fixture.store.sendDraft()
+        }
+        fixture.store.draft = "Original operation"
+        fixture.store.sendDraft()
+        try await RelayTests.until("new operation awaiting reply") { fixture.inputCount == 2 }
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertTrue(fixture.store.busy, "The old continuation cannot release the newer operation")
+        XCTAssertEqual(fixture.store.draft, "New busy operation")
+        try await fixture.mac.releaseInput()
+        try await RelayTests.until("new operation completed") { !fixture.store.busy }
+        XCTAssertEqual(fixture.enterCount, 2)
+        XCTAssertEqual(fixture.store.draft, "")
+        XCTAssertEqual(fixture.budget.ended, [0, 1])
+    }
+
+    func testBackgroundExpirationAfterInputDoesNotPressEnter() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        let delegate = SwitchingDelegate(store: fixture.store)
+        fixture.connection.delegate = delegate
+        delegate.afterReply = { [weak delegate] action in
+            guard action == "input" else { return }
+            delegate?.afterReply = nil
+            fixture.budget.expire(0)
+        }
+        fixture.store.draft = "Pasted but not submitted"
+        fixture.store.sendDraft()
+        fixture.store.enterBackground(finishingSend: true)
+        try await RelayTests.until("input boundary expired") { fixture.inputCount == 1 && !fixture.store.busy }
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(fixture.store.phase, .offline)
+        XCTAssertEqual(fixture.enterCount, 0)
+        XCTAssertEqual(fixture.store.draft, "Pasted but not submitted")
+        XCTAssertTrue(fixture.store.sendMayBeIncomplete)
+        XCTAssertEqual(fixture.budget.ended, [0])
+    }
+
+    private func syntheticPhotos() -> [Attachment] {
+        (1...3).map {
+            Attachment(name: "photo-\($0).jpg", data: Data(repeating: UInt8($0), count: RemoteFile.chunkBytes + 7), preview: nil)
+        }
+    }
+
+    private func backgroundFixture() async throws -> BackgroundSendFixture {
+        let port = try relayPort
+        let mac = FakeMac(origin: URL(string: "http://localhost:\(port)")!)
+        let budget = BackgroundTaskFixture()
+        let connection = RemoteConnection()
+        let store = RemoteStore(isDemo: false, restoreSavedPairings: false, connection: connection, backgroundTask: budget.task)
+        let fixture = BackgroundSendFixture(store: store, mac: mac, budget: budget, connection: connection)
+        do {
+            let room = try await mac.register()
+            XCTAssertNil(store.pair(with: "http://localhost:\(port)/#room=\(room)&key=\(mac.pairingKey)"))
+            try await RelayTests.until("background send fixture paired") { store.isConnected && store.selectedTabID == "T1" }
+            return fixture
+        } catch {
+            fixture.stop()
+            throw error
+        }
+    }
+
+    private func captureSendScreen(_ store: RemoteStore, named name: String) async throws {
+        let controller = UIHostingController(rootView: SessionScreen().environment(store))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        try await Task.sleep(for: .milliseconds(350))
+        controller.view.layoutIfNeeded()
+        XCTAssertTrue(store.sendMayBeIncomplete)
+        XCTAssertTrue(store.errorMessage?.contains("Send may be incomplete") == true,
+                      "The warning remains after the screen's automatic reads finish")
+        let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
+        let image = renderer.image { context in window.layer.render(in: context.cgContext) }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testNativeStorePairSelectSendTerminalControlsAndReconnect() async throws {
         let mac = FakeMac(origin: URL(string: "http://localhost:\(try relayPort)")!)
         mac.presentTerminalMenu = true
@@ -347,15 +739,56 @@ final class NativeFlowTests: XCTestCase {
 }
 
 @MainActor
+private final class BackgroundTaskFixture {
+    var granted = true
+    var expireDuringBegin = false
+    private(set) var expirations: [@MainActor @Sendable () -> Void] = []
+    private(set) var ended: [Int] = []
+
+    var task: SendBackgroundTask {
+        SendBackgroundTask { expiration in
+            let index = self.expirations.count
+            self.expirations.append(expiration)
+            if self.expireDuringBegin { expiration() }
+            guard self.granted else { return nil }
+            return {
+                XCTAssertFalse(self.ended.contains(index), "A background assertion ends once")
+                self.ended.append(index)
+            }
+        }
+    }
+
+    func expire(_ index: Int) { expirations[index]() }
+}
+
+@MainActor
+private struct BackgroundSendFixture {
+    let store: RemoteStore
+    let mac: FakeMac
+    let budget: BackgroundTaskFixture
+    let connection: RemoteConnection
+    var inputCount: Int { mac.requests.filter { $0.action == "input" }.count }
+    var enterCount: Int { mac.requests.filter { $0.action == "key" && $0.text == "enter" }.count }
+
+    func stop() {
+        store.enterBackground()
+        mac.stop()
+        for credential in store.macs { CredentialStore.delete(id: credential.id); ScreenCache.delete(for: credential) }
+    }
+}
+
+@MainActor
 private final class SwitchingDelegate: RemoteConnectionDelegate {
     let store: RemoteStore
     var switchOnKey: String?
+    var afterReply: ((String) -> Void)?
     init(store: RemoteStore) { self.store = store }
     func connection(_ connection: RemoteConnection, didChange phase: RemoteConnection.Phase) {
         store.connection(connection, didChange: phase)
     }
     func connection(_ connection: RemoteConnection, didReceive reply: RemoteReply, for action: String, tabID: String?) {
         store.connection(connection, didReceive: reply, for: action, tabID: tabID)
+        afterReply?(action)
         if action == "key", let target = switchOnKey {
             switchOnKey = nil
             store.switchTo(macID: target)

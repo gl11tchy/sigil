@@ -394,6 +394,8 @@ final class RemoteConnection {
             return
         }
         goOffline(.connecting)
+        // The delegate may stop or replace this connection on the phase change.
+        guard current == generation, !stopped else { return }
         let delay = reconnectDelay
         reconnectDelay = min(reconnectDelay * 2, 8)
         reconnectTask = Task { @MainActor [weak self] in
