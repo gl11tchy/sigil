@@ -1337,3 +1337,27 @@ A held-request/cancel/drain test brings NativeFlow to44, with11focused cases.
 Only those two source/test files differ from the verified candidate; screen,
 capture, protocol and1198 lifecycle sources are unchanged. Required final-head
 CI and parent personal review remain pending. [QA and images](../qa/rea-1199.md).
+
+
+## REA-1258 — search-field keyboard navigation (2026-10-18)
+
+Sole worker on verified main aa06ac94aa0322d4c40b854e5aa2997e3c60de2a,
+after REA-1199 Done and official build384 installed/read back. Prior updater/test
+operations completed; no active or queued CI, no matching1258 branch/worktree
+and only protectedPR162 open before this isolated worktree was created.
+Root/product/design/experience and workbench instructions were read. Existing
+workbench wrappers compile helpers and enumerate processes, so they are not run
+under the current local native-build/process-enumeration hold.
+
+The test-only baseline adds two required CI app-hosted regressions: a Down event
+directed to the generated host window must keep its search editor and advance
+the row; the actual glide target must remain on the keyboard row in both
+appearances while search owns focus. It reuses the real SidebarView and existing
+DEBUG hover observer. All production Sources remain byte-identical to main.
+The validator requires all four non-pointer cases and preserves exactly the
+existing four permission-dependent pointer exceptions; five Python validator
+tests and whitespace/source-boundary checks passed. Native reproduction is
+pending normal PR CI. No local native build/test, process enumeration, real CLI
+or personal history was used. Implementation and real isolated AX/window-ID
+evidence follow reproduction, or an exact permission blocker will be retained.
+Parent reviews final code/current comments/visuals before merge.

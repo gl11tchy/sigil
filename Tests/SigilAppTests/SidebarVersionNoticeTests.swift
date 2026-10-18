@@ -11,6 +11,107 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct SidebarVersionNoticeTests {
+    @Test func searchArrowsKeepTheFieldFocusedAndMoveTheHighlight() async throws {
+        try #require(NSApplication.shared.isRunning)
+        let fixture = try SidebarFixture()
+        defer { fixture.cleanup() }
+        let model = try await searchModel(fixture)
+        defer { model.closeAllTabsAndWait() }
+        let probe = HoverProbe()
+        let hosted = host(
+            NSHostingView(
+                rootView: SidebarView(model: model, observeHover: { probe.glide = $0 })
+                    .environment(\.palette, Palette(theme: .sigilDark))),
+            size: .init(width: 272, height: 600), interactive: true)
+        defer { hosted.window.close() }
+        model.focusSidebarSearch()
+        model.searchText = "auth"
+        let rows = model.sidebarSnapshot().rowIDs
+        try #require(rows.count == 3)
+        try await waitForSearchState("Search must have a real editor and top-row highlight") {
+            hosted.window.firstResponder is NSTextView && model.sidebarCommandContext.keyboardRowID == rows[0]
+        }
+        let editor = try #require(hosted.window.firstResponder as? NSTextView)
+        try #require(editor.string == "auth")
+        try #require(hosted.window.isKeyWindow)
+        let down = try #require(
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: hosted.window.windowNumber, context: nil, characters: "\u{F701}",
+                charactersIgnoringModifiers: "\u{F701}", isARepeat: false, keyCode: 125))
+        // This event belongs to the generated CI-host window. It is never posted
+        // to the desktop or whichever application happens to be in front.
+        NSApp.sendEvent(down)
+        try await waitForSearchState("Down must reach the real sidebar key handler") {
+            model.sidebarCommandContext.listFocused || model.sidebarCommandContext.keyboardRowID == rows[1]
+        }
+        print(
+            """
+            REA-1258 Down: query=\(model.searchText), fieldKept=\(hosted.window.firstResponder === editor), \
+            listFocused=\(model.sidebarCommandContext.listFocused), row=\(model.sidebarCommandContext.keyboardRowID ?? "nil")
+            """)
+        #expect(hosted.window.firstResponder === editor)
+        #expect(!model.sidebarCommandContext.listFocused)
+        #expect(model.sidebarCommandContext.keyboardRowID == rows[1])
+    }
+
+    @Test func searchFieldHighlightIsVisibleInDarkAndLight() async throws {
+        try #require(NSApplication.shared.isRunning)
+        for theme in [TerminalTheme.sigilDark, .sigilLight] {
+            let fixture = try SidebarFixture()
+            defer { fixture.cleanup() }
+            let model = try await searchModel(fixture)
+            defer { model.closeAllTabsAndWait() }
+            let probe = HoverProbe()
+            let hosted = host(
+                NSHostingView(
+                    rootView: SidebarView(model: model, observeHover: { probe.glide = $0 })
+                        .environment(\.palette, Palette(theme: theme))
+                        .environment(\.colorScheme, theme.isDark ? .dark : .light)),
+                size: .init(width: 272, height: 600), interactive: true)
+            defer { hosted.window.close() }
+            model.focusSidebarSearch()
+            model.searchText = "auth"
+            let first = try #require(model.sidebarSnapshot().rowIDs.first)
+            try await waitForSearchState("Search must own focus and the first result") {
+                hosted.window.firstResponder is NSTextView && model.sidebarCommandContext.keyboardRowID == first
+            }
+            // Remove incidental pointer hover through the view's actual callback.
+            // Keyboard fill must then remain visible while the editor keeps focus.
+            if let target = probe.glide?.target { probe.glide?.hover(target, false) }
+            try await Task.sleep(for: .milliseconds(100))
+            print(
+                """
+                REA-1258 search fill: appearance=\(theme.name), row=\(first), \
+                fill=\(probe.glide?.target ?? "nil"), listFocused=\(model.sidebarCommandContext.listFocused)
+                """)
+            #expect(!model.sidebarCommandContext.listFocused)
+            #expect(probe.glide?.target == first)
+        }
+    }
+
+    private func searchModel(_ fixture: SidebarFixture) async throws -> AppModel {
+        fixture.settings.showWorktreeSessions = true
+        let folder = try fixture.directory("search-project")
+        for (index, title) in ["Auth one", "Auth two", "Auth three"].enumerated() {
+            try fixture.writeListedSession(id: "search-\(index)", cwd: folder.path, summary: title)
+        }
+        await fixture.store.reload()
+        let model = fixture.model()
+        model.openRecents()
+        return model
+    }
+
+    private func waitForSearchState(_ description: String, _ ready: @MainActor () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !ready(), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        guard ready() else {
+            throw NSError(domain: "Sigil.SearchHostFixture", code: 1, userInfo: [NSLocalizedDescriptionKey: description])
+        }
+    }
+
     @Test func thousandSessionTwentyRowHoverSweep() async throws {
         try #require(NSApplication.shared.isRunning)
         let fixture = try SidebarFixture()
@@ -805,11 +906,11 @@ private final class SidebarFixture {
         return url
     }
 
-    func writeListedSession(id: String, cwd: String) throws {
+    func writeListedSession(id: String, cwd: String, summary title: String = "Session") throws {
         let directory = GrokPaths.sessionDirectory(cwd: cwd, sessionID: id)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let summary: [String: Any] = [
-            "info": ["id": id, "cwd": cwd], "session_summary": "Session",
+            "info": ["id": id, "cwd": cwd], "session_summary": title,
             "created_at": "2026-08-01T00:00:00Z", "updated_at": "2026-08-01T00:00:00Z",
             "num_chat_messages": 4,
         ]
