@@ -55,6 +55,23 @@ There is no Kimi transcript/Wire/ACP fixture suite in these checked host contrac
 generated launch tests does not establish a disk format for either implementation. No personal
 Kimi home, session file, token or credential store was opened; no fixture or CLI was executed.
 
+## Same-session hooks
+
+The [replacement Hooks
+reference](https://moonshotai.github.io/kimi-code/en/customization/hooks), accessed 2026-10-18,
+documents scripts running from the existing session. Base JSON stdin includes `session_id`,
+event name and client/workspace fields; `TurnStarted` carries `turn_id` and prompt/origin, with
+separate queued-prompt, tool/result, permission/result, interruption and session events. This
+avoids a second agent writer, but the reviewed event catalog does not establish a full
+assistant-message stream.
+
+Rules live in replacement `~/.kimi-code/config.toml`, not the legacy family's configuration.
+Matching hooks run in parallel. Tool/prompt/stop handlers can block or append context; other
+events are observational. Errors/timeouts fail open, so missing events cannot certify success or
+serve as a security boundary. A prospective collector should use confirmed observational events,
+emit no control/context output and preserve user configuration. This rolling contract was not
+verified against replacement 2.1.1 or any legacy binary; no hooks were installed or run.
+
 ## Coexistence and potential value
 
 The replacement's session APIs and event subscriptions make a future read-only projection worth
@@ -66,7 +83,8 @@ is not proof of exclusive ownership.
 A future integration could offer message navigation and explicit pending requests, but it must
 select one implementation family and preserve that family's event and recovery semantics. Legacy
 Wire, replacement ACP and the experimental server API are not interchangeable transcript
-formats.
+formats. Replacement hooks offer a narrower same-session activity route that does not require
+assuming server ownership or ACP reattachment semantics.
 
 ## Identity, security and unresolved assumptions
 
@@ -77,6 +95,12 @@ and no bypass-auth option should be introduced for this feature. Historical/repl
 cannot become current approvals. Separate display-only subscriptions from prompt, interrupt,
 permission and session mutation methods.
 
+Hook IDs also need an owned collector/launch generation plus independent tab/native-session
+binding. Do not trust arbitrary local JSON or infer turn IDs on events that omit them. Bound
+payloads and specify ordering, loss, duplicate/queued prompts and stop continuation before
+showing completion; keep permission events informational unless a separately authorized live
+control channel exists.
+
 The exact installed implementation, replacement disk schema, schema-to-release mapping, replay
 ordering and live multi-client arbitration remain unverified. The difference between rolling
 reference pages and the dated release label is an explicit limit, not permission to assume
@@ -85,9 +109,11 @@ compatibility. No integration or uniform cross-provider mapping is selected.
 ## Decision and fallback
 
 **NO-GO for a native transcript or structured approval layer on the current Kimi PTY path.**
-There are genuine structured options, but Sigil has no checked family/version/identity adapter,
-and legacy Wire evidence cannot fill the replacement's gaps. Reconsider only after a pinned
-replacement contract and synthetic same-session, replay, authentication and pending-request
-tests justify a separate spec. The fallback remains the actual interactive `kimi` terminal and
-existing terminal/phone output, with unsupported native history/completion/approval capabilities
-unavailable; do not auto-migrate or launch another agent to manufacture a transcript.
+**GO for a scoped replacement-family read-only hook/activity specification**, because documented
+callbacks can observe the current agent. Full transcript adoption needs assistant-message
+coverage, a checked family/version/identity adapter and synthetic ordering, loss, queued-prompt,
+continuation and permission cases; legacy Wire cannot fill those gaps. Server/ACP control needs
+a separate authentication/ownership design. The fallback remains the actual interactive `kimi`
+terminal and existing terminal/phone output, with unsupported native history/completion/approval
+capabilities unavailable; do not auto-migrate or launch another agent to manufacture a
+transcript.

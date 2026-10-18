@@ -38,13 +38,30 @@ with a `cwd`/time guess. The repository has no validated app-server transcript/a
 Only generated fixture source was inspected; no private rollout or CLI home was opened and no
 tests or CLIs were run for this document.
 
+## Same-session hooks
+
+The [official Hooks reference](https://developers.openai.com/codex/hooks), accessed 2026-10-18,
+documents hooks in the agent loop, including prompts, tools/results, permissions, compaction,
+interrupts and stops. Command stdin includes `session_id`; turn-scoped events add `turn_id`.
+`Stop` can include the latest assistant text, but other hooks may continue the turn. This is a
+same-session observation option without replacing the PTY or starting another conversation; it
+does not establish a complete ordered assistant-message stream. The referenced transcript format
+is explicitly unstable.
+
+Hooks load from JSON/config/plugin sources, with non-managed hooks reviewed/trusted. Matching
+commands run concurrently; synchronous handlers add latency and async delivery needs ordering
+and loss handling. A future collector must emit no context, continuation, permission or tool
+mutation output and preserve user hooks. Availability/schema in 0.157.1 was not checked, and no
+hooks or trust settings were changed.
+
 ## Coexistence and potential value
 
 The current [app-server documentation](https://developers.openai.com/codex/app-server/)
 explicitly supports connecting a terminal UI with `codex --remote` to a server. This is a
-documented future shared-server topology, not an unavailable feature. The page labels WebSocket
-transport experimental and unsupported for production; that transport warning must not be
-generalized to default stdio.
+documented future shared-server topology, not an unavailable feature. The reviewed page labels
+the app-server command and WebSocket transport experimental and unsupported for production. That
+command-wide support warning also applies when choosing default stdio; an additional WebSocket
+warning does not exempt stdio.
 
 That still does not establish an observer for an arbitrary already-running Sigil TUI. An opt-in
 server/remote-TUI launch would change ownership. Item boundaries, diffs and live approvals could
@@ -59,6 +76,11 @@ Replayed disk items are display evidence only. Stale requests, cancellation, rec
 conflicting clients must never transfer approval authority. Terminal text and successful history
 parsing remain insufficient authorization.
 
+Hook session/turn fields likewise require independent tab/process binding and an owned collector
+generation. Reject stale or forged local payloads, bound data and surface gaps; do not open a
+hook-supplied transcript path merely because its ID matches. Hook observation must not replace
+the current independently validated lifecycle/completion evidence.
+
 No multi-client arbitration, arbitrary-TUI attachment, schema upgrade or reconnect/replay
 behavior was validated here. The documented server route is a real candidate for further
 investigation, not a tested Sigil capability. No listener, token or permission configuration was
@@ -67,9 +89,10 @@ created or changed.
 ## Decision and fallback
 
 **NO-GO for adopting app-server as a native transcript/approval layer for the current Codex PTY
-path now.** The documented shared-server terminal route is more promising than a second headless
-conversation, but Sigil's launch, identity and client-arbitration contract for it remains
-unvalidated. Reconsider a separate opt-in integration spec with a supported transport, pinned
-schemas and synthetic ownership, event, replay and approval cases. Keep the actual terminal plus
-existing validated history/resume and separately verified lifecycle/tab identity as the fallback.
-Do not promise a uniform provider transcript.
+path now.** Its experimental command status and unvalidated launch/client-arbitration contract
+prevent adoption. **GO for a scoped read-only hook investigation** that retains the interactive
+PTY; confirm version coverage, collector/session/turn identity and incomplete/continued turns
+with synthetic cases before changing capabilities. A later server integration needs an explicit
+support decision, pinned schemas and synthetic ownership, replay and approval cases. Keep the
+actual terminal plus existing validated history/resume and separately verified lifecycle/tab
+identity as the fallback. Do not promise a uniform provider transcript.

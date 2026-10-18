@@ -41,6 +41,24 @@ provider-specific arguments and removal of Grok-only state. They do not construc
 transcript, ACP approval or local/cloud identity fixtures. Only repository source was read; no
 personal Devin database, credentials or live CLI was inspected and no fixture was executed here.
 
+## Same-session hooks
+
+The [lifecycle hook reference](https://docs.devin.ai/cli/extensibility/hooks/lifecycle-hooks),
+accessed 2026-10-18, documents callbacks from the running agent with stable `session_id` and a
+per-prompt `prompt_id` (absent before the first prompt). Prompt text, tool input/result,
+permission requests, compaction summaries and session boundaries can be observed without a
+second agent writer. The reviewed event list does not document assistant-text deltas or a
+complete assistant-message callback. `Stop` is an attempted stop that other hooks can block, not
+unconditional completion.
+
+The [hooks overview](https://docs.devin.ai/cli/extensibility/hooks/overview) documents JSON
+command hooks in `.devin/hooks.v1.json`, other project/user settings and compatible Claude
+settings. Commands receive JSON stdin and can alter inputs, permissions or context through
+stdout; exit 2 blocks, while other failures are logged without blocking. A prospective passive
+collector should emit no decisions/context/rewrites and preserve existing hooks. Pin and check
+these rolling hook schemas against the selected binary: the changelog label alone is
+insufficient. No hook configuration or runtime probe was performed.
+
 ## Coexistence and potential value
 
 ACP could supply explicit message/tool updates and request/response boundaries to a future
@@ -48,10 +66,10 @@ custom client. That is stronger evidence than scraping a TUI. It also puts the c
 of a subprocess and session operations, rather than making it a transparent second reader of
 Sigil's current terminal.
 
-The reviewed sources do not establish a passive attachment to an arbitrary active local PTY. A
-second resume, a forced open or a cloud handoff must not be used to infer such coexistence. A
-future spec must first establish one writer and an exact mapping between the local provider
-session and the Sigil tab/process generation.
+Same-session hooks provide a more direct observation candidate than ACP attachment. A second
+resume, forced open or cloud handoff is unnecessary for those callbacks and must not substitute
+for verified identity. A future spec must establish an exact mapping between the local provider
+session, collector and Sigil tab/process generation without changing the current agent writer.
 
 ## Identity, security and unresolved assumptions
 
@@ -59,6 +77,12 @@ Keep local and cloud session namespaces, accounts, workspaces and transport gene
 separate. An ID from JSON session listing or a matching directory cannot prove that it belongs
 to the currently owned terminal. Never extract account credentials or duplicate them into Sigil
 for this investigation.
+
+Hook IDs are claims in local payloads, not an authenticated lease. Bind an owned
+launch/collector generation to the native session; specify bounded buffering, loss, duplicates
+and stale `prompt_id` rejection. Do not install project executables or inherit a
+permission-changing handler merely to obtain activity. No hook observation alone grants approval
+authority.
 
 A future ACP adapter must pin and negotiate its schema/capabilities, retain each live permission
 request's identity, handle interruption and reconnect, and reject stale or historical approvals.
@@ -70,9 +94,10 @@ here. The public changelog label is not a claim of binary compatibility.
 ## Decision and fallback
 
 **NO-GO for a structured transcript or approval layer on the current Devin PTY path.** ACP is a
-credible separate client mode, but the reviewed evidence does not bind it to Sigil's existing
-process or supply a checked native-history schema. Reconsider after a provider-specific
-ownership/authentication spec and synthetic version, identity, replay and permission tests; do
-not force-open a live session to obtain events. The fallback is the real interactive CLI and
-existing terminal/phone output, with unsupported history, completion and approval capabilities
-reported truthfully. No uniform transcript is promised.
+credible separate client mode. **GO for a scoped read-only hook/activity specification**,
+because it observes the existing agent with session/prompt correlation. Full transcript adoption
+remains unjustified without assistant-message coverage, pinned schemas and synthetic identity,
+loss/replay, stop-continuation and permission tests. Do not force-open a live session to obtain
+events. The fallback is the real interactive CLI and existing terminal/phone output, with
+unsupported history, completion and approval capabilities reported truthfully. No uniform
+transcript is promised.
