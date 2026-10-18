@@ -1377,3 +1377,23 @@ Public Apple read-only local preflight reports AX, post-event and screen-capture
 access unavailable. No prompt/request, app launch, event or screenshot was
 attempted. Required real-app AX/window-ID acceptance remains incomplete;
 CI unit/view evidence must not be substituted for it.
+
+REA-1258 second baseline CI39109273556 reproduced the actual Down focus transfer
+and absent fill in both appearances. Checkoutc880837 has expected aa06/833dd
+parents and identical treea436f18; all production Sources still matched main.
+The late editor assertions passed in both appearance cases. Eight cases recorded
+two legacy passes, two search failures (five assertions), four existing pointer
+skips. No production source was changed before this proof.
+
+The candidate keeps the native search field and uses existing clamped/scrolled
+selection for bare query arrows. A weak per-field native anchor checks live
+marked text in its owned window; editing modifiers, composition and rename stay
+with the editor. Query rerank, pointer priority and empty Down traversal remain.
+Four focused unit cases and five required hosted search cases cover policies,
+owned-window lifecycle, Up/repeat/bounds, fill, typing/reranked Return, traversal,
+modified arrows and no results. Eleven exact host cases retain only the original
+four pointer exceptions. Five Python validator tests and static checks passed.
+Native CI is pending. A PR183-only private DEBUG artifact export avoids local
+builds; actual AX/window-ID acceptance remains blocked/incomplete as documented
+in the [QA record](../qa/rea-1258.md). No app was launched locally or replaced;
+no additional worker, security change, next ticket or merge.

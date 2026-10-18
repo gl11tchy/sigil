@@ -58,6 +58,19 @@ struct SidebarVersionNoticeTests {
         #expect(hosted.window.firstResponder === editor)
         #expect(!model.sidebarCommandContext.listFocused)
         #expect(model.sidebarCommandContext.keyboardRowID == rows[1])
+        for (keyCode, characters, expected, repeating) in [
+            (UInt16(126), "\u{F700}", rows[0], false),
+            (UInt16(126), "\u{F700}", rows[0], true),
+            (UInt16(125), "\u{F701}", rows[1], false),
+            (UInt16(125), "\u{F701}", rows[2], true),
+            (UInt16(125), "\u{F701}", rows[2], true),
+        ] {
+            try sendSearchKey(to: hosted.window, keyCode: keyCode, characters: characters, repeating: repeating)
+            try await Task.sleep(for: .milliseconds(30))
+            #expect(model.sidebarCommandContext.keyboardRowID == expected)
+            #expect(hosted.window.firstResponder === editor)
+            #expect(!model.sidebarCommandContext.listFocused)
+        }
     }
 
     @Test func searchFieldHighlightIsVisibleInDarkAndLight() async throws {
@@ -98,10 +111,149 @@ struct SidebarVersionNoticeTests {
         }
     }
 
+    @Test func typingReranksTheHighlightAndReturnOpensTheCurrentResult() async throws {
+        let fixture = try SidebarFixture()
+        defer { fixture.cleanup() }
+        let model = try await searchModel(fixture)
+        defer { model.closeAllTabsAndWait() }
+        let search = try await hostSearch(model)
+        defer { search.window.close() }
+        for expected in search.rows.dropFirst() {
+            try sendSearchKey(to: search.window, keyCode: 125, characters: "\u{F701}")
+            try await waitForSearchState("Down must advance before typing") {
+                model.sidebarCommandContext.keyboardRowID == expected
+            }
+        }
+        #expect(search.window.firstResponder === search.editor)
+        search.editor.setSelectedRange(NSRange(location: search.editor.string.utf16.count, length: 0))
+        try sendSearchKey(to: search.window, keyCode: 1, characters: "s")
+        try await waitForSearchState("Typing must continue in search and rerank") {
+            model.searchText == "auths" && model.sidebarSnapshot().rowIDs.count == 1
+                && model.sidebarCommandContext.keyboardRowID == model.sidebarSnapshot().rowIDs.first
+        }
+        #expect(search.window.firstResponder === search.editor)
+        #expect(!model.sidebarCommandContext.listFocused)
+        let current = try #require(model.sidebarSnapshot().rowIDs.first)
+        let session = try #require(model.sidebarSessions.first { model.sessionKey($0) == current })
+        try sendSearchKey(to: search.window, keyCode: 36, characters: "\r")
+        try await waitForSearchState("Return must open the highlighted reranked session") {
+            model.selectedTab?.sessionID == session.id
+        }
+        #expect(model.tabs.count == 1)
+    }
+
+    @Test func searchTabTraversalAndModifiedArrowsPreserveTheirRoles() async throws {
+        let fixture = try SidebarFixture()
+        defer { fixture.cleanup() }
+        let model = try await searchModel(fixture)
+        defer { model.closeAllTabsAndWait() }
+        let search = try await hostSearch(model)
+        defer { search.window.close() }
+        try sendSearchKey(to: search.window, keyCode: 125, characters: "\u{F701}")
+        try await waitForSearchState("Choose the second result before Tab") {
+            model.sidebarCommandContext.keyboardRowID == search.rows[1]
+        }
+        try sendSearchKey(to: search.window, keyCode: 48, characters: "\t")
+        try await waitForSearchState("Plain Tab must enter the list") { model.sidebarCommandContext.listFocused }
+        #expect(model.sidebarCommandContext.keyboardRowID == search.rows[1])
+        #expect(search.window.firstResponder !== search.editor)
+
+        model.focusSidebarSearch()
+        try await waitForSearchState("Return to the owned search editor") {
+            search.window.firstResponder === search.editor && !model.sidebarCommandContext.listFocused
+        }
+        search.editor.setSelectedRange(NSRange(location: 0, length: 0))
+        try sendSearchKey(to: search.window, keyCode: 125, characters: "\u{F701}", modifiers: .shift)
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(search.editor.selectedRange().length > 0)
+        #expect(search.window.firstResponder === search.editor)
+        #expect(model.sidebarCommandContext.keyboardRowID == search.rows[1])
+        try sendSearchKey(to: search.window, keyCode: 48, characters: "\t", modifiers: .shift)
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(!model.sidebarCommandContext.listFocused, "Shift-Tab must not become forward list traversal")
+
+        model.searchText = ""
+        model.focusSidebarSearch()
+        try await waitForSearchState("Empty search must own its editor") {
+            search.window.firstResponder === search.editor && search.editor.string.isEmpty
+        }
+        try sendSearchKey(to: search.window, keyCode: 126, characters: "\u{F700}")
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(search.window.firstResponder === search.editor)
+        #expect(!model.sidebarCommandContext.listFocused)
+        try sendSearchKey(to: search.window, keyCode: 125, characters: "\u{F701}")
+        try await waitForSearchState("Empty-query Down must retain existing list traversal") {
+            model.sidebarCommandContext.listFocused
+        }
+    }
+
+    @Test func searchWithNoResultsCannotNavigateOrActivateAStaleRow() async throws {
+        let fixture = try SidebarFixture()
+        defer { fixture.cleanup() }
+        let model = try await searchModel(fixture)
+        defer { model.closeAllTabsAndWait() }
+        let search = try await hostSearch(model)
+        defer { search.window.close() }
+        try sendSearchKey(to: search.window, keyCode: 125, characters: "\u{F701}")
+        try await waitForSearchState("Select a real row before removing the results") {
+            model.sidebarCommandContext.keyboardRowID == search.rows[1]
+        }
+        model.searchText = "no-generated-session-matches-this"
+        try await waitForSearchState("No results must clear the old highlight") {
+            model.sidebarSnapshot().rowIDs.isEmpty && model.sidebarCommandContext.keyboardRowID == nil
+        }
+        for (keyCode, characters) in [(UInt16(125), "\u{F701}"), (UInt16(126), "\u{F700}")] {
+            try sendSearchKey(to: search.window, keyCode: keyCode, characters: characters)
+            try await Task.sleep(for: .milliseconds(30))
+            #expect(search.window.firstResponder === search.editor)
+            #expect(!model.sidebarCommandContext.listFocused)
+            #expect(model.sidebarCommandContext.keyboardRowID == nil)
+        }
+        try sendSearchKey(to: search.window, keyCode: 36, characters: "\r")
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(model.tabs.isEmpty)
+        #expect(model.selectedTab == nil)
+        #expect(model.sidebarCommandContext.keyboardRowID == nil)
+    }
+
+    private func hostSearch(_ model: AppModel) async throws -> (window: NSWindow, editor: NSTextView, rows: [String]) {
+        try #require(NSApplication.shared.isRunning)
+        let hosted = host(model, interactive: true)
+        do {
+            model.focusSidebarSearch()
+            model.searchText = "auth"
+            let rows = model.sidebarSnapshot().rowIDs
+            try #require(rows.count == 3)
+            try await waitForSearchState("Search must own a real field editor and the first result") {
+                hosted.window.firstResponder is NSTextView && model.sidebarCommandContext.keyboardRowID == rows[0]
+            }
+            let editor = try #require(hosted.window.firstResponder as? NSTextView)
+            try #require(editor.string == "auth")
+            return (hosted.window, editor, rows)
+        } catch {
+            hosted.window.close()
+            throw error
+        }
+    }
+
+    private func sendSearchKey(
+        to window: NSWindow, keyCode: UInt16, characters: String,
+        modifiers: NSEvent.ModifierFlags = [], repeating: Bool = false
+    ) throws {
+        let event = try #require(
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: modifiers,
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, characters: characters, charactersIgnoringModifiers: characters,
+                isARepeat: repeating, keyCode: keyCode))
+        try #require(event.window === window)
+        window.sendEvent(event)
+    }
+
     private func searchModel(_ fixture: SidebarFixture) async throws -> AppModel {
         fixture.settings.showWorktreeSessions = true
         let folder = try fixture.directory("search-project")
-        for (index, title) in ["Auth one", "Auth two", "Auth three"].enumerated() {
+        for (index, title) in ["Auth one", "Auth two", "Auths"].enumerated() {
             try fixture.writeListedSession(id: "search-\(index)", cwd: folder.path, summary: title)
         }
         await fixture.store.reload()

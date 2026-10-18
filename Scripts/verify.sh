@@ -171,6 +171,10 @@ if ! kill -0 "$SMOKE_PID" 2>/dev/null; then
   fail "Sigil exited during the smoke check"
 fi
 stop_smoke
+if [[ -n "${SIGIL_SEARCH_WORKBENCH:-}" ]]; then
+  python3 "$SCRIPT_DIR/export-search-workbench.py" "$APP" "$SIGIL_SEARCH_WORKBENCH" \
+    || fail "isolated search workbench artifact"
+fi
 rm -f "$SMOKE_LOG"
 rm -rf "$SMOKE_ROOT"
 SMOKE_ROOT=""

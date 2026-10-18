@@ -66,6 +66,7 @@ struct SidebarView: View {
     /// Arrow-key highlight. Separate from open/active so those markers stay
     /// about the tab strip, not about where the keys are.
     @State private var keyboardSelectionID: String?
+    @State private var searchInput = SidebarSearchInputContext()
     @State private var pendingDelete: GrokSession?
     /// ⌘/⇧-click multi-selection over the visible chat rows, for bulk archive
     /// and delete. Keys are `sessionKey`s; the anchor starts a ⇧ range.
@@ -213,11 +214,12 @@ struct SidebarView: View {
         .frame(height: 44)
     }
 
-    /// Where the gliding `hover` fill sits: the row under the pointer, else the
-    /// arrow-key row while the list has the keyboard.
+    /// The pointer row, or the keyboard row while browsing the list or search results.
     private var glide: SidebarGlide {
         SidebarGlide(
-            target: hoveredRowID ?? (focus == .list ? keyboardSelectionID : nil),
+            target: SidebarOrganization.hoverTarget(
+                pointerRowID: hoveredRowID, keyboardRowID: keyboardSelectionID,
+                listFocused: focus == .list, searchFocused: focus == .search, listKind: listKind),
             namespace: glideSpace,
             hover: { id, inside in
                 if inside {
@@ -252,8 +254,21 @@ struct SidebarView: View {
                 .ui(13.5)
                 .foregroundStyle(palette.ink)
                 .focused($focus, equals: .search)
+                .background(
+                    SidebarSearchInputAnchor(input: searchInput)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true))
                 .onSubmit(activateSearchResult)
-                .onKeyPress(.downArrow) { moveFocusToList() }
+                .onKeyPress(keys: [.upArrow, .downArrow], phases: [.down, .repeat]) { press in
+                    handleSearchArrow(press)
+                }
+                .onKeyPress(.tab, phases: .down) { press in
+                    guard focus == .search,
+                        searchInput.canNavigate(
+                            modifiers: press.modifiers, isRenaming: model.renamingSessionKey != nil)
+                    else { return .ignored }
+                    return moveFocusToList()
+                }
                 .onKeyPress(Self.f2) { renameKeyboardSelection() }
                 .onKeyPress(.escape) { handleEscape() }
                 .onExitCommand { _ = handleEscape() }
@@ -1008,6 +1023,7 @@ struct SidebarView: View {
     }
 
     private func activateSearchResult() {
+        guard model.renamingSessionKey == nil, !searchInput.hasMarkedText else { return }
         guard
             let id = SidebarOrganization.activationKey(
                 preferred: keyboardSelectionID, in: visibleRowIDs())
@@ -1204,6 +1220,18 @@ struct SidebarView: View {
             rowVisible: visible
         )
         return (key, session, surface)
+    }
+
+    private func handleSearchArrow(_ press: KeyPress) -> KeyPress.Result {
+        guard focus == .search,
+            searchInput.canNavigate(modifiers: press.modifiers, isRenaming: model.renamingSessionKey != nil)
+        else { return .ignored }
+        switch SidebarOrganization.searchFieldArrow(query: model.searchText) {
+        case .moveHighlight:
+            return moveKeyboardSelection(by: press.key == .upArrow ? -1 : 1, shift: false)
+        case .enterList:
+            return press.key == .downArrow ? moveFocusToList() : .ignored
+        }
     }
 
     private func moveFocusToList() -> KeyPress.Result {

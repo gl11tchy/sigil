@@ -11,6 +11,9 @@ OTHER_TESTS = {
     "SidebarVersionNoticeTests/threeNoticesPreserveTheListViewportInANarrowShortSidebar()",
     "SidebarVersionNoticeTests/searchArrowsKeepTheFieldFocusedAndMoveTheHighlight()",
     "SidebarVersionNoticeTests/searchFieldHighlightIsVisibleInDarkAndLight()",
+    "SidebarVersionNoticeTests/typingReranksTheHighlightAndReturnOpensTheCurrentResult()",
+    "SidebarVersionNoticeTests/searchTabTraversalAndModifiedArrowsPreserveTheirRoles()",
+    "SidebarVersionNoticeTests/searchWithNoResultsCannotNavigateOrActivateAStaleRow()",
 }
 
 
@@ -23,16 +26,16 @@ def validate(summary, tree, test_status):
 
     nodes = list(cases(tree.get("testNodes", [])))
     outcomes = {node.get("nodeIdentifier"): node.get("result") for node in nodes}
-    if test_status != 0 or len(nodes) != 8 or set(outcomes) != POINTER_TESTS | OTHER_TESTS:
-        raise ValueError("Expected one successful run of the exact eight hosted fixtures")
+    if test_status != 0 or len(nodes) != 11 or set(outcomes) != POINTER_TESTS | OTHER_TESTS:
+        raise ValueError("Expected one successful run of the exact eleven hosted fixtures")
     if any(outcomes[test] != "Passed" for test in OTHER_TESTS):
         raise ValueError("All unrelated and search hosted fixtures must pass without skips")
     counts = tuple(summary.get(key) for key in ("passedTests", "failedTests", "skippedTests"))
-    if counts == (8, 0, 0) and all(outcomes[test] == "Passed" for test in POINTER_TESTS):
-        return "eight fixtures passed, no retries or skips"
-    if counts == (4, 0, 4) and all(outcomes[test] == "Skipped" for test in POINTER_TESTS):
+    if counts == (11, 0, 0) and all(outcomes[test] == "Passed" for test in POINTER_TESTS):
+        return "eleven fixtures passed, no retries or skips"
+    if counts == (7, 0, 4) and all(outcomes[test] == "Skipped" for test in POINTER_TESTS):
         return (
-            "four fixtures passed; four REA-1350 pointer fixtures skipped because event-posting "
+            "seven fixtures passed; four REA-1350 pointer fixtures skipped because event-posting "
             "permission is unavailable. Owner-approved manual verification remains pending"
         )
     raise ValueError("Only all four REA-1350 permission skips are allowed; pointer failures remain failures")

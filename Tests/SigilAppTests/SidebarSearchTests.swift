@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import SwiftUI
 import Testing
 
 @testable import SigilApp
@@ -6,6 +8,101 @@ import Testing
 @Suite
 @MainActor
 struct SidebarSearchTests {
+    @Test func searchFieldArrowsKeepEmptyTraversalSeparateFromQueryNavigation() {
+        for query in ["", " ", "\n\t", "\u{00A0}"] {
+            #expect(SidebarOrganization.searchFieldArrow(query: query) == .enterList)
+        }
+        for query in ["auth", "  auth  ", "s"] {
+            #expect(SidebarOrganization.searchFieldArrow(query: query) == .moveHighlight)
+        }
+    }
+
+    @Test func searchHoverFollowsTheKeyboardWithoutReplacingPointerPriority() {
+        let cases: [(String?, String?, Bool, Bool, SidebarListKind, String?)] = [
+            (nil, "key", false, true, .search, "key"),
+            (nil, "key", true, false, .projectList, "key"),
+            (nil, "key", false, true, .recents, nil),
+            (nil, "key", false, false, .search, nil),
+            ("pointer", "key", false, true, .search, "pointer"),
+            ("pointer", "key", true, false, .recents, "pointer"),
+            (nil, nil, false, true, .search, nil),
+        ]
+        for (pointer, keyboard, listFocused, searchFocused, kind, expected) in cases {
+            #expect(
+                SidebarOrganization.hoverTarget(
+                    pointerRowID: pointer, keyboardRowID: keyboard,
+                    listFocused: listFocused, searchFocused: searchFocused, listKind: kind) == expected)
+        }
+    }
+
+    @Test func searchNavigationLeavesModifiedKeysAndCompositionWithTheEditor() {
+        let editor = NSTextView()
+        #expect(
+            SidebarSearchInputContext.allowsNavigation(
+                modifiers: [], isRenaming: false, responder: editor))
+        let editingModifiers: [EventModifiers] = [.shift, .control, .option, .command, [.shift, .option]]
+        for modifiers in editingModifiers {
+            #expect(
+                !SidebarSearchInputContext.allowsNavigation(
+                    modifiers: modifiers, isRenaming: false, responder: editor))
+        }
+        #expect(
+            !SidebarSearchInputContext.allowsNavigation(
+                modifiers: [], isRenaming: true, responder: editor))
+        #expect(
+            !SidebarSearchInputContext.allowsNavigation(
+                modifiers: [], isRenaming: false, responder: nil))
+        #expect(
+            !SidebarSearchInputContext.allowsNavigation(
+                modifiers: [], isRenaming: false, responder: NSResponder()))
+        editor.setMarkedText(
+            "composing", selectedRange: NSRange(location: 0, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0))
+        #expect(editor.hasMarkedText())
+        #expect(
+            !SidebarSearchInputContext.allowsNavigation(
+                modifiers: [], isRenaming: false, responder: editor))
+        editor.unmarkText()
+        #expect(
+            SidebarSearchInputContext.allowsNavigation(
+                modifiers: [], isRenaming: false, responder: editor))
+    }
+
+    @Test func searchInputReadsItsOwnedWindowAndOldTeardownKeepsTheReplacement() throws {
+        _ = NSApplication.shared
+        func inputWindow() throws -> (window: NSWindow, anchor: NSView, editor: NSTextView) {
+            let frame = NSRect(x: 0, y: 0, width: 240, height: 80)
+            let window = NSWindow(contentRect: frame, styleMask: [.titled], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            let root = NSView(frame: frame)
+            let editor = NSTextView(frame: frame)
+            let anchor = NSView(frame: .zero)
+            root.addSubview(editor)
+            root.addSubview(anchor)
+            window.contentView = root
+            try #require(window.makeFirstResponder(editor))
+            return (window, anchor, editor)
+        }
+        let first = try inputWindow()
+        defer { first.window.close() }
+        let second = try inputWindow()
+        defer { second.window.close() }
+        let context = SidebarSearchInputContext()
+        context.attach(first.anchor)
+        #expect(context.canNavigate(modifiers: [], isRenaming: false))
+        second.editor.setMarkedText(
+            "composing", selectedRange: NSRange(location: 0, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0))
+        context.attach(second.anchor)
+        #expect(context.hasMarkedText)
+        #expect(!context.canNavigate(modifiers: [], isRenaming: false))
+        context.detach(first.anchor)
+        second.editor.unmarkText()
+        #expect(context.canNavigate(modifiers: [], isRenaming: false))
+        context.detach(second.anchor)
+        #expect(!context.hasMarkedText)
+        #expect(!context.canNavigate(modifiers: [], isRenaming: false))
+    }
 
     @Test func searchReachesEveryFolderIncludingArchivedAndRanksTheCloserTitle() async throws {
         let fixture = try ModelFixture()

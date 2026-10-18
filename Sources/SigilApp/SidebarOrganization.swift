@@ -187,6 +187,22 @@ enum SidebarOrganization {
         !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    enum SearchFieldArrowAction: Equatable, Sendable {
+        case moveHighlight
+        case enterList
+    }
+
+    static func searchFieldArrow(query: String) -> SearchFieldArrowAction {
+        isSearching(query) ? .moveHighlight : .enterList
+    }
+
+    static func hoverTarget(
+        pointerRowID: String?, keyboardRowID: String?, listFocused: Bool,
+        searchFocused: Bool, listKind: SidebarListKind
+    ) -> String? {
+        pointerRowID ?? ((listFocused || (searchFocused && listKind == .search)) ? keyboardRowID : nil)
+    }
+
     static func listKind(surface: SidebarSurface, isSearching: Bool) -> SidebarListKind {
         if isSearching { return .search }
         switch surface {
