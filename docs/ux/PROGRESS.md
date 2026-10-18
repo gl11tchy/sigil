@@ -343,7 +343,7 @@ The notes contract and limits are in [provider capabilities](../provider-capabil
 | M0 | Done on branch `claude/sigil-native-workbench-88a27e` | [M0 record](#m0-contract-baseline-and-reference-slice) |
 | M1 | Next. Not started. | Live projection from `AppModel` behind a setting that defaults off. See [next dependency](#next-dependency). |
 | M2 | Not started | Needs M1. Navigation consolidation. |
-| M3 | Not started | Needs M1. Live review and a checks-source spec. |
+| M3 | Implementation not started | Needs M1 for live review. [Checks-source decision](checks-source.md) recorded; no adapter implemented. |
 | M4 | Not started | Needs M3. Finish and worktree removal. |
 | M5 | Not started | Needs M1. Phone addresses tasks. |
 | M6 | Decisions recorded; integrations unimplemented | Independent. [REA-1175 evidence](#rea-1175-provider-transcript-decisions-2026-10-18); no uniform transcript promise. |
@@ -1375,3 +1375,24 @@ real-app acceptance remains blocked; this documentation supplies no acceptance
 for it. Protected PR162 and unrelated entries/work remain intact. Parent personal
 final review and required exact-head checks precede any merge; broader M6
 integrations, runtime validation and further implementation remain uncompleted.
+
+## REA-1185: review checks source decision (2026-10-18)
+
+The [checks-source decision](checks-source.md) chooses explicitly connected,
+read-only hosted GitHub checks and defers an opt-in local-command runner. It
+defines exact workspace/HEAD/repository/account/issuer/attempt identity,
+complete evidence, stale/pending/failed/unknown/unavailable states, refresh/cost
+bounds and review-only attention mapping. Repository files cannot authorize
+execution; the proposed integration cannot trigger CI, create credentials or
+infer provider completion. M3's adapter and live UI remain unimplemented.
+
+Started from verified main `8ca33db146b8e8d899696c5b3e500fadd1c71135` in one
+isolated worktree after checking open PRs and no active CI/owned updater. Official
+GitHub REST/CLI references were read on 2026-10-18 alongside repository attention
+and Checks sources. Validation is bounded to document structure, citations,
+scope and whitespace; required final-head checks are reported on the PR. No
+local native build/test, provider inference, personal data, CI dispatch,
+credentials, permissions, app launch/relaunch or distribution change occurred.
+PR183 remains blocked on real-app acceptance; PR162 and unrelated entries are
+preserved. This entry records a decision only, not broader M3 completion. Parent
+personal final review is required before any merge; no next ticket is started.
