@@ -68,6 +68,8 @@ jobs:
       - name: Verify
         env:
           SIGIL_SIDEBAR_ARTIFACTS: ${{ runner.temp }}/sigil-sidebar-${{ github.run_id }}-${{ github.run_attempt }}
+          SIGIL_SEARCH_WORKBENCH: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 183 && format('{0}/sigil-rea-1258-{1}-{2}', runner.temp, github.run_id, github.run_attempt) || '' }}
+          SIGIL_SEARCH_PR_HEAD: ${{ github.event.pull_request.head.sha }}
           SIGIL_SWIFT_DIAGNOSTICS: ${{ github.event_name == 'pull_request' && (github.event.pull_request.number == 142 || github.event.pull_request.number == 145) && '1' || '' }}
         run: |
           if [[ "$SIGIL_SWIFT_DIAGNOSTICS" == "1" ]]; then
@@ -102,6 +104,15 @@ jobs:
           name: sidebar-app-hosted-verification
           retention-days: 7
           path: ${{ runner.temp }}/sigil-sidebar-${{ github.run_id }}-${{ github.run_attempt }}/*.xcresult
+          if-no-files-found: warn
+
+      - name: Upload isolated search workbench
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.number == 183
+        uses: actions/upload-artifact@v4
+        with:
+          name: REA-1258-isolated-debug-workbench
+          retention-days: 7
+          path: ${{ runner.temp }}/sigil-rea-1258-${{ github.run_id }}-${{ github.run_attempt }}/*
           if-no-files-found: warn
 
       - name: iPhone app, shipping extensions, and native relay tests

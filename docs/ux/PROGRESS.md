@@ -1337,3 +1337,85 @@ A held-request/cancel/drain test brings NativeFlow to44, with11focused cases.
 Only those two source/test files differ from the verified candidate; screen,
 capture, protocol and1198 lifecycle sources are unchanged. Required final-head
 CI and parent personal review remain pending. [QA and images](../qa/rea-1199.md).
+
+
+## REA-1258 — search-field keyboard navigation (2026-10-18)
+
+Sole worker on verified main aa06ac94aa0322d4c40b854e5aa2997e3c60de2a,
+after REA-1199 Done and official build384 installed/read back. Prior updater/test
+operations completed; no active or queued CI, no matching1258 branch/worktree
+and only protectedPR162 open before this isolated worktree was created.
+Root/product/design/experience and workbench instructions were read. Existing
+workbench wrappers compile helpers and enumerate processes, so they are not run
+under the current local native-build/process-enumeration hold.
+
+The test-only baseline adds two required CI app-hosted regressions: a Down event
+directed to the generated host window must keep its search editor and advance
+the row; the actual glide target must remain on the keyboard row in both
+appearances while search owns focus. It reuses the real SidebarView and existing
+DEBUG hover observer. All production Sources remain byte-identical to main.
+The validator requires all four non-pointer cases and preserves exactly the
+existing four permission-dependent pointer exceptions; five Python validator
+tests and whitespace/source-boundary checks passed. Native reproduction is
+pending normal PR CI. No local native build/test, process enumeration, real CLI
+or personal history was used. Implementation and real isolated AX/window-ID
+evidence follow reproduction, or an exact permission blocker will be retained.
+Parent reviews final code/current comments/visuals before merge.
+
+
+REA-1258 first baseline CI39108130408 used checkout4ab8813 with expected
+aa06/94932 parents and identical treeeba8657. Production Sources subtree stayed
+60f1048. The8 host cases recorded2 legacy passes,2 new failures and4 existing
+pointer skips. Both appearances had nil glide target against the known row;
+late editor identity was not yet asserted. The Down case stopped at its key-
+window requirement before input, so no Down-event reproduction is claimed.
+Harness round1 directs the event to the exact owned NSWindow responder chain,
+adds active/key/editor diagnostics and late editor identity assertions. No
+production edits or local native execution. Normal updated baseline CI pending.
+
+Public Apple read-only local preflight reports AX, post-event and screen-capture
+access unavailable. No prompt/request, app launch, event or screenshot was
+attempted. Required real-app AX/window-ID acceptance remains incomplete;
+CI unit/view evidence must not be substituted for it.
+
+REA-1258 second baseline CI39109273556 reproduced the actual Down focus transfer
+and absent fill in both appearances. Checkoutc880837 has expected aa06/833dd
+parents and identical treea436f18; all production Sources still matched main.
+The late editor assertions passed in both appearance cases. Eight cases recorded
+two legacy passes, two search failures (five assertions), four existing pointer
+skips. No production source was changed before this proof.
+
+The candidate keeps the native search field and uses existing clamped/scrolled
+selection for bare query arrows. A weak per-field native anchor checks live
+marked text in its owned window; editing modifiers, composition and rename stay
+with the editor. Query rerank, pointer priority and empty Down traversal remain.
+Four focused unit cases and five required hosted search cases cover policies,
+owned-window lifecycle, Up/repeat/bounds, fill, typing/reranked Return, traversal,
+modified arrows and no results. Eleven exact host cases retain only the original
+four pointer exceptions. Five Python validator tests and static checks passed.
+Native CI is pending. A PR183-only private DEBUG artifact export avoids local
+builds; actual AX/window-ID acceptance remains blocked/incomplete as documented
+in the [QA record](../qa/rea-1258.md). No app was launched locally or replaced;
+no additional worker, security change, next ticket or merge.
+
+REA-1258 candidate08d41ae CI39110636374 compiled and passed1,346 Swift tests in
+113 suites plus37 XCTest cases, including four new search/input units. Checkout
+7a816b8 has expected aa06/08d41 parents and identical treeb3b3657. Native readback
+confirms Down/Up/repeat/bounds, dark/light fill and traversal passed; two legacy
+host cases passed and four original pointer cases skipped. Typing/no-results
+timed out at their first Down wait; overall CI failed before later gates/artifact.
+One bounded helper repair now requires actual published search focus and rendered
+keyboard fill before initial input. A two-survivor fixture proves rerank resets
+away from a still-visible prior row. Production remains unchanged. Updated CI
+pending; AX/window-ID acceptance stays incomplete, with no local app interaction.
+
+REA-1258 updated candidate 8e3e058 / CI39111723994 passed all 1,346 Swift tests
+in 113 suites, 37 XCTest cases, and all seven required hosted cases. Legacy
+readback confirms all five search cases passed, including two-survivor rerank
+and Return plus no-results arrows/Return. Only the four original pointer cases
+skipped. Checkout203070b has expected aa06/8e3e parents and identical treee6b6913.
+Shell syntax/shellcheck passed; two format diagnostics stopped the later gates.
+The final evidence revision fixes only those layouts, with full final-head CI
+still required. No private workbench artifact was produced by either failed
+candidate. Real-app AX/window-ID acceptance remains blocked/incomplete; no
+local native execution, app interaction, permission change, merge or next ticket.

@@ -14,12 +14,12 @@ def fixture(pointer="Passed", other="Passed"):
 
 
 class HostedResultTests(unittest.TestCase):
-    def test_six_real_passes(self):
-        self.assertIn("six fixtures passed", host.validate(
-            {"passedTests": 6, "failedTests": 0, "skippedTests": 0}, fixture(), 0))
+    def test_eleven_real_passes(self):
+        self.assertIn("eleven fixtures passed", host.validate(
+            {"passedTests": 11, "failedTests": 0, "skippedTests": 0}, fixture(), 0))
 
     def test_only_the_four_pointer_skips_are_accepted_and_reported(self):
-        result = host.validate({"passedTests": 2, "failedTests": 0, "skippedTests": 4}, fixture("Skipped"), 0)
+        result = host.validate({"passedTests": 7, "failedTests": 0, "skippedTests": 4}, fixture("Skipped"), 0)
         self.assertIn("four REA-1350 pointer fixtures skipped", result)
         self.assertIn("manual verification remains pending", result)
 
@@ -28,7 +28,7 @@ class HostedResultTests(unittest.TestCase):
         for node in tree["testNodes"][0]["children"][:2]:
             node["result"] = "Passed"
         with self.assertRaisesRegex(ValueError, "unrelated"):
-            host.validate({"passedTests": 2, "failedTests": 0, "skippedTests": 4}, tree, 0)
+            host.validate({"passedTests": 7, "failedTests": 0, "skippedTests": 4}, tree, 0)
 
     def test_partial_or_duplicate_results_fail(self):
         for duplicate in (False, True):
@@ -40,13 +40,13 @@ class HostedResultTests(unittest.TestCase):
                 else:
                     nodes.pop()
                 with self.assertRaises(ValueError):
-                    host.validate({"passedTests": 6, "failedTests": 0, "skippedTests": 0}, tree, 0)
+                    host.validate({"passedTests": 11, "failedTests": 0, "skippedTests": 0}, tree, 0)
 
     def test_failed_command_or_behavior_never_passes(self):
         with self.assertRaises(ValueError):
-            host.validate({"passedTests": 6, "failedTests": 0, "skippedTests": 0}, fixture(), 1)
+            host.validate({"passedTests": 11, "failedTests": 0, "skippedTests": 0}, fixture(), 1)
         with self.assertRaises(ValueError):
-            host.validate({"passedTests": 2, "failedTests": 4, "skippedTests": 0}, fixture("Failed"), 0)
+            host.validate({"passedTests": 7, "failedTests": 4, "skippedTests": 0}, fixture("Failed"), 0)
 
 
 if __name__ == "__main__":
