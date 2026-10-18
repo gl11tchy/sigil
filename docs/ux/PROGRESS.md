@@ -1438,8 +1438,8 @@ writes automatically. The existing host has no atomic conditional-rename token;
 another client can still race after the fresh read. No host/protocol changes.
 
 The generated baseline failed on main `9165c2d` before production edits because the
-More action was absent. Final local checks passed 301 Node tests, including 16 new
-action regressions, and both focused Chromium cases. Four 390×844 captures were
+More action was absent. Final local checks passed 309 Node tests, including 24 new
+action regressions, and all three focused Chromium cases. Six 390×844 captures were
 viewed; [QA evidence](../qa/rea-1205.md). Local WebKit failed synthetic pairing
 before reaching the feature; no local pass or root cause is claimed. Required
 CI and both-engine artifacts are reported on the PR. No local native build/test,
@@ -1447,3 +1447,14 @@ process inventory, provider inference, personal data, installed-app interaction,
 security/access/credential change, deployment or distribution occurred. PR183’s
 real-app acceptance hold and protected PR162 are preserved. Parent personal final
 code/screenshots/ticket/current-comment review is required before merge.
+
+Automatic review on initial `270c385` identified four verified defects. Seven generated
+regressions reproduced post-dispatch Cancel/Escape, incomplete archive warnings,
+silent capability loss and activity oscillation reviving an old confirmation.
+The revision locks dismissal only after dispatch, always warns about archive’s
+full host-owned stopping scope, explains/latches capability loss and permanently
+latches observed activity changes until reopen. The browser covers an idle copy
+with a working duplicate, pending Escape, retained edits and risk oscillation.
+Initial CI651 passed `270c385` only; revised-head CI is reported on PR187. No passing
+run was repeated for prose. Parent personal assessment of the initial review
+threads and revised code/pixels is required before merge; no next ticket.

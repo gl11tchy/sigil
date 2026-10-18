@@ -1483,7 +1483,7 @@ test('REA-1205 session metadata and guarded actions at 390x844', async ({ page, 
     await expect(page.locator('#session-archive')).toBeHidden(); await expect(page.locator('#session-rename')).toBeDisabled();
     await page.locator('#session-action-cancel').click();
     await more('Check reconnect behavior').click(); await page.locator('#session-archive').click();
-    await expect(page.locator('#session-action-detail')).toContainText('It may still be running. Archiving stops it.');
+    await expect(page.locator('#session-action-detail')).toContainText('stops all its open tabs on your Mac, including any that are working or whose status is unknown.');
     expect(mac.actions.filter(r => r.action === 'archive')).toHaveLength(0);
     await page.locator('#session-action-accept').click();
     await expect(more('Check reconnect behavior')).toHaveCount(0);
@@ -1520,4 +1520,62 @@ test('REA-1205 rejected rename retains edits and cannot overwrite a newer host n
     expect(mac.actions.filter(r => r.action === 'rename')).toHaveLength(1);
     expect(mac.errors).toEqual([]);
   } finally { mac.close(); }
+});
+
+test('REA-1205 review safeguards remain truthful through dispatch and live state changes', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const shared = { provider: 'grokBuild', providerName: 'Grok Build', folder: 'sigil', cwd: '/tmp/sigil', sessionID: 'shared-native', canArchive: true, capabilities: { rename: true, archive: true } };
+  const state = { tabs: [
+    { ...shared, id: 'one', title: 'Idle copy', status: 'idle' },
+    { ...shared, id: 'two', title: 'Working copy', status: 'working' },
+    { id: 'three', title: 'Reference task', status: 'idle', providerName: 'Claude Code', folder: 'docs', capabilities: { rename: true } },
+  ], selectedTabID: 'one', terminal: 'Generated review fixture.', mac: 'Fixture Mac', capabilities: ['sessionOps'] };
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const mac = await pair(page, baseURL, undefined, { state, async onRequest(request) {
+    if (request.action === 'archive') {
+      await held;
+      state.tabs = state.tabs.filter(tab => tab.sessionID !== 'shared-native');
+      state.selectedTabID = 'three';
+    }
+  } });
+  const capture = async name => {
+    const path = testInfo.outputPath(`session-actions-${name}-390x844.png`);
+    await page.screenshot({ path, animations: 'disabled' }); await testInfo.attach(name, { path, contentType: 'image/png' });
+  };
+  const more = title => page.getByRole('button', { name: `More actions for ${title}`, exact: true });
+  try {
+    await page.getByRole('button', { name: 'Browse open and saved chats' }).click();
+    await more('Idle copy').click(); await page.locator('#session-archive').click();
+    await expect(page.locator('#session-action-detail')).toContainText('stops all its open tabs');
+    await expect(page.locator('#session-action-detail')).toContainText('working or whose status is unknown');
+    expect(mac.actions.filter(r => r.action === 'archive')).toHaveLength(0);
+    await capture('archive'); await page.locator('#session-action-accept').click();
+    await expect.poll(() => mac.actions.filter(r => r.action === 'archive').length).toBe(1);
+    await expect(page.locator('#session-action-cancel')).toBeDisabled();
+    await expect(page.locator('#session-action-accept')).toHaveText('Archiving…');
+    await page.keyboard.press('Escape'); await expect(page.locator('#session-action-dialog')).toBeVisible();
+    await capture('pending'); release();
+    await expect(page.locator('#session-action-dialog')).toBeHidden();
+    await expect(more('Idle copy')).toHaveCount(0); await expect(more('Working copy')).toHaveCount(0);
+    await expect(page.locator('#tabs')).toHaveValue('three');
+    await more('Reference task').click(); await page.locator('#session-rename').click();
+    await page.locator('#session-name').fill('Retained review edit');
+    state.tabs[0].capabilities.rename = false;
+    await expect(page.locator('#session-action-error')).toContainText('Renaming is no longer available');
+    await expect(page.locator('#session-action-accept')).toBeDisabled();
+    await expect(page.locator('#session-name')).toHaveValue('Retained review edit');
+    state.tabs[0].capabilities.rename = true;
+    await expect(page.locator('#session-rename')).toBeEnabled();
+    await expect(page.locator('#session-action-accept')).toBeDisabled();
+    await page.locator('#session-action-cancel').click();
+    await more('Reference task').click(); await page.locator('#session-close-action').click();
+    state.tabs[0].status = 'working';
+    await expect(page.locator('#session-action-error')).toContainText('activity changed');
+    state.tabs[0].status = 'idle';
+    await expect(page.locator('#session-list button').filter({ hasText: 'Reference task' })).toContainText('Ready');
+    await expect(page.locator('#session-action-accept')).toBeDisabled();
+    expect(mac.actions.filter(r => r.action === 'close' || r.action === 'rename')).toHaveLength(0);
+    expect(mac.errors).toEqual([]);
+  } finally { release(); mac.close(); }
 });

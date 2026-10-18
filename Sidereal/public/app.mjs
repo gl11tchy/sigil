@@ -515,10 +515,14 @@ function sessionActionRisk(tab) {
 }
 function currentSessionAction(context, action) {
   const tab = sessionActionTab(context);
-  return Boolean(tab && !context.uncertain && !context.needsRefresh
-    && (!['close', 'archive'].includes(action) || context.confirmationRisk === undefined || context.confirmationRisk === sessionActionRisk(tab))
-    && (action !== 'rename' || (tab.capabilities?.rename !== false && tab.title === context.title))
-    && (action !== 'archive' || (tab.canArchive === true && tab.capabilities?.archive !== false)));
+  const destructive = ['close', 'archive'].includes(action);
+  if (tab && destructive && context.confirmationRisk !== undefined && context.confirmationRisk !== sessionActionRisk(tab)) context.activityChanged = true;
+  const supported = tab && (action !== 'rename' || tab.capabilities?.rename !== false)
+    && (action !== 'archive' || (tab.canArchive === true && tab.capabilities?.archive !== false));
+  if (tab && !supported && sessionActionMode === action) context.capabilityChanged = action;
+  return Boolean(tab && supported && !context.uncertain && !context.needsRefresh
+    && context.capabilityChanged !== action && (!destructive || !context.activityChanged)
+    && (action !== 'rename' || tab.title === context.title));
 }
 function sessionActionMessage(text) {
   $('session-action-error').textContent = text; $('session-action-error').hidden = !text;
@@ -527,6 +531,11 @@ function updateSessionActionControls() {
   if (!$('session-action-dialog').open) return;
   const context = sessionActionTarget, tab = sessionActionTab(context);
   const unavailable = busy || Boolean(sessionActionFlight) || !tab;
+  const dispatched = sessionActionFlight?.context === context && sessionActionFlight.dispatched;
+  $('session-action-cancel').disabled = Boolean(dispatched);
+  $('session-action-accept').textContent = dispatched
+    ? { rename: 'Saving…', archive: 'Archiving…', close: 'Closing…' }[sessionActionMode]
+    : { rename: 'Save', archive: 'Archive', close: 'Close' }[sessionActionMode] || 'Save';
   $('session-rename').disabled = unavailable || tab?.capabilities?.rename === false;
   $('session-rename').title = tab?.capabilities?.rename === false ? 'This provider does not support renaming.' : '';
   $('session-archive').hidden = !tab || tab.canArchive !== true || tab.capabilities?.archive === false;
@@ -541,7 +550,8 @@ function updateSessionActionControls() {
   if (sessionActionFlight?.context === context) return;
   if (context?.uncertain) sessionActionMessage('No confirmed result. Check this session on your Mac before trying again.');
   else if (!tab || (sessionActionMode === 'rename' && tab.title !== context.title)) sessionActionMessage('This session changed. Cancel and reopen its actions. Your edits are kept here.');
-  else if (['close', 'archive'].includes(sessionActionMode) && context.confirmationRisk !== sessionActionRisk(tab)) sessionActionMessage('This session’s activity changed. Cancel and reopen its actions before confirming.');
+  else if (context.capabilityChanged === sessionActionMode) sessionActionMessage(`${sessionActionMode === 'rename' ? 'Renaming' : 'Archiving'} is no longer available for this session. Cancel and reopen its actions. Your edits are kept here.`);
+  else if (['close', 'archive'].includes(sessionActionMode) && context.activityChanged) sessionActionMessage('This session’s activity changed. Cancel and reopen its actions before confirming.');
   else if (context.needsRefresh) sessionActionMessage('Could not refresh this session. Your edits are kept. Cancel and reopen after reconnecting.');
   else if (sessionActionMode === 'rename' && invalidName) sessionActionMessage('Use at most 80 UTF-8 bytes and no control characters.');
 }
@@ -579,7 +589,9 @@ function chooseSessionAction(action) {
     $('session-action-detail').textContent = tab.status === 'working' && tab.processRunning !== false
       ? `It is still working. ${verb} stops it.`
       : uncertain ? `It may still be running. ${verb} stops it.` : action === 'archive' ? 'This archives the conversation and closes its open tabs on your Mac.' : 'This closes the tab on your Mac.';
-    if (action === 'archive' && context.confirmationRisk !== 'inactive') $('session-action-detail').textContent += ' This archives the conversation and closes its open tabs on your Mac.';
+    // The host owns archive's affected set, including path aliases and tabs omitted
+    // by a capped snapshot. Always disclose its stopping effect across that set.
+    if (action === 'archive') $('session-action-detail').textContent = 'This archives the conversation and stops all its open tabs on your Mac, including any that are working or whose status is unknown.';
     $('session-action-cancel').focus();
   }
   sessionActionMessage(''); updateSessionActionControls();
@@ -629,7 +641,10 @@ $('session-close-action').onclick = () => chooseSessionAction('close');
 $('session-action-accept').onclick = () => void submitSessionAction();
 $('session-rename-form').onsubmit = event => { event.preventDefault(); void submitSessionAction(); };
 $('session-name').oninput = () => { sessionActionMessage(''); updateSessionActionControls(); };
-$('session-action-cancel').onclick = () => $('session-action-dialog').close();
+$('session-action-cancel').onclick = () => { if (!sessionActionFlight?.dispatched) $('session-action-dialog').close(); };
+$('session-action-dialog').addEventListener('cancel', event => {
+  if (sessionActionFlight?.dispatched) event.preventDefault();
+});
 $('session-action-dialog').addEventListener('close', () => {
   sessionActionTarget = null;
   if ($('sessions-dialog').open) $('session-search').focus();
@@ -1514,7 +1529,9 @@ async function transmit(action, text, tabID, pairing, extra = {}, returnRefresh,
     pending.set(seq, { resolve, reject, timer, action, tabID, returnRefresh });
     const flight = newFlight?.attempt.action === action && ['new', 'createProject'].includes(action) ? newFlight : null;
     if (flight) flight.dispatched = true;
-    if (sessionContext && sessionActionFlight?.context === sessionContext) sessionActionFlight.dispatched = true;
+    if (sessionContext && sessionActionFlight?.context === sessionContext) {
+      sessionActionFlight.dispatched = true; updateSessionActionControls();
+    }
     ws.send(JSON.stringify({ data }));
     if (flight) updateNewControls();
   });

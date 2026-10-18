@@ -734,7 +734,7 @@ for (const action of ['close', 'archive']) {
       state.tabs[0].status = status;
       await page.fireTimer(1000); await answer();
       choose(action); assert.equal(operations(socket).length, 0);
-      assert.match(page.element('session-action-detail').textContent, status === 'working' ? /still working/ : /may still be running/);
+      assert.match(page.element('session-action-detail').textContent, action === 'archive' ? /all.*open tabs.*working.*unknown/ : status === 'working' ? /still working/ : /may still be running/);
       page.element('session-action-cancel').onclick(); await accept();
       assert.equal(operations(socket).length, 0);
       choose(action); await accept();
@@ -828,3 +828,65 @@ for (const action of ['rename', 'close', 'archive']) {
     assert.equal(page.element('session-action-accept').disabled, true);
   });
 }
+
+for (const action of ['close', 'archive']) {
+  test(`REA-1205 review: ${action} cannot be dismissed after dispatch`, async () => {
+    const { page, socket, answer, choose, accept } = await actionPage();
+    choose(action); await accept();
+    assert.equal(operations(socket).length, 1);
+    assert.equal(page.element('session-action-cancel').disabled, true);
+    page.element('session-action-cancel').onclick();
+    assert.equal(page.element('session-action-dialog').open, true);
+    let prevented = false;
+    for (const listener of page.element('session-action-dialog').listeners.cancel || []) listener({ preventDefault() { prevented = true; } });
+    assert.equal(prevented, true, 'Escape must not imply cancellation of a dispatched write');
+    await answer(operations(socket)[0]);
+    assert.equal(page.element('session-action-dialog').open, false);
+  });
+  test(`REA-1205 review: ${action} permanently invalidates a changed activity confirmation`, async () => {
+    const { page, socket, state, answer, choose, accept } = await actionPage();
+    choose(action);
+    state.tabs[0].status = 'idle'; await page.fireTimer(1000); await answer();
+    state.tabs[0].status = 'working'; await page.fireTimer(1000); await answer();
+    assert.equal(page.element('session-action-accept').disabled, true);
+    await accept(); assert.equal(operations(socket).length, 0);
+    assert.match(page.element('session-action-error').textContent, /activity changed/);
+    page.element('session-action-cancel').onclick(); choose(action); await accept();
+    assert.equal(operations(socket).length, 1, 'explicitly reopened confirmation can proceed');
+  });
+}
+
+test('REA-1205 review: archive always warns about every affected open tab', async () => {
+  for (const status of ['working', 'unknown']) {
+    const { page, choose } = await actionPage({ tabs: [actionTab({ status: 'idle' }), actionTab({ id: 'duplicate', status })], selectedTabID: 'one' });
+    choose('archive');
+    assert.match(page.element('session-action-detail').textContent, /all.*open tabs/);
+    assert.match(page.element('session-action-detail').textContent, /working/);
+    assert.match(page.element('session-action-detail').textContent, /unknown/);
+  }
+});
+
+for (const action of ['rename', 'archive']) {
+  test(`REA-1205 review: ${action} explains a provider capability change without losing edits`, async () => {
+    const { page, socket, state, answer, choose, accept } = await actionPage();
+    choose(action); page.element('session-name').value = 'Retained capability draft';
+    state.tabs[0].capabilities[action] = false;
+    await page.fireTimer(1000); await answer();
+    assert.equal(page.element('session-action-accept').disabled, true);
+    assert.match(page.element('session-action-error').textContent, /no longer|unavailable/);
+    assert.match(page.element('session-action-error').textContent, /Cancel.*reopen/);
+    assert.equal(page.element('session-name').value, 'Retained capability draft');
+    await accept(); assert.equal(operations(socket).length, 0);
+  });
+}
+
+test('REA-1205 review: Cancel before write dispatch prevents the operation', async () => {
+  for (const action of ['close', 'archive']) {
+    const { page, socket, answer, choose, accept } = await actionPage();
+    choose(action); await accept({ preflight: false });
+    assert.equal(socket.sent.at(-1).action, 'state');
+    assert.equal(page.element('session-action-cancel').disabled, false);
+    page.element('session-action-cancel').onclick(); await answer();
+    assert.equal(operations(socket).length, 0);
+  }
+});
