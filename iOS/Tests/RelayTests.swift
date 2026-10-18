@@ -349,6 +349,7 @@ final class FakeMac {
         var clientNonce: String?
         var restartedTabID: String?
         var restartedSession: ProviderSessionReference?
+        var earlier: String?
     }
 
     let origin: URL
@@ -360,6 +361,8 @@ final class FakeMac {
     var orderedEvents = true
     var pauseInput = false
     var pauseFile = false
+    var pauseEnter = false
+    var optionsError = "Unknown action."
     var rotateAfterInput = false
     var pauseState = false
     var rotateAfterState = false
@@ -559,6 +562,7 @@ final class FakeMac {
         requests.append(request)
         if pauseInput, request.action == "input" { delayedInput = request; return }
         if pauseFile, request.action == "file" { return }
+        if pauseEnter, request.action == "key", request.text == "enter" { return }
         if pauseState, request.action == "state" { delayedState = request; return }
         if pauseRestart, request.action == "restart" {
             delayedRestart = request
@@ -580,6 +584,15 @@ final class FakeMac {
         case "file":
             // Synthetic attachment acknowledgement; no file is written or opened.
             reply.state = state("file: \(request.name ?? "")")
+        case "options":
+            // This fixture models the supported legacy options fallback.
+            reply.ok = false
+            reply.error = optionsError
+        case "earlier":
+            // A short synthetic terminal has no earlier page. Rendering it
+            // must not invent a closed-tab error for a normal history read.
+            reply.earlier = ""
+            reply.state = state("ready")
         case "key" where request.tabID == selected:
             reply.state = state("key: \(request.text ?? "")")
         default:

@@ -519,26 +519,38 @@ final class NativeFlowTests: XCTestCase {
         try await captureSendScreen(fixture.store, named: "REA-1198 revoked pairing keeps send uncertainty")
     }
 
-    func testBackgroundLostInputReplyRetainsDraftWithoutReplay() async throws {
-        let fixture = try await backgroundFixture()
-        defer { fixture.stop() }
-        fixture.mac.pauseInput = true
-        fixture.store.draft = "An acknowledgement can be lost"
-        fixture.store.sendDraft()
-        try await RelayTests.until("unacknowledged input") { fixture.inputCount == 1 }
-        fixture.store.enterBackground(finishingSend: true)
-        try await RelayTests.until("normal command deadline settles send", timeout: 14) {
-            !fixture.store.busy && fixture.store.phase == .offline
+    func testBackgroundLostRepliesRetainDraftWithoutReplay() async throws {
+        for lost in ["input", "Enter"] {
+            let fixture = try await backgroundFixture()
+            defer { fixture.stop() }
+            fixture.mac.pauseInput = lost == "input"
+            fixture.mac.pauseEnter = lost == "Enter"
+            let expectedEnter = lost == "Enter" ? 1 : 0
+            fixture.store.draft = "An \(lost) acknowledgement can be lost"
+            fixture.store.sendDraft()
+            try await RelayTests.until("unacknowledged \(lost)") {
+                fixture.inputCount == 1 && fixture.enterCount == expectedEnter
+            }
+            fixture.store.enterBackground(finishingSend: true)
+            try await RelayTests.until("normal command deadline settles \(lost)", timeout: 14) {
+                !fixture.store.busy && fixture.store.phase == .offline
+            }
+            XCTAssertTrue(fixture.store.sendMayBeIncomplete)
+            XCTAssertEqual(fixture.store.draft, "An \(lost) acknowledgement can be lost")
+            fixture.mac.pauseInput = false
+            fixture.mac.pauseEnter = false
+            fixture.store.enterForeground()
+            try await RelayTests.until("reconnected after lost \(lost)") { fixture.store.isConnected && fixture.mac.connections == 2 }
+            XCTAssertEqual(fixture.inputCount, 1)
+            XCTAssertEqual(fixture.enterCount, expectedEnter, "Reconnect cannot replay either stage")
+            XCTAssertTrue(fixture.store.errorMessage?.contains("Send may be incomplete") == true)
+            fixture.mac.optionsError = "Options could not be loaded."
+            _ = await fixture.store.loadSessionOptions()
+            XCTAssertTrue(fixture.store.errorMessage?.contains("Send may be incomplete") == true,
+                          "An automatic read error cannot hide the uncertain send")
+            XCTAssertTrue(fixture.store.errorMessage?.contains("Options could not be loaded.") == true)
+            XCTAssertEqual(fixture.budget.ended, [0])
         }
-        XCTAssertTrue(fixture.store.sendMayBeIncomplete)
-        XCTAssertEqual(fixture.store.draft, "An acknowledgement can be lost")
-        fixture.mac.pauseInput = false
-        fixture.store.enterForeground()
-        try await RelayTests.until("reconnected after lost reply") { fixture.store.isConnected && fixture.mac.connections == 2 }
-        XCTAssertEqual(fixture.inputCount, 1)
-        XCTAssertEqual(fixture.enterCount, 0)
-        XCTAssertTrue(fixture.store.errorMessage?.contains("Send may be incomplete") == true)
-        XCTAssertEqual(fixture.budget.ended, [0])
     }
 
     func testNewDraftRevisionSurvivesOriginalSend() async throws {
@@ -645,6 +657,9 @@ final class NativeFlowTests: XCTestCase {
         defer { window.isHidden = true }
         try await Task.sleep(for: .milliseconds(350))
         controller.view.layoutIfNeeded()
+        XCTAssertTrue(store.sendMayBeIncomplete)
+        XCTAssertTrue(store.errorMessage?.contains("Send may be incomplete") == true,
+                      "The warning remains after the screen's automatic reads finish")
         let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
         let image = renderer.image { context in window.layer.render(in: context.cgContext) }
         let attachment = XCTAttachment(image: image)

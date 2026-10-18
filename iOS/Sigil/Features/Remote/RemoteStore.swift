@@ -50,7 +50,15 @@ final class RemoteStore {
     private(set) var cachedAt: Date?
     /// At launch, the screen waits for a cache on disk instead of showing an empty Mac.
     private(set) var awaitingCache = false
-    var errorMessage: String?
+    private var problem: String?
+    var errorMessage: String? {
+        get {
+            guard let problem else { return nil }
+            return sendMayBeIncomplete && !problem.hasPrefix(Self.incompleteSend)
+                ? Self.incompleteSend + " " + problem : problem
+        }
+        set { problem = newValue }
+    }
     var rawMode = false
     var drafts: [String: String] = [:] {
         didSet {
@@ -885,7 +893,7 @@ final class RemoteStore {
         busy = false
         if previous.macID == activeMacID, !isDemo {
             if previous.isSend { markIncompleteSend() }
-            else { showError(RemoteConnectionError.changed.localizedDescription) }
+            else { errorMessage = RemoteConnectionError.changed.localizedDescription }
         }
     }
 
@@ -898,7 +906,7 @@ final class RemoteStore {
         if work.isSend, !isDemo, sameMac, error != nil || !owns(work) {
             markIncompleteSend()
         } else if let error, sameMac {
-            showError(error.localizedDescription)
+            errorMessage = error.localizedDescription
         }
         let stop = !foreground && backgroundSend == work.id && sameMac
         let stopEpoch = connection.commandEpoch
@@ -912,13 +920,9 @@ final class RemoteStore {
         connection.stop()
     }
 
-    private func showError(_ message: String) {
-        errorMessage = sendMayBeIncomplete ? Self.incompleteSend + " " + message : message
-    }
-
     private func run(_ work: (RemoteConnection) async throws -> Void) async {
         if isDemo { return }
-        do { try await work(connection) } catch { showError(error.localizedDescription) }
+        do { try await work(connection) } catch { errorMessage = error.localizedDescription }
     }
 
     /// Keep edits made on either side of a confirmed conversation replacement.
@@ -1258,7 +1262,7 @@ extension RemoteStore: RemoteConnectionDelegate {
     }
 
     func connection(_ connection: RemoteConnection, didFail message: String) {
-        showError(message)
+        errorMessage = message
     }
 }
 

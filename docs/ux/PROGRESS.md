@@ -1266,3 +1266,12 @@ eight fresh loopback relays; production limits/grace/deadlines stay unchanged.
 Fifteen focused cases and two screenshot captures are implemented, runtime pending
 CI. Static shell/Node/Python parsing, whitespace and unchanged crypto/queue/deadline/
 terminal-key/production-relay source checks passed. Parent final review required.
+
+REA-1198 first candidate e428ab5 CI39092981215 passed full Verify/native gates,
+all33 NativeFlow cases including15new. Checkout2c2b961 has expected parents/tree.
+Visual review caught expiry warning replaced by an automatic read error
+after the test assertion; that PNG was rejected and is not acceptance evidence.
+Revocation warning was legible. Repair centralizes error presentation so every
+writer retains send uncertainty, adds post-layout assertions, models legacy
+options fallback, and covers both input/Enter lost acknowledgements plus later
+failed options reads. Replacement CI/images pending; no local native execution.
