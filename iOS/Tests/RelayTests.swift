@@ -371,6 +371,7 @@ final class FakeMac {
     private var delayedRestart: Request?
     private var delayedState: Request?
     private var delayedInput: Request?
+    private var delayedFile: Request?
     private(set) var requests: [Request] = []
     var firstTab = Reply.Tab(id: "T1", title: "Test", status: "idle") {
         didSet { if selected == oldValue.id { selected = firstTab.id } }
@@ -453,6 +454,12 @@ final class FakeMac {
         try await send(["peer": peer, "data": sealed], on: socket)
     }
 
+    func selectOnMac(_ tabID: String, eventSequence: Int) async throws {
+        guard tabID == firstTab.id || tabID == "T2" else { throw TestFailure("unknown fixture tab") }
+        selected = tabID
+        try await pushEvent(rows: ["selected: \(tabID)"], eventSequence: eventSequence)
+    }
+
     func releaseState() async throws {
         guard let request = delayedState, let socket, let peer, let deviceKey else { throw TestFailure("no delayed state") }
         delayedState = nil
@@ -469,6 +476,16 @@ final class FakeMac {
         pauseInput = false
         let reply = Reply(challenge: request.challenge, sequence: request.sequence,
                           state: state("echo: \(request.text ?? "")"), ticket: ticket, clientNonce: request.clientNonce)
+        let sealed = try RemoteCrypto.seal(reply, key: deviceKey, direction: "mac")
+        try await send(["peer": peer, "data": sealed], on: socket)
+    }
+
+    func releaseFile() async throws {
+        guard let request = delayedFile, let socket, let peer, let deviceKey else { throw TestFailure("no delayed file") }
+        delayedFile = nil
+        pauseFile = false
+        let reply = Reply(challenge: request.challenge, sequence: request.sequence,
+                          state: state("file: \(request.name ?? "")"), ticket: ticket, clientNonce: request.clientNonce)
         let sealed = try RemoteCrypto.seal(reply, key: deviceKey, direction: "mac")
         try await send(["peer": peer, "data": sealed], on: socket)
     }
@@ -561,7 +578,7 @@ final class FakeMac {
         var reply = Reply(challenge: request.challenge, sequence: request.sequence, ticket: ticket, clientNonce: request.clientNonce)
         requests.append(request)
         if pauseInput, request.action == "input" { delayedInput = request; return }
-        if pauseFile, request.action == "file" { return }
+        if pauseFile, request.action == "file" { delayedFile = request; return }
         if pauseEnter, request.action == "key", request.text == "enter" { return }
         if pauseState, request.action == "state" { delayedState = request; return }
         if pauseRestart, request.action == "restart" {

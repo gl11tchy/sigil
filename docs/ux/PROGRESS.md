@@ -1291,3 +1291,49 @@ remain disclosed. No local native build/test/app launch occurred. Physical
 device suspension, OS allowance, network handoff, APNs and production deployment
 remain unverified. Parent personal review of exact final code/current comments
 and required final-head CI still precede merge; no next ticket or extra worker.
+
+## REA-1199 — terminal keys and interrupted sends (2026-10-18)
+
+Same sole worker on current main c760d2d45a603b61d2956c255afb63e47c7dc206,
+after verified REA-1198 merge/Done bookkeeping and official build380 installation.
+No existing1199 branch/worktree/open PR; protected162 and unrelated work preserved.
+The first revision adds three generated regressions for busy-key interleaving,
+Stop during multipart input and a cancelled queued Enter, plus a held-file reply
+fixture. All production code remains unchanged. Baseline reproduction is pending
+normal CI; no local native build/test or app interaction occurred. Implementation,
+simulator evidence and parent final review follow the observed baseline.
+
+REA-1199 baseline CI39100616743 reproduced all three regressions: eight keys
+between file chunks; Stop followed by remaining file/input/Enter and cleared
+draft; cancelled queued Enter still dispatched. All33 existing NativeFlow cases
+passed, three new cases failed with11 assertions. Actual checkout1f36bee has
+expected c760/d294 parents and identical tree96ec09f. No production edits preceded
+that evidence. General Verify/typecheck/shared relay passed; TextKit was not run.
+
+The candidate guards/disables ordinary keys, cancels the owned send on Stop,
+propagates caller cancellation to queued transport work and validates controls at
+dispatch against Mac/epoch/selection/operation identity. Known file receipts keep
+their cleanup without erasing newer work. REA-1198 lifecycle/lease identity and
+frame/crypto/socket/deadline/relay source are unchanged. Ten focused cases bring
+NativeFlow to43, including actual rendered enabled-state assertions and regular/
+accessibility captures. Three review coverage gaps are addressed in the tests.
+Runtime/captures are pending CI; [QA record](../qa/rea-1199.md). No local native
+execution, extra worker, app interaction or next ticket. Parent review required.
+
+
+REA-1199 candidate e485fc1 CI39102595670 passed full general/native checks.
+Checkout4e6aca4 has expected c760/e485 parents and identical tree9163e4a. Legacy
+result readback confirms all43 NativeFlow cases, including10focused, successful.
+Both original828×1792 PNGs were visually accepted: eight disabled keys and Stop
+remain visible, including the accessibility two-column grid. Native TextKit7pass.
+Two existing browser and four REA-1350 permission-dependent pointer cases skipped;
+manual pointer/device/OS allowance/network handoff/APNs/provider/runtime limits
+remain. No local native execution or app interaction occurred.
+
+The final evidence revision preserves the original PNG bytes and records actual
+candidate checks. It also handles CancellationError in New's two read methods,
+so expected dismissal cannot overwrite current feedback after queue cancellation.
+A held-request/cancel/drain test brings NativeFlow to44, with11focused cases.
+Only those two source/test files differ from the verified candidate; screen,
+capture, protocol and1198 lifecycle sources are unchanged. Required final-head
+CI and parent personal review remain pending. [QA and images](../qa/rea-1199.md).

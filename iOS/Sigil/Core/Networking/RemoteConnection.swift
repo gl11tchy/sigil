@@ -138,7 +138,8 @@ final class RemoteConnection {
     func request(
         _ action: String, text: String? = nil, tabID: String? = nil, name: String? = nil,
         index: Int? = nil, count: Int? = nil, transfer: String? = nil, provider: String? = nil,
-        model: String? = nil, effort: String? = nil, worktree: Bool? = nil
+        model: String? = nil, effort: String? = nil, worktree: Bool? = nil,
+        beforeSend: (@MainActor () throws -> Void)? = nil
     ) async throws -> RemoteReply {
         guard phase == .connected else { throw RemoteConnectionError.notConnected }
         guard queuedRequests < 32 else { throw RemoteConnectionError.busy }
@@ -149,15 +150,25 @@ final class RemoteConnection {
         let epoch = commandEpoch
         let work = Task { @MainActor () throws -> RemoteReply in
             await previous?.value
-            guard current == self.generation, epoch == self.commandEpoch else { throw RemoteConnectionError.changed }
             return try await self.transmit(
                 RequestFields(
                     action: action, text: text, tabID: tabID, name: name, index: index, count: count,
                     transfer: transfer, provider: provider, model: model, effort: effort, worktree: worktree),
-                pairing: false)
+                pairing: false,
+                beforeSend: {
+                    try Task.checkCancellation()
+                    guard current == self.generation, epoch == self.commandEpoch else { throw RemoteConnectionError.changed }
+                    try beforeSend?()
+                })
         }
         queue = Task { _ = try? await work.value }
-        return try await work.value
+        return try await withTaskCancellationHandler {
+            try await work.value
+        } onCancel: {
+            // The queue task is unstructured. Cancelling its caller must also
+            // cancel work that is still waiting to transmit.
+            work.cancel()
+        }
     }
 
     func requireCurrentConnection(_ epoch: Int) throws {
@@ -178,7 +189,12 @@ final class RemoteConnection {
         var worktree: Bool?
     }
 
-    private func transmit(_ fields: RequestFields, pairing: Bool) async throws -> RemoteReply {
+    private func transmit(
+        _ fields: RequestFields, pairing: Bool, beforeSend: (@MainActor () throws -> Void)? = nil
+    ) async throws -> RemoteReply {
+        // No suspension between this validation and creating/sending the frame.
+        // A request already on the wire still settles by its reply or deadline.
+        try beforeSend?()
         guard let socket, let challenge, let credential,
             phase == .connected || pairing || fields.action == "state"
         else { throw RemoteConnectionError.notConnected }

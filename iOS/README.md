@@ -39,6 +39,13 @@ when provider, native conversation ID, and canonical project all match.
 
 ## Terminal controls and alerts
 
+The eight terminal keys are unavailable while a request is busy. Stop stays
+available during a send, even before the provider starts working. Stop cancels
+remaining upload/input/Enter stages; an already transmitted request still needs
+its receipt or deadline. The incomplete-send warning and draft remain. Confirmed
+full-file receipts remove only those attachments, while partial uploads and newer
+work remain. Inspect the terminal before sending again; nothing is replayed.
+
 Sigil has no verified approval response broker connected to the owned terminal session.
 Parsed menus appear as **Terminal controls**, with the available operation and
 exact choice labels. They send ordinary terminal keys, not verified approvals.

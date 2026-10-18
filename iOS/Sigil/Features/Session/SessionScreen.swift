@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 struct SessionScreen: View {
+    private let initiallyShowingKeys: Bool
     @Environment(RemoteStore.self) private var store
     @State private var showingSessions = false
     @State private var showingProjects = false
@@ -20,13 +21,17 @@ struct SessionScreen: View {
     @State private var pageHeight: CGFloat?
     @FocusState private var findFocused: Bool
 
+    init(initiallyShowingKeys: Bool = false) { self.initiallyShowingKeys = initiallyShowingKeys }
+
     var body: some View {
         NavigationStack {
             content
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     CoverSlot {
                         if store.selectedTab != nil, !store.isRevoked {
-                            ComposerBar(upperLimit: pageHeight.map { $0 * 0.4 } ?? .infinity)
+                            ComposerBar(
+                                upperLimit: pageHeight.map { $0 * 0.4 } ?? .infinity,
+                                initiallyShowingKeys: initiallyShowingKeys)
                         }
                     } changed: {
                         composerHeight = $0?.height ?? 0
