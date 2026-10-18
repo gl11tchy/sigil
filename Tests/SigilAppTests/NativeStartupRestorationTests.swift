@@ -9,20 +9,32 @@ import Testing
 @MainActor
 struct NativeStartupRestorationTests {
     @Test
-    func anUnavailableSavedCodexEntryRemainsASavedIntentWithoutOpeningATab() throws {
+    func anUnavailableSavedCodexEntryRemainsASavedIntentWithoutOpeningATab() async throws {
         _ = NSApplication.shared
         let fixture = try ModelFixture()
         defer { fixture.cleanup() }
         fixture.settings.isTabMessagingEnabled = false
         let entry = OpenTabsSnapshot.Entry(
             sessionID: UUID().uuidString.lowercased(), cwd: fixture.root.path, provider: .codex)
+        let transcript = fixture.root.appendingPathComponent("generated-codex.jsonl")
+        try Data("{\"fixture\":true}\n".utf8).write(to: transcript)
+        let session = GrokSession(
+            id: entry.sessionID, cwd: entry.cwd, summary: "Unavailable saved Codex",
+            createdAt: Date(), updatedAt: Date(), messageCount: 2, modelID: nil, agentName: nil,
+            reasoningEffort: nil, directory: transcript, provider: .codex)
+        let store = SessionStore(
+            root: fixture.store.root, timing: SessionStoreTiming(),
+            scanOperation: { _, _, _ in .init(sessions: [session], cache: [:], loadError: nil) })
+        defer { store.stop() }
+        await store.reload()
+        #expect(store.appliedScanSequence > 0 && store.sessions.first?.isHistoryValidated == true)
         fixture.settings.openTabs = .init(
             tabs: [entry], selectedSessionID: entry.sessionID, selectedCWD: entry.cwd, selectedProvider: .codex)
         var installations = fixtureProviderInstallations(fixture.executable)
         let problem = "Synthetic Codex executable is unavailable."
         installations[.codex] = .init(executable: nil, version: nil, problem: problem)
         let model = AppModel(
-            settings: fixture.settings, store: fixture.store, presentError: { _ in },
+            settings: fixture.settings, store: store, presentError: { _ in },
             panel: RightPanel(defaults: fixture.defaults, notesStore: ConversationNotesStore(root: fixture.notesRoot)),
             pairingStore: InMemoryRemotePairingStore(), kimiKeyStore: InMemoryKimiKeyStore(),
             providerInstallations: installations)
@@ -44,8 +56,12 @@ struct NativeStartupRestorationTests {
         let fixture = try ModelFixture(script: "#!/bin/sh\nwhile IFS= read -r line; do :; done\n")
         defer { fixture.cleanup() }
         fixture.settings.isTabMessagingEnabled = false
+        // hostCommand accepts only supported shell basenames. This script ignores
+        // the supplied -c command, so it can never dispatch a provider from PATH.
+        let shell = fixture.root.appendingPathComponent("zsh")
+        try FileManager.default.copyItem(at: fixture.executable, to: shell)
         let oldShell = ProcessInfo.processInfo.environment["SHELL"]
-        setenv("SHELL", fixture.executable.path, 1)
+        setenv("SHELL", shell.path, 1)
         defer {
             if let oldShell { setenv("SHELL", oldShell, 1) } else { unsetenv("SHELL") }
         }
