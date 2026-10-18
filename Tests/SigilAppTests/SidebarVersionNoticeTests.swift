@@ -33,15 +33,20 @@ struct SidebarVersionNoticeTests {
         }
         let editor = try #require(hosted.window.firstResponder as? NSTextView)
         try #require(editor.string == "auth")
-        try #require(hosted.window.isKeyWindow)
         let down = try #require(
             NSEvent.keyEvent(
                 with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
                 windowNumber: hosted.window.windowNumber, context: nil, characters: "\u{F701}",
                 charactersIgnoringModifiers: "\u{F701}", isARepeat: false, keyCode: 125))
-        // This event belongs to the generated CI-host window. It is never posted
-        // to the desktop or whichever application happens to be in front.
-        NSApp.sendEvent(down)
+        try #require(down.window === hosted.window)
+        print(
+            """
+            REA-1258 before Down: appActive=\(NSApp.isActive), keyWindow=\(hosted.window.isKeyWindow), \
+            editor=\(type(of: editor)), query=\(editor.string), dispatch=owned NSWindow.sendEvent
+            """)
+        // Deliver to this generated window's responder chain even when the CI
+        // host is inactive. No event is posted to the desktop or another window.
+        hosted.window.sendEvent(down)
         try await waitForSearchState("Down must reach the real sidebar key handler") {
             model.sidebarCommandContext.listFocused || model.sidebarCommandContext.keyboardRowID == rows[1]
         }
@@ -76,6 +81,8 @@ struct SidebarVersionNoticeTests {
             try await waitForSearchState("Search must own focus and the first result") {
                 hosted.window.firstResponder is NSTextView && model.sidebarCommandContext.keyboardRowID == first
             }
+            let editor = try #require(hosted.window.firstResponder as? NSTextView)
+            try #require(editor.string == "auth")
             // Remove incidental pointer hover through the view's actual callback.
             // Keyboard fill must then remain visible while the editor keeps focus.
             if let target = probe.glide?.target { probe.glide?.hover(target, false) }
@@ -86,6 +93,7 @@ struct SidebarVersionNoticeTests {
                 fill=\(probe.glide?.target ?? "nil"), listFocused=\(model.sidebarCommandContext.listFocused)
                 """)
             #expect(!model.sidebarCommandContext.listFocused)
+            #expect(hosted.window.firstResponder === editor)
             #expect(probe.glide?.target == first)
         }
     }

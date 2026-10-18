@@ -1361,3 +1361,19 @@ pending normal PR CI. No local native build/test, process enumeration, real CLI
 or personal history was used. Implementation and real isolated AX/window-ID
 evidence follow reproduction, or an exact permission blocker will be retained.
 Parent reviews final code/current comments/visuals before merge.
+
+
+REA-1258 first baseline CI39108130408 used checkout4ab8813 with expected
+aa06/94932 parents and identical treeeba8657. Production Sources subtree stayed
+60f1048. The8 host cases recorded2 legacy passes,2 new failures and4 existing
+pointer skips. Both appearances had nil glide target against the known row;
+late editor identity was not yet asserted. The Down case stopped at its key-
+window requirement before input, so no Down-event reproduction is claimed.
+Harness round1 directs the event to the exact owned NSWindow responder chain,
+adds active/key/editor diagnostics and late editor identity assertions. No
+production edits or local native execution. Normal updated baseline CI pending.
+
+Public Apple read-only local preflight reports AX, post-event and screen-capture
+access unavailable. No prompt/request, app launch, event or screenshot was
+attempted. Required real-app AX/window-ID acceptance remains incomplete;
+CI unit/view evidence must not be substituted for it.
