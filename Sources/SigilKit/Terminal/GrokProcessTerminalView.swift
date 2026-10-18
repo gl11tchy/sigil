@@ -13,6 +13,8 @@ import SwiftTerm
 final class GrokProcessTerminalView: LocalProcessTerminalView {
     /// Invoked on the main queue when the child writes output.
     var onChildOutput: (() -> Void)?
+    /// Content changes for Find; a resize must not announce CLI activity.
+    var onContentChange: (() -> Void)?
     /// Invoked when the user submits the current prompt with Return.
     var onUserSubmit: (() -> Void)?
     /// Every byte sent, including menu digits, paste, and non-Return keys.
@@ -22,6 +24,7 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
     /// Moves on every child write and every resize, the only ways Sigil changes
     /// the buffer. Find reuses its last read of the rows while this is unchanged.
     fileprivate(set) var contentGeneration = 0
+    fileprivate(set) var resizeGeneration = 0
     private var isForwardingBracketedPaste = false
     /// Held strongly here: `terminalDelegate` is weak.
     private lazy var clipboardGuard = ClipboardGuard(view: self)
@@ -142,6 +145,7 @@ final class GrokProcessTerminalView: LocalProcessTerminalView {
     override func dataReceived(slice: ArraySlice<UInt8>) {
         super.dataReceived(slice: slice)
         contentGeneration &+= 1
+        onContentChange?()
         onChildOutput?()
     }
 
@@ -201,7 +205,9 @@ private final class ClipboardGuard: @preconcurrency TerminalViewDelegate {
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
         // A resize reflows wrapped rows. Every resize path in SwiftTerm ends here.
         view.contentGeneration &+= 1
+        view.resizeGeneration &+= 1
         view.sizeChanged(source: source, newCols: newCols, newRows: newRows)
+        view.onContentChange?()
     }
 
     func setTerminalTitle(source: TerminalView, title: String) {

@@ -882,6 +882,35 @@ struct AppModelTests {
     }
 
     @Test @MainActor
+    func deferredFindPublishesCountsToTheVisibleBarAndDismissalClearsPendingState() async throws {
+        let fixture = try ModelFixture()
+        defer { fixture.cleanup() }
+        let cwd = try fixture.directory("project")
+        let model = fixture.model()
+        defer { model.closeAllTabsAndWait() }
+        let tab = try #require(model.newTab(in: cwd))
+        let view = try #require(tab.controller.view as? GrokProcessTerminalView)
+        let query = "REA1193_\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
+        view.dataReceived(slice: ArraySlice(Array("\r\n\(query) one\r\n\(query) two\r\n".utf8)))
+        model.showFindBar()
+        model.findQuery = query
+        model.applyFindQuery()
+        #expect(model.isFindSearching)
+        #expect(model.findMatchCount == 0)
+        let deadline = ContinuousClock.now + .seconds(10)
+        while model.isFindSearching, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(!model.isFindSearching)
+        #expect(model.findMatchCount == 2)
+        #expect(model.findMatchIndex == 2)
+        model.dismissFindBar()
+        #expect(!model.isFindSearching)
+        #expect(model.findMatchCount == 0)
+        #expect(!view.selection.active)
+    }
+
+    @Test @MainActor
     func readingAChatThenLeavingClearsItsUnreadDot() throws {
         _ = NSApplication.shared
         let fixture = try ModelFixture()

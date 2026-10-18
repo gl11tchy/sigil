@@ -62,6 +62,7 @@ final class AppModel {
     var findQuery = ""
     var findMatchIndex = 0
     var findMatchCount = 0
+    var isFindSearching = false
     /// The thread viewer can be collapsed for a full-width terminal.
     var isSidebarVisible = true {
         didSet {
@@ -2157,6 +2158,10 @@ final class AppModel {
 
     /// Output and status changes reach the phone through the remote stream.
     private func wireRemoteStream(_ tab: TerminalTab) {
+        tab.controller.onFindChange = { [weak self, weak tab] in
+            guard let self, let tab, self.isFindBarVisible, self.selectedTabID == tab.id else { return }
+            self.refreshFindCounts()
+        }
         tab.onActivityChange = { [weak self, weak tab] in
             guard let self, let tab else { return }
             self.remoteControl.noteChange()
@@ -3287,6 +3292,7 @@ final class AppModel {
         findQuery = ""
         findMatchIndex = 0
         findMatchCount = 0
+        isFindSearching = false
     }
 
     func applyFindQuery() {
@@ -3308,6 +3314,7 @@ final class AppModel {
     private func refreshFindCounts() {
         findMatchIndex = selectedTab?.controller.findMatchIndex ?? 0
         findMatchCount = selectedTab?.controller.findMatchCount ?? 0
+        isFindSearching = selectedTab?.controller.isFinding ?? false
     }
 
     /// Switching tabs hides the bar and clears find on the tab that had it.
@@ -3320,6 +3327,7 @@ final class AppModel {
         findQuery = ""
         findMatchIndex = 0
         findMatchCount = 0
+        isFindSearching = false
     }
 
     /// Closes any tab showing `session`, then moves its directory to the Trash.
