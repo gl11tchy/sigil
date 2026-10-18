@@ -73,6 +73,7 @@ struct NativeStartupRestorationTests {
         defer { model.closeAllTabsAndWait() }
         let tab = try #require(model.newTab(in: fixture.root, provider: .devin))
         #expect(tab.nativeSessionID == nil)
+        #expect(tab.spec.hostCommand().executable == shell)
         let prompt = try #require(StopWorkingPrompt(action: .quit, stopping: [tab]))
         print("REA-1240 quit baseline: \(prompt.messageText) | \(prompt.informativeText)")
         #expect(prompt.informativeText.contains("1 tab will not reopen next time."))
@@ -119,8 +120,11 @@ struct NativeStartupRestorationTests {
         settings.openTabs = .init(
             tabs: [entry], selectedSessionID: entry.sessionID, selectedCWD: root.path, selectedProvider: provider)
         let model = AppModel(
-            settings: settings, store: store, presentError: { _ in }, panel: RightPanel(defaults: defaults),
-            pairingStore: InMemoryRemotePairingStore(), providerInstallations: fixtureProviderInstallations(shell))
+            settings: settings, store: store, presentError: { _ in },
+            panel: RightPanel(
+                defaults: defaults, notesStore: ConversationNotesStore(root: root.appendingPathComponent("notes"))),
+            pairingStore: InMemoryRemotePairingStore(), kimiKeyStore: InMemoryKimiKeyStore(),
+            providerInstallations: fixtureProviderInstallations(shell))
         defer { model.closeAllTabsAndWait() }
         #expect(store.sessions.isEmpty)
         await model.onAppear()
