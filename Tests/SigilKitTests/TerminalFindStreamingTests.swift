@@ -7,9 +7,15 @@ import Testing
 
 private actor FindScanGate {
     private var released = false
+    private let holdingAfter: Int
+    private var calls = 0
     private var continuations: [CheckedContinuation<Void, Never>] = []
 
+    init(holdingAfter: Int = 0) { self.holdingAfter = holdingAfter }
+
     func wait() async {
+        calls += 1
+        guard calls > holdingAfter else { return }
         guard !released else { return }
         await withCheckedContinuation { continuations.append($0) }
     }
@@ -242,6 +248,84 @@ struct TerminalFindStreamingTests {
         controller.clearFind()
     }
 
+    @Test func nextDoesNotWrapWithinAPartialSnapshotBeforeNewRowsAreScanned() async throws {
+        let controller = TerminalController()
+        let view = try #require(controller.view as? GrokProcessTerminalView)
+        let gate = FindScanGate(holdingAfter: 1)
+        holdScans(controller, with: gate)
+        defer { controller.clearFind() }
+        output(view, "needle one\r\nfiller\r\n")
+        controller.setFindQuery("needle")
+        await settled(controller)
+        output(view, "")
+        #expect(await TerminalTestSupport.waitUntil { controller.findDiagnostics.scansStarted == 2 })
+        controller.findNext()
+        output(view, "needle two\r\n")
+        await gate.release()
+        await settled(controller)
+        #expect(controller.findDiagnostics.acceptedResults >= 3)
+        #expect(controller.findMatchCount == 2)
+        #expect(controller.findMatchIndex == 2)
+        #expect(view.selection.start == Position(col: 0, row: 2))
+    }
+
+    @Test func aPartialFallbackDoesNotReplaceTheUnverifiedPreviousNavigationOrigin() async throws {
+        let controller = TerminalController()
+        let view = try #require(controller.view as? GrokProcessTerminalView)
+        let gate = FindScanGate(holdingAfter: 1)
+        holdScans(controller, with: gate)
+        defer { controller.clearFind() }
+        output(view, "needle one\r\nfiller\r\nneedle two\r\nfiller\r\nneedle three\r\n")
+        controller.setFindQuery("needle")
+        await settled(controller)
+        controller.findNext()
+        #expect(view.selection.start == Position(col: 0, row: 0))
+        output(view, "")
+        #expect(await TerminalTestSupport.waitUntil { controller.findDiagnostics.scansStarted == 2 })
+        controller.findPrevious()
+        output(view, "\u{1b}[2;1Hchanged filler")
+        await gate.release()
+        await settled(controller)
+        #expect(controller.findDiagnostics.acceptedResults >= 3)
+        #expect(controller.findMatchCount == 3)
+        #expect(controller.findMatchIndex == 3)
+        #expect(view.selection.start == Position(col: 0, row: 4))
+    }
+
+    @Test func partialResultsCanNavigateWithinTheirVerifiedHistoryBeforeCompletion() async throws {
+        let controller = TerminalController()
+        let view = try #require(controller.view as? GrokProcessTerminalView)
+        let gate = FindScanGate(holdingAfter: 1)
+        holdScans(controller, with: gate)
+        output(view, (0..<500).map { "row \($0) needle" }.joined(separator: "\r\n") + "\r\n")
+        controller.setFindQuery("needle")
+        await settled(controller)
+        controller.findNext()
+        #expect(view.selection.start.row == 0)
+        var navigatedBeforeCompletion = false
+        controller.onFindChange = { [weak controller, weak view] in
+            if let controller, let view, controller.findDiagnostics.acceptedResults == 2,
+                controller.isFinding, view.selection.active, view.selection.start.row == 1
+            {
+                navigatedBeforeCompletion = true
+            }
+        }
+        defer {
+            controller.onFindChange = nil
+            controller.clearFind()
+        }
+        output(view, "")
+        #expect(await TerminalTestSupport.waitUntil { controller.findDiagnostics.scansStarted == 2 })
+        controller.findNext()
+        output(view, "new needle\r\n")
+        await gate.release()
+        await settled(controller)
+        #expect(navigatedBeforeCompletion)
+        #expect(controller.findMatchCount == 501)
+        #expect(controller.findMatchIndex == 2)
+        #expect(view.selection.start == Position(col: 6, row: 1))
+    }
+
     @MainActor
     private final class StreamProbe {
         var active = true
@@ -259,14 +343,14 @@ struct TerminalFindStreamingTests {
                 if Task.isCancelled { break }
                 view.dataReceived(slice: ArraySlice(Array("stream \(index) needle\r\n".utf8)))
                 probe.writes += 1
-                try? await Task.sleep(for: .milliseconds(5))
+                try? await Task.sleep(for: .milliseconds(5), tolerance: .zero)
             }
             probe.active = false
         }
         let heartbeat = Task { @MainActor in
             while probe.active, !Task.isCancelled {
                 let start = ContinuousClock.now
-                try? await Task.sleep(for: .milliseconds(1))
+                try? await Task.sleep(for: .milliseconds(1), tolerance: .zero)
                 probe.heartbeatDelays.append(max(0, TerminalFindScan.milliseconds(start.duration(to: .now)) - 1))
             }
         }

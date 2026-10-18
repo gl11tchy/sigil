@@ -309,6 +309,7 @@ final class TerminalFindSession {
         var chunk: [ScrollbackSearch.Row] = []
         var stampChunk: [CapturedRow?] = []
         var offset = 0
+        var workSinceRunLoopYield: Duration = .zero
         while offset < first.count {
             let start = ContinuousClock.now
             guard capturedRequest == request, capturedEpoch == epoch, let now = synchronize(),
@@ -333,7 +334,18 @@ final class TerminalFindSession {
             } while offset < first.count && processed < Self.rowsPerPass
                 && start.duration(to: .now) < Self.snapshotBudget
             recordSnapshotPass(rows: processed, started: start)
-            if offset < first.count { try? await Task.sleep(for: .milliseconds(1)) }
+            workSinceRunLoopYield += start.duration(to: .now)
+            if offset < first.count {
+                if workSinceRunLoopYield >= Self.snapshotBudget {
+                    // Give the run loop a turn after a bounded amount of CPU
+                    // work. A timer after every cheap/cache-hit chunk can be
+                    // coalesced into seconds of avoidable snapshot latency.
+                    workSinceRunLoopYield = .zero
+                    try? await Task.sleep(for: .milliseconds(1), tolerance: .zero)
+                } else {
+                    await Task.yield()
+                }
+            }
         }
         if !chunk.isEmpty {
             chunks.append(chunk)
@@ -401,15 +413,19 @@ final class TerminalFindSession {
         diagnostics.lastScanRanOnMainThread = output.ranOnMainThread
         diagnostics.acceptedResults += 1
         let complete = snapshot.startGeneration == state.generation && snapshot.endGeneration == state.generation
-        if !complete { needsWork = true }
+        needsWork = !complete
         updateRanges(state, preserving: previous)
         if initialSelectionCompleted, let previous, let index = index(of: previous), contains(index) {
             current = index
+        } else if !complete, initialSelectionCompleted, previous != nil {
+            // Keep the navigation origin until a fresh scan verifies it. A
+            // different partial hit must not silently become the new origin.
+            current = nil
         } else {
             current = defaultIndex(above: queryAnchor)
         }
-        let explicitNavigation = navigation != 0
-        consumeNavigation()
+        let explicitNavigation = navigation != 0 && (complete || canNavigateInHistory(state))
+        if complete || explicitNavigation { consumeNavigation() }
         if complete, matchCount == 0 { navigation = 0 }
         let reveal = explicitNavigation || (complete && !initialSelectionCompleted)
         if complete { initialSelectionCompleted = true }
@@ -529,6 +545,28 @@ final class TerminalFindSession {
         }
         navigation = 0
         initialSelectionCompleted = true
+    }
+
+    /// A partial result proves a navigation step only inside its contiguous,
+    /// immutable history prefix. Wrapping or crossing live/unchecked rows must
+    /// wait for a complete scan, which can include newly appended matches.
+    private func canNavigateInHistory(_ state: TerminalFindBufferState) -> Bool {
+        guard initialSelectionCompleted, let result, let current,
+            let old = ordinal(current), navigation >= -old, navigation < matchCount - old
+        else { return false }
+        var target = old + navigation
+        for range in ranges {
+            if target < range.count {
+                let destination = result.matches[range.lowerBound + target]
+                let origin = result.matches[current]
+                let start = max(state.trimmed, result.snapshot.origin)
+                let end = min(state.historyEnd, result.snapshot.historyEnd)
+                return origin.line >= start && origin.endLine < end
+                    && destination.line >= start && destination.endLine < end
+            }
+            target -= range.count
+        }
+        return false
     }
 
     private func emitSelection(reveal: Bool, state: TerminalFindBufferState) {
