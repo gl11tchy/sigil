@@ -1440,3 +1440,84 @@ test('REA-1206 a pre-existing second tab cannot repeat a start after taking the 
     expect(mac.actions.find(request => request.action === 'new').model).toBe('');
   } finally { await second.close(); mac.close(); }
 });
+
+test('REA-1205 session metadata and guarded actions at 390x844', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const state = { tabs: [
+    { id: 'one', title: 'Review session actions', status: 'working', provider: 'grokBuild', providerName: 'Grok Build', folder: 'sigil', cwd: '/tmp/sigil', sessionID: 'native-one', canArchive: true, capabilities: { rename: true, archive: true } },
+    { id: 'two', title: 'Check reconnect behavior', status: 'unknown', provider: 'claudeCode', providerName: 'Claude Code', folder: 'companion', cwd: '/tmp/companion', sessionID: 'native-two', canArchive: true, capabilities: { rename: true, archive: true } },
+    { id: 'three', title: 'Read the release notes', status: 'idle', providerName: 'Kimi Code', folder: 'docs', canArchive: false, capabilities: { rename: false, archive: false } },
+  ], selectedTabID: 'two', terminal: 'Synthetic session output. No provider CLI is running.', mac: 'Fixture Mac', capabilities: ['sessionOps'] };
+  const mac = await pair(page, baseURL, undefined, { state, onRequest(request) {
+    if (request.action === 'rename') state.tabs.find(tab => tab.id === request.tabID).title = request.name || 'Review session actions';
+    if (['close', 'archive'].includes(request.action)) {
+      state.tabs = state.tabs.filter(tab => tab.id !== request.tabID);
+      if (state.selectedTabID === request.tabID) state.selectedTabID = state.tabs[0]?.id;
+    }
+  } });
+  const capture = async name => {
+    const path = testInfo.outputPath(`session-actions-${name}-390x844.png`);
+    await page.screenshot({ path, animations: 'disabled' }); await testInfo.attach(name, { path, contentType: 'image/png' });
+  };
+  const more = title => page.getByRole('button', { name: `More actions for ${title}`, exact: true });
+  try {
+    await page.getByRole('button', { name: 'Browse open and saved chats' }).click();
+    await expect(page.locator('.session-metadata')).toHaveText(['Grok Build · sigil', 'Claude Code · companion', 'Kimi Code · docs']);
+    for (const button of await page.locator('[data-session-more]').all()) {
+      const box = await button.boundingBox(); expect(box.width).toBeGreaterThanOrEqual(44); expect(box.height).toBeGreaterThanOrEqual(44);
+    }
+    await capture('list');
+    // An unchanged state poll must not detach the row's action handler.
+    await expect.poll(() => mac.actions.filter(r => r.action === 'state').length).toBeGreaterThanOrEqual(1);
+    await more('Review session actions').click(); await capture('menu');
+    await page.locator('#session-rename').click();
+    await page.locator('#session-name').fill('😀'.repeat(21));
+    await expect(page.locator('#session-action-accept')).toBeDisabled();
+    await page.locator('#session-name').fill('Verify remote session actions'); await capture('rename');
+    await page.locator('#session-action-accept').click();
+    await expect(more('Verify remote session actions')).toBeVisible();
+    await expect(page.locator('#sessions-error')).toBeHidden();
+    await expect(page.locator('#session-action-dialog')).toBeHidden();
+    expect(mac.actions.filter(r => r.action === 'rename').map(r => [r.tabID, r.name])).toEqual([['one', 'Verify remote session actions']]);
+    await more('Read the release notes').click();
+    await expect(page.locator('#session-archive')).toBeHidden(); await expect(page.locator('#session-rename')).toBeDisabled();
+    await page.locator('#session-action-cancel').click();
+    await more('Check reconnect behavior').click(); await page.locator('#session-archive').click();
+    await expect(page.locator('#session-action-detail')).toContainText('It may still be running. Archiving stops it.');
+    expect(mac.actions.filter(r => r.action === 'archive')).toHaveLength(0);
+    await page.locator('#session-action-accept').click();
+    await expect(more('Check reconnect behavior')).toHaveCount(0);
+    await expect(page.locator('#tabs')).toHaveValue('one');
+    await more('Verify remote session actions').click(); await page.locator('#session-close-action').click();
+    await expect(page.locator('#session-action-detail')).toHaveText('It is still working. Closing stops it.');
+    await capture('close'); await page.locator('#session-action-cancel').click();
+    expect(mac.actions.filter(r => r.action === 'close')).toHaveLength(0);
+    await more('Verify remote session actions').click(); await page.locator('#session-close-action').click();
+    await page.locator('#session-action-accept').click();
+    await expect(page.locator('#tabs')).toHaveValue('three');
+    expect(mac.actions.filter(r => ['archive', 'close'].includes(r.action)).map(r => [r.action, r.tabID])).toEqual([['archive', 'two'], ['close', 'one']]);
+    state.capabilities = [];
+    await expect(page.locator('[data-session-more]')).toHaveCount(0);
+    expect(mac.errors).toEqual([]);
+  } finally { mac.close(); }
+});
+
+test('REA-1205 rejected rename retains edits and cannot overwrite a newer host name', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const state = { tabs: [{ id: 'one', title: 'Original title', status: 'idle', providerName: 'Codex', folder: 'sigil', capabilities: { rename: true } }],
+    selectedTabID: 'one', terminal: 'Synthetic output.', mac: 'Fixture Mac', capabilities: ['sessionOps'] };
+  const mac = await pair(page, baseURL, undefined, { state, rejectAction: 'rename', onRequest(request) {
+    if (request.action === 'rename') state.tabs[0].title = 'Newer host name';
+  } });
+  try {
+    await page.getByRole('button', { name: 'Browse open and saved chats' }).click();
+    await page.getByRole('button', { name: 'More actions for Original title' }).click();
+    await page.locator('#session-rename').click(); await page.locator('#session-name').fill('My retained edit');
+    await page.locator('#session-action-accept').click();
+    await expect(page.locator('#session-name')).toHaveValue('My retained edit');
+    await expect(page.locator('#session-action-error')).toContainText('This session changed');
+    await expect(page.locator('#session-action-accept')).toBeDisabled();
+    expect(mac.actions.filter(r => r.action === 'rename')).toHaveLength(1);
+    expect(mac.errors).toEqual([]);
+  } finally { mac.close(); }
+});
