@@ -7,7 +7,7 @@ that Sigil launches, not a new Devin Cloud session or an integration implementat
 | --- | --- |
 | Sigil repository | `aa06ac94aa0322d4c40b854e5aa2997e3c60de2a` |
 | Public CLI version reference | Stable changelog **v3000.11.92**, dated **2026-10-14**, inspected as documentation; no installed binary was probed |
-| Structured protocol | Documented ACP over JSON-RPC/stdin/stdout. No exact negotiated ACP revision or binary-specific schema was validated |
+| Structured protocol | Documented ACP over JSON-RPC/stdin/stdout and turn-end ATIF export. No exact ACP/ATIF revision or binary-specific schema was validated |
 | Sigil contract | No checked Devin version or native history adapter in `CLIProvider`; rolling public docs do not add either capability |
 
 ## Official channels
@@ -27,6 +27,23 @@ documented stable on-disk message schema or a safe passive-observer contract.
 The [official quickstart](https://docs.devin.ai/cli) distinguishes local Devin CLI from cloud
 Devin. Cloud session APIs and handoff do not establish a control channel to the local PTY that
 the user already has open.
+
+## Same-process turn-end export
+
+The [Global Flags reference](https://docs.devin.ai/cli/reference/commands#global-flags), checked
+2026-10-18, documents `--export [PATH]`: conversation export in ATIF format after each turn,
+with a default destination when no path is supplied. Its interactive examples do not require
+`--print`. A future opt-in interactive launch could therefore produce transcript snapshots from
+the same agent process. This is a turn-end file export, not live deltas or a permission/control
+channel; the flag does not establish attachment to an arbitrary already-running PTY.
+
+The reference does not specify an ATIF schema revision, session/turn identity guarantees or
+atomic write/replacement semantics. The changelog label is not proof of export compatibility. A
+future adapter must pin the CLI/schema, bind an owned explicit destination and native session
+independently, and reject partial, stale or cross-session snapshots. Export may persist
+sensitive prompt/tool content: require private storage, bounded retention and explicit user
+choice, with no automatic upload. No export file was created/read and no CLI behavior was tested
+here.
 
 ## Repository and synthetic evidence
 
@@ -66,10 +83,11 @@ custom client. That is stronger evidence than scraping a TUI. It also puts the c
 of a subprocess and session operations, rather than making it a transparent second reader of
 Sigil's current terminal.
 
-Same-session hooks provide a more direct observation candidate than ACP attachment. A second
-resume, forced open or cloud handoff is unnecessary for those callbacks and must not substitute
-for verified identity. A future spec must establish an exact mapping between the local provider
-session, collector and Sigil tab/process generation without changing the current agent writer.
+Turn-end ATIF export could support message navigation between turns, while same-session hooks
+could provide activity during a turn. Both avoid a second agent writer. A second resume, forced
+open or cloud handoff is unnecessary for those candidates and must not substitute for verified
+identity. A future spec must map the local provider session, export file/collector and Sigil
+tab/process generation without changing the current agent writer.
 
 ## Identity, security and unresolved assumptions
 
@@ -94,10 +112,11 @@ here. The public changelog label is not a claim of binary compatibility.
 ## Decision and fallback
 
 **NO-GO for a structured transcript or approval layer on the current Devin PTY path.** ACP is a
-credible separate client mode. **GO for a scoped read-only hook/activity specification**,
-because it observes the existing agent with session/prompt correlation. Full transcript adoption
-remains unjustified without assistant-message coverage, pinned schemas and synthetic identity,
-loss/replay, stop-continuation and permission tests. Do not force-open a live session to obtain
-events. The fallback is the real interactive CLI and existing terminal/phone output, with
-unsupported history, completion and approval capabilities reported truthfully. No uniform
-transcript is promised.
+credible separate client mode. **GO for a scoped read-only ATIF-export/hook projection
+specification**: interactive turn-end conversation snapshots justify transcript research beyond
+hook activity alone. Adoption still needs a pinned CLI/ATIF schema and synthetic owned-file,
+session/turn identity, partial/replaced snapshot, privacy, loss/replay and stop-continuation
+cases. Exported history cannot answer live approvals; those require a separate authority design.
+Do not force-open a live session to obtain events. The fallback is the real interactive CLI and
+existing terminal/phone output, with unsupported history, completion and approval capabilities
+reported truthfully. No uniform transcript is promised.

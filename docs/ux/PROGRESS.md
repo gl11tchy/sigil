@@ -1344,15 +1344,17 @@ Completed documentation decisions for [Grok Build](transcripts/grok-build.md),
 [Claude Code](transcripts/claude-code.md), [Codex](transcripts/codex.md),
 [Devin](transcripts/devin.md), [Cursor](transcripts/cursor.md) and
 [Kimi Code](transcripts/kimi-code.md). Research on 2026-10-18 used 27 official
-documentation URLs and generated repository fixture source at main
+documentation pages and generated repository fixture source at main
 `aa06ac94aa0322d4c40b854e5aa2997e3c60de2a`. Each record separates headless/client
 modes from same-session hooks, states checked version/protocol references and
 unsupported assumptions, and gives identity/security boundaries, a decision and
 terminal fallback. No uniform transcript is promised.
 
-These decisions justify scoped read-only hook follow-up, not adoption of full
-transcripts or structured approvals. No integration is implemented. Rolling
-documentation and fixture baselines do not certify installed CLI compatibility,
+These decisions justify scoped read-only hook/export follow-up, not adoption of
+full transcripts or structured approvals. Devin's interactive ATIF turn-end
+export is a same-process transcript candidate, with schema/version, identity,
+atomicity and privacy limits; no CLI/export behavior was tested. No integration is
+implemented. Rolling documentation and fixture baselines do not certify installed CLI compatibility,
 complete message/lifecycle coverage or live approval authority. No provider CLI,
 hook, personal transcript/home, credential store or model call was used.
 
