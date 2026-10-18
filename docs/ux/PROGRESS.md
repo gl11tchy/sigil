@@ -1458,3 +1458,32 @@ with a working duplicate, pending Escape, retained edits and risk oscillation.
 Initial CI651 passed `270c385` only; revised-head CI is reported on PR187. No passing
 run was repeated for prose. Parent personal assessment of the initial review
 threads and revised code/pixels is required before merge; no next ticket.
+
+
+## REA-1193 · terminal Find · 2026-10-18
+
+- Base `8f87323bf777d0d5f57574d9bdb2298b438cebe3`; isolated serial branch
+  `fix/rea-1193-responsive-terminal-find`, [PR188](https://github.com/gl11tchy-team/sigil/pull/188).
+  Existing ticket audit/history/ownership is preserved; no blockers/comments.
+- Before production edits, normal CI654 at test-only98b1637 reproduced six
+  synchronous full-buffer reads on a generated10k-row stream. Input callbacks
+  took97.5–103.6ms; immutable scan11.149ms. The new responsiveness assertion
+  was the only failure among1343 Swift tests/113suites. Actual checkoutca0f19ee
+  had the expected base/head parents and branch-identical tree.
+- Code and fixtures add80ms coalescing, bounded main snapshots, immutable
+  detached scanning, row/layout/request identity checks, rebased navigation,
+  continuous-output progress and truthful pending counts. Existing terminal
+  cell maps and matcher remain authoritative. Async callbacks update the
+  visible selected Find bar independently of lifecycle activity.
+- Static Swift formatting/lint and whitespace checks passed. Native execution
+  remains CI-only; actual final-head counts, measurements and limits are linked
+  on the PR. [QA methodology and boundaries](../qa/rea-1193.md). This entry does
+  not claim compilation/runtime/performance acceptance from static checks.
+- Added actual-controller completion/streaming measurements and controlled
+  stale-result gates, retaining Unicode, wrap, viewport, resize, reset and
+  trim cases. The two baseline review comments have implementation/coverage
+  responses; parent assesses final code/current comments and acceptance.
+- No local native build/test, process inventory, private provider data,
+  active-app interaction, permission/security/credential change or distribution.
+  Official installed398/latest653.1 was checked without disrupting sessions.
+  PR183's real-app hold and protected PR162 remain. No merge or next ticket.

@@ -15,7 +15,7 @@ struct MacFindTerminalControllerTests {
         TerminalTestSupport.prepareAppKit()
     }
 
-    @Test func streamingTenThousandRowQueriesDoNotSynchronouslyReadTheBuffer() throws {
+    @Test func streamingTenThousandRowQueriesDoNotSynchronouslyReadTheBuffer() async throws {
         let controller = TerminalController()
         let view = try terminal(controller)
         defer { controller.clearFind() }
@@ -32,6 +32,23 @@ struct MacFindTerminalControllerTests {
             inputMilliseconds.append(Self.milliseconds(elapsed))
             synchronousReads += controller.bufferRowReads - before
         }
+        await settled(controller)
+        let terminal = view.getTerminal()
+        var expected = 0
+        var row = 0
+        while let line = terminal.bufferLine(atRow: row) {
+            let text = line.translateToString(trimRight: true, characterProvider: { terminal.getCharacter(for: $0) })
+            if text.contains("needle") { expected += 1 }
+            row += 1
+        }
+        #expect(expected > 9_000)
+        #expect(controller.findMatchCount == expected)
+        #expect(controller.findMatchIndex == expected)
+        #expect(controller.findDiagnostics.scansStarted == 1)
+        #expect(controller.findDiagnostics.largestSnapshotRows <= TerminalFindSession.rowsPerPass)
+        #expect(controller.findDiagnostics.snapshotsRanOnMainThread)
+        #expect(!controller.findDiagnostics.lastScanRanOnMainThread)
+        #expect(controller.findDiagnostics.lastQueryDelayMilliseconds >= 75)
         let rows = lines.map { ScrollbackSearch.Row(text: $0) }
         let text = ScrollbackSearch.Text(rows, version: 1)
         var scanner = ScrollbackSearch()
@@ -40,15 +57,25 @@ struct MacFindTerminalControllerTests {
             "fixtureRows": 10_000, "inputMilliseconds": inputMilliseconds,
             "synchronousFullBufferReads": synchronousReads,
             "immutableScanMilliseconds": Self.milliseconds(scan), "matches": scanner.matchCount,
+            "controllerMatches": controller.findMatchCount, "expectedControllerMatches": expected,
+            "controllerScanMilliseconds": controller.findDiagnostics.lastScanMilliseconds,
+            "largestSnapshotMilliseconds": controller.findDiagnostics.largestSnapshotMilliseconds,
+            "largestSnapshotRows": controller.findDiagnostics.largestSnapshotRows,
+            "rowCopies": controller.findDiagnostics.rowCopies, "scansStarted": controller.findDiagnostics.scansStarted,
         ]
         let data = try JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys])
         print("REA-1193 streaming Find measurement \(String(decoding: data, as: UTF8.self))")
-        #expect(synchronousReads == 0, "Typing must defer bounded snapshot work and scanning away from the input callback")
+        #expect(
+            synchronousReads == 0, "Typing must defer bounded snapshot work and scanning away from the input callback")
         #expect(scanner.matchCount == 10_000)
     }
 
     private static func milliseconds(_ duration: Duration) -> Double {
         Double(duration.components.seconds) * 1_000 + Double(duration.components.attoseconds) / 1_000_000_000_000_000
+    }
+
+    private func settled(_ controller: TerminalController) async {
+        #expect(await TerminalTestSupport.waitUntil(timeout: .seconds(10)) { !controller.isFinding })
     }
 
     private struct State: Equatable {
@@ -86,12 +113,13 @@ struct MacFindTerminalControllerTests {
         )
     }
 
-    private func run(_ step: Step, on controller: TerminalController) {
+    private func run(_ step: Step, on controller: TerminalController) async {
         switch step {
         case .query(let query): controller.setFindQuery(query)
         case .next: controller.findNext()
         case .previous: controller.findPrevious()
         }
+        await settled(controller)
     }
 
     /// Wide and extended characters, folded text, soft-wrapped hits, and enough
@@ -105,105 +133,122 @@ struct MacFindTerminalControllerTests {
         return lines.joined(separator: "\r\n") + "\r\n"
     }
 
-    @Test func anEmptyQueryClearsWithoutReadingTheRows() throws {
+    @Test func anEmptyQueryClearsWithoutReadingTheRows() async throws {
         let controller = TerminalController()
         let view = try terminal(controller)
         output(view, "needle one\r\nneedle two\r\n")
 
         controller.setFindQuery("")
-        #expect(controller.bufferRowReads == 0)
+        await settled(controller)
+        #expect(controller.findDiagnostics.snapshotsCompleted == 0)
 
         controller.setFindQuery("needle")
+        await settled(controller)
         #expect(controller.findMatchCount == 2)
         #expect(view.selection.active)
-        let reads = controller.bufferRowReads
+        let reads = controller.findDiagnostics.snapshotsCompleted
 
         controller.setFindQuery("")
-        #expect(controller.bufferRowReads == reads)
+        await settled(controller)
+        #expect(controller.findDiagnostics.snapshotsCompleted == reads)
         #expect(controller.findMatchCount == 0)
         #expect(controller.findMatchIndex == 0)
         #expect(!view.selection.active)
 
         controller.findNext()
+        await settled(controller)
         controller.findPrevious()
-        #expect(controller.bufferRowReads == reads)
+        await settled(controller)
+        #expect(controller.findDiagnostics.snapshotsCompleted == reads)
         #expect(controller.findMatchIndex == 0)
     }
 
-    @Test func nextPreviousAndQueryEditsOnUnchangedOutputReadTheRowsOnce() throws {
+    @Test func nextPreviousAndQueryEditsOnUnchangedOutputReadTheRowsOnce() async throws {
         let controller = TerminalController()
         let view = try terminal(controller)
         output(view, (0..<300).map { $0 % 10 == 0 ? "needle \($0)" : "filler \($0)" }.joined(separator: "\r\n"))
 
         for query in ["n", "ne", "nee", "need", "needl", "needle"] {
-            controller.setFindQuery(query)
+            controller.setFindQuery(query)  // coalesced
         }
-        #expect(controller.bufferRowReads == 1)
+        await settled(controller)
+        #expect(controller.findDiagnostics.snapshotsCompleted == 1)
         #expect(controller.findMatchCount == 30)
 
         for _ in 0..<5 { controller.findNext() }
+        await settled(controller)
         for _ in 0..<3 { controller.findPrevious() }
+        await settled(controller)
         controller.setFindQuery("needle")
-        #expect(controller.bufferRowReads == 1)
+        await settled(controller)
+        #expect(controller.findDiagnostics.snapshotsCompleted == 1)
     }
 
-    @Test func outputBetweenNextCallsIsSearched() throws {
+    @Test func outputBetweenNextCallsIsSearched() async throws {
         let controller = TerminalController()
         let view = try terminal(controller)
         output(view, "needle one\r\n")
         controller.setFindQuery("needle")
+        await settled(controller)
         controller.findNext()
+        await settled(controller)
         #expect(controller.findMatchCount == 1)
-        #expect(controller.bufferRowReads == 1)
+        #expect(controller.findDiagnostics.snapshotsCompleted == 1)
 
         output(view, "needle two\r\n")
         controller.findNext()
+        await settled(controller)
 
-        #expect(controller.bufferRowReads == 2)
+        #expect(controller.findDiagnostics.snapshotsCompleted == 2)
         #expect(controller.findMatchCount == 2)
         #expect(controller.findMatchIndex == 2)
         #expect(view.selection.start == Position(col: 0, row: 1))
 
         output(view, "needle three\r\n")
         controller.findPrevious()
-        #expect(controller.bufferRowReads == 3)
+        await settled(controller)
+        #expect(controller.findDiagnostics.snapshotsCompleted == 3)
         #expect(controller.findMatchCount == 3)
         #expect(controller.findMatchIndex == 1)
     }
 
-    @Test func aWiderViewReflowsTheRowsAndIsSearchedAgain() throws {
+    @Test func aWiderViewReflowsTheRowsAndIsSearchedAgain() async throws {
         let controller = TerminalController()
         let view = try terminal(controller)
         let columns = view.getTerminal().cols
         output(view, String(repeating: "x", count: columns - 3) + "needle\r\n")
         controller.setFindQuery("needle")
+        await settled(controller)
         #expect(view.selection.start == Position(col: columns - 3, row: 0))
         #expect(view.selection.end.row == 1)
 
         view.setFrameSize(NSSize(width: view.frame.width * 2, height: view.frame.height))
         #expect(view.getTerminal().cols > columns + 6)
         controller.findNext()
+        await settled(controller)
 
-        #expect(controller.bufferRowReads == 2)
+        #expect(controller.findDiagnostics.snapshotsCompleted == 2)
         #expect(controller.findMatchCount == 1)
         #expect(view.selection.start == Position(col: columns - 3, row: 0))
         #expect(view.selection.end == Position(col: columns + 3, row: 0))
     }
 
-    @Test func aLargerFontRewrapsTheRowsAndIsSearchedAgain() throws {
+    @Test func aLargerFontRewrapsTheRowsAndIsSearchedAgain() async throws {
         let controller = TerminalController()
         let view = try terminal(controller)
         let columns = view.getTerminal().cols
         output(view, String(repeating: "x", count: columns - 10) + "needle\r\n")
         controller.setFindQuery("needle")
+        await settled(controller)
         #expect(view.selection.start == Position(col: columns - 10, row: 0))
 
         controller.setFontSize(26)
         let narrower = view.getTerminal().cols
         #expect(narrower < columns - 10)
         controller.findPrevious()
+        await settled(controller)
 
-        #expect(controller.bufferRowReads == 2)
+        #expect(controller.findDiagnostics.snapshotsCompleted == 2)
         #expect(controller.findMatchCount == 1)
         #expect(
             view.selection.start
@@ -212,7 +257,7 @@ struct MacFindTerminalControllerTests {
 
     /// Each step matches a controller that reads every row again, as Find did
     /// before, including the start at the newest hit and the scroll position.
-    @Test func cachedStepsMatchReadingTheRowsEveryTime() throws {
+    @Test func cachedStepsMatchReadingTheRowsEveryTime() async throws {
         let cached = TerminalController()
         let reread = TerminalController()
         let cachedView = try terminal(cached)
@@ -228,38 +273,43 @@ struct MacFindTerminalControllerTests {
         steps += [.query("界"), .next, .previous, .previous, .query("👩‍💻"), .next]
         steps += [.query("strasse"), .query("needle"), .previous, .query("zz"), .next, .query("x"), .previous]
 
-        var rereads = reread.bufferRowReads
+        var copies: Int?
         for step in steps {
-            // An empty write moves the buffer version without changing a row.
+            // An empty write changes the output generation but not any row.
             output(rereadView, "")
-            run(step, on: cached)
-            run(step, on: reread)
-            #expect(reread.bufferRowReads == rereads + 1)
-            rereads = reread.bufferRowReads
+            await run(step, on: cached)
+            await run(step, on: reread)
+            if let copies {
+                #expect(cached.findDiagnostics.rowCopies == copies)
+                #expect(reread.findDiagnostics.rowCopies == copies)
+            } else {
+                copies = cached.findDiagnostics.rowCopies
+            }
             #expect(state(cached, cachedView) == state(reread, rereadView))
         }
-        #expect(cached.bufferRowReads == 1)
     }
 
-    @Test func wideCellsAndWrappedHitsSelectTheirCells() throws {
+    @Test func wideCellsAndWrappedHitsSelectTheirCells() async throws {
         let controller = TerminalController()
         let view = try terminal(controller)
         let columns = view.getTerminal().cols
         output(view, "界界 needle\r\n" + String(repeating: "x", count: columns - 2) + "needle\r\n")
 
         controller.setFindQuery("needle")
+        await settled(controller)
         #expect(controller.findMatchCount == 2)
         #expect(controller.findMatchIndex == 2)
         #expect(view.selection.start == Position(col: columns - 2, row: 1))
         #expect(view.selection.end == Position(col: 4, row: 2))
 
         controller.findNext()
+        await settled(controller)
         #expect(view.selection.start == Position(col: 5, row: 0))
         #expect(view.selection.end == Position(col: 11, row: 0))
-        #expect(controller.bufferRowReads == 1)
+        #expect(controller.findDiagnostics.snapshotsCompleted == 1)
     }
 
-    @Test func theFirstHitIsTheNewestOnScreenAndTheViewDoesNotMove() throws {
+    @Test func theFirstHitIsTheNewestOnScreenAndTheViewDoesNotMove() async throws {
         let controller = TerminalController()
         let view = try terminal(controller)
         let filler = (0..<300).map { "filler \($0)" }.joined(separator: "\r\n")
@@ -267,16 +317,19 @@ struct MacFindTerminalControllerTests {
         let top = view.getTerminal().buffer.yDisp
 
         controller.setFindQuery("needle")
+        await settled(controller)
         #expect(controller.findMatchIndex == 2)
         #expect(view.getTerminal().buffer.yDisp == top)
 
         controller.findPrevious()
+        await settled(controller)
         #expect(controller.findMatchIndex == 1)
         #expect(view.getTerminal().buffer.yDisp < top)
 
         // The same query again starts from the new viewport, with no new read.
         controller.setFindQuery("needle")
+        await settled(controller)
         #expect(controller.findMatchIndex == 1)
-        #expect(controller.bufferRowReads == 1)
+        #expect(controller.findDiagnostics.snapshotsCompleted == 1)
     }
 }

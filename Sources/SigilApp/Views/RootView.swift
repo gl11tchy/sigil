@@ -254,6 +254,7 @@ struct WindowContent: View {
                             query: Bindable(model).findQuery,
                             matchIndex: model.findMatchIndex,
                             matchCount: model.findMatchCount,
+                            isSearching: model.isFindSearching,
                             focusToken: model.findFocusToken,
                             findNext: { model.findNextInTerminal() },
                             findPrevious: { model.findPreviousInTerminal() },
@@ -300,9 +301,13 @@ struct WindowContent: View {
             value: model.isFindBarVisible
         )
         .animation(reduceMotion ? nil : Motion.slide, value: model.selectedTab?.bridgeInbox.count)
-        .onChange(of: model.findQuery) { _, query in
+        .onChange(of: model.findQuery) { _, _ in
             model.applyFindQuery()
-            announce(ScreenAnnouncement.findMatches(query: query, count: model.findMatchCount))
+        }
+        .onChange(of: model.isFindSearching) { _, searching in
+            if !searching, model.isFindBarVisible {
+                announce(ScreenAnnouncement.findMatches(query: model.findQuery, count: model.findMatchCount))
+            }
         }
     }
 }
