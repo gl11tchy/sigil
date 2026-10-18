@@ -24,7 +24,11 @@ async function browser() {
       open: false, focus() {}, contains() { return false; },
       getAttribute(name) { return this[name]; }, setAttribute(name, value) { this[name] = value; },
       listeners: {}, addEventListener(type, listener) { (this.listeners[type] ??= []).push(listener); },
-      showModal() { this.open = true; }, close() { this.open = false; },
+      showModal() { this.open = true; }, close() {
+        if (!this.open) return;
+        this.open = false;
+        for (const listener of this.listeners.close || []) listener();
+      },
       scrollHeight: 0, scrollTop: 0, clientHeight: 0,
       querySelector(selector) { return element(`${id}-${selector}`); },
       // A fragment hands over its nodes, and the text is the text of the new children.
@@ -119,6 +123,216 @@ async function browser() {
 }
 const searches = socket => socket.sent.filter(request => request.action === 'chats');
 const chats = query => ({ chats: [{ id: `chat-${query}`, title: `${query} result`, folder: '/work' }] });
+
+test('opening Chats requests and displays recent saved conversations before typing', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('sessions-toggle').onclick();
+  await settle();
+  assert.deepEqual(searches(socket).map(request => request.text), ['']);
+  socket.answer(searches(socket)[0], { chats: [{ id: 'recent-1', title: 'Yesterday’s work', folder: '/tmp/fixture' }] });
+  await settle();
+  assert.equal(page.element('saved-heading').textContent, 'Recent chats');
+  assert.equal(page.element('saved-heading').hidden, false);
+  assert.deepEqual(page.element('saved-list').children.map(row => row.children[0].textContent), ['Yesterday’s work']);
+});
+
+const savedRow = (id, fields = {}) => ({ id: String(id), title: `Saved ${id}`, folder: '/tmp/fixture', provider: 'grokBuild', ...fields });
+const savedRows = page => page.element('saved-list').children.filter(row => row.dataset.more !== 'true');
+const moreRow = page => page.element('saved-list').children.find(row => row.dataset.more === 'true');
+async function query(page, text) {
+  page.element('session-search').value = text;
+  page.element('session-search').oninput();
+  await settle();
+}
+async function recentPage({ paging = true, mac = 'mac-a' } = {}) {
+  const page = await browser();
+  const state = { tabs: [tab('tab-1')], selectedTabID: 'tab-1', terminal: 'READY', mac, capabilities: paging ? ['sessionOps'] : [] };
+  const socket = await page.authorize(state);
+  page.element('sessions-toggle').onclick();
+  await settle();
+  const answer = async (fields, request = searches(socket).at(-1), nextState = state) => {
+    socket.answer(request, fields, nextState); await settle();
+  };
+  return { page, socket, state, answer };
+}
+
+test('recents, search, and clearing the query replace each other without publishing late rows', async () => {
+  const { page, socket, answer } = await recentPage();
+  const recent = searches(socket)[0];
+  await page.type('alpha');
+  await answer({ chats: [savedRow('old-recent')] }, recent);
+  assert.equal(savedRows(page).length, 0);
+  assert.equal(searches(socket).at(-1).text, 'alpha');
+  await answer({ chats: [savedRow('match')] });
+  assert.equal(page.element('saved-heading').textContent, 'Saved chats');
+  assert.equal(savedRows(page)[0].children[0].textContent, 'Saved match');
+  page.element('session-search').value = '   ';
+  page.element('session-search').oninput(); await settle();
+  assert.equal(searches(socket).at(-1).text, '');
+  await answer({ chats: [savedRow('new-recent')] });
+  assert.equal(page.element('saved-heading').textContent, 'Recent chats');
+  assert.equal(savedRows(page)[0].children[0].textContent, 'Saved new-recent');
+});
+
+test('paging consumes partial and duplicate rows, deduplicates provider/folder/id, and opens the exact row', async () => {
+  const { page, socket, answer } = await recentPage();
+  await answer({ chats: [savedRow('same'), savedRow('same', { folder: '/tmp/other' })], chatsTruncated: true });
+  const oldMore = moreRow(page);
+  oldMore.onclick(); oldMore.onclick(); await settle();
+  assert.equal(searches(socket).length, 2);
+  assert.equal(searches(socket).at(-1).index, 2);
+  await answer({ chats: [savedRow('same', { title: 'Renamed' }), savedRow('same', { provider: 'claudeCode' })], chatsTruncated: true });
+  assert.equal(savedRows(page).length, 3);
+  assert.equal(savedRows(page)[0].children[0].textContent, 'Renamed');
+  moreRow(page).onclick(); await settle();
+  assert.equal(searches(socket).at(-1).index, 4);
+  await answer({ chats: [] });
+  assert.equal(moreRow(page), undefined);
+  savedRows(page)[2].onclick(); await settle();
+  assert.equal(socket.sent.at(-1).action, 'open');
+  assert.equal(socket.sent.at(-1).name, 'same');
+  assert.equal(socket.sent.at(-1).text, '/tmp/fixture');
+  assert.equal(socket.sent.at(-1).provider, 'claudeCode');
+});
+
+test('a changed query replaces a waiting page index in the existing coalescing queue', async () => {
+  const { page, socket, answer } = await recentPage();
+  await answer({ chats: Array.from({ length: 40 }, (_, i) => savedRow(i)) });
+  page.element('interrupt').onclick(); await settle();
+  const key = socket.sent.at(-1);
+  moreRow(page).onclick();
+  await page.type('new');
+  await answer({}, key);
+  const next = searches(socket).at(-1);
+  assert.equal(next.text, 'new');
+  assert.equal(next.index, undefined);
+  await answer({ chats: [savedRow('result')] });
+  assert.equal(savedRows(page).length, 1);
+});
+
+test('closing and reopening a sheet rejects its old page and old row actions', async () => {
+  const { page, socket, answer } = await recentPage();
+  await answer({ chats: Array.from({ length: 40 }, (_, i) => savedRow(i)) });
+  const oldRow = savedRows(page)[0];
+  moreRow(page).onclick(); await settle();
+  const oldPage = searches(socket).at(-1);
+  closeSheet(page);
+  page.element('sessions-toggle').onclick(); await settle();
+  const before = socket.sent.length; oldRow.onclick(); await settle(); assert.equal(socket.sent.length, before);
+  await answer({ chats: [savedRow('late')] }, oldPage);
+  assert.equal(savedRows(page).length, 0);
+  assert.equal(searches(socket).at(-1).index, undefined);
+  await answer({ chats: [savedRow('fresh')] });
+  assert.equal(savedRows(page)[0].children[0].textContent, 'Saved fresh');
+});
+
+test('a Mac identity change clears rows and rejects the old Mac response before a fresh read', async () => {
+  const { page, socket, state, answer } = await recentPage();
+  await answer({ chats: [savedRow('old-mac')] }, searches(socket)[0], { ...state, mac: 'mac-b' });
+  assert.equal(savedRows(page).length, 0);
+  assert.equal(searches(socket).length, 2);
+  await answer({ chats: [savedRow('new-mac')] }, searches(socket).at(-1), { ...state, mac: 'mac-b' });
+  assert.equal(savedRows(page)[0].children[0].textContent, 'Saved new-mac');
+});
+
+test('a saved open queued behind a command is discarded after query, sheet, or Mac changes', async () => {
+  for (const change of ['query', 'sheet', 'mac']) {
+    const { page, socket, state, answer } = await recentPage();
+    await answer({ chats: [savedRow('old-target')] });
+    page.element('interrupt').onclick(); await settle();
+    const command = socket.sent.at(-1);
+    savedRows(page)[0].onclick(); await settle();
+    if (change === 'query') await query(page, 'different');
+    if (change === 'sheet') closeSheet(page);
+    await answer({}, command, change === 'mac' ? { ...state, mac: 'mac-b' } : state);
+    assert.equal(socket.sent.some(request => request.action === 'open'), false, change);
+    assert.equal(page.element('message').readOnly, false, change);
+  }
+});
+
+test('disconnecting clears rows, suppresses the old request error, and refreshes on reconnect', async () => {
+  const { page, socket, state, answer } = await recentPage();
+  await answer({ chats: Array.from({ length: 40 }, (_, i) => savedRow(i)) });
+  moreRow(page).onclick(); await settle();
+  socket.close(); await settle();
+  assert.equal(savedRows(page).length, 0);
+  assert.equal(page.element('sessions-error').hidden, true);
+  await page.fireTimer(500);
+  const next = await page.authorize(state); await settle();
+  assert.equal(searches(next).length, 1);
+  next.answer(searches(next)[0], { chats: [savedRow('reconnected')] }, state); await settle();
+  assert.equal(savedRows(page)[0].children[0].textContent, 'Saved reconnected');
+});
+
+test('Unknown action hides the saved section quietly, while a real failure stays visible', async () => {
+  const { page, socket, state, answer } = await recentPage();
+  await answer({ ok: false, error: 'Unknown action.' });
+  assert.equal(page.element('saved-heading').hidden, true);
+  assert.equal(page.element('saved-empty').hidden, true);
+  assert.equal(page.element('sessions-error').hidden, true);
+  await query(page, 'search');
+  await answer({ ok: false, error: 'Could not read chats.' });
+  assert.equal(page.element('sessions-error').textContent, 'Could not read chats.');
+  assert.equal(page.element('sessions-error').hidden, false);
+  await query(page, 'recovery');
+  await answer({ chats: [] });
+  assert.equal(page.element('sessions-error').hidden, true);
+});
+
+test('an empty recent list and an empty search have distinct truthful messages', async () => {
+  const { page, answer } = await recentPage();
+  await answer({ chats: [] });
+  assert.equal(page.element('saved-empty').textContent, 'No recent chats.');
+  assert.equal(page.element('saved-empty').hidden, false);
+  await query(page, 'missing'); await answer({ chats: [] });
+  assert.equal(page.element('saved-empty').textContent, 'No matching chats.');
+  assert.equal(page.element('saved-empty').hidden, false);
+});
+
+test('old hosts without sessionOps expose one bounded page, and index-ignoring hosts stop on repetition', async () => {
+  const old = await recentPage({ paging: false });
+  const rows = Array.from({ length: 80 }, (_, i) => savedRow(i));
+  await old.answer({ chats: rows });
+  assert.equal(savedRows(old.page).length, 40);
+  assert.equal(moreRow(old.page), undefined);
+  const current = await recentPage();
+  await current.answer({ chats: rows.slice(0, 40) });
+  moreRow(current.page).onclick(); await settle();
+  await current.answer({ chats: rows.slice(0, 40) });
+  assert.equal(savedRows(current.page).length, 40);
+  assert.equal(moreRow(current.page), undefined);
+  assert.equal(searches(current.socket).length, 2);
+});
+
+test('manual paging is bounded to 400 consumed rows and never loops automatically', async () => {
+  const { page, socket, answer } = await recentPage();
+  for (let offset = 0; offset < 400; offset += 40) {
+    assert.equal(searches(socket).at(-1).index ?? 0, offset);
+    await answer({ chats: Array.from({ length: 40 }, (_, i) => savedRow(offset + i)) });
+    if (offset < 360) { moreRow(page).onclick(); await settle(); }
+  }
+  assert.equal(savedRows(page).length, 400);
+  assert.equal(searches(socket).length, 10);
+  assert.equal(moreRow(page), undefined);
+  assert.match(page.element('saved-empty').textContent, /Search to narrow/);
+});
+
+test('malformed rows and incomplete lists cannot impersonate an empty recent list', async () => {
+  const { page, answer } = await recentPage();
+  await answer({ chats: undefined });
+  assert.match(page.element('saved-empty').textContent, /unavailable/);
+  await query(page, 'truncated');
+  await answer({ chats: [], chatsTruncated: true });
+  assert.match(page.element('saved-empty').textContent, /unavailable/);
+  await query(page, 'invalid');
+  await answer({ chats: [null, savedRow('bad', { provider: {} })] });
+  assert.match(page.element('saved-empty').textContent, /unavailable/);
+  await query(page, 'safe');
+  await answer({ chats: [null, savedRow('bad', { provider: {} }), savedRow('good')] });
+  assert.equal(savedRows(page).length, 1);
+  assert.equal(savedRows(page)[0].children[0].textContent, 'Saved good');
+});
 
 test('typing faster than the Mac answers sends a bounded number of searches and shows only the last', async () => {
   const page = await browser();
@@ -234,10 +448,9 @@ test('keys queued between searches keep their order and are never dropped', asyn
 // Close the Chats sheet as the browser does: close(), then the close event.
 function closeSheet(page) {
   page.element('sessions-close').onclick();
-  for (const listener of page.element('sessions-dialog').listeners.close) listener();
 }
 
-test('clearing the search drops the waiting query, and a session tapped next waits only for the search out', async () => {
+test('clearing the search replaces the waiting query with recents before the next selection', async () => {
   const page = await browser();
   const socket = await page.authorize({ tabs: [tab('tab-1'), tab('tab-2', 'Other')], selectedTabID: 'tab-1', terminal: 'READY' });
   socket.sent[0].answered = true;
@@ -249,7 +462,7 @@ test('clearing the search drops the waiting query, and a session tapped next wai
   page.element('session-list').children.find(row => row.dataset.tabId === 'tab-2').onclick();
   await drain(socket);
   assert.deepEqual(socket.sent.map(request => [request.action, request.text ?? request.tabID]),
-    [['state', undefined], ['chats', 'a'], ['select', 'tab-2']]);
+    [['state', undefined], ['chats', 'a'], ['chats', ''], ['select', 'tab-2']]);
   assert.deepEqual(page.element('saved-list').children, []);
   assert.equal(page.element('error').hidden, true);
 });
@@ -270,7 +483,7 @@ test('closing the sheet drops the waiting query and shows nothing for it', async
   assert.equal(page.element('error').hidden, true);
 });
 
-test('reopening the sheet leaves the old query unsent, and a session tapped there waits only for the search out', async () => {
+test('reopening the sheet replaces the obsolete query with recents before the next selection', async () => {
   const page = await browser();
   const socket = await page.authorize({ tabs: [tab('tab-1'), tab('tab-2', 'Other')], selectedTabID: 'tab-1', terminal: 'READY' });
   socket.sent[0].answered = true;
@@ -281,12 +494,12 @@ test('reopening the sheet leaves the old query unsent, and a session tapped ther
   page.element('session-list').children.find(row => row.dataset.tabId === 'tab-2').onclick();
   await drain(socket);
   assert.deepEqual(socket.sent.map(request => [request.action, request.text ?? request.tabID]),
-    [['state', undefined], ['chats', 'a'], ['select', 'tab-2']]);
+    [['state', undefined], ['chats', 'a'], ['chats', ''], ['select', 'tab-2']]);
   assert.deepEqual(page.element('saved-list').children, []);
   assert.equal(page.element('error').hidden, true);
 });
 
-test('a search waiting through a new handshake is not sent, and the next one starts fresh', async () => {
+test('a new handshake discards the old query and refreshes the open sheet under its new challenge', async () => {
   const page = await browser();
   const socket = await page.authorize();
   page.element('sessions-toggle').onclick();
@@ -300,7 +513,10 @@ test('a search waiting through a new handshake is not sent, and the next one sta
   socket.answer(socket.sent.at(-1));
   await settle();
   assert.equal(page.element('status').textContent, 'Connected');
-  assert.deepEqual(searches(socket).map(request => request.text), ['a']);
+  assert.deepEqual(searches(socket).map(request => request.text), ['a', 'ab']);
+  assert.equal(searches(socket).at(-1).challenge, 'd'.repeat(64));
+  socket.answer(searches(socket).at(-1), chats('ab'));
+  await settle();
   await page.type('c', { from: 'ab' });
   const next = searches(socket).at(-1);
   assert.equal(next.text, 'abc');

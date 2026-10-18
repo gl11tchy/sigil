@@ -33,6 +33,9 @@ let sessionTabs = [], canRestart = false;
 let freshHandshake = false;
 const histories = new Map();
 let pendingEarlier = null, earlierFlight = false, searchToken = 0;
+const SAVED_PAGE_SIZE = 40, SAVED_LIMIT = 400;
+let savedChats = [], savedOffset = 0, savedMore = false, savedLoading = false;
+let savedVisible = false, savedNotice = '', savedMac = null;
 let providerChoice = '', providerProblems = new Map();
 let newOptions = null, newProjects = [], projectTarget = null, worktreeChoice = null, canUseSessionOps = false;
 let newFlight = null;
@@ -144,7 +147,9 @@ function updateControls() {
   $('welcome').querySelector('p').textContent = waiting ? 'Keep Sigil open and your Mac awake.' : 'Your sessions. Your tools. Away from your desk.';
   $('welcome').querySelector('.pairing-steps').hidden = waiting;
   for (const id of ['session-list', 'saved-list']) {
-    for (const button of Array.from($(id).children || [])) button.disabled = disabled;
+    for (const button of Array.from($(id).children || [])) {
+      button.disabled = disabled || (id === 'saved-list' && button.dataset.more === 'true' && savedLoading);
+    }
   }
   const standalone = isStandaloneApp();
   for (const id of ['standalone-hint', 'standalone-panel-hint']) {
@@ -170,6 +175,7 @@ function offline(message = 'Disconnected') {
   connected = false;
   refreshing = false; refreshFlight = null;
   commandEpoch++;
+  clearSaved();
   $('status').textContent = $('status-live').textContent = message;
   $('status').dataset.connected = 'false';
   clearTimeout(pollTimer);
@@ -322,6 +328,17 @@ function render(state) {
     throw new Error('Invalid Mac response');
   }
   const allTabsNew = freshHandshake && sessionTabs.length > 0 && !sessionTabs.some(tab => ids.has(tab.id));
+  const nextMac = typeof state.mac === 'string' ? state.mac : null;
+  if (nextMac !== savedMac) {
+    savedMac = nextMac;
+    clearSaved();
+    if (connected && $('sessions-dialog').open) {
+      const mac = savedMac, epoch = commandEpoch;
+      void Promise.resolve().then(() => {
+        if (connected && savedMac === mac && commandEpoch === epoch && $('sessions-dialog').open) searchSaved();
+      });
+    }
+  }
   freshHandshake = false;
   const previousTab = sessionTabs.find(tab => tab.id === selected);
   sessionTabs = state.tabs;
@@ -470,45 +487,90 @@ function renderSessionList() {
 }
 function searchSaved() {
   renderSessionList();
-  const query = $('session-search').value.trim();
-  const token = ++searchToken;
-  if (!query || !$('sessions-dialog').open) { dropWaitingSearch(); renderSaved([]); return; }
-  renderSaved([], { pending: true });
-  // The Mac reads 200 characters, and text over 8 KB drops the connection.
-  request('chats', utf8Limited(takeGraphemes(query, 200), 8192)).then(reply => {
-    if (reply.stale || token !== searchToken || $('session-search').value.trim() !== query) return;
-    renderSaved(reply.chats, { truncated: reply.chatsTruncated === true });
-  }).catch(error => { if (token === searchToken) showError(error.message); });
+  $('sessions-error').textContent = ''; $('sessions-error').hidden = true;
+  searchToken++;
+  savedChats = []; savedOffset = 0; savedMore = false; savedLoading = false; savedNotice = '';
+  savedVisible = connected && !refreshing && $('sessions-dialog').open;
+  if (!savedVisible) { dropWaitingSearch(); renderSaved(); return; }
+  void loadSavedPage();
 }
-function renderSaved(chats, options = {}) {
-  const query = $('session-search').value.trim();
-  const safe = [];
-  const rows = Array.isArray(chats) ? chats : [];
-  if (query) {
-    for (const chat of rows.slice(0, 40)) {
+function clearSaved() {
+  searchToken++; dropWaitingSearch();
+  savedChats = []; savedOffset = 0; savedMore = false; savedLoading = false;
+  savedVisible = false; savedNotice = '';
+  renderSaved();
+}
+function savedContext() {
+  return { token: searchToken, query: $('session-search').value.trim(), generation, epoch: commandEpoch, owner: credential, mac: savedMac };
+}
+function currentSaved(context) {
+  return connected && !refreshing && $('sessions-dialog').open && savedVisible
+    && context.token === searchToken && context.query === $('session-search').value.trim()
+    && context.generation === generation && context.epoch === commandEpoch
+    && context.owner === credential && context.mac === savedMac;
+}
+const savedIdentity = chat => JSON.stringify([chat.provider ?? 'grokBuild', chat.folder, chat.id]);
+async function loadSavedPage(offset = 0) {
+  const context = savedContext();
+  if (!currentSaved(context) || savedLoading || (offset > 0 && (!canUseSessionOps || !savedMore || offset !== savedOffset)) || offset >= SAVED_LIMIT) return;
+  savedLoading = true; savedNotice = ''; renderSaved();
+  try {
+    // The Mac reads 200 characters, and text over 8 KB drops the connection.
+    const text = utf8Limited(takeGraphemes(context.query, 200), 8192);
+    const reply = await request('chats', text, undefined, false, offset ? { index: offset } : {});
+    if (reply.stale || !currentSaved(context)) return;
+    savedMore = false;
+    if (!Array.isArray(reply.chats)) { savedNotice = 'Saved chats are unavailable. Try searching again.'; return; }
+    const page = reply.chats.slice(0, Math.min(SAVED_PAGE_SIZE, SAVED_LIMIT - offset));
+    const rows = new Map(savedChats.map(chat => [savedIdentity(chat), chat]));
+    const before = rows.size;
+    for (const chat of page) {
       if (!chat || typeof chat.id !== 'string' || typeof chat.title !== 'string' || typeof chat.folder !== 'string') continue;
       if (!chat.id || chat.id.length > 80 || chat.title.length > 300 || chat.folder.length > 4_096) continue;
       if (/[\u0000-\u001F]/.test(chat.id) || /[\u0000-\u001F]/.test(chat.folder)) continue;
-      safe.push({ id: chat.id, title: chat.title, folder: chat.folder, provider: chat.provider });
+      if (chat.provider !== undefined && (typeof chat.provider !== 'string' || !chat.provider || chat.provider.length > 32)) continue;
+      rows.set(savedIdentity(chat), { id: chat.id, title: chat.title, folder: chat.folder, provider: chat.provider });
+    }
+    savedChats = [...rows.values()].slice(0, SAVED_LIMIT);
+    if (!savedChats.length && (page.length || reply.chatsTruncated === true)) savedNotice = 'Saved chats are unavailable. Try searching again.';
+    // Advance by consumed rows, including duplicates after a concurrent list change.
+    savedOffset = offset + page.length;
+    const continuation = page.length > 0 && (page.length === SAVED_PAGE_SIZE || reply.chatsTruncated === true);
+    // Indexed chats predate sessionOps; Macs without that contract get one bounded page.
+    // Even an index-ignoring host cannot loop: a page must add a new identity.
+    savedMore = canUseSessionOps && reply.chats.length <= SAVED_PAGE_SIZE && rows.size > before
+      && continuation && savedOffset < SAVED_LIMIT && savedChats.length < SAVED_LIMIT;
+    if (continuation && !savedMore) {
+      savedNotice = context.query ? 'Showing the first matches. Narrow the search.'
+        : savedOffset >= SAVED_LIMIT ? 'Showing the first chats. Search to narrow the list.'
+        : 'Showing the available chats. Search to narrow the list.';
+    }
+  } catch (error) {
+    if (!currentSaved(context)) return;
+    savedMore = false;
+    if (error.verifiedReply && error.message === 'Unknown action.') {
+      savedVisible = false; savedChats = [];
+    } else {
+      savedNotice = 'Could not load saved chats.';
+      showError(error.message);
+    }
+  } finally {
+    if (currentSaved(context) || (context.token === searchToken && !savedVisible)) {
+      savedLoading = false; renderSaved();
     }
   }
+}
+function renderSaved() {
+  const context = savedContext();
   const heading = $('saved-heading');
-  if (heading) heading.hidden = !query;
+  if (heading) { heading.hidden = !savedVisible; heading.textContent = context.query ? 'Saved chats' : 'Recent chats'; }
   const empty = $('saved-empty');
   if (empty) {
-    if (options.truncated === true && safe.length > 0) {
-      empty.hidden = false;
-      empty.textContent = 'Showing the first matches.';
-    } else {
-      empty.hidden = !query || safe.length > 0 || options.pending === true;
-      if (query && safe.length === 0 && !options.pending && !Array.isArray(chats)) {
-        empty.textContent = 'The list was too long. Narrow the search.';
-      } else if (empty.textContent !== 'No matching chats.') {
-        empty.textContent = 'No matching chats.';
-      }
-    }
+    empty.hidden = !savedVisible || (!savedNotice && savedChats.length > 0);
+    empty.textContent = savedLoading && !savedChats.length ? 'Loading chats…'
+      : savedNotice || (context.query ? 'No matching chats.' : 'No recent chats.');
   }
-  $('saved-list').replaceChildren(...safe.map(chat => {
+  const buttons = savedChats.map(chat => {
     const button = document.createElement('button');
     button.type = 'button';
     button.disabled = !connected || busy || refreshing;
@@ -518,15 +580,22 @@ function renderSaved(chats, options = {}) {
     folder.textContent = chat.folder;
     button.append(title, folder);
     button.onclick = () => {
-      if (!connected || busy || refreshing) return;
+      if (!currentSaved(context) || busy) return;
       const id = chat.id, folderPath = chat.folder;
       void perform(async () => {
-        if (!await changeSession('open', folderPath, undefined, { name: id, ...(chat.provider ? { provider: chat.provider } : {}) })) return;
+        if (!await changeSession('open', folderPath, undefined, { name: id, ...(chat.provider ? { provider: chat.provider } : {}) }, context)) return;
         $('sessions-dialog').close();
       });
     };
     return button;
-  }));
+  });
+  if (savedMore) {
+    const more = projectButton(savedLoading ? 'Loading…' : 'Show more', 'More saved chats', () => { if (currentSaved(context) && !busy) void loadSavedPage(savedOffset); });
+    more.dataset.more = 'true'; more.disabled = !connected || busy || refreshing || savedLoading;
+    buttons.push(more);
+  }
+  $('saved-list').replaceChildren(...buttons);
+  $('saved-list').setAttribute('aria-busy', String(savedLoading));
 }
 function projectButton(nameText, folderText, onClick) {
   const button = document.createElement('button');
@@ -1205,14 +1274,13 @@ function closeFind() {
 }
 $('sessions-toggle').onclick = () => {
   $('session-search').value = '';
-  searchToken++;
-  renderSaved([]);
   renderSessionList(); $('sessions-dialog').showModal();
+  searchSaved();
   // On a touch screen, focus would raise the keyboard over the list.
   if (hasFinePointer()) $('session-search').focus();
 };
 $('sessions-close').onclick = () => $('sessions-dialog').close();
-$('sessions-dialog').addEventListener('close', () => { dropWaitingSearch(); if (!$('sessions-toggle').hidden) $('sessions-toggle').focus(); });
+$('sessions-dialog').addEventListener('close', () => { clearSaved(); if (!$('sessions-toggle').hidden) $('sessions-toggle').focus(); });
 $('session-search').oninput = searchSaved;
 $('find-toggle').onclick = () => {
   $('find-bar').hidden = false; $('find-toggle').setAttribute('aria-expanded', 'true');
@@ -1249,14 +1317,14 @@ function request(action, text, tabID = selected, pairing = false, extra = {}, re
   // behind a later command it is skipped at its turn. Its callers see a stale token.
   const waiting = waitingSearch;
   if (waiting?.tail === outgoing && waiting.generation === generation && waiting.epoch === commandEpoch) {
-    Object.assign(waiting, { text, tabID });
+    Object.assign(waiting, { text, tabID, extra });
     return waiting.reply;
   }
   if (waiting) waiting.stale = true;
-  const search = waitingSearch = { text, tabID, generation, epoch: commandEpoch };
+  const search = waitingSearch = { text, tabID, extra, generation, epoch: commandEpoch };
   search.reply = enqueue(async () => {
     if (waitingSearch === search) waitingSearch = null;
-    return search.stale ? { stale: true } : transmit(action, search.text, search.tabID, pairing, extra);
+    return search.stale ? { stale: true } : transmit(action, search.text, search.tabID, pairing, search.extra);
   });
   search.tail = outgoing;
   return search.reply;
@@ -1373,6 +1441,7 @@ function connect(isReturning = false) {
           connected = true; busy = false;
           $('status').textContent = $('status-live').textContent = 'Connected'; $('status').dataset.connected = 'true';
           showError(''); updateControls(); poll();
+          if ($('sessions-dialog').open) searchSaved();
         }).catch(error => {
           if (current !== generation || authorizationEpoch !== commandEpoch) return;
           if (replacingMemory) {
@@ -1469,13 +1538,14 @@ function connect(isReturning = false) {
 }
 // The displayed picker can change before the Mac confirms its selection. Keep
 // the old draft readable and focused, but do not accept edits for an uncertain target.
-async function changeSession(action, text, tabID, extra = {}) {
+async function changeSession(action, text, tabID, extra = {}, savedTarget) {
   const current = generation, epoch = commandEpoch;
   const selection = selectingSession = { current, epoch };
   updateControls();
   try {
-    await request(action, text, tabID, false, extra);
-    return current === generation && epoch === commandEpoch;
+    const reply = savedTarget ? await enqueue(() => currentSaved(savedTarget)
+      ? transmit(action, text, tabID, false, extra) : { stale: true }) : await request(action, text, tabID, false, extra);
+    return !reply.stale && (!savedTarget || currentSaved(savedTarget)) && current === generation && epoch === commandEpoch;
   } catch (error) {
     if (current === generation && epoch === commandEpoch) throw error;
     return false;
@@ -1835,6 +1905,7 @@ function stopScan() {
   if (scanner) scanner.hidden = true;
 }
 async function beginPair(pairing) {
+  clearSaved();
   // Pairing credentials are not replaced on disk until this Mac authenticates.
   // Contents from the previous Mac must not share an ID namespace with this one.
   if (credential && !replacingMemory) replacingMemory = {

@@ -1396,3 +1396,22 @@ credentials, permissions, app launch/relaunch or distribution change occurred.
 PR183 remains blocked on real-app acceptance; PR162 and unrelated entries are
 preserved. This entry records a decision only, not broader M3 completion. Parent
 personal final review is required before any merge; no next ticket is started.
+
+## REA-1204: recent saved chats in the web sheet (2026-10-18)
+
+Opening Chats now reads recent saved conversations before typing; search and
+clearing replace the list. Manual paging consumes at most 40 rows per request
+and 400 per view, deduplicates provider/folder/native-ID identity, and stops on
+unsupported or repeated pages. Query/sheet/Mac/connection changes invalidate
+old replies and queued saved-row opens. Unknown action quietly hides the section.
+This preserves the existing host protocol and adds no provider-completion claim.
+
+The [QA record](../qa/rea-1204.md) records main `b17a940` reproduction, generated
+fixtures, 284 passing Node tests and seven Chromium passes, plus viewed 390×844
+before/after screenshots. Local WebKit stalls during synthetic pairing before
+Chats behavior; its acceptance and screenshot remain pending required PR CI.
+No local native build, SigilAppTests, personal data, paid inference, process
+enumeration, app launch/update or security/access change occurred. Tests stayed
+serial under an exclusive lease. PR183's real-app hold, PR162 and unrelated
+ledger bytes remain preserved. Broader phone/task work is uncompleted; parent
+personal final review is required before merge. No next ticket started.
