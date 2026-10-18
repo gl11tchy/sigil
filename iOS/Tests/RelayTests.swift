@@ -296,6 +296,9 @@ final class FakeMac {
         let text: String?
         let name: String?
         let clientNonce: String?
+        let index: Int?
+        let count: Int?
+        let transfer: String?
     }
 
     struct Reply: Encodable {
@@ -560,6 +563,9 @@ final class FakeMac {
             reply.state = state("selected: \(selected)")
         case "input":
             reply.state = state("echo: \(request.text ?? "")")
+        case "file":
+            // Synthetic attachment acknowledgement; no file is written or opened.
+            reply.state = state("file: \(request.name ?? "")")
         case "key" where request.tabID == selected:
             reply.state = state("key: \(request.text ?? "")")
         default:

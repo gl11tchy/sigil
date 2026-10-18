@@ -1238,3 +1238,13 @@ its exact-head CI; no local native execution or manual pmset claim.
 - Short returns now serialize one immediate fresh-state read after any in-flight transaction. Long suspensions replace the connection without command replay. Visibility/BFCache events coalesce; initial hidden loading, page/connection/selection identity, missing-state responses and editable drafts have explicit handling. The 30-second threshold is a recovery heuristic; the ten-second command deadline and wire/security contracts stay intact.
 - Local focused results:34Node cases passed (23new/11existing safety),8browser cases passed in Chromium/WebKit. Six390×844 screenshots captured on final source; [evidence and limits](../qa/rea-1202.md). Both owned local relays/browser runs ended; no local native build/test or active-app interaction.
 - Manual physical Safari/network handoff and production deployment remain unverified. Required CI is reported on the PR. Hold the next merge for parent personal exact-final-code/current-comments review; no next ticket or extra worker.
+
+## REA-1198 — background send lifetime (2026-10-18)
+
+Sole serial worker on verified main `cccbe4c08d902b9f07019ea32430d6caa701abb1`.
+Added a generated NativeFlow three-photo/two-chunks-each regression and minimal
+fixture acknowledgements; all production sources remain byte-identical to main.
+Native reproduction is pending the normal PR CI run; no local native execution.
+Expected current behavior is immediate socket stop and an incomplete send.
+REA-1199 keyboard behavior and protected PR162 are outside scope. Parent personal
+final review and required final-head checks precede any merge.

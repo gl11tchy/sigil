@@ -276,6 +276,38 @@ final class NativeFlowTests: XCTestCase {
         XCTAssertFalse(store.draft.isEmpty, "Uncertain submission retains the draft")
     }
 
+    func testBackgroundFinishesThreePhotoSendBeforeClosing() async throws {
+        let mac = FakeMac(origin: URL(string: "http://localhost:\(try relayPort)")!)
+        let room = try await mac.register()
+        let store = RemoteStore(isDemo: false, restoreSavedPairings: false)
+        defer {
+            store.enterBackground(); mac.stop()
+            for credential in store.macs { CredentialStore.delete(id: credential.id); ScreenCache.delete(for: credential) }
+        }
+        XCTAssertNil(store.pair(with: "http://localhost:\(try relayPort)/#room=\(room)&key=\(mac.pairingKey)"))
+        try await RelayTests.until("background send fixture paired") { store.isConnected && store.selectedTabID == "T1" }
+        let photos = (1...3).map {
+            Attachment(name: "photo-\($0).jpg", data: Data(repeating: UInt8($0), count: RemoteFile.chunkBytes + 7), preview: nil)
+        }
+        store.draft = "Three synthetic photos"
+        XCTAssertNil(store.attach(photos))
+        store.sendDraft()
+        store.enterBackground()
+        try await RelayTests.until("background send settled") { !store.busy }
+        let dispatched = mac.requests.filter { $0.action == "file" || $0.action == "input" || $0.action == "key" }
+        let chunks = dispatched.filter { $0.action == "file" }
+        print("REA-1198 background fixture: actions=\(dispatched.map(\.action)), draftRetained=\(!store.draft.isEmpty), connected=\(store.isConnected)")
+        XCTAssertEqual(dispatched.map(\.action), Array(repeating: "file", count: 6) + ["input", "key"])
+        XCTAssertEqual(chunks.compactMap(\.index), [0, 1, 0, 1, 0, 1])
+        XCTAssertEqual(chunks.compactMap(\.count), Array(repeating: 2, count: 6))
+        XCTAssertEqual(Set(chunks.compactMap(\.transfer)).count, 3)
+        XCTAssertEqual(dispatched.first { $0.action == "input" }?.text, " Three synthetic photos")
+        XCTAssertEqual(dispatched.last?.text, "enter")
+        XCTAssertEqual(store.draft, "")
+        XCTAssertTrue(store.selectedAttachments.isEmpty)
+        XCTAssertFalse(store.isConnected, "The background connection closes after the send settles")
+    }
+
     func testNativeStorePairSelectSendTerminalControlsAndReconnect() async throws {
         let mac = FakeMac(origin: URL(string: "http://localhost:\(try relayPort)")!)
         mac.presentTerminalMenu = true
