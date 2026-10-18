@@ -1418,3 +1418,43 @@ enumeration, app launch/update or security/access change occurred. Tests stayed
 serial under an exclusive lease. PR183's real-app hold, PR162 and unrelated
 ledger bytes remain preserved. Broader phone/task work is uncompleted; parent
 personal final review is required before merge. No next ticket started.
+
+
+## REA-1205: web session metadata and actions (2026-10-18)
+
+Capable Chats rows now show provider/folder metadata and a separate 44px More
+button. A row-bound dialog offers capability-gated rename/archive/close. Close
+and archive require explicit confirmation, including working/uncertain activity;
+a changed activity class invalidates that confirmation. Archive copy identifies
+that the host closes the conversation’s open tabs. Legacy hosts retain their
+existing rows without the new metadata/actions.
+
+Each write first reads fresh host state within the same local queue slot, then
+rechecks row/native identity, paired credential, Mac, connection/command/page
+epoch and capability before dispatch and after sealing. Rename validates 80 UTF-8
+bytes and empty-name reset. Rejections keep edits and require fresh state before
+retry; a changed host name blocks the retained draft. Lost replies never replay
+writes automatically. The existing host has no atomic conditional-rename token;
+another client can still race after the fresh read. No host/protocol changes.
+
+The generated baseline failed on main `9165c2d` before production edits because the
+More action was absent. Final local checks passed 309 Node tests, including 24 new
+action regressions, and all three focused Chromium cases. Six 390×844 captures were
+viewed; [QA evidence](../qa/rea-1205.md). Local WebKit failed synthetic pairing
+before reaching the feature; no local pass or root cause is claimed. Required
+CI and both-engine artifacts are reported on the PR. No local native build/test,
+process inventory, provider inference, personal data, installed-app interaction,
+security/access/credential change, deployment or distribution occurred. PR183’s
+real-app acceptance hold and protected PR162 are preserved. Parent personal final
+code/screenshots/ticket/current-comment review is required before merge.
+
+Automatic review on initial `270c385` identified four verified defects. Seven generated
+regressions reproduced post-dispatch Cancel/Escape, incomplete archive warnings,
+silent capability loss and activity oscillation reviving an old confirmation.
+The revision locks dismissal only after dispatch, always warns about archive’s
+full host-owned stopping scope, explains/latches capability loss and permanently
+latches observed activity changes until reopen. The browser covers an idle copy
+with a working duplicate, pending Escape, retained edits and risk oscillation.
+Initial CI651 passed `270c385` only; revised-head CI is reported on PR187. No passing
+run was repeated for prose. Parent personal assessment of the initial review
+threads and revised code/pixels is required before merge; no next ticket.

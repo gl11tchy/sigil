@@ -124,6 +124,16 @@ async function browser() {
 const searches = socket => socket.sent.filter(request => request.action === 'chats');
 const chats = query => ({ chats: [{ id: `chat-${query}`, title: `${query} result`, folder: '/work' }] });
 
+test('REA-1205 capable rows expose metadata and a separate More action', async () => {
+  const page = await browser();
+  await page.authorize({ tabs: [{ ...tab('one'), providerName: 'Claude Code', folder: 'sigil' }],
+    selectedTabID: 'one', terminal: 'READY', capabilities: ['sessionOps'] });
+  page.element('sessions-toggle').onclick();
+  const row = page.element('session-list').children[0];
+  assert.equal(row.children.at(-1).dataset.sessionMore, 'true', 'capable row needs a More button');
+  assert.equal(row.children[0].children[0].children[1].textContent, 'Claude Code · sigil');
+});
+
 test('opening Chats requests and displays recent saved conversations before typing', async () => {
   const page = await browser();
   const socket = await page.authorize();
@@ -642,4 +652,241 @@ test('changed text, status, tabs, mode and earlier history show exactly what a f
   await settle();
   assert.deepEqual(page.formatted, ['EARLY\nSECOND']);
   assert.equal(terminal.textContent, readableOutput('EARLY\nSECOND'));
+});
+
+// REA-1205 exercises the real queue, replies and UI handlers against generated state.
+const actionTab = (fields = {}) => ({ ...tab('one', 'Fixture task', 'working'), provider: 'grokBuild',
+  providerName: 'Grok Build', sessionID: 'native-one', cwd: '/tmp/one', folder: 'sigil',
+  canArchive: true, capabilities: { rename: true, archive: true }, ...fields });
+async function actionPage(fields = {}) {
+  const page = await browser();
+  const state = { tabs: [actionTab(), actionTab({ id: 'two', sessionID: 'native-two', title: 'Other task' })],
+    selectedTabID: 'two', terminal: 'READY', capabilities: ['sessionOps'], mac: 'fixture-mac', ...fields };
+  const socket = await page.authorize(state);
+  page.element('sessions-toggle').onclick(); await settle();
+  socket.answer(socket.sent.at(-1), { chats: [] }, state); await settle();
+  const answer = async (request = socket.sent.at(-1), fields = {}, next = state) => { socket.answer(request, fields, next); await settle(); };
+  const more = () => page.element('session-list').children[0].children.at(-1).onclick();
+  const choose = action => { more(); page.element(action === 'close' ? 'session-close-action' : `session-${action}`).onclick(); };
+  const accept = async ({ preflight = true } = {}) => {
+    const before = socket.sent.length;
+    page.element('session-action-accept').onclick(); await settle();
+    if (preflight && socket.sent.length > before && socket.sent.at(-1).action === 'state') await answer();
+  };
+  return { page, socket, state, answer, more, choose, accept };
+}
+const operations = socket => socket.sent.filter(request => ['rename', 'archive', 'close'].includes(request.action));
+
+test('REA-1205 legacy rows hide metadata and More; unchanged capable polls keep More usable', async () => {
+  const legacy = await actionPage({ capabilities: [] });
+  assert.equal(legacy.page.element('session-list').children[0].tag, 'button');
+  assert.equal(legacy.page.element('session-list').children[0].children[0].textContent, 'Fixture task');
+  const { page, socket, state, answer, more } = await actionPage();
+  await page.fireTimer(1000); await answer(socket.sent.at(-1), {}, structuredClone(state));
+  more(); assert.equal(page.element('session-action-dialog').open, true);
+});
+
+test('REA-1205 rename targets the captured row, enforces UTF-8 bytes, and permits empty reset', async () => {
+  for (const name of ['😀'.repeat(20), '']) {
+    const { page, socket, state, answer, choose, accept } = await actionPage();
+    choose('rename');
+    page.element('session-name').value = '😀'.repeat(21); page.element('session-name').oninput();
+    await accept(); assert.equal(operations(socket).length, 0);
+    assert.equal(page.element('session-action-accept').disabled, true);
+    page.element('session-name').value = name; page.element('session-name').oninput();
+    await accept(); const request = operations(socket)[0];
+    assert.deepEqual([request.action, request.tabID, request.name], ['rename', 'one', name]);
+    state.tabs[0].title = name || 'Mac title'; await answer(request);
+    assert.equal(page.element('session-action-dialog').open, false);
+    assert.equal(page.element('sessions-error').hidden, true);
+    assert.equal(page.element('session-list').children[0].children[0].children[0].children[0].textContent, name || 'Mac title');
+  }
+});
+
+test('REA-1205 rejected rename keeps edits and refreshes before retry, preserving a newer name', async () => {
+  const { page, socket, state, answer, choose, accept } = await actionPage();
+  choose('rename'); page.element('session-name').value = 'My retained edit'; await accept();
+  await answer(operations(socket)[0], { ok: false, error: 'Name refused.' }, null);
+  assert.equal(socket.sent.at(-1).action, 'state');
+  assert.equal(page.element('session-name').value, 'My retained edit');
+  assert.equal(page.element('session-action-accept').disabled, true);
+  state.tabs[0].title = 'Newer Mac name'; await answer();
+  await accept(); assert.equal(operations(socket).length, 1);
+  assert.equal(page.element('session-name').value, 'My retained edit');
+  assert.match(page.element('session-action-error').textContent, /session changed/);
+});
+
+test('REA-1205 a verified rename failure with unchanged state permits an explicit edited retry', async () => {
+  const { page, socket, answer, choose, accept } = await actionPage();
+  choose('rename'); page.element('session-name').value = 'Rejected draft'; await accept();
+  await answer(operations(socket)[0], { ok: false, error: 'Try another name.' }, null);
+  await answer();
+  assert.equal(page.element('session-name').value, 'Rejected draft');
+  assert.equal(page.element('session-action-accept').disabled, false);
+  page.element('session-name').value = 'Corrected draft'; await accept();
+  assert.deepEqual(operations(socket).map(r => r.name), ['Rejected draft', 'Corrected draft']);
+});
+
+for (const action of ['close', 'archive']) {
+  test(`REA-1205 ${action} confirms working and uncertain rows and uses their captured identity`, async () => {
+    for (const status of ['working', 'unknown']) {
+      const { page, socket, state, choose, accept, answer } = await actionPage();
+      state.tabs[0].status = status;
+      await page.fireTimer(1000); await answer();
+      choose(action); assert.equal(operations(socket).length, 0);
+      assert.match(page.element('session-action-detail').textContent, action === 'archive' ? /all.*open tabs.*working.*unknown/ : status === 'working' ? /still working/ : /may still be running/);
+      page.element('session-action-cancel').onclick(); await accept();
+      assert.equal(operations(socket).length, 0);
+      choose(action); await accept();
+      assert.deepEqual(operations(socket).map(r => [r.action, r.tabID]), [[action, 'one']]);
+      await answer();
+    }
+  });
+}
+
+test('REA-1205 capability restrictions and changes never dispatch unsupported actions', async () => {
+  for (const fields of [{ canArchive: false }, { capabilities: { archive: false, rename: false } }]) {
+    const { page, socket, state, answer, more, choose, accept } = await actionPage();
+    Object.assign(state.tabs[0], fields);
+    await page.fireTimer(1000); await answer(); more();
+    assert.equal(page.element('session-archive').hidden, true);
+    page.element('session-action-cancel').onclick(); choose('archive'); await accept();
+    assert.equal(operations(socket).length, 0);
+    page.element('session-action-cancel').onclick(); choose('close');
+    await page.fireTimer(1000); await answer(socket.sent.at(-1), {}, { ...state, capabilities: [] });
+    await accept(); assert.equal(operations(socket).length, 0);
+  }
+});
+
+test('REA-1205 queued actions recheck tab, native identity, name, sheet and Mac at dispatch', async () => {
+  for (const change of ['tab', 'native', 'name', 'sheet', 'mac', 'capability']) {
+    const { page, socket, state, answer, choose, accept } = await actionPage();
+    choose('rename'); page.element('session-name').value = 'New name';
+    page.element('interrupt').onclick(); await settle(); const held = socket.sent.at(-1);
+    await accept();
+    const next = structuredClone(state);
+    if (change === 'tab') next.tabs = next.tabs.slice(1);
+    if (change === 'native') next.tabs[0].sessionID = 'replacement-native';
+    if (change === 'name') next.tabs[0].title = 'Newer title';
+    if (change === 'sheet') page.element('sessions-close').onclick();
+    if (change === 'mac') next.mac = 'different-mac';
+    if (change === 'capability') next.capabilities = [];
+    await answer(held, {}, next);
+    assert.equal(operations(socket).length, 0, change);
+  }
+});
+
+test('REA-1205 disconnect and timed-out operations retain rename edits and never replay on reconnect', async () => {
+  for (const action of ['rename', 'archive', 'close']) {
+    const { page, socket, state, choose, accept } = await actionPage();
+    choose(action); page.element('session-name').value = 'Retained offline edit'; await accept();
+    assert.equal(operations(socket).length, 1);
+    await page.fireTimer(10000);
+    assert.equal(page.element('session-name').value, 'Retained offline edit');
+    assert.equal(page.element('session-action-accept').disabled, true);
+    await page.fireTimer(500); const next = await page.authorize(state); await settle();
+    await accept(); assert.equal(operations(next).length, 0);
+    assert.equal(operations(socket).length, 1);
+  }
+});
+
+for (const action of ['close', 'archive']) {
+  test(`REA-1205 ${action} requires renewed confirmation when activity changes while queued`, async () => {
+    const { page, socket, state, choose, accept, answer } = await actionPage();
+    state.tabs[0].status = 'idle'; await page.fireTimer(1000); await answer();
+    choose(action); assert.match(page.element('session-action-detail').textContent, /on your Mac/);
+    page.element('interrupt').onclick(); await settle(); const held = socket.sent.at(-1);
+    await accept(); state.tabs[0].status = 'working'; await answer(held);
+    assert.equal(operations(socket).length, 0);
+    assert.equal(page.element('session-action-accept').disabled, true);
+    assert.match(page.element('session-action-error').textContent, /activity changed/);
+  });
+}
+
+test('REA-1205 a rejected rename without fresh state retains edits and explains disabled retry', async () => {
+  const { page, socket, answer, choose, accept } = await actionPage();
+  choose('rename'); page.element('session-name').value = 'Retained draft'; await accept();
+  await answer(operations(socket)[0], { ok: false, error: 'Name refused.' }, null);
+  await answer(socket.sent.at(-1), {}, null);
+  assert.equal(page.element('session-name').value, 'Retained draft');
+  assert.equal(page.element('session-action-accept').disabled, true);
+  assert.match(page.element('session-action-error').textContent, /Could not refresh/);
+  await accept(); assert.equal(operations(socket).length, 1);
+});
+
+for (const action of ['rename', 'close', 'archive']) {
+  test(`REA-1205 ${action} checks fresh host state before any write`, async () => {
+    const { page, socket, state, answer, choose, accept } = await actionPage();
+    choose(action); page.element('session-name').value = 'My edit';
+    await accept({ preflight: false });
+    assert.equal(socket.sent.at(-1).action, 'state');
+    assert.equal(operations(socket).length, 0);
+    if (action === 'rename') state.tabs[0].title = 'Newer remote name';
+    else state.tabs[0].status = 'idle';
+    await answer();
+    assert.equal(operations(socket).length, 0);
+    assert.equal(page.element('session-action-accept').disabled, true);
+  });
+}
+
+for (const action of ['close', 'archive']) {
+  test(`REA-1205 review: ${action} cannot be dismissed after dispatch`, async () => {
+    const { page, socket, answer, choose, accept } = await actionPage();
+    choose(action); await accept();
+    assert.equal(operations(socket).length, 1);
+    assert.equal(page.element('session-action-cancel').disabled, true);
+    page.element('session-action-cancel').onclick();
+    assert.equal(page.element('session-action-dialog').open, true);
+    let prevented = false;
+    for (const listener of page.element('session-action-dialog').listeners.cancel || []) listener({ preventDefault() { prevented = true; } });
+    assert.equal(prevented, true, 'Escape must not imply cancellation of a dispatched write');
+    await answer(operations(socket)[0]);
+    assert.equal(page.element('session-action-dialog').open, false);
+  });
+  test(`REA-1205 review: ${action} permanently invalidates a changed activity confirmation`, async () => {
+    const { page, socket, state, answer, choose, accept } = await actionPage();
+    choose(action);
+    state.tabs[0].status = 'idle'; await page.fireTimer(1000); await answer();
+    state.tabs[0].status = 'working'; await page.fireTimer(1000); await answer();
+    assert.equal(page.element('session-action-accept').disabled, true);
+    await accept(); assert.equal(operations(socket).length, 0);
+    assert.match(page.element('session-action-error').textContent, /activity changed/);
+    page.element('session-action-cancel').onclick(); choose(action); await accept();
+    assert.equal(operations(socket).length, 1, 'explicitly reopened confirmation can proceed');
+  });
+}
+
+test('REA-1205 review: archive always warns about every affected open tab', async () => {
+  for (const status of ['working', 'unknown']) {
+    const { page, choose } = await actionPage({ tabs: [actionTab({ status: 'idle' }), actionTab({ id: 'duplicate', status })], selectedTabID: 'one' });
+    choose('archive');
+    assert.match(page.element('session-action-detail').textContent, /all.*open tabs/);
+    assert.match(page.element('session-action-detail').textContent, /working/);
+    assert.match(page.element('session-action-detail').textContent, /unknown/);
+  }
+});
+
+for (const action of ['rename', 'archive']) {
+  test(`REA-1205 review: ${action} explains a provider capability change without losing edits`, async () => {
+    const { page, socket, state, answer, choose, accept } = await actionPage();
+    choose(action); page.element('session-name').value = 'Retained capability draft';
+    state.tabs[0].capabilities[action] = false;
+    await page.fireTimer(1000); await answer();
+    assert.equal(page.element('session-action-accept').disabled, true);
+    assert.match(page.element('session-action-error').textContent, /no longer|unavailable/);
+    assert.match(page.element('session-action-error').textContent, /Cancel.*reopen/);
+    assert.equal(page.element('session-name').value, 'Retained capability draft');
+    await accept(); assert.equal(operations(socket).length, 0);
+  });
+}
+
+test('REA-1205 review: Cancel before write dispatch prevents the operation', async () => {
+  for (const action of ['close', 'archive']) {
+    const { page, socket, answer, choose, accept } = await actionPage();
+    choose(action); await accept({ preflight: false });
+    assert.equal(socket.sent.at(-1).action, 'state');
+    assert.equal(page.element('session-action-cancel').disabled, false);
+    page.element('session-action-cancel').onclick(); await answer();
+    assert.equal(operations(socket).length, 0);
+  }
 });

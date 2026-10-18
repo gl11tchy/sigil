@@ -49,6 +49,22 @@
     <div id="saved-list"></div>
     <p id="saved-empty" role="status" hidden>No recent chats.</p>
   </dialog>
+  <dialog id="session-action-dialog" class="confirm" aria-labelledby="session-action-heading" aria-describedby="session-action-detail">
+    <div class="sheet-heading"><h2 id="session-action-heading">Session actions</h2></div>
+    <p id="session-action-detail"></p>
+    <p id="session-action-error" class="sheet-error" role="alert" hidden></p>
+    <div id="session-action-menu">
+      <button id="session-rename" type="button">Rename</button>
+      <button id="session-archive" type="button">Archive</button>
+      <button id="session-close-action" class="destructive" type="button">Close</button>
+    </div>
+    <form id="session-rename-form" hidden>
+      <label for="session-name">Name</label>
+      <input id="session-name" type="text" autocomplete="off" aria-describedby="session-name-help">
+      <p id="session-name-help" class="sheet-notice">At most 80 UTF-8 bytes. An empty name restores the Mac’s title.</p>
+    </form>
+    <div class="dialog-actions"><button id="session-action-cancel" type="button">Cancel</button><button id="session-action-accept" type="button" hidden>Save</button></div>
+  </dialog>
   <dialog id="project-dialog" class="sheet" aria-labelledby="project-heading">
     <div class="sheet-heading"><h2 id="project-heading">New session</h2><button id="project-cancel" type="button">Cancel</button></div>
     <p id="project-error" class="sheet-error" role="alert" hidden></p>

@@ -39,6 +39,7 @@ let savedVisible = false, savedNotice = '', savedMac = null;
 let providerChoice = '', providerProblems = new Map();
 let newOptions = null, newProjects = [], projectTarget = null, worktreeChoice = null, canUseSessionOps = false;
 let newFlight = null;
+let sessionActionTarget = null, sessionActionMode = 'menu', sessionActionFlight = null;
 let newSheetEpoch = 0;
 let findIndex = 0, findMatches = [], displayedOutput = null;
 let rawOutput = '', rawMode = false;
@@ -50,7 +51,7 @@ let incoming = Promise.resolve(), outgoing = Promise.resolve(), pending = new Ma
 const RETURN_RECONNECT_AFTER = 30_000;
 let hiddenAt = document.hidden ? Date.now() : null, pageEpoch = 0, refreshing = false, refreshFlight = null;
 // A modal sheet makes the page inert, so its errors show inside the sheet.
-const sheetErrors = { 'sessions-dialog': 'sessions-error', 'project-dialog': 'project-error' };
+const sheetErrors = { 'session-action-dialog': 'session-action-error', 'sessions-dialog': 'sessions-error', 'project-dialog': 'project-error' };
 const showError = text => {
   const open = Object.keys(sheetErrors).find(id => $(id).open);
   for (const id of ['error', ...Object.values(sheetErrors)]) { $(id).textContent = ''; $(id).hidden = true; }
@@ -148,7 +149,8 @@ function updateControls() {
   $('welcome').querySelector('.pairing-steps').hidden = waiting;
   for (const id of ['session-list', 'saved-list']) {
     for (const button of Array.from($(id).children || [])) {
-      button.disabled = disabled || (id === 'saved-list' && button.dataset.more === 'true' && savedLoading);
+      const controls = button.dataset.sessionRow ? button.children : [button];
+      for (const control of controls) control.disabled = disabled || (id === 'saved-list' && button.dataset.more === 'true' && savedLoading);
     }
   }
   const standalone = isStandaloneApp();
@@ -157,6 +159,7 @@ function updateControls() {
     if (hint) hint.hidden = !standalone;
   }
   updateNewControls();
+  updateSessionActionControls();
 }
 function hasFinePointer() {
   return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
@@ -457,10 +460,11 @@ function renderSessionList() {
   const openHeading = $('open-heading');
   if (openHeading) openHeading.hidden = matches.length === 0;
   // Preserve focus during state polls: only rebuild if the displayed entries change.
-  const signature = JSON.stringify([matches, selected]);
+  const signature = JSON.stringify([matches, selected, canUseSessionOps, generation, commandEpoch, savedMac]);
   if ($('session-list').dataset.signature === signature) return;
   $('session-list').dataset.signature = signature;
   const focusedID = document.activeElement?.dataset.tabId;
+  const focusedMore = document.activeElement?.dataset.sessionMore === 'true';
   let nextFocus;
   $('session-list').replaceChildren(...matches.map(tab => {
     const button = document.createElement('button');
@@ -468,12 +472,17 @@ function renderSessionList() {
     button.disabled = !connected || busy || refreshing;
     button.setAttribute('aria-current', String(tab.id === selected));
     button.dataset.tabId = tab.id;
-    if (tab.id === focusedID) nextFocus = button;
+    if (tab.id === focusedID && !focusedMore) nextFocus = button;
     const title = document.createElement('span');
     title.textContent = tab.title;
     const status = document.createElement('small');
     status.textContent = STATUS_LABELS[tab.status] ?? 'Status unknown';
-    button.append(title, status);
+    if (canUseSessionOps) {
+      const label = document.createElement('span'); label.className = 'session-label';
+      const metadata = document.createElement('small'); metadata.className = 'session-metadata';
+      metadata.textContent = [tab.providerName, tab.folder].filter(value => typeof value === 'string' && value).join(' · ');
+      label.append(title, metadata); button.append(label, status);
+    } else button.append(title, status);
     button.onclick = () => {
       if (!connected || busy || refreshing) return;
       void perform(async () => {
@@ -481,10 +490,165 @@ function renderSessionList() {
         if ($('sessions-dialog').open) { $('sessions-dialog').close(); $('sessions-toggle').focus(); }
       });
     };
-    return button;
+    if (!canUseSessionOps) return button;
+    const row = document.createElement('div'); row.className = 'session-row'; row.dataset.sessionRow = 'true'; row.dataset.tabId = tab.id;
+    const more = document.createElement('button'); more.type = 'button'; more.textContent = '…';
+    more.dataset.sessionMore = 'true'; more.dataset.tabId = tab.id;
+    more.setAttribute('aria-label', `More actions for ${tab.title}`); more.setAttribute('aria-haspopup', 'dialog');
+    more.disabled = !connected || busy || refreshing; more.onclick = () => openSessionActions(tab);
+    if (tab.id === focusedID && focusedMore) nextFocus = more;
+    row.append(button, more); return row;
   }));
   if (focusedID) (nextFocus || $('session-search')).focus();
 }
+// A row is a live tab in one authenticated Mac connection, never the current picker selection.
+function sessionActionTab(context) {
+  if (!context || context !== sessionActionTarget || !connected || refreshing || !canUseSessionOps
+    || context.owner !== credential || context.generation !== generation || context.epoch !== commandEpoch
+    || context.mac !== savedMac || context.page !== pageEpoch || !$('sessions-dialog').open) return null;
+  const tab = sessionTabs.find(tab => tab.id === context.id);
+  return tab && ['provider', 'sessionID', 'cwd'].every(key => tab[key] === context[key]) ? tab : null;
+}
+function sessionActionRisk(tab) {
+  if (tab.processRunning === false || ['idle', 'exited'].includes(tab.status)) return 'inactive';
+  return tab.status === 'working' ? 'working' : 'uncertain';
+}
+function currentSessionAction(context, action) {
+  const tab = sessionActionTab(context);
+  const destructive = ['close', 'archive'].includes(action);
+  if (tab && destructive && context.confirmationRisk !== undefined && context.confirmationRisk !== sessionActionRisk(tab)) context.activityChanged = true;
+  const supported = tab && (action !== 'rename' || tab.capabilities?.rename !== false)
+    && (action !== 'archive' || (tab.canArchive === true && tab.capabilities?.archive !== false));
+  if (tab && !supported && sessionActionMode === action) context.capabilityChanged = action;
+  return Boolean(tab && supported && !context.uncertain && !context.needsRefresh
+    && context.capabilityChanged !== action && (!destructive || !context.activityChanged)
+    && (action !== 'rename' || tab.title === context.title));
+}
+function sessionActionMessage(text) {
+  $('session-action-error').textContent = text; $('session-action-error').hidden = !text;
+}
+function updateSessionActionControls() {
+  if (!$('session-action-dialog').open) return;
+  const context = sessionActionTarget, tab = sessionActionTab(context);
+  const unavailable = busy || Boolean(sessionActionFlight) || !tab;
+  const dispatched = sessionActionFlight?.context === context && sessionActionFlight.dispatched;
+  $('session-action-cancel').disabled = Boolean(dispatched);
+  $('session-action-accept').textContent = dispatched
+    ? { rename: 'Saving…', archive: 'Archiving…', close: 'Closing…' }[sessionActionMode]
+    : { rename: 'Save', archive: 'Archive', close: 'Close' }[sessionActionMode] || 'Save';
+  $('session-rename').disabled = unavailable || tab?.capabilities?.rename === false;
+  $('session-rename').title = tab?.capabilities?.rename === false ? 'This provider does not support renaming.' : '';
+  $('session-archive').hidden = !tab || tab.canArchive !== true || tab.capabilities?.archive === false;
+  $('session-archive').disabled = $('session-close-action').disabled = unavailable;
+  const name = $('session-name').value.trim();
+  const invalidName = new TextEncoder().encode(name).length > 80 || /\p{Cc}/u.test(name);
+  $('session-name').readOnly = Boolean(sessionActionFlight);
+  $('session-action-accept').disabled = unavailable || !currentSessionAction(context, sessionActionMode)
+    || (sessionActionMode === 'rename' && invalidName);
+  // A successful action reply renders state before its Promise resolves. Do not
+  // label that acknowledged rename as an external edit or leak a stale error on close.
+  if (sessionActionFlight?.context === context) return;
+  if (context?.uncertain) sessionActionMessage('No confirmed result. Check this session on your Mac before trying again.');
+  else if (!tab || (sessionActionMode === 'rename' && tab.title !== context.title)) sessionActionMessage('This session changed. Cancel and reopen its actions. Your edits are kept here.');
+  else if (context.capabilityChanged === sessionActionMode) sessionActionMessage(`${sessionActionMode === 'rename' ? 'Renaming' : 'Archiving'} is no longer available for this session. Cancel and reopen its actions. Your edits are kept here.`);
+  else if (['close', 'archive'].includes(sessionActionMode) && context.activityChanged) sessionActionMessage('This session’s activity changed. Cancel and reopen its actions before confirming.');
+  else if (context.needsRefresh) sessionActionMessage('Could not refresh this session. Your edits are kept. Cancel and reopen after reconnecting.');
+  else if (sessionActionMode === 'rename' && invalidName) sessionActionMessage('Use at most 80 UTF-8 bytes and no control characters.');
+}
+function openSessionActions(tab) {
+  if (!connected || busy || refreshing || !canUseSessionOps || !$('sessions-dialog').open) return;
+  // A detached row handler cannot bind a replacement row with the same tab id.
+  const current = sessionTabs.find(item => item.id === tab.id);
+  if (!current || !['title', 'provider', 'sessionID', 'cwd'].every(key => current[key] === tab[key])) return;
+  tab = current;
+  sessionActionTarget = { id: tab.id, provider: tab.provider, sessionID: tab.sessionID, cwd: tab.cwd,
+    title: tab.title, owner: credential, generation, epoch: commandEpoch, mac: savedMac, page: pageEpoch };
+  sessionActionMode = 'menu';
+  $('session-action-heading').textContent = tab.title;
+  $('session-action-detail').textContent = [tab.providerName, tab.folder].filter(value => typeof value === 'string' && value).join(' · ');
+  $('session-action-menu').hidden = false; $('session-rename-form').hidden = true;
+  $('session-action-accept').hidden = true; $('session-action-cancel').textContent = 'Done';
+  sessionActionMessage(''); $('session-action-dialog').showModal(); updateSessionActionControls();
+}
+function chooseSessionAction(action) {
+  const context = sessionActionTarget, tab = sessionActionTab(context);
+  if (!tab || busy || sessionActionFlight || !currentSessionAction(context, action)) return;
+  sessionActionMode = action;
+  $('session-action-menu').hidden = true; $('session-rename-form').hidden = action !== 'rename';
+  $('session-action-heading').textContent = `${action === 'rename' ? 'Rename' : action === 'archive' ? 'Archive' : 'Close'} “${tab.title}”${action === 'rename' ? '' : '?'}`;
+  $('session-action-cancel').textContent = 'Cancel'; $('session-action-accept').hidden = false;
+  $('session-action-accept').textContent = action === 'rename' ? 'Save' : action === 'archive' ? 'Archive' : 'Close';
+  $('session-action-accept').className = action === 'rename' ? 'primary' : 'destructive';
+  if (action === 'rename') {
+    $('session-name').value = tab.title; $('session-name').focus();
+    $('session-action-detail').textContent = 'Leave the name empty to restore the Mac’s title.';
+  } else {
+    const verb = action === 'archive' ? 'Archiving' : 'Closing';
+    context.confirmationRisk = sessionActionRisk(tab);
+    const uncertain = context.confirmationRisk === 'uncertain';
+    $('session-action-detail').textContent = tab.status === 'working' && tab.processRunning !== false
+      ? `It is still working. ${verb} stops it.`
+      : uncertain ? `It may still be running. ${verb} stops it.` : action === 'archive' ? 'This archives the conversation and closes its open tabs on your Mac.' : 'This closes the tab on your Mac.';
+    // The host owns archive's affected set, including path aliases and tabs omitted
+    // by a capped snapshot. Always disclose its stopping effect across that set.
+    if (action === 'archive') $('session-action-detail').textContent = 'This archives the conversation and stops all its open tabs on your Mac, including any that are working or whose status is unknown.';
+    $('session-action-cancel').focus();
+  }
+  sessionActionMessage(''); updateSessionActionControls();
+}
+async function submitSessionAction() {
+  const context = sessionActionTarget, action = sessionActionMode;
+  if (!['rename', 'archive', 'close'].includes(action) || busy || refreshing || sessionActionFlight
+    || !currentSessionAction(context, action)) return;
+  const name = $('session-name').value.trim();
+  if (action === 'rename' && (new TextEncoder().encode(name).length > 80 || /\p{Cc}/u.test(name))) {
+    updateSessionActionControls(); return;
+  }
+  const flight = sessionActionFlight = { context, action };
+  await perform(async () => {
+    try {
+      const reply = await enqueue(async () => {
+        if (!currentSessionAction(context, action) || !$('session-action-dialog').open) throw new Error('This session changed. Cancel and reopen its actions.');
+        // Keep the fresh read and write in one queue slot. Other local commands
+        // cannot slip between them; the host still owns the final mutation.
+        context.needsRefresh = true;
+        const fresh = await transmit('state', undefined, context.id, false);
+        if (!fresh.state) throw new Error('Could not refresh this session. Nothing was sent.');
+        context.needsRefresh = false;
+        if (!currentSessionAction(context, action) || !$('session-action-dialog').open) throw new Error('This session changed. Cancel and reopen its actions.');
+        return transmit(action, undefined, context.id, false, action === 'rename' ? { name } : {}, undefined, context);
+      });
+      if (sessionActionTarget === context && reply.ok === true) $('session-action-dialog').close();
+    } catch (error) {
+      if (sessionActionTarget !== context) return;
+      if (!error.verifiedReply && flight.dispatched) context.uncertain = true;
+      // A rejected rename retains edits. Read current host state before enabling a retry,
+      // so a name another client supplied is never overwritten by the retained draft.
+      if (action === 'rename' && error.verifiedReply && sessionActionTab(context)) {
+        context.needsRefresh = true;
+        try { const fresh = await request('state'); if (fresh.state) context.needsRefresh = false; } catch { /* keep retry disabled */ }
+      }
+      sessionActionMessage(error.message); updateSessionActionControls();
+    } finally {
+      if (sessionActionFlight === flight) sessionActionFlight = null;
+    }
+  });
+  updateSessionActionControls();
+}
+$('session-rename').onclick = () => chooseSessionAction('rename');
+$('session-archive').onclick = () => chooseSessionAction('archive');
+$('session-close-action').onclick = () => chooseSessionAction('close');
+$('session-action-accept').onclick = () => void submitSessionAction();
+$('session-rename-form').onsubmit = event => { event.preventDefault(); void submitSessionAction(); };
+$('session-name').oninput = () => { sessionActionMessage(''); updateSessionActionControls(); };
+$('session-action-cancel').onclick = () => { if (!sessionActionFlight?.dispatched) $('session-action-dialog').close(); };
+$('session-action-dialog').addEventListener('cancel', event => {
+  if (sessionActionFlight?.dispatched) event.preventDefault();
+});
+$('session-action-dialog').addEventListener('close', () => {
+  sessionActionTarget = null;
+  if ($('sessions-dialog').open) $('session-search').focus();
+});
 function searchSaved() {
   renderSessionList();
   $('sessions-error').textContent = ''; $('sessions-error').hidden = true;
@@ -1280,7 +1444,7 @@ $('sessions-toggle').onclick = () => {
   if (hasFinePointer()) $('session-search').focus();
 };
 $('sessions-close').onclick = () => $('sessions-dialog').close();
-$('sessions-dialog').addEventListener('close', () => { clearSaved(); if (!$('sessions-toggle').hidden) $('sessions-toggle').focus(); });
+$('sessions-dialog').addEventListener('close', () => { if ($('session-action-dialog').open) $('session-action-dialog').close(); clearSaved(); if (!$('sessions-toggle').hidden) $('sessions-toggle').focus(); });
 $('session-search').oninput = searchSaved;
 $('find-toggle').onclick = () => {
   $('find-bar').hidden = false; $('find-toggle').setAttribute('aria-expanded', 'true');
@@ -1345,13 +1509,14 @@ async function enqueue(send) {
     return await send();
   } finally { queuedCommands--; release(); }
 }
-async function transmit(action, text, tabID, pairing, extra = {}, returnRefresh) {
+async function transmit(action, text, tabID, pairing, extra = {}, returnRefresh, sessionContext) {
   if (returnRefresh && !currentReturnRefresh(returnRefresh)) return { stale: true };
   if (!socket || socket.readyState !== WebSocket.OPEN || !challenge || (!connected && !pairing && action !== 'state')) throw new Error('Not connected.');
   const ws = socket, current = generation, epoch = commandEpoch, seq = ++sequence;
   const message = { challenge, clientNonce, sequence: seq, action, ...(tabID ? { tabID } : {}), ...(text !== undefined ? { text } : {}), ...extra };
   const data = await seal(message, pairing ? bootstrap : credential.key, 'phone');
   if (current !== generation || epoch !== commandEpoch || ws.readyState !== WebSocket.OPEN) throw new Error('Connection lost.');
+  if (sessionContext && !currentSessionAction(sessionContext, action)) throw new Error('This session changed. Cancel and reopen its actions.');
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       if (current !== generation || epoch !== commandEpoch || socket !== ws) return;
@@ -1364,6 +1529,9 @@ async function transmit(action, text, tabID, pairing, extra = {}, returnRefresh)
     pending.set(seq, { resolve, reject, timer, action, tabID, returnRefresh });
     const flight = newFlight?.attempt.action === action && ['new', 'createProject'].includes(action) ? newFlight : null;
     if (flight) flight.dispatched = true;
+    if (sessionContext && sessionActionFlight?.context === sessionContext) {
+      sessionActionFlight.dispatched = true; updateSessionActionControls();
+    }
     ws.send(JSON.stringify({ data }));
     if (flight) updateNewControls();
   });
