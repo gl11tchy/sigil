@@ -1319,3 +1319,21 @@ NativeFlow to43, including actual rendered enabled-state assertions and regular/
 accessibility captures. Three review coverage gaps are addressed in the tests.
 Runtime/captures are pending CI; [QA record](../qa/rea-1199.md). No local native
 execution, extra worker, app interaction or next ticket. Parent review required.
+
+
+REA-1199 candidate e485fc1 CI39102595670 passed full general/native checks.
+Checkout4e6aca4 has expected c760/e485 parents and identical tree9163e4a. Legacy
+result readback confirms all43 NativeFlow cases, including10focused, successful.
+Both original828×1792 PNGs were visually accepted: eight disabled keys and Stop
+remain visible, including the accessibility two-column grid. Native TextKit7pass.
+Two existing browser and four REA-1350 permission-dependent pointer cases skipped;
+manual pointer/device/OS allowance/network handoff/APNs/provider/runtime limits
+remain. No local native execution or app interaction occurred.
+
+The final evidence revision preserves the original PNG bytes and records actual
+candidate checks. It also handles CancellationError in New's two read methods,
+so expected dismissal cannot overwrite current feedback after queue cancellation.
+A held-request/cancel/drain test brings NativeFlow to44, with11focused cases.
+Only those two source/test files differ from the verified candidate; screen,
+capture, protocol and1198 lifecycle sources are unchanged. Required final-head
+CI and parent personal review remain pending. [QA and images](../qa/rea-1199.md).

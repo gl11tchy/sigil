@@ -385,6 +385,45 @@ final class NativeFlowTests: XCTestCase {
         XCTAssertEqual(fixture.enterCount, 0)
     }
 
+    func testCancelledQueuedSessionReadsPreserveCurrentFeedback() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        fixture.mac.pauseState = true
+        let previousReads = fixture.mac.requests.filter { $0.action == "state" }.count
+        let blocked = Task { try await fixture.connection.request("state") }
+        defer { blocked.cancel() }
+        try await RelayTests.until("state request held ahead of New session reads") {
+            fixture.mac.requests.filter { $0.action == "state" }.count > previousReads
+        }
+        let feedback = "Current feedback from a newer action"
+        fixture.store.errorMessage = feedback
+        var started = 0
+        let options = Task {
+            started += 1
+            return await fixture.store.loadSessionOptions()
+        }
+        let projects = Task {
+            started += 1
+            return await fixture.store.loadProjects()
+        }
+        defer {
+            options.cancel()
+            projects.cancel()
+        }
+        try await RelayTests.until("both New session reads queued") { started == 2 }
+        options.cancel()
+        projects.cancel()
+        try await fixture.mac.releaseState()
+        _ = try await blocked.value
+        let hasOptions = await options.value
+        let hasProjects = await projects.value
+        _ = try await fixture.connection.request("state")
+        XCTAssertFalse(hasOptions)
+        XCTAssertTrue(hasProjects)
+        XCTAssertEqual(fixture.store.errorMessage, feedback)
+        XCTAssertFalse(fixture.mac.requests.contains { ["options", "projects"].contains($0.action) })
+    }
+
     func testStopWhileInputWaitsRetainsDraftAndRejectsChangedSelection() async throws {
         for changeSelection in [false, true] {
             let fixture = try await backgroundFixture()

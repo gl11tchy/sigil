@@ -636,6 +636,9 @@ final class RemoteStore {
         } catch RemoteConnectionError.mac("Unknown action.") {
             sessionOptions = nil
             return false
+        } catch is CancellationError {
+            // Dismissing New cancels its queued reads, not the current feedback.
+            return sessionOptions != nil
         } catch {
             errorMessage = error.localizedDescription
             return sessionOptions != nil
@@ -684,6 +687,8 @@ final class RemoteStore {
             return true
         } catch RemoteConnectionError.mac("Unknown action.") {
             return false
+        } catch is CancellationError {
+            return true
         } catch {
             errorMessage = error.localizedDescription
             return true
