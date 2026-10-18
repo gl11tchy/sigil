@@ -1275,3 +1275,19 @@ Revocation warning was legible. Repair centralizes error presentation so every
 writer retains send uncertainty, adds post-layout assertions, models legacy
 options fallback, and covers both input/Enter lost acknowledgements plus later
 failed options reads. Replacement CI/images pending; no local native execution.
+
+REA-1198 repair f4f88a9 CI39094902441 passed the full general/native gate.
+Checkout15fcd7f has expected CCCbe/f4 parents and identical tree4133992. Legacy
+result readback confirms all33 NativeFlow cases successful, including15focused
+cases and both lost input/Enter reply scenarios. Both original828×1792 PNGs were
+visually accepted: expiry retains the full warning, draft and photo chips;
+revocation retains the warning alongside Pairing ended. The rejected first
+expiry image is excluded. [QA evidence and limits](../qa/rea-1198.md).
+
+The evidence commit adds only accepted PNGs and QA/progress documentation; all
+eight production/test/script source hashes match the passing repair head.
+Two existing browser skips and four existing REA-1350 pointer-fixture skips
+remain disclosed. No local native build/test/app launch occurred. Physical
+device suspension, OS allowance, network handoff, APNs and production deployment
+remain unverified. Parent personal review of exact final code/current comments
+and required final-head CI still precede merge; no next ticket or extra worker.
