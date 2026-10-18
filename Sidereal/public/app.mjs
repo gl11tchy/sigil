@@ -2060,6 +2060,7 @@ function refreshReturnedState() {
     refreshing = false;
     $('status').textContent = $('status-live').textContent = 'Connected'; $('status').dataset.connected = 'true';
     updateControls(); poll();
+    if ($('sessions-dialog').open) searchSaved();
   }).catch(error => {
     if (!currentReturnRefresh(flight)) return;
     showError(error.message); connect(true);

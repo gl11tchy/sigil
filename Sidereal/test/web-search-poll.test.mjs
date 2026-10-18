@@ -265,6 +265,23 @@ test('disconnecting clears rows, suppresses the old request error, and refreshes
   assert.equal(savedRows(page)[0].children[0].textContent, 'Saved reconnected');
 });
 
+test('a page return refresh reloads the open saved list after discarding an in-flight read', async () => {
+  const { page, socket, answer } = await recentPage();
+  const oldRead = searches(socket)[0];
+  page.app.document.hidden = true; page.app.pausePage();
+  page.app.document.hidden = false; page.app.resumePage();
+  await settle();
+  await answer({ chats: [savedRow('old-before-return')] }, oldRead);
+  assert.equal(savedRows(page).length, 0);
+  const freshState = socket.sent.at(-1);
+  assert.equal(freshState.action, 'state');
+  await answer({}, freshState);
+  assert.equal(searches(socket).length, 2);
+  await answer({ chats: [savedRow('after-return')] });
+  assert.equal(savedRows(page)[0].children[0].textContent, 'Saved after-return');
+  assert.equal(page.element('saved-list')['aria-busy'], 'false');
+});
+
 test('Unknown action hides the saved section quietly, while a real failure stays visible', async () => {
   const { page, socket, state, answer } = await recentPage();
   await answer({ ok: false, error: 'Unknown action.' });

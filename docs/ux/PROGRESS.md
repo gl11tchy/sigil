@@ -1407,9 +1407,12 @@ old replies and queued saved-row opens. Unknown action quietly hides the section
 This preserves the existing host protocol and adds no provider-completion claim.
 
 The [QA record](../qa/rea-1204.md) records main `b17a940` reproduction, generated
-fixtures, 284 passing Node tests and seven Chromium passes, plus viewed 390×844
-before/after screenshots. Local WebKit stalls during synthetic pairing before
-Chats behavior; its acceptance and screenshot remain pending required PR CI.
+fixtures, 285 passing Node tests and seven Chromium passes. Initial CI Verify
+passed 252 browser cases across both engines; both 390×844 result images were
+verified and viewed. Local WebKit still stalls before Chats during pairing.
+The initial run was cancelled before serial revision tests; final-head required
+checks are reported on the PR. A reproduced page-return regression now reloads
+the open list after fresh state. No initial-run native completion is claimed.
 No local native build, SigilAppTests, personal data, paid inference, process
 enumeration, app launch/update or security/access change occurred. Tests stayed
 serial under an exclusive lease. PR183's real-app hold, PR162 and unrelated
