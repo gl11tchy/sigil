@@ -208,6 +208,40 @@ struct TerminalFindStreamingTests {
         controller.clearFind()
     }
 
+    @Test func noMatchNavigationIsNotReplayedAgainstLaterOutput() async throws {
+        let controller = TerminalController()
+        let view = try #require(controller.view as? GrokProcessTerminalView)
+        output(view, "no hits\r\n")
+        controller.setFindQuery("needle")
+        await settled(controller)
+        #expect(controller.findMatchCount == 0)
+        controller.findNext()
+        output(view, "\u{1b}[Hneedle one\r\nneedle two\r\n")
+        await settled(controller)
+        #expect(controller.findMatchCount == 2)
+        #expect(controller.findMatchIndex == 2)
+        #expect(view.selection.start == Position(col: 0, row: 1))
+        controller.clearFind()
+    }
+
+    @Test func aChangedRowKeepsOnlyTheNavigationAnchorUntilItsHitIsVerifiedAgain() async throws {
+        let controller = TerminalController()
+        let view = try #require(controller.view as? GrokProcessTerminalView)
+        output(view, "needle one\r\nneedle two\r\n")
+        controller.setFindQuery("needle")
+        await settled(controller)
+        controller.findPrevious()
+        #expect(view.selection.start == Position(col: 0, row: 0))
+        output(view, "\u{1b}[1;20Hchanged")
+        #expect(!view.selection.active)
+        controller.findNext()
+        await settled(controller)
+        #expect(controller.findMatchCount == 2)
+        #expect(controller.findMatchIndex == 2)
+        #expect(view.selection.start == Position(col: 0, row: 1))
+        controller.clearFind()
+    }
+
     @MainActor
     private final class StreamProbe {
         var active = true

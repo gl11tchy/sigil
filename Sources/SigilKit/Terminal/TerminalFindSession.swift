@@ -13,18 +13,23 @@ enum TerminalFindScan {
 
     static let run: Operation = { chunks, query, origin in
         await Task.detached(priority: .userInitiated) {
-            let start = ContinuousClock.now
-            var search = ScrollbackSearch()
-            search.setQuery(query, in: chunks.flatMap { $0 })
-            let matches = search.matches.map {
-                ScrollbackSearch.Match(
-                    line: $0.line + origin, columns: $0.columns,
-                    endLine: $0.endLine + origin, endColumn: $0.endColumn)
-            }
-            return Output(
-                matches: matches, milliseconds: milliseconds(start.duration(to: .now)),
-                ranOnMainThread: Thread.isMainThread)
+            perform(chunks, query: query, origin: origin)
         }.value
+    }
+
+    /// No suspension can change executors between this work and its thread observation.
+    private static func perform(_ chunks: [[ScrollbackSearch.Row]], query: String, origin: Int) -> Output {
+        let start = ContinuousClock.now
+        var search = ScrollbackSearch()
+        search.setQuery(query, in: chunks.flatMap { $0 })
+        let matches = search.matches.map {
+            ScrollbackSearch.Match(
+                line: $0.line + origin, columns: $0.columns,
+                endLine: $0.endLine + origin, endColumn: $0.endColumn)
+        }
+        return Output(
+            matches: matches, milliseconds: milliseconds(start.duration(to: .now)),
+            ranOnMainThread: Thread.isMainThread)
     }
 
     static func milliseconds(_ duration: Duration) -> Double {
@@ -131,6 +136,9 @@ final class TerminalFindSession {
     private var result: Result?
     private var ranges: [Range<Int>] = []
     private var current: Int?
+    /// Navigation preference only. It never authorizes selecting stale cells;
+    /// a new scan and current row stamps must confirm the hit again.
+    private var selectionAnchor: ScrollbackSearch.Match?
     private var navigation = 0
     private var initialSelectionCompleted = false
     private var validationOffset = 0
@@ -189,6 +197,7 @@ final class TerminalFindSession {
         result = nil
         ranges = []
         current = nil
+        selectionAnchor = nil
         navigation = 0
         initialSelectionCompleted = false
         needsWork = true
@@ -204,6 +213,7 @@ final class TerminalFindSession {
         result = nil
         ranges = []
         current = nil
+        selectionAnchor = nil
         navigation = 0
         initialSelectionCompleted = false
         select(nil, false)
@@ -228,7 +238,7 @@ final class TerminalFindSession {
             needsWork = true
             schedule()
         } else {
-            consumeNavigation()
+            if matchCount == 0 { navigation = 0 } else { consumeNavigation() }
             emitSelection(reveal: true, state: state)
         }
         changed()
@@ -250,6 +260,7 @@ final class TerminalFindSession {
                 result = nil
                 ranges = []
                 current = nil
+                selectionAnchor = nil
                 initialSelectionCompleted = false
                 validationOffset = 0
                 needsWork = !query.isEmpty
@@ -321,11 +332,7 @@ final class TerminalFindSession {
                 processed += 1
             } while offset < first.count && processed < Self.rowsPerPass
                 && start.duration(to: .now) < Self.snapshotBudget
-            diagnostics.snapshotPasses += 1
-            diagnostics.largestSnapshotRows = max(diagnostics.largestSnapshotRows, processed)
-            diagnostics.largestSnapshotMilliseconds = max(
-                diagnostics.largestSnapshotMilliseconds, TerminalFindScan.milliseconds(start.duration(to: .now)))
-            diagnostics.snapshotsRanOnMainThread = diagnostics.snapshotsRanOnMainThread && Thread.isMainThread
+            recordSnapshotPass(rows: processed, started: start)
             if offset < first.count { try? await Task.sleep(for: .milliseconds(1)) }
         }
         if !chunk.isEmpty {
@@ -342,6 +349,14 @@ final class TerminalFindSession {
             origin: first.trimmed, count: first.count, historyEnd: first.historyEnd,
             startGeneration: first.generation, endGeneration: last.generation,
             rows: chunks, stamps: stamps)
+    }
+
+    private func recordSnapshotPass(rows: Int, started: ContinuousClock.Instant) {
+        diagnostics.snapshotPasses += 1
+        diagnostics.largestSnapshotRows = max(diagnostics.largestSnapshotRows, rows)
+        diagnostics.largestSnapshotMilliseconds = max(
+            diagnostics.largestSnapshotMilliseconds, TerminalFindScan.milliseconds(started.duration(to: .now)))
+        diagnostics.snapshotsRanOnMainThread = diagnostics.snapshotsRanOnMainThread && Thread.isMainThread
     }
 
     private func captureRow(absolute: Int, state: TerminalFindBufferState) -> CapturedRow? {
@@ -379,7 +394,7 @@ final class TerminalFindSession {
             diagnostics.rejectedResults += 1
             return
         }
-        let previous = currentMatch
+        let previous = currentMatch ?? selectionAnchor
         current = nil
         result = Result(snapshot: snapshot, matches: output.matches)
         diagnostics.lastScanMilliseconds = output.milliseconds
@@ -503,7 +518,7 @@ final class TerminalFindSession {
         guard count > 0 else { return }
         if current == nil { current = defaultIndex(above: queryAnchor) }
         guard navigation != 0 else { return }
-        let old = current.flatMap(ordinal) ?? 0
+        let old = current.flatMap { ordinal($0) } ?? 0
         var target = (old + navigation % count + count) % count
         for range in ranges {
             if target < range.count {
@@ -533,6 +548,7 @@ final class TerminalFindSession {
             schedule()
             return
         }
+        selectionAnchor = match
         select(match, reveal)
     }
 }
