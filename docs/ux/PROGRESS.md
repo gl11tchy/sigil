@@ -1248,3 +1248,21 @@ Native reproduction is pending the normal PR CI run; no local native execution.
 Expected current behavior is immediate socket stop and an incomplete send.
 REA-1199 keyboard behavior and protected PR162 are outside scope. Parent personal
 final review and required final-head checks precede any merge.
+
+REA-1198 baseline observed in CI39090877227: actual checkout9ee741b has expected
+CCCbe/8c48184 parents and identical head tree; production was unchanged. The new
+three-photo case delivered zero file/input/Enter frames and retained draft/files.
+Its eight assertions failed; a separate existing native test also hit accumulated
+fixture room quota. Verify/typecheck/shared relay passed; native full gate failed.
+No local native execution occurred. Legacy result-object reading confirmed values;
+new summary reader could not write its cache and was replaced by that read path.
+
+Implementation candidate owns the send/task/background assertion, preserves
+uncertainty and draft revisions, fences old callbacks, and suppresses background
+reconnect after a delegate stop. UIKit assertion is requested before work, following
+Apple guidance. Default teardown stays immediate; only app lifecycle opts in.
+Warning remains visible on revocation. Native fixture cases rotate serially over
+eight fresh loopback relays; production limits/grace/deadlines stay unchanged.
+Fifteen focused cases and two screenshot captures are implemented, runtime pending
+CI. Static shell/Node/Python parsing, whitespace and unchanged crypto/queue/deadline/
+terminal-key/production-relay source checks passed. Parent final review required.

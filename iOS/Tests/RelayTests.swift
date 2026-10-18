@@ -359,6 +359,7 @@ final class FakeMac {
     var presentTerminalMenu = false
     var orderedEvents = true
     var pauseInput = false
+    var pauseFile = false
     var rotateAfterInput = false
     var pauseState = false
     var rotateAfterState = false
@@ -366,6 +367,7 @@ final class FakeMac {
     var truncatedTabs = false
     private var delayedRestart: Request?
     private var delayedState: Request?
+    private var delayedInput: Request?
     private(set) var requests: [Request] = []
     var firstTab = Reply.Tab(id: "T1", title: "Test", status: "idle") {
         didSet { if selected == oldValue.id { selected = firstTab.id } }
@@ -387,9 +389,10 @@ final class FakeMac {
     init(origin: URL) { self.origin = origin }
 
     func register() async throws -> String {
-        // This expanded fixture suite can legitimately allocate more than the
-        // production relay's 20 rooms/minute. Retry refused setup only; never a
-        // command or a transport failure, and keep workflow deadlines unchanged.
+        // The real relay has a five-token burst/refill and a 20-room active cap.
+        // Native cases rotate over a fresh relay pool so room grace does not
+        // exhaust one suite-wide budget. Retry refused setup only, never
+        // a command or transport failure; keep workflow deadlines unchanged.
         let deadline = Date().addingTimeInterval(75)
         while true {
             let remaining = deadline.timeIntervalSinceNow
@@ -453,6 +456,16 @@ final class FakeMac {
         pauseState = false
         let reply = Reply(challenge: request.challenge, sequence: request.sequence,
                           state: state("ready"), ticket: ticket, clientNonce: request.clientNonce)
+        let sealed = try RemoteCrypto.seal(reply, key: deviceKey, direction: "mac")
+        try await send(["peer": peer, "data": sealed], on: socket)
+    }
+
+    func releaseInput() async throws {
+        guard let request = delayedInput, let socket, let peer, let deviceKey else { throw TestFailure("no delayed input") }
+        delayedInput = nil
+        pauseInput = false
+        let reply = Reply(challenge: request.challenge, sequence: request.sequence,
+                          state: state("echo: \(request.text ?? "")"), ticket: ticket, clientNonce: request.clientNonce)
         let sealed = try RemoteCrypto.seal(reply, key: deviceKey, direction: "mac")
         try await send(["peer": peer, "data": sealed], on: socket)
     }
@@ -544,7 +557,8 @@ final class FakeMac {
         if request.action == "pair", dropPairReply { return }
         var reply = Reply(challenge: request.challenge, sequence: request.sequence, ticket: ticket, clientNonce: request.clientNonce)
         requests.append(request)
-        if pauseInput, request.action == "input" { return }
+        if pauseInput, request.action == "input" { delayedInput = request; return }
+        if pauseFile, request.action == "file" { return }
         if pauseState, request.action == "state" { delayedState = request; return }
         if pauseRestart, request.action == "restart" {
             delayedRestart = request
