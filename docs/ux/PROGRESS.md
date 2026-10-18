@@ -1397,3 +1397,14 @@ Native CI is pending. A PR183-only private DEBUG artifact export avoids local
 builds; actual AX/window-ID acceptance remains blocked/incomplete as documented
 in the [QA record](../qa/rea-1258.md). No app was launched locally or replaced;
 no additional worker, security change, next ticket or merge.
+
+REA-1258 candidate08d41ae CI39110636374 compiled and passed1,346 Swift tests in
+113 suites plus37 XCTest cases, including four new search/input units. Checkout
+7a816b8 has expected aa06/08d41 parents and identical treeb3b3657. Native readback
+confirms Down/Up/repeat/bounds, dark/light fill and traversal passed; two legacy
+host cases passed and four original pointer cases skipped. Typing/no-results
+timed out at their first Down wait; overall CI failed before later gates/artifact.
+One bounded helper repair now requires actual published search focus and rendered
+keyboard fill before initial input. A two-survivor fixture proves rerank resets
+away from a still-visible prior row. Production remains unchanged. Updated CI
+pending; AX/window-ID acceptance stays incomplete, with no local app interaction.

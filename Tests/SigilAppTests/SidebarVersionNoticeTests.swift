@@ -128,12 +128,15 @@ struct SidebarVersionNoticeTests {
         search.editor.setSelectedRange(NSRange(location: search.editor.string.utf16.count, length: 0))
         try sendSearchKey(to: search.window, keyCode: 1, characters: "s")
         try await waitForSearchState("Typing must continue in search and rerank") {
-            model.searchText == "auths" && model.sidebarSnapshot().rowIDs.count == 1
+            model.searchText == "auths" && model.sidebarSnapshot().rowIDs.count == 2
                 && model.sidebarCommandContext.keyboardRowID == model.sidebarSnapshot().rowIDs.first
         }
         #expect(search.window.firstResponder === search.editor)
         #expect(!model.sidebarCommandContext.listFocused)
         let current = try #require(model.sidebarSnapshot().rowIDs.first)
+        #expect(
+            current != search.rows.last,
+            "The prior row remains visible but reranking must select the new top row")
         let session = try #require(model.sidebarSessions.first { model.sessionKey($0) == current })
         try sendSearchKey(to: search.window, keyCode: 36, characters: "\r")
         try await waitForSearchState("Return must open the highlighted reranked session") {
@@ -218,7 +221,12 @@ struct SidebarVersionNoticeTests {
 
     private func hostSearch(_ model: AppModel) async throws -> (window: NSWindow, editor: NSTextView, rows: [String]) {
         try #require(NSApplication.shared.isRunning)
-        let hosted = host(model, interactive: true)
+        let probe = HoverProbe()
+        let hosted = host(
+            NSHostingView(
+                rootView: SidebarView(model: model, observeHover: { probe.glide = $0 })
+                    .environment(\.palette, Palette(theme: .sigilDark))),
+            size: .init(width: 272, height: 600), interactive: true)
         do {
             model.focusSidebarSearch()
             model.searchText = "auth"
@@ -226,9 +234,21 @@ struct SidebarVersionNoticeTests {
             try #require(rows.count == 3)
             try await waitForSearchState("Search must own a real field editor and the first result") {
                 hosted.window.firstResponder is NSTextView && model.sidebarCommandContext.keyboardRowID == rows[0]
+                    && model.isSidebarFocused && !model.sidebarCommandContext.listFocused
             }
             let editor = try #require(hosted.window.firstResponder as? NSTextView)
             try #require(editor.string == "auth")
+            if let target = probe.glide?.target { probe.glide?.hover(target, false) }
+            try await waitForSearchState("The search focus must render before delivering the first key") {
+                probe.glide?.target == rows[0] && hosted.window.firstResponder === editor
+                    && model.isSidebarFocused && !model.sidebarCommandContext.listFocused
+            }
+            hosted.view.layoutSubtreeIfNeeded()
+            print(
+                """
+                REA-1258 ready: searchFocused=true, query=\(editor.string), \
+                row=\(rows[0]), fill=\(probe.glide?.target ?? "nil")
+                """)
             return (hosted.window, editor, rows)
         } catch {
             hosted.window.close()
@@ -247,13 +267,19 @@ struct SidebarVersionNoticeTests {
                 context: nil, characters: characters, charactersIgnoringModifiers: characters,
                 isARepeat: repeating, keyCode: keyCode))
         try #require(event.window === window)
+        let editor = window.firstResponder as? NSTextView
+        print(
+            """
+            REA-1258 key: code=\(keyCode), modifiers=\(modifiers.rawValue), \
+            query=\(editor?.string ?? "nil"), marked=\(editor?.hasMarkedText() ?? false)
+            """)
         window.sendEvent(event)
     }
 
     private func searchModel(_ fixture: SidebarFixture) async throws -> AppModel {
         fixture.settings.showWorktreeSessions = true
         let folder = try fixture.directory("search-project")
-        for (index, title) in ["Auth one", "Auth two", "Auths"].enumerated() {
+        for (index, title) in ["Auths", "Auth two", "Auths notes"].enumerated() {
             try fixture.writeListedSession(id: "search-\(index)", cwd: folder.path, summary: title)
         }
         await fixture.store.reload()
