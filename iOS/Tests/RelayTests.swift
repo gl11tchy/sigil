@@ -454,6 +454,12 @@ final class FakeMac {
         try await send(["peer": peer, "data": sealed], on: socket)
     }
 
+    func selectOnMac(_ tabID: String, eventSequence: Int) async throws {
+        guard tabID == firstTab.id || tabID == "T2" else { throw TestFailure("unknown fixture tab") }
+        selected = tabID
+        try await pushEvent(rows: ["selected: \(tabID)"], eventSequence: eventSequence)
+    }
+
     func releaseState() async throws {
         guard let request = delayedState, let socket, let peer, let deviceKey else { throw TestFailure("no delayed state") }
         delayedState = nil

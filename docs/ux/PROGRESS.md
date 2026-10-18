@@ -1302,3 +1302,20 @@ Stop during multipart input and a cancelled queued Enter, plus a held-file reply
 fixture. All production code remains unchanged. Baseline reproduction is pending
 normal CI; no local native build/test or app interaction occurred. Implementation,
 simulator evidence and parent final review follow the observed baseline.
+
+REA-1199 baseline CI39100616743 reproduced all three regressions: eight keys
+between file chunks; Stop followed by remaining file/input/Enter and cleared
+draft; cancelled queued Enter still dispatched. All33 existing NativeFlow cases
+passed, three new cases failed with11 assertions. Actual checkout1f36bee has
+expected c760/d294 parents and identical tree96ec09f. No production edits preceded
+that evidence. General Verify/typecheck/shared relay passed; TextKit was not run.
+
+The candidate guards/disables ordinary keys, cancels the owned send on Stop,
+propagates caller cancellation to queued transport work and validates controls at
+dispatch against Mac/epoch/selection/operation identity. Known file receipts keep
+their cleanup without erasing newer work. REA-1198 lifecycle/lease identity and
+frame/crypto/socket/deadline/relay source are unchanged. Ten focused cases bring
+NativeFlow to43, including actual rendered enabled-state assertions and regular/
+accessibility captures. Three review coverage gaps are addressed in the tests.
+Runtime/captures are pending CI; [QA record](../qa/rea-1199.md). No local native
+execution, extra worker, app interaction or next ticket. Parent review required.

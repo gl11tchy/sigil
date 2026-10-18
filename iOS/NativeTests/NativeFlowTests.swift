@@ -313,6 +313,15 @@ final class NativeFlowTests: XCTestCase {
         XCTAssertEqual(keys, [RemoteKey.enter.rawValue])
         XCTAssertEqual(fixture.store.draft, "")
         XCTAssertEqual(fixture.budget.ended, [0])
+        let previousKeys = keys.count
+        let ordinary = [RemoteKey.escape, .tab, .up, .down, .left, .right, .backspace, .enter]
+        for key in ordinary { fixture.store.send(key: key) }
+        try await RelayTests.until("ordinary keys available after Send") {
+            fixture.mac.requests.filter { $0.action == "key" }.count == previousKeys + ordinary.count
+        }
+        _ = try await fixture.connection.request("state")
+        let recovered = fixture.mac.requests.filter { $0.action == "key" }.dropFirst(previousKeys).compactMap(\.text)
+        XCTAssertEqual(recovered.sorted(), ordinary.map(\.rawValue).sorted())
     }
 
     func testStopCancelsRemainingMultipartSend() async throws {
@@ -332,6 +341,7 @@ final class NativeFlowTests: XCTestCase {
             !fixture.store.busy
                 && fixture.mac.requests.contains { $0.action == "key" && $0.text == RemoteKey.interrupt.rawValue }
         }
+        _ = try await fixture.connection.request("state")
         let dispatch = fixture.mac.requests.filter { ["file", "input", "key"].contains($0.action) }
         let keys = dispatch.filter { $0.action == "key" }.compactMap(\.text)
         print("REA-1199 Stop baseline: actions=\(dispatch.map(\.action)), keys=\(keys)")
@@ -369,8 +379,251 @@ final class NativeFlowTests: XCTestCase {
         case .failure(let error):
             XCTAssertTrue(error is CancellationError)
         }
+        // A cancelled caller could otherwise leave an orphaned queue task.
+        _ = try await fixture.connection.request("state")
         print("REA-1199 cancelled-Enter baseline: deliveredEnterCount=\(fixture.enterCount)")
         XCTAssertEqual(fixture.enterCount, 0)
+    }
+
+    func testStopWhileInputWaitsRetainsDraftAndRejectsChangedSelection() async throws {
+        for changeSelection in [false, true] {
+            let fixture = try await backgroundFixture()
+            defer { fixture.stop() }
+            fixture.mac.pauseInput = true
+            fixture.store.draft = "Generated pending input"
+            fixture.store.sendDraft()
+            try await RelayTests.until("input awaiting acknowledgement") { fixture.inputCount == 1 }
+            fixture.store.interrupt()
+            try await Task.sleep(for: .milliseconds(100))
+            if changeSelection {
+                try await fixture.mac.selectOnMac("T2", eventSequence: 1)
+                try await RelayTests.until("Mac selected another tab") { fixture.store.selectedTabID == "T2" }
+                try await fixture.mac.selectOnMac("T1", eventSequence: 2)
+                try await RelayTests.until("Mac returned to the original tab") { fixture.store.selectedTabID == "T1" }
+            }
+            try await fixture.mac.releaseInput()
+            try await RelayTests.until("interrupted input settled") { !fixture.store.busy }
+            if !changeSelection {
+                try await RelayTests.until("current Stop dispatched") {
+                    fixture.mac.requests.contains { $0.action == "key" && $0.text == RemoteKey.interrupt.rawValue }
+                }
+            }
+            _ = try await fixture.connection.request("state")
+            XCTAssertEqual(fixture.inputCount, 1)
+            XCTAssertEqual(fixture.enterCount, 0)
+            XCTAssertEqual(fixture.store.draft, "Generated pending input")
+            XCTAssertTrue(fixture.store.sendMayBeIncomplete)
+            let interrupts = fixture.mac.requests.filter { $0.action == "key" && $0.text == RemoteKey.interrupt.rawValue }
+            XCTAssertEqual(interrupts.count, changeSelection ? 0 : 1)
+            XCTAssertEqual(fixture.budget.ended, [0])
+        }
+    }
+
+    func testStopAtInputAcknowledgementDoesNotPressEnter() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        let delegate = SwitchingDelegate(store: fixture.store)
+        fixture.connection.delegate = delegate
+        delegate.afterReply = { [weak delegate] action in
+            guard action == "input" else { return }
+            delegate?.afterReply = nil
+            fixture.store.interrupt()
+        }
+        fixture.store.draft = "Generated Stop in the Enter delay"
+        fixture.store.sendDraft()
+        try await RelayTests.until("input acknowledged and Stop settled") {
+            fixture.inputCount == 1 && !fixture.store.busy
+                && fixture.mac.requests.contains { $0.action == "key" && $0.text == RemoteKey.interrupt.rawValue }
+        }
+        _ = try await fixture.connection.request("state")
+        XCTAssertEqual(fixture.enterCount, 0)
+        XCTAssertEqual(fixture.mac.requests.filter { $0.action == "key" }.compactMap(\.text), [RemoteKey.interrupt.rawValue])
+        XCTAssertEqual(fixture.store.draft, "Generated Stop in the Enter delay")
+        XCTAssertTrue(fixture.store.sendMayBeIncomplete)
+        XCTAssertEqual(fixture.budget.ended, [0])
+    }
+
+    func testStopAtFileReceiptKeepsNewerWorkAndDoesNotRepeatTheFile() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        let delegate = SwitchingDelegate(store: fixture.store)
+        fixture.connection.delegate = delegate
+        let newer = Attachment(name: "newer.txt", data: Data("generated".utf8), preview: nil)
+        delegate.afterReply = { [weak delegate] action in
+            guard action == "file", fixture.mac.requests.filter({ $0.action == "file" }).count == 2 else { return }
+            delegate?.afterReply = nil
+            fixture.store.draft = "Edited while the photo uploaded"
+            XCTAssertNil(fixture.store.attach([newer]))
+            fixture.store.interrupt()
+        }
+        fixture.store.draft = "Original generated caption"
+        XCTAssertNil(fixture.store.attach(Array(syntheticPhotos().prefix(1))))
+        fixture.store.sendDraft()
+        try await RelayTests.until("full file receipt and interrupted continuation settled") {
+            fixture.mac.requests.filter { $0.action == "file" }.count == 2 && !fixture.store.busy
+                && fixture.mac.requests.contains { $0.action == "key" && $0.text == RemoteKey.interrupt.rawValue }
+        }
+        _ = try await fixture.connection.request("state")
+        XCTAssertEqual(fixture.inputCount, 0)
+        XCTAssertEqual(fixture.enterCount, 0)
+        XCTAssertEqual(fixture.mac.requests.filter { $0.action == "key" }.compactMap(\.text), [RemoteKey.interrupt.rawValue])
+        XCTAssertEqual(fixture.store.draft, "Edited while the photo uploaded")
+        XCTAssertEqual(fixture.store.selectedAttachments.map(\.id), [newer.id])
+        XCTAssertTrue(fixture.store.sendMayBeIncomplete)
+        XCTAssertEqual(fixture.budget.ended, [0])
+    }
+
+    func testStopCancelsEnterQueuedBehindAnotherRequest() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        fixture.mac.pauseInput = true
+        fixture.mac.pauseState = true
+        fixture.store.draft = "Generated Enter held in the queue"
+        fixture.store.sendDraft()
+        try await RelayTests.until("input held before queueing a state read") { fixture.inputCount == 1 }
+        let previousReads = fixture.mac.requests.filter { $0.action == "state" }.count
+        let blocked = Task { try await fixture.connection.request("state") }
+        defer { blocked.cancel() }
+        try await Task.sleep(for: .milliseconds(100))
+        try await fixture.mac.releaseInput()
+        try await RelayTests.until("state read blocks the Enter stage") {
+            fixture.mac.requests.filter { $0.action == "state" }.count > previousReads
+        }
+        // The send's existing 100ms Enter delay elapses behind the held read.
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertEqual(fixture.enterCount, 0)
+        fixture.store.interrupt()
+        try await fixture.mac.releaseState()
+        _ = try await blocked.value
+        try await RelayTests.until("cancelled queued Enter settled") {
+            !fixture.store.busy
+                && fixture.mac.requests.contains { $0.action == "key" && $0.text == RemoteKey.interrupt.rawValue }
+        }
+        _ = try await fixture.connection.request("state")
+        XCTAssertEqual(fixture.inputCount, 1)
+        XCTAssertEqual(fixture.enterCount, 0)
+        XCTAssertEqual(fixture.mac.requests.filter { $0.action == "key" }.compactMap(\.text), [RemoteKey.interrupt.rawValue])
+        XCTAssertEqual(fixture.store.draft, "Generated Enter held in the queue")
+        XCTAssertTrue(fixture.store.sendMayBeIncomplete)
+        XCTAssertEqual(fixture.budget.ended, [0])
+    }
+
+    func testOldQueuedStopCannotInterruptNewBusySend() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        fixture.mac.pauseInput = true
+        fixture.mac.pauseState = true
+        fixture.store.draft = "Old generated send"
+        fixture.store.sendDraft()
+        try await RelayTests.until("old input held") { fixture.inputCount == 1 }
+        let previousReads = fixture.mac.requests.filter { $0.action == "state" }.count
+        let blocked = Task { try await fixture.connection.request("state") }
+        defer { blocked.cancel() }
+        try await Task.sleep(for: .milliseconds(100))
+        fixture.store.interrupt()
+        try await Task.sleep(for: .milliseconds(100))
+        try await fixture.mac.releaseInput()
+        try await RelayTests.until("old send released busy while Stop waits behind a read") {
+            !fixture.store.busy && fixture.mac.requests.filter { $0.action == "state" }.count > previousReads
+        }
+        fixture.mac.pauseInput = true
+        fixture.store.draft = "New generated send"
+        fixture.store.sendDraft()
+        try await fixture.mac.releaseState()
+        _ = try await blocked.value
+        try await RelayTests.until("new input owns busy") { fixture.inputCount == 2 }
+        XCTAssertTrue(fixture.store.busy)
+        XCTAssertEqual(fixture.store.draft, "New generated send")
+        XCTAssertEqual(fixture.enterCount, 0)
+        XCTAssertFalse(fixture.mac.requests.contains { $0.action == "key" && $0.text == RemoteKey.interrupt.rawValue })
+        try await fixture.mac.releaseInput()
+        try await RelayTests.until("new send completed") { !fixture.store.busy }
+        _ = try await fixture.connection.request("state")
+        XCTAssertEqual(fixture.enterCount, 1)
+        XCTAssertEqual(fixture.store.draft, "")
+        XCTAssertFalse(fixture.mac.requests.contains { $0.action == "key" && $0.text == RemoteKey.interrupt.rawValue })
+        XCTAssertEqual(fixture.budget.ended, [0, 1])
+    }
+
+    func testQueuedKeyCannotFollowAChangedSelection() async throws {
+        for returnToOriginal in [false, true] {
+            let fixture = try await backgroundFixture()
+            defer { fixture.stop() }
+            fixture.mac.pauseState = true
+            let previousReads = fixture.mac.requests.filter { $0.action == "state" }.count
+            let blocked = Task { try await fixture.connection.request("state") }
+            defer { blocked.cancel() }
+            try await RelayTests.until("read held ahead of ordinary key") {
+                fixture.mac.requests.filter { $0.action == "state" }.count > previousReads
+            }
+            fixture.store.send(key: .enter)
+            try await Task.sleep(for: .milliseconds(100))
+            try await fixture.mac.selectOnMac("T2", eventSequence: 1)
+            try await RelayTests.until("new tab selected") { fixture.store.selectedTabID == "T2" }
+            if returnToOriginal {
+                try await fixture.mac.selectOnMac("T1", eventSequence: 2)
+                try await RelayTests.until("original ID selected again") { fixture.store.selectedTabID == "T1" }
+            }
+            fixture.store.errorMessage = "New selection marker"
+            try await fixture.mac.releaseState()
+            _ = try await blocked.value
+            _ = try await fixture.connection.request("state")
+            XCTAssertEqual(fixture.enterCount, 0)
+            XCTAssertEqual(fixture.store.errorMessage, "New selection marker")
+        }
+    }
+
+    func testBusyTerminalControlsRenderDisabledWithStopAvailable() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        let keys = [RemoteKey.escape, .tab, .up, .down, .left, .right, .backspace, .enter]
+        let identifiers = keys.map { "key-" + $0.rawValue }
+        let modes: [(String, DynamicTypeSize)] = [("regular", .large), ("accessibility", .accessibility3)]
+        for (name, size) in modes {
+            fixture.mac.pauseFile = true
+            let previousFiles = fixture.mac.requests.filter { $0.action == "file" }.count
+            fixture.store.draft = "Generated \(name) upload"
+            XCTAssertNil(fixture.store.attach(Array(syntheticPhotos().prefix(1))))
+            fixture.store.sendDraft()
+            try await RelayTests.until("upload held while controls render") {
+                fixture.store.busy && fixture.mac.requests.filter { $0.action == "file" }.count > previousFiles
+            }
+            // The provider is still idle: Stop must be available for the owned send itself.
+            XCTAssertEqual(fixture.store.selectedTab?.status, .idle)
+            let observed = TerminalControlStates()
+            let controller = UIHostingController(rootView:
+                SessionScreen(initiallyShowingKeys: true)
+                    .environment(fixture.store)
+                    .environment(\.terminalControlEnabledObserver, { id, enabled in observed.values[id] = enabled })
+                    .dynamicTypeSize(size))
+            let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+            let window = UIWindow(windowScene: scene)
+            window.rootViewController = controller
+            window.makeKeyAndVisible()
+            defer { window.isHidden = true }
+            try await RelayTests.until("all real controls reported their environment") {
+                identifiers.allSatisfy { observed.values[$0] != nil } && observed.values["stop"] != nil
+            }
+            try await Task.sleep(for: .milliseconds(350))
+            controller.view.layoutIfNeeded()
+            XCTAssertTrue(fixture.store.busy)
+            for id in identifiers { XCTAssertEqual(observed.values[id], false, id) }
+            XCTAssertEqual(observed.values["stop"], true)
+            let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
+            let image = renderer.image { context in window.layer.render(in: context.cgContext) }
+            let attachment = XCTAttachment(image: image)
+            attachment.name = "REA-1199 busy terminal controls \(name)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            try await fixture.mac.releaseFile()
+            try await RelayTests.until("send completed and actual keys re-enabled") {
+                !fixture.store.busy && identifiers.allSatisfy { observed.values[$0] == true }
+            }
+            _ = try await fixture.connection.request("state")
+            XCTAssertEqual(fixture.store.draft, "")
+            XCTAssertTrue(fixture.store.selectedAttachments.isEmpty)
+        }
+        XCTAssertEqual(fixture.budget.ended, [0, 1])
     }
 
     func testBackgroundFinishesThreePhotoSendBeforeClosing() async throws {
@@ -819,6 +1072,11 @@ final class NativeFlowTests: XCTestCase {
         field.resignFirstResponder()
         window.isHidden = true
     }
+}
+
+@MainActor
+private final class TerminalControlStates {
+    var values: [String: Bool] = [:]
 }
 
 @MainActor

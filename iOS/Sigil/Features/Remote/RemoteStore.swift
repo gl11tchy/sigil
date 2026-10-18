@@ -35,11 +35,15 @@ final class RemoteStore {
     private(set) var activeMacID: String?
     private(set) var phase: RemoteConnection.Phase = .offline
     private(set) var tabs: [RemoteTab] = []
-    private(set) var selectedTabID: String?
+    private(set) var selectedTabID: String? {
+        didSet { if selectedTabID != oldValue { selectionRevision = UUID() } }
+    }
     private(set) var canRestart = false
     /// The Mac streams rows and takes close, rename and archive.
     private(set) var supportsSessionOps = false
-    private(set) var busy = false
+    private(set) var busy = false {
+        didSet { if busy && !oldValue { controlGeneration = UUID() } }
+    }
     private(set) var sendMayBeIncomplete = false
     private(set) var loadingEarlier = false
     private(set) var macAddress: String?
@@ -104,6 +108,14 @@ final class RemoteStore {
         let macID: String?
         let epoch: Int
         let isSend: Bool
+        var cancelled = false
+    }
+    private struct ControlTarget {
+        let macID: String?
+        let tabID: String
+        let epoch: Int
+        let selection: UUID
+        let generation: UUID
     }
     private struct SendLease {
         let id = UUID()
@@ -114,6 +126,8 @@ final class RemoteStore {
     @ObservationIgnored private var commandTask: Task<Void, Never>?
     @ObservationIgnored private var sendLease: SendLease?
     @ObservationIgnored private var backgroundSend: UUID?
+    @ObservationIgnored private var selectionRevision = UUID()
+    @ObservationIgnored private var controlGeneration = UUID()
     /// The APNs token, once iOS gave one; sent to the Mac on every connection.
     @ObservationIgnored private var pushToken: String?
     /// A session a notification or widget chose before the socket was up.
@@ -250,6 +264,8 @@ final class RemoteStore {
     }
 
     var selectedAttachments: [Attachment] { selectedTabID.flatMap { attachments[$0] } ?? [] }
+
+    var isSending: Bool { busy && command?.isSend == true }
 
     var canSend: Bool {
         guard isConnected, !busy, let tab = selectedTab, tab.acceptsInput else { return false }
@@ -510,22 +526,42 @@ final class RemoteStore {
     }
 
     func interrupt() {
-        guard isConnected, let id = selectedTabID else { return }
-        let epoch = connection.commandEpoch
-        Task { await run {
-            try $0.requireCurrentConnection(epoch)
-            _ = try await $0.request("key", text: RemoteKey.interrupt.rawValue, tabID: id)
-        } }
+        guard isConnected, !isDemo, selectedTabID != nil else { return }
+        if let command, command.isSend {
+            self.command?.cancelled = true
+            commandTask?.cancel()
+            if command.macID == activeMacID { markIncompleteSend() }
+        }
+        sendControl(.interrupt, allowingBusy: true)
     }
 
-    /// Keys queue behind each other in the connection, so quick taps are never dropped.
+    /// Ordinary keys stay with the selection and operation that accepted the tap.
     func send(key: RemoteKey) {
-        guard isConnected, let id = selectedTabID else { return }
-        let epoch = connection.commandEpoch
-        Task { await run {
-            try $0.requireCurrentConnection(epoch)
-            _ = try await $0.request("key", text: key.rawValue, tabID: id)
-        } }
+        guard !busy else { return }
+        sendControl(key, allowingBusy: false)
+    }
+
+    private func sendControl(_ key: RemoteKey, allowingBusy: Bool) {
+        guard isConnected, !isDemo, allowingBusy || !busy, let id = selectedTabID else { return }
+        let target = ControlTarget(
+            macID: activeMacID, tabID: id, epoch: connection.commandEpoch,
+            selection: selectionRevision, generation: controlGeneration)
+        Task { @MainActor in
+            do {
+                _ = try await self.connection.request("key", text: key.rawValue, tabID: id, beforeSend: {
+                    guard self.isCurrent(target), allowingBusy || !self.busy else { throw RemoteConnectionError.changed }
+                })
+            } catch {
+                guard self.isCurrent(target), allowingBusy || !self.busy else { return }
+                self.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func isCurrent(_ target: ControlTarget) -> Bool {
+        isConnected && connection.phase == .connected && activeMacID == target.macID
+            && selectedTabID == target.tabID && connection.commandEpoch == target.epoch
+            && selectionRevision == target.selection && controlGeneration == target.generation
     }
 
     func restart() {
@@ -803,9 +839,12 @@ final class RemoteStore {
             try self.requireCommand(id)
             for file in files {
                 try await self.upload(file, to: target, over: connection, commandID: id)
+                // A full-file receipt remains evidence even when Stop arrived
+                // before this continuation. Remove only that acknowledged ID.
+                if let command = self.command, command.id == id, self.owns(command) {
+                    self.attachments[target]?.removeAll { $0.id == file.id }
+                }
                 try self.requireCommand(id)
-                // The Mac has pasted this file, so a retry must not send it again.
-                self.attachments[target]?.removeAll { $0.id == file.id }
             }
             if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 try self.requireCommand(id)
@@ -870,7 +909,9 @@ final class RemoteStore {
 
     private func requireCommand(_ id: UUID) throws {
         try Task.checkCancellation()
-        guard let command, command.id == id, activeMacID == command.macID else { throw RemoteConnectionError.changed }
+        guard let command, command.id == id, !command.cancelled, activeMacID == command.macID else {
+            throw RemoteConnectionError.changed
+        }
         try connection.requireCurrentConnection(command.epoch)
     }
 
@@ -900,10 +941,11 @@ final class RemoteStore {
     private func completeCommand(_ work: PendingCommand, error: Error?, onSuccess: (@MainActor () -> Void)?) {
         guard command?.id == work.id else { return }
         let sameMac = activeMacID == work.macID
+        let cancelled = command?.cancelled == true
         // Commit the draft and release busy in one actor turn. A disconnect
         // between the async work and this completion must retain the draft.
-        if error == nil, owns(work) { onSuccess?() }
-        if work.isSend, !isDemo, sameMac, error != nil || !owns(work) {
+        if error == nil, owns(work), !cancelled { onSuccess?() }
+        if work.isSend, !isDemo, sameMac, error != nil || !owns(work) || cancelled {
             markIncompleteSend()
         } else if let error, sameMac {
             errorMessage = error.localizedDescription
@@ -918,11 +960,6 @@ final class RemoteStore {
         guard stop, !foreground, command == nil, activeMacID == work.macID,
             connection.commandEpoch == stopEpoch, phase != .revoked else { return }
         connection.stop()
-    }
-
-    private func run(_ work: (RemoteConnection) async throws -> Void) async {
-        if isDemo { return }
-        do { try await work(connection) } catch { errorMessage = error.localizedDescription }
     }
 
     /// Keep edits made on either side of a confirmed conversation replacement.

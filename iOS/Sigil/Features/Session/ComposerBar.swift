@@ -18,6 +18,11 @@ struct ComposerBar: View {
     @FocusState private var focused: Bool
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
+    init(upperLimit: CGFloat = .infinity, initiallyShowingKeys: Bool = false) {
+        self.upperLimit = upperLimit
+        _showingKeys = State(initialValue: initiallyShowingKeys)
+    }
+
     private var status: TabStatus? { store.selectedTab?.status }
     private var ended: Bool { store.selectedTab?.acceptsInput == false }
 
@@ -66,7 +71,7 @@ struct ComposerBar: View {
                 HStack(spacing: 0) {
                     attachMenu
                     Spacer(minLength: 0)
-                    if store.selectedTab?.canInterrupt == true { stopButton }
+                    if store.isSending || store.selectedTab?.canInterrupt == true { stopButton }
                     sendButton
                 }
                 .padding(Theme.Space.s2)
@@ -152,8 +157,8 @@ struct ComposerBar: View {
         .disabled(ended || preparing)
     }
 
-    /// While a turn runs, the web companion's Stop: the word in `redInk` on the red tint,
-    /// beside the send button rather than in its place.
+    /// Stop cancels an owned send or interrupts the running turn. It stays beside
+    /// Send, with the word in `redInk` on the red tint.
     private var stopButton: some View {
         Button("Stop") {
             store.interrupt()
@@ -163,6 +168,11 @@ struct ComposerBar: View {
         .contentShape(Rectangle())
         .padding(.trailing, Theme.Space.s4)
         .accessibilityLabel("Stop")
+        .background {
+            #if DEBUG
+                TerminalControlEnabledProbe(identifier: "stop")
+            #endif
+        }
         .disabled(!store.isConnected)
     }
 
@@ -314,7 +324,12 @@ struct ComposerBar: View {
                 }
                 .buttonStyle(TerminalKeyStyle())
                 .accessibilityLabel(Self.spoken(key))
-                .disabled(!store.isConnected || ended)
+                .background {
+                    #if DEBUG
+                        TerminalControlEnabledProbe(identifier: "key-" + key.rawValue)
+                    #endif
+                }
+                .disabled(!store.isConnected || ended || store.busy)
             }
         }
     }
@@ -572,3 +587,33 @@ private struct TerminalKey: View {
             .animation(Theme.animation(Theme.Motion.fade, reduceMotion: reduceMotion), value: configuration.isPressed)
     }
 }
+
+#if DEBUG
+    /// Test observers receive the control's resolved environment, never a copy
+    /// of its availability predicate. No probe or observer ships in release UI.
+    typealias TerminalControlEnabledObserver = @MainActor @Sendable (String, Bool) -> Void
+
+    private struct TerminalControlEnabledObserverKey: EnvironmentKey {
+        static let defaultValue: TerminalControlEnabledObserver? = nil
+    }
+
+    extension EnvironmentValues {
+        var terminalControlEnabledObserver: TerminalControlEnabledObserver? {
+            get { self[TerminalControlEnabledObserverKey.self] }
+            set { self[TerminalControlEnabledObserverKey.self] = newValue }
+        }
+    }
+
+    private struct TerminalControlEnabledProbe: View {
+        let identifier: String
+        @Environment(\.isEnabled) private var enabled
+        @Environment(\.terminalControlEnabledObserver) private var observer
+
+        var body: some View {
+            Color.clear
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+                .onChange(of: enabled, initial: true) { _, value in observer?(identifier, value) }
+        }
+    }
+#endif
