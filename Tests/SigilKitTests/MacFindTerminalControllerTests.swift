@@ -15,6 +15,42 @@ struct MacFindTerminalControllerTests {
         TerminalTestSupport.prepareAppKit()
     }
 
+    @Test func streamingTenThousandRowQueriesDoNotSynchronouslyReadTheBuffer() throws {
+        let controller = TerminalController()
+        let view = try terminal(controller)
+        defer { controller.clearFind() }
+        let lines = (0..<10_000).map { "row \($0) needle café 界 👩‍💻 " + String(repeating: "x", count: 32) }
+        output(view, lines.joined(separator: "\r\n") + "\r\n")
+        #expect(view.getTerminal().bufferLine(atRow: 9_999) != nil)
+        let clock = ContinuousClock()
+        var inputMilliseconds: [Double] = []
+        var synchronousReads = 0
+        for (index, query) in ["n", "ne", "nee", "need", "needl", "needle"].enumerated() {
+            output(view, "stream \(index) needle\r\n")
+            let before = controller.bufferRowReads
+            let elapsed = clock.measure { controller.setFindQuery(query) }
+            inputMilliseconds.append(Self.milliseconds(elapsed))
+            synchronousReads += controller.bufferRowReads - before
+        }
+        let rows = lines.map { ScrollbackSearch.Row(text: $0) }
+        let text = ScrollbackSearch.Text(rows, version: 1)
+        var scanner = ScrollbackSearch()
+        let scan = clock.measure { scanner.setQuery("needle", in: text) }
+        let receipt: [String: Any] = [
+            "fixtureRows": 10_000, "inputMilliseconds": inputMilliseconds,
+            "synchronousFullBufferReads": synchronousReads,
+            "immutableScanMilliseconds": Self.milliseconds(scan), "matches": scanner.matchCount,
+        ]
+        let data = try JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys])
+        print("REA-1193 streaming Find measurement \(String(decoding: data, as: UTF8.self))")
+        #expect(synchronousReads == 0, "Typing must defer bounded snapshot work and scanning away from the input callback")
+        #expect(scanner.matchCount == 10_000)
+    }
+
+    private static func milliseconds(_ duration: Duration) -> Double {
+        Double(duration.components.seconds) * 1_000 + Double(duration.components.attoseconds) / 1_000_000_000_000_000
+    }
+
     private struct State: Equatable {
         let count: Int
         let index: Int
