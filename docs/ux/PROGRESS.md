@@ -1291,3 +1291,14 @@ remain disclosed. No local native build/test/app launch occurred. Physical
 device suspension, OS allowance, network handoff, APNs and production deployment
 remain unverified. Parent personal review of exact final code/current comments
 and required final-head CI still precede merge; no next ticket or extra worker.
+
+## REA-1199 — terminal keys and interrupted sends (2026-10-18)
+
+Same sole worker on current main c760d2d45a603b61d2956c255afb63e47c7dc206,
+after verified REA-1198 merge/Done bookkeeping and official build380 installation.
+No existing1199 branch/worktree/open PR; protected162 and unrelated work preserved.
+The first revision adds three generated regressions for busy-key interleaving,
+Stop during multipart input and a cancelled queued Enter, plus a held-file reply
+fixture. All production code remains unchanged. Baseline reproduction is pending
+normal CI; no local native build/test or app interaction occurred. Implementation,
+simulator evidence and parent final review follow the observed baseline.

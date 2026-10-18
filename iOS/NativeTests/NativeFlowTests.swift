@@ -290,6 +290,89 @@ final class NativeFlowTests: XCTestCase {
         XCTAssertFalse(store.draft.isEmpty, "Uncertain submission retains the draft")
     }
 
+    func testBusyTerminalKeysCannotInterleaveWithMultipartSend() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        fixture.mac.pauseFile = true
+        fixture.store.draft = "Generated busy-key regression"
+        XCTAssertNil(fixture.store.attach(Array(syntheticPhotos().prefix(1))))
+        fixture.store.sendDraft()
+        try await RelayTests.until("first file chunk held") {
+            fixture.store.busy && fixture.mac.requests.filter { $0.action == "file" }.count == 1
+        }
+        for key in [RemoteKey.escape, .tab, .up, .down, .left, .right, .backspace, .enter] {
+            fixture.store.send(key: key)
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        try await fixture.mac.releaseFile()
+        try await RelayTests.until("multipart send completed") { !fixture.store.busy && fixture.inputCount == 1 }
+        let dispatch = fixture.mac.requests.filter { ["file", "input", "key"].contains($0.action) }
+        let keys = dispatch.filter { $0.action == "key" }.compactMap(\.text)
+        print("REA-1199 busy-key baseline: actions=\(dispatch.map(\.action)), keys=\(keys)")
+        XCTAssertEqual(dispatch.map(\.action), ["file", "file", "input", "key"])
+        XCTAssertEqual(keys, [RemoteKey.enter.rawValue])
+        XCTAssertEqual(fixture.store.draft, "")
+        XCTAssertEqual(fixture.budget.ended, [0])
+    }
+
+    func testStopCancelsRemainingMultipartSend() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        fixture.mac.pauseFile = true
+        fixture.store.draft = "Generated multipart Stop regression"
+        XCTAssertNil(fixture.store.attach(Array(syntheticPhotos().prefix(1))))
+        fixture.store.sendDraft()
+        try await RelayTests.until("first chunk awaiting reply before Stop") {
+            fixture.store.busy && fixture.mac.requests.filter { $0.action == "file" }.count == 1
+        }
+        fixture.store.interrupt()
+        try await Task.sleep(for: .milliseconds(100))
+        try await fixture.mac.releaseFile()
+        try await RelayTests.until("Stop delivered and send settled") {
+            !fixture.store.busy
+                && fixture.mac.requests.contains { $0.action == "key" && $0.text == RemoteKey.interrupt.rawValue }
+        }
+        let dispatch = fixture.mac.requests.filter { ["file", "input", "key"].contains($0.action) }
+        let keys = dispatch.filter { $0.action == "key" }.compactMap(\.text)
+        print("REA-1199 Stop baseline: actions=\(dispatch.map(\.action)), keys=\(keys)")
+        XCTAssertEqual(dispatch.map(\.action), ["file", "key"])
+        XCTAssertEqual(keys, [RemoteKey.interrupt.rawValue])
+        XCTAssertEqual(fixture.inputCount, 0)
+        XCTAssertEqual(fixture.enterCount, 0)
+        XCTAssertEqual(fixture.store.draft, "Generated multipart Stop regression")
+        XCTAssertEqual(fixture.store.selectedAttachments.count, 1)
+        XCTAssertTrue(fixture.store.sendMayBeIncomplete)
+        XCTAssertEqual(fixture.budget.ended, [0])
+    }
+
+    func testCancelledQueuedEnterNeverDispatches() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        fixture.mac.pauseState = true
+        let previousReads = fixture.mac.requests.filter { $0.action == "state" }.count
+        let blocked = Task { try await fixture.connection.request("state") }
+        defer { blocked.cancel() }
+        try await RelayTests.until("state request held ahead of Enter") {
+            fixture.mac.requests.filter { $0.action == "state" }.count > previousReads
+        }
+        let enter = Task {
+            try await fixture.connection.request("key", text: RemoteKey.enter.rawValue, tabID: "T1")
+        }
+        defer { enter.cancel() }
+        try await Task.sleep(for: .milliseconds(100))
+        enter.cancel()
+        try await fixture.mac.releaseState()
+        _ = try await blocked.value
+        switch await enter.result {
+        case .success:
+            XCTFail("Cancellation must prevent a queued Enter from being transmitted")
+        case .failure(let error):
+            XCTAssertTrue(error is CancellationError)
+        }
+        print("REA-1199 cancelled-Enter baseline: deliveredEnterCount=\(fixture.enterCount)")
+        XCTAssertEqual(fixture.enterCount, 0)
+    }
+
     func testBackgroundFinishesThreePhotoSendBeforeClosing() async throws {
         let fixture = try await backgroundFixture()
         defer { fixture.stop() }
