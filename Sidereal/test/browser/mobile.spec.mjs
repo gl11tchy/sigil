@@ -274,6 +274,169 @@ test('drafts, history position, and a keyboard-sized viewport stay usable', asyn
   } finally { mac.close(); }
 });
 
+function approvalViewportState(lines = 25) {
+  return {
+    tabs: [{ id: 'one', title: 'Generated layout review', status: 'working', provider: 'claudeCode',
+      processRunning: true, capabilities: { structuredApproval: false } }],
+    selectedTabID: 'one', terminal: Array.from({ length: 40 }, (_, i) => `Output line ${i + 1}: inspect the generated change.`).join('\n'),
+    prompt: { id: 'viewport-prompt', question: 'Do you want to proceed?', verified: false, style: 'menu',
+      operation: Array.from({ length: lines }, (_, i) => `Inspect generated-file-${i + 1}.txt`).join('\n'),
+      choices: [{ label: 'Yes', key: '1' }, { label: 'Yes, always', key: '2' },
+        { label: 'No, and tell the agent what to do differently', key: '3' }] },
+  };
+}
+
+async function resizeVisualViewport(page, height) {
+  // Emulate the visualViewport event the keyboard sends, preserving the full
+  // layout viewport. This is browser emulation, not a physical Safari keyboard.
+  await page.evaluate(height => {
+    Object.defineProperty(window.visualViewport, 'height', { configurable: true, value: height });
+    window.visualViewport.dispatchEvent(new Event('resize'));
+  }, height);
+  await expect(page.locator('body')).toHaveAttribute('data-compact', String(height < 600));
+  await expect.poll(() => page.evaluate(() => parseFloat(document.documentElement.style.getPropertyValue('--viewport-height')))).toBe(height);
+}
+
+async function approvalViewportGeometry(page) {
+  return page.evaluate(() => {
+    const box = selector => document.querySelector(selector).getBoundingClientRect().toJSON();
+    return { layoutHeight: innerHeight, visualHeight: visualViewport.height, body: box('body'), header: box('header'),
+      controls: box('#controls'), output: box('.output'), terminal: box('#terminal'), interaction: box('#interaction'),
+      compose: box('#compose'), send: box('#send'), keys: box('#keys') };
+  });
+}
+
+for (const keys of [false, true]) {
+  test(`approval viewport keeps output with terminal keys ${keys ? 'open' : 'closed'}`, async ({ page, baseURL }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    const mac = await pair(page, baseURL, '', { state: approvalViewportState() });
+    try {
+      await expect(page.locator('#interaction-heading')).toHaveText('Terminal controls');
+      if (keys) await page.locator('#keys-toggle').click();
+      await page.locator('#message').focus();
+      await resizeVisualViewport(page, 420);
+      await page.evaluate(() => document.fonts.ready);
+      const geometry = await approvalViewportGeometry(page);
+      await testInfo.attach('approval-viewport-geometry', { body: JSON.stringify(geometry, null, 2), contentType: 'application/json' });
+      console.log(`REA-1192 ${testInfo.project.name} keys=${keys}: ${JSON.stringify(geometry)}`);
+      await page.screenshot({ path: testInfo.outputPath(`approval-viewport-keys-${keys ? 'open' : 'closed'}.png`) });
+      expect.soft(geometry.layoutHeight).toBe(844);
+      expect.soft(geometry.visualHeight).toBe(420);
+      expect.soft(geometry.output.height).toBeGreaterThanOrEqual(100);
+      expect.soft(geometry.output.top).toBeGreaterThanOrEqual(geometry.controls.top - 1);
+      expect.soft(geometry.output.bottom).toBeLessThanOrEqual(geometry.controls.bottom + 1);
+      expect.soft(geometry.terminal.bottom).toBeLessThanOrEqual(geometry.interaction.top + 1);
+      expect.soft(geometry.interaction.height).toBeLessThanOrEqual(420 * .3 + 1);
+      expect.soft(geometry.send.bottom).toBeLessThanOrEqual(420);
+      for (const button of await page.locator('#interaction-choices button').all()) {
+        await button.click({ trial: true });
+        const card = await page.locator('#interaction').boundingBox(), choice = await button.boundingBox();
+        expect(choice.y).toBeGreaterThanOrEqual(card.y);
+        expect(choice.y + choice.height).toBeLessThanOrEqual(card.y + card.height + 1);
+      }
+      expect(mac.actions.some(action => ['answer', 'input', 'key'].includes(action.action))).toBe(false);
+      expect(mac.errors).toEqual([]);
+      expect(errors).toEqual([]);
+    } finally { mac.close(); }
+  });
+}
+
+test('approval viewport caps a long card without stretching a short operation', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const state = approvalViewportState();
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const mac = await pair(page, baseURL, '', { state });
+  try {
+    await expect(page.locator('#interaction')).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    const long = await approvalViewportGeometry(page);
+    console.log(`REA-1192 natural-long ${testInfo.project.name}: ${JSON.stringify(long)}`);
+    expect(long.layoutHeight).toBe(844);
+    expect(long.visualHeight).toBe(844);
+    expect(Math.abs(long.interaction.height - 844 * .3)).toBeLessThan(1);
+    expect(long.output.height).toBeGreaterThanOrEqual(100);
+    expect(long.terminal.bottom).toBeLessThanOrEqual(long.interaction.top + 1);
+    expect(await page.locator('#interaction').evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath('approval-viewport-keyboard-down.png') });
+
+    state.prompt.operation = 'Inspect generated-file-1.txt';
+    await expect(page.locator('#interaction-operation')).toHaveText(state.prompt.operation);
+    const short = await approvalViewportGeometry(page);
+    await testInfo.attach('approval-natural-height-geometry', { body: JSON.stringify({ long, short }, null, 2), contentType: 'application/json' });
+    console.log(`REA-1192 natural ${testInfo.project.name}: ${JSON.stringify({ long, short })}`);
+    await page.screenshot({ path: testInfo.outputPath('approval-viewport-short-operation.png') });
+    expect(short.interaction.height).toBeLessThan(long.interaction.height - 1);
+    expect(await page.locator('#interaction').evaluate(el => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
+    expect(short.terminal.bottom).toBeLessThanOrEqual(short.interaction.top + 1);
+    expect(short.send.bottom).toBeLessThanOrEqual(844);
+    expect(mac.errors).toEqual([]);
+    expect(errors).toEqual([]);
+  } finally { mac.close(); }
+});
+
+for (const size of [{ width: 390, height: 844 }, { width: 844, height: 390 }]) for (const keys of [false, true]) {
+  test(`approval viewport scrolls at tiny heights in ${size.width}x${size.height} with terminal keys ${keys ? 'open' : 'closed'}`, async ({ page, baseURL }, testInfo) => {
+    await page.setViewportSize(size);
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    const mac = await pair(page, baseURL, '', { state: approvalViewportState() });
+    try {
+      await expect(page.locator('#interaction')).toBeVisible();
+      if (keys) await page.locator('#keys-toggle').click();
+      await page.locator('#message').focus();
+      await resizeVisualViewport(page, 200);
+      await page.evaluate(() => document.fonts.ready);
+      const controls = page.locator('#controls'), terminal = page.locator('#terminal');
+      expect(await controls.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+      await page.locator('.output').scrollIntoViewIfNeeded();
+      const output = await approvalViewportGeometry(page);
+      await testInfo.attach('approval-tiny-output-geometry', { body: JSON.stringify(output, null, 2), contentType: 'application/json' });
+      console.log(`REA-1192 tiny-output ${testInfo.project.name} keys=${keys}: ${JSON.stringify({ size, ...output })}`);
+      await page.screenshot({ path: testInfo.outputPath(`approval-viewport-tiny-output-keys-${keys ? 'open' : 'closed'}.png`) });
+      expect(output.layoutHeight).toBe(size.height);
+      expect(output.body.width).toBe(size.width);
+      expect(output.visualHeight).toBe(200);
+      expect(output.terminal.height).toBeGreaterThanOrEqual(100);
+      expect(output.terminal.top).toBeGreaterThanOrEqual(output.controls.top - 1);
+      expect(output.terminal.bottom).toBeLessThanOrEqual(output.controls.bottom + 1);
+      expect(output.terminal.bottom).toBeLessThanOrEqual(output.interaction.top + 1);
+      await terminal.evaluate(el => { el.scrollTop = el.scrollHeight; });
+      expect(await terminal.evaluate(el => el.scrollTop)).toBeGreaterThan(0);
+      await expect(terminal).toContainText('Output line 40');
+
+      for (const button of await page.locator('#interaction-choices button').all()) {
+        await button.click({ trial: true });
+        const card = await page.locator('#interaction').boundingBox(), choice = await button.boundingBox();
+        const viewport = await controls.boundingBox();
+        expect(choice.y).toBeGreaterThanOrEqual(Math.max(card.y, viewport.y) - 1);
+        expect(choice.y + choice.height).toBeLessThanOrEqual(Math.min(card.y + card.height, viewport.y + viewport.height) + 1);
+      }
+      if (keys) {
+        await page.getByRole('button', { name: 'Up arrow', exact: true }).click({ trial: true });
+        await page.locator('#keys button').last().click({ trial: true });
+      }
+      await page.locator('#message').fill('Generated response to the terminal question');
+      await page.locator('#send').click({ trial: true });
+      const input = await approvalViewportGeometry(page), message = await page.locator('#message').boundingBox();
+      const scrollTop = await controls.evaluate(el => el.scrollTop);
+      await testInfo.attach('approval-tiny-viewport-geometry', { body: JSON.stringify({ output, input, scrollTop }, null, 2), contentType: 'application/json' });
+      console.log(`REA-1192 tiny ${testInfo.project.name} keys=${keys}: ${JSON.stringify({ size, output, input, scrollTop })}`);
+      await page.screenshot({ path: testInfo.outputPath(`approval-viewport-tiny-keys-${keys ? 'open' : 'closed'}.png`) });
+      expect(message.y).toBeGreaterThanOrEqual(input.controls.top - 1);
+      expect(message.y + message.height).toBeLessThanOrEqual(input.controls.bottom + 1);
+      expect(input.send.top).toBeGreaterThanOrEqual(input.controls.top - 1);
+      expect(input.send.bottom).toBeLessThanOrEqual(Math.min(200, input.controls.bottom) + 1);
+      expect(scrollTop).toBeGreaterThan(0);
+      expect(mac.actions.some(action => ['answer', 'input', 'key'].includes(action.action))).toBe(false);
+      expect(mac.errors).toEqual([]);
+      expect(errors).toEqual([]);
+    } finally { mac.close(); }
+  });
+}
+
 test('loading earlier output keeps the text the reader was on in place', async ({ page, baseURL }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   let batch = 0;
