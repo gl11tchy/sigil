@@ -274,6 +274,73 @@ test('drafts, history position, and a keyboard-sized viewport stay usable', asyn
   } finally { mac.close(); }
 });
 
+function approvalViewportState(lines = 25) {
+  return {
+    tabs: [{ id: 'one', title: 'Generated layout review', status: 'working', provider: 'claudeCode',
+      processRunning: true, capabilities: { structuredApproval: false } }],
+    selectedTabID: 'one', terminal: Array.from({ length: 40 }, (_, i) => `Output line ${i + 1}: inspect the generated change.`).join('\n'),
+    prompt: { id: 'viewport-prompt', question: 'Do you want to proceed?', verified: false, style: 'menu',
+      operation: Array.from({ length: lines }, (_, i) => `Inspect generated-file-${i + 1}.txt`).join('\n'),
+      choices: [{ label: 'Yes', key: '1' }, { label: 'Yes, always', key: '2' },
+        { label: 'No, and tell the agent what to do differently', key: '3' }] },
+  };
+}
+
+async function resizeVisualViewport(page, height) {
+  // Emulate the visualViewport event the keyboard sends, preserving the full
+  // layout viewport. This is browser emulation, not a physical Safari keyboard.
+  await page.evaluate(height => {
+    Object.defineProperty(window.visualViewport, 'height', { configurable: true, value: height });
+    window.visualViewport.dispatchEvent(new Event('resize'));
+  }, height);
+  await expect(page.locator('body')).toHaveAttribute('data-compact', String(height < 600));
+  await expect.poll(() => page.evaluate(() => parseFloat(document.documentElement.style.getPropertyValue('--viewport-height')))).toBe(height);
+}
+
+async function approvalViewportGeometry(page) {
+  return page.evaluate(() => {
+    const box = selector => document.querySelector(selector).getBoundingClientRect().toJSON();
+    return { layoutHeight: innerHeight, visualHeight: visualViewport.height, body: box('body'), header: box('header'),
+      controls: box('#controls'), output: box('.output'), terminal: box('#terminal'), interaction: box('#interaction'),
+      compose: box('#compose'), send: box('#send'), keys: box('#keys') };
+  });
+}
+
+for (const keys of [false, true]) {
+  test(`approval viewport keeps output with terminal keys ${keys ? 'open' : 'closed'}`, async ({ page, baseURL }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    const mac = await pair(page, baseURL, '', { state: approvalViewportState() });
+    try {
+      await expect(page.locator('#interaction-heading')).toHaveText('Terminal controls');
+      if (keys) await page.locator('#keys-toggle').click();
+      await page.locator('#message').focus();
+      await resizeVisualViewport(page, 420);
+      await page.evaluate(() => document.fonts.ready);
+      const geometry = await approvalViewportGeometry(page);
+      await testInfo.attach('approval-viewport-geometry', { body: JSON.stringify(geometry, null, 2), contentType: 'application/json' });
+      console.log(`REA-1192 ${testInfo.project.name} keys=${keys}: ${JSON.stringify(geometry)}`);
+      await page.screenshot({ path: testInfo.outputPath(`approval-viewport-keys-${keys ? 'open' : 'closed'}.png`) });
+      expect.soft(geometry.layoutHeight).toBe(844);
+      expect.soft(geometry.visualHeight).toBe(420);
+      expect.soft(geometry.output.height).toBeGreaterThanOrEqual(100);
+      expect.soft(geometry.terminal.bottom).toBeLessThanOrEqual(geometry.interaction.top + 1);
+      expect.soft(geometry.interaction.height).toBeLessThanOrEqual(420 * .3 + 1);
+      expect.soft(geometry.send.bottom).toBeLessThanOrEqual(420);
+      for (const button of await page.locator('#interaction-choices button').all()) {
+        await button.click({ trial: true });
+        const card = await page.locator('#interaction').boundingBox(), choice = await button.boundingBox();
+        expect(choice.y).toBeGreaterThanOrEqual(card.y);
+        expect(choice.y + choice.height).toBeLessThanOrEqual(card.y + card.height + 1);
+      }
+      expect(mac.actions.some(action => ['answer', 'input', 'key'].includes(action.action))).toBe(false);
+      expect(mac.errors).toEqual([]);
+      expect(errors).toEqual([]);
+    } finally { mac.close(); }
+  });
+}
+
 test('loading earlier output keeps the text the reader was on in place', async ({ page, baseURL }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   let batch = 0;
