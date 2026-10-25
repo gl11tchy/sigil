@@ -7,6 +7,12 @@ const apns = capture
   ? { async send(request) { appendFileSync(capture, `${JSON.stringify(request)}\n`); return { status: 200 }; }, close() {} }
   : null;
 const relay = createRelay({ publicOrigin: 'http://localhost:3099', apns });
+// A native test can wait for the old host transport to close without sleeps or
+// inspecting processes. Record only a count marker, never headers or tickets.
+if (process.env.SIGIL_TEST_HOST_CLOSE_CAPTURE) relay.server.prependListener('upgrade', (req, socket) => {
+  if (new URL(req.url, 'http://localhost').searchParams.get('role') !== 'host') return;
+  socket.once('close', () => appendFileSync(process.env.SIGIL_TEST_HOST_CLOSE_CAPTURE, 'closed\n', { mode: 0o600 }));
+});
 // Native tests can deny allocation and later restore this same generated relay.
 // This is a fixture-only file, not a production environment setting.
 if (process.env.SIGIL_TEST_ALLOCATION_STATUS) {

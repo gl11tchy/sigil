@@ -98,6 +98,16 @@ must open in Safari so it uses that store. A standalone web app does not.
 Forget this Mac clears the phone's stored key; it does not revoke other copies of
 that credential. Use Disconnect on the Mac to revoke authorization.
 
+Disconnect clears the Mac's credential immediately, then best-effort tells its
+current relay room to revoke the registered routing ticket, even with no phone
+connected. The relay closes rooms sharing that ticket and retains at most 1,000
+in-memory hints for 30 days so a returning phone receives `unauthorized` before
+closing. These are routing hints, not independently authenticated device identity;
+device authentication remains end to end. A relay restart forgets the hints, and
+an unreachable relay cannot record one, so a phone may resume transient retries.
+Quitting or a network disconnect does not create a revocation hint. No tickets
+or control frames are logged or persisted by this mechanism.
+
 ## Push alerts
 
 Set `APNS_KEY` (the contents of the `.p8`, PEM or base64), `APNS_KEY_ID`,

@@ -463,10 +463,10 @@ final class RemoteControl {
         task?.cancel()
         task = nil
         stopWatching()
-        if revoke, let socket, let peer {
-            // The relay forwards this and closes the phone, which then stops
-            // reconnecting and asks for a new scan. A plain stop stays silent.
-            Self.send(Frame(peer: peer, error: "unauthorized"), thenClose: socket, network: network)
+        if revoke, let socket {
+            // Best effort only: local removal above never waits for the relay.
+            // The relay also retains a bounded hint for a phone that is away.
+            Self.send(Self.revocationFrames(peer: peer), thenClose: socket, network: network)
         } else {
             socket?.cancel(with: .goingAway, reason: nil)
             network?.invalidateAndCancel()
@@ -1079,11 +1079,25 @@ final class RemoteControl {
         try await socket.send(.string(String(decoding: bytes, as: UTF8.self)))
     }
 
-    private static func send(_ frame: Frame, thenClose socket: URLSessionWebSocketTask, network: URLSession?) {
-        let bytes = (try? JSONEncoder().encode(frame)) ?? Data()
-        socket.send(.string(String(decoding: bytes, as: UTF8.self))) { _ in
-            socket.cancel(with: .goingAway, reason: nil)
-            network?.invalidateAndCancel()
+    /// Older relays can still deliver the connected phone's existing refusal.
+    static func revocationFrames(peer: String?) -> [Frame] {
+        let hint = Frame(revoke: true)
+        return peer.map { [Frame(peer: $0, error: "unauthorized"), hint] } ?? [hint]
+    }
+
+    private static func send(_ frames: [Frame], thenClose socket: URLSessionWebSocketTask, network: URLSession?) {
+        Task {
+            defer {
+                socket.cancel(with: .goingAway, reason: nil)
+                network?.invalidateAndCancel()
+            }
+            // Captures only this old socket/session. No acknowledgement or retry.
+            for frame in frames {
+                do {
+                    let bytes = try JSONEncoder().encode(frame)
+                    try await socket.send(.string(String(decoding: bytes, as: UTF8.self)))
+                } catch { return }
+            }
         }
     }
 
@@ -1119,6 +1133,7 @@ final class RemoteControl {
         var hello: String?
         var data: String?
         var error: String?
+        var revoke: Bool?
         var pushToken: String?
         var pushEnvironment: String?
         var push: Push?
@@ -1131,7 +1146,7 @@ final class RemoteControl {
         init(
             type: String? = nil, route: String? = nil, peer: String? = nil, hello: String? = nil,
             data: String? = nil, error: String? = nil, pushToken: String? = nil, pushEnvironment: String? = nil,
-            push: Push? = nil, pushTokenCleared: Bool = false
+            push: Push? = nil, pushTokenCleared: Bool = false, revoke: Bool? = nil
         ) {
             self.type = type
             self.route = route
@@ -1139,6 +1154,7 @@ final class RemoteControl {
             self.hello = hello
             self.data = data
             self.error = error
+            self.revoke = revoke
             self.pushToken = pushToken
             self.pushEnvironment = pushEnvironment
             self.push = push
@@ -1146,7 +1162,7 @@ final class RemoteControl {
         }
 
         private enum CodingKeys: String, CodingKey {
-            case type, route, peer, hello, data, error, pushToken, pushEnvironment, push, ok, status, reason
+            case type, route, peer, hello, data, error, revoke, pushToken, pushEnvironment, push, ok, status, reason
         }
 
         func encode(to encoder: Encoder) throws {
@@ -1157,6 +1173,7 @@ final class RemoteControl {
             try c.encodeIfPresent(hello, forKey: .hello)
             try c.encodeIfPresent(data, forKey: .data)
             try c.encodeIfPresent(error, forKey: .error)
+            try c.encodeIfPresent(revoke, forKey: .revoke)
             if pushTokenCleared {
                 try c.encodeNil(forKey: .pushToken)
             } else {
