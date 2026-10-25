@@ -120,20 +120,19 @@ jobs:
           if-no-files-found: error
 
       - name: Build release bundle
-        if: github.event_name != 'pull_request'
-        env:
-          # GitHub macos-15 cannot currently produce the x86_64 half of a
-          # universal bundle (SigilMCP @main). Ship a host-arch zip instead.
-          SIGIL_ALLOW_THIN: "1"
-        run: Scripts/build-app.sh
+        # Verify both architectures before merge; publishing remains main-only.
+        run: |
+          Scripts/build-app.sh
+          for binary in Sigil sigil-mcp; do
+            echo "==> lipo dist/Sigil.app/Contents/MacOS/$binary -verify_arch arm64 x86_64"
+            lipo "dist/Sigil.app/Contents/MacOS/$binary" -verify_arch arm64 x86_64
+          done
 
       - name: Smoke-launch release bundle
-        if: github.event_name != 'pull_request'
         run: Scripts/smoke-launch.sh dist/Sigil.app
 
       - name: Zip the app
         id: zip_app
-        if: github.event_name != 'pull_request'
         run: ditto -c -k --keepParent dist/Sigil.app dist/Sigil.zip
 
       - name: Publish latest GitHub Release
