@@ -275,6 +275,27 @@ writes or removes provider history. Multiple app copies may atomically replace t
 disposable cache, and each copy revalidates identities. Custom-root stores persist
 only when an isolated index location is explicitly injected.
 
+Saved tabs that cannot reopen remain available through `AppModel.unrestoredTabs`
+in saved order, with their original entry, title and typed reason. A completed
+provider check retains its exact problem message. Missing folders and confirmed
+missing history are separate from pending provider/history checks, failed reads,
+unverified saved metadata and entries waiting behind an earlier recovery. These
+are model facts for the workbench consumer; this contract adds no new view.
+
+`retryUnrestoredTabs()` refreshes the retained providers and reloads history under
+the existing provider and scan generations. Only the latest Retry owns its hold,
+and restoration rereads current saved intents after each await. Forget removes
+only that provider/conversation/workspace's reopen intent and persists immediately;
+it never deletes provider history, notes, names or workspace files. An older Retry
+cannot restore forgotten intent. Original saved-order slots remain stable around
+already restored peers, including after other entries are forgotten. Legacy
+snapshots still default to Grok, and this projection has no row cap.
+
+Quit warns how many open tabs have no persistable native identity and will not
+reopen next time. Ended tabs can carry that warning without being described as
+running work. The warning does not invent an identity or change close/archive
+behavior, provider resumption or Codex's independent binding proof.
+
 The scanner keeps metadata and display fields, not full transcripts. Oversized or
 unsupported records can still require a folder fallback.
 Search covers discovered titles and project paths; the Mac sidebar also searches

@@ -6,6 +6,24 @@ import SigilKit
 import UniformTypeIdentifiers
 import os
 
+enum UnrestoredReason: Equatable, Sendable {
+    case providerUnavailable(String)
+    case folderMissing
+    case folderUnavailable(String)
+    case historyMissing
+    case historyUnavailable(String)
+    case checkingProviders
+    case historyLoading
+    case waitingForEarlierTab
+}
+
+struct UnrestoredTab: Identifiable, Equatable, Sendable {
+    let id: String
+    let entry: OpenTabsSnapshot.Entry
+    let title: String
+    let reason: UnrestoredReason
+}
+
 /// Window-level state: the open tabs, the session sidebar, and the actions the menus call.
 @MainActor
 @Observable
@@ -98,6 +116,8 @@ final class AppModel {
     private var isRestoringTabs = false
     /// Saved entries that are temporarily unavailable stay here instead of being erased.
     private var deferredOpenTabs: [OpenTabsSnapshot.Entry] = []
+    private var unrestoredReasons: [String: UnrestoredReason] = [:]
+    private var unrestoredRetry: (generation: UUID, reason: UnrestoredReason)?
     private var savedOpenTabOrder: [OpenTabsSnapshot.Entry] = []
     @ObservationIgnored private var restoredSavedTabOrder: [TerminalTab.ID: Int] = [:]
     private var deferredSelectedEntry: OpenTabsSnapshot.Entry?
@@ -3652,38 +3672,156 @@ final class AppModel {
 
     // MARK: - Persistence
 
+    /// All retained intents, in saved order. Availability facts come from restoration,
+    /// never a provider probe or history read while the view asks for rows.
+    var unrestoredTabs: [UnrestoredTab] {
+        var occurrences: [String: Int] = [:]
+        return deferredOpenTabs.map { entry in
+            let key = entryKey(entry)
+            // Row identity also preserves the original reference. Canonical aliases
+            // and repeated snapshot rows still share one Forget/restoration intent.
+            let reference = key + "\u{0}" + entry.cwd
+            let occurrence = occurrences[reference, default: 0]
+            occurrences[reference] = occurrence + 1
+            let known = store.sessions.first { $0.id == sidebarID(entry) && samePath($0.cwd, entry.cwd) }
+            let folder = URL(fileURLWithPath: entry.cwd).lastPathComponent
+            let title =
+                ConversationNaming.name(
+                    sessionID: sidebarID(entry), cwd: entry.cwd, in: settings.conversationNames, samePath: samePath)
+                ?? known?.summary.nilIfEmpty
+                ?? "\(entry.provider.name) · \(folder.isEmpty ? entry.cwd : folder)"
+            let reason: UnrestoredReason
+            if let retry = unrestoredRetry {
+                reason = retry.reason
+            } else if !checkingProviders.isEmpty {
+                reason = .checkingProviders
+            } else if store.isLoading {
+                reason = .historyLoading
+            } else {
+                reason = unrestoredReasons[key] ?? .historyLoading
+            }
+            return UnrestoredTab(
+                id: reference + "\u{0}" + String(occurrence), entry: entry, title: title, reason: reason)
+        }
+    }
+
+    /// One explicit attempt refreshes only the retained providers, then their history.
+    /// Awaited work never owns a copy of the intents: Forget remains authoritative.
+    func retryUnrestoredTabs() async {
+        loadOpenTabsSnapshotIfNeeded()
+        guard !Task.isCancelled, !deferredOpenTabs.isEmpty else { return }
+        let generation = UUID()
+        unrestoredRetry = (generation, .checkingProviders)
+        defer {
+            if unrestoredRetry?.generation == generation { unrestoredRetry = nil }
+        }
+        await refreshProviderInstallations(only: Set(deferredOpenTabs.map(\.provider)))
+        guard !Task.isCancelled else { return }
+        guard unrestoredRetry?.generation == generation else {
+            if unrestoredRetry == nil { restoreOpenTabs() }
+            return
+        }
+        guard !deferredOpenTabs.isEmpty else { return }
+        unrestoredRetry = (generation, .historyLoading)
+        await store.reload()
+        guard !Task.isCancelled else { return }
+        guard unrestoredRetry?.generation == generation else {
+            // An older forced scan can keep the store loading after the latest
+            // result publishes. Re-read current state once that older work drains.
+            if unrestoredRetry == nil { restoreOpenTabs() }
+            return
+        }
+        unrestoredRetry = nil
+        restoreOpenTabs()
+    }
+
+    /// Removes only reopen intent. History, names, notes and workspace files stay owned
+    /// by their existing stores. A row already restored or forgotten is a no-op.
+    func forgetUnrestoredTab(_ row: UnrestoredTab) {
+        guard let entry = deferredOpenTabs.first(where: { sameEntry($0, row.entry) }) else { return }
+        // Repeated/alias references to this same canonical intent must not survive
+        // Forget and reopen it later. Other providers and workspaces remain distinct.
+        deferredOpenTabs.removeAll { sameEntry($0, entry) }
+        unrestoredReasons[entryKey(entry)] = nil
+        if deferredSelectedEntry.map({ sameEntry($0, entry) }) == true {
+            clearDeferredSelection()
+        } else if deferredLegacySelectedSessionID == entry.sessionID,
+            !deferredOpenTabs.contains(where: { $0.sessionID == entry.sessionID })
+        {
+            deferredLegacySelectedSessionID = nil
+        }
+        // Keep the original order slots: restored peers still refer to their
+        // indexes, and a later Retry must remain behind those peers.
+        persistOpenTabs()
+    }
+
+    private func loadOpenTabsSnapshotIfNeeded() {
+        guard !didLoadOpenTabsSnapshot else { return }
+        didLoadOpenTabsSnapshot = true
+        let snapshot = settings.openTabs
+        deferredOpenTabs = snapshot.tabs
+        savedOpenTabOrder = snapshot.tabs
+        if let selectedCWD = snapshot.selectedCWD, let selectedID = snapshot.selectedSessionID {
+            deferredSelectedEntry = .init(
+                sessionID: selectedID, cwd: selectedCWD, provider: snapshot.selectedProvider ?? .grokBuild)
+            deferredLegacySelectedSessionID = nil
+        } else {
+            deferredSelectedEntry = nil
+            deferredLegacySelectedSessionID = snapshot.selectedSessionID
+        }
+    }
+
+    private func recordUnrestoredReason(_ reason: UnrestoredReason) {
+        for entry in deferredOpenTabs { unrestoredReasons[entryKey(entry)] = reason }
+    }
+
+    private enum RestorationPathStatus {
+        case present
+        case missing
+        case unavailable(String)
+    }
+
+    private static func restorationPathStatus(_ url: URL, directory: Bool) -> RestorationPathStatus {
+        var info = stat()
+        guard stat(url.path, &info) == 0 else {
+            let code = errno
+            if code == ENOENT || code == ENOTDIR { return .missing }
+            return .unavailable(NSError(domain: NSPOSIXErrorDomain, code: Int(code)).localizedDescription)
+        }
+        let expected = directory ? mode_t(S_IFDIR) : mode_t(S_IFREG)
+        guard info.st_mode & mode_t(S_IFMT) == expected else {
+            return .unavailable(directory ? "The saved path is not a folder." : "The saved path is not a regular file.")
+        }
+        return .present
+    }
+
     /// Reopen saved tabs whose session directories still exist. Never starts a
     /// `.new` session: a launch must not create junk conversations on disk.
     @ObservationIgnored private var restorationHistoryValidation: Task<Void, Never>?
 
     func restoreOpenTabs() {
-        if !didLoadOpenTabsSnapshot {
-            didLoadOpenTabsSnapshot = true
-            let snapshot = settings.openTabs
-            deferredOpenTabs = snapshot.tabs
-            savedOpenTabOrder = snapshot.tabs
-            if let selectedCWD = snapshot.selectedCWD, let selectedID = snapshot.selectedSessionID {
-                deferredSelectedEntry = .init(
-                    sessionID: selectedID, cwd: selectedCWD, provider: snapshot.selectedProvider ?? .grokBuild)
-                deferredLegacySelectedSessionID = nil
-            } else {
-                deferredSelectedEntry = nil
-                deferredLegacySelectedSessionID = snapshot.selectedSessionID
-            }
-        }
+        loadOpenTabsSnapshotIfNeeded()
+        guard unrestoredRetry == nil else { return }
         // Retained fresh results must not restore a later saved entry ahead
         // of one whose required replacement check is still pending.
         guard checkingProviders.isEmpty,
             !deferredOpenTabs.contains(where: { providerChecks.requiresRestorationCheck($0.provider) })
-        else { return }
+        else {
+            recordUnrestoredReason(.checkingProviders)
+            return
+        }
         // Native paths come from the initial history scan. Starting Grok first
         // would reorder a mixed saved snapshot before those paths can be known.
         // A completed (even failed) scan lets genuinely missing entries defer
         // individually without holding back the available conversations.
         if store.appliedScanSequence == 0, deferredOpenTabs.contains(where: { $0.provider != .grokBuild }) {
+            recordUnrestoredReason(.historyLoading)
             return
         }
-        if store.appliedScanSequence == 0, store.hasUnvalidatedHistory { return }
+        if store.appliedScanSequence == 0, store.hasUnvalidatedHistory {
+            recordUnrestoredReason(.historyLoading)
+            return
+        }
         let candidates = deferredOpenTabs
         let previousSelection = selectedTabID
         let hadSavedSelection = deferredSelectedEntry != nil || deferredLegacySelectedSessionID != nil
@@ -3691,6 +3829,8 @@ final class AppModel {
         isRestoringTabs = true
         defer {
             isRestoringTabs = false
+            let retained = Set(deferredOpenTabs.map { entryKey($0) })
+            unrestoredReasons = unrestoredReasons.filter { retained.contains($0.key) }
             persistOpenTabs()
         }
         var restoredSelection: TerminalTab.ID?
@@ -3704,12 +3844,18 @@ final class AppModel {
             // Restore the ready prefix immediately, but never let a later
             // success overtake an earlier saved tab with a retry still pending.
             if waitsForEarlierRetry || providerChecks.isRecovering(entry.provider) {
+                unrestoredReasons[entryKey(entry)] = waitsForEarlierRetry ? .waitingForEarlierTab : .checkingProviders
                 waitsForEarlierRetry = true
                 deferredOpenTabs.append(entry)
                 continue
             }
             let known = store.sessions.first { $0.id == sidebarID(entry) && samePath($0.cwd, entry.cwd) }
             if let known, !known.isHistoryValidated {
+                unrestoredReasons[entryKey(entry)] =
+                    store.hasPendingHistoryValidation
+                    ? .historyLoading
+                    : .historyUnavailable(
+                        store.loadError ?? store.historyNotice ?? "Saved conversation history has not been verified.")
                 waitsForEarlierRetry = true
                 deferredOpenTabs.append(entry)
                 if restorationHistoryValidation == nil, store.hasPendingHistoryValidation {
@@ -3718,9 +3864,9 @@ final class AppModel {
                     }
                     restorationHistoryValidation = Task { [weak self] in
                         guard let self else { return }
-                        let validated = await self.store.validatedSessions(for: savedSessions)
+                        _ = await self.store.validatedSessions(for: savedSessions)
                         self.restorationHistoryValidation = nil
-                        if !validated.isEmpty { self.restoreOpenTabs() }
+                        self.restoreOpenTabs()
                     }
                 }
                 continue
@@ -3730,10 +3876,31 @@ final class AppModel {
                 ? GrokPaths.sessionDirectory(cwd: entry.cwd, sessionID: entry.sessionID)
                 : known?.directory
             let workingDirectory = URL(fileURLWithPath: entry.cwd)
-            let historyExists = directory.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
-            guard historyExists, Self.isUsableDirectory(workingDirectory),
-                providerLaunchProblem(entry.provider) == nil
-            else {
+            let reason: UnrestoredReason?
+            if let problem = providerLaunchProblem(entry.provider) {
+                reason = .providerUnavailable(problem)
+            } else {
+                switch Self.restorationPathStatus(workingDirectory, directory: true) {
+                case .missing: reason = .folderMissing
+                case .unavailable(let message): reason = .folderUnavailable(message)
+                case .present:
+                    if let directory {
+                        switch Self.restorationPathStatus(directory, directory: entry.provider == .grokBuild) {
+                        case .present: reason = nil
+                        case .missing: reason = .historyMissing
+                        case .unavailable(let message): reason = .historyUnavailable(message)
+                        }
+                    } else if store.canPruneMissingProjects {
+                        reason = .historyMissing
+                    } else {
+                        reason = .historyUnavailable(
+                            store.loadError ?? store.historyNotice
+                                ?? "Saved conversation history could not be verified.")
+                    }
+                }
+            }
+            if let reason {
+                unrestoredReasons[entryKey(entry)] = reason
                 deferredOpenTabs.append(entry)
                 continue
             }
