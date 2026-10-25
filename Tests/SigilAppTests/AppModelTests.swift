@@ -27,7 +27,7 @@ struct AppModelTests {
         let model = fixture.model()
         defer { model.closeAllTabsAndWait() }
         model.open(saved)
-        let tab = try #require(model.tabs.first)
+        let tab = try #require(model.tabs.first, "Task ledger: \(model.taskLedgerProblem ?? "no reported problem")")
         #expect(tab.spec.model == "grok-4.7-build-fast")
         #expect(tab.spec.reasoningEffort == "xhigh")
         #expect(
@@ -739,8 +739,10 @@ struct AppModelTests {
         #expect(model.deleteConversation(makeSession(id: id, cwd: cwdA)))
 
         #expect(model.tabs.count == 1)
-        #expect(model.tabs[0].workingDirectory.resolvingSymlinksInPath().path == cwdB.path)
-        let taskID = try #require(model.taskID(for: model.tabs[0]))
+        let remaining = try #require(
+            model.tabs.first, "Task ledger: \(model.taskLedgerProblem ?? "no reported problem")")
+        #expect(remaining.workingDirectory.resolvingSymlinksInPath().path == cwdB.path)
+        let taskID = try #require(model.taskID(for: remaining))
         #expect(
             fixture.settings.openTabs.tabs == [
                 .init(sessionID: id, cwd: cwdB.path, model: "", effort: "", taskID: taskID)

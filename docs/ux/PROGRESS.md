@@ -1683,3 +1683,22 @@ unwraps, retaining both checks and every task/native/provider assertion. Searche
 focused fixtures for other nested Testing macros; none remain. Static formatting,
 strict lint and whitespace pass. Corrected exact-head CI remains prerequisite;
 no local native execution, skip/workflow change or merge approval.
+
+
+REA-1176 CI672 at faba454 completed failure (8m44s). Macro repair compiled;
+separate XCTest37 passed, and Swift Testing began running. All six provider-launch
+cases returned nil; AppModel's copied-session test then indexed empty tabs and
+crashed. No complete Swift Testing summary or ledger-suite runtime result; later
+gates did not execute. This is concrete execution progress beyond CI671, not a pass.
+
+Repair2 source diagnosis: storedPath compared POSIX canonical /private paths with
+Foundation standardizedFileURL spelling. Apple's path documentation demonstrates
+/private removal by standardization; this is a source-based diagnosis without a
+local native probe. Replace that comparison with lexical validation retaining
+absolute/private-alias/dot-component checks. Add a generated existing temporary
+workspace/store/serialization regression. Preserve the copied-session count/path/
+identity assertions and require its first element before indexing; add diagnostic
+ledger problem text to the initial open assertion. No test skipped or weakened.
+Static formatting/strict lint/whitespace pass; corrected CI must confirm the fix.
+Repository two-round-without-progress limit remains active; no local native run.
+Reference: https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/Strings/Articles/ManipulatingPaths.html

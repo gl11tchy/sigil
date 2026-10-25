@@ -147,6 +147,26 @@ struct TaskLedgerTests {
         #expect(ledger.entries.count == 1)
     }
 
+    @Test
+    func anExistingTemporaryWorkspaceSurvivesValidationAndSerialization() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ledger 'quoted' \(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = TaskLedgerStore()
+        let entry = try store.transaction { ledger in
+            try ledger.start(
+                .init(
+                    taskID: UUID().uuidString.lowercased(), provider: .codex,
+                    projectPath: root.path, workspacePath: root.path, branch: nil,
+                    conversation: nil, createdAt: Date()))
+        }
+        #expect(entry.workspacePath == GrokPaths.canonicalPath(root.path))
+        #expect(store.read().ledger.entries == [entry])
+        let decoded = try JSONDecoder().decode(TaskLedger.self, from: JSONEncoder().encode(store.read().ledger))
+        try decoded.validate()
+        #expect(decoded.entries == [entry])
+    }
+
     private func reference(_ provider: CLIProvider = .codex, cwd: String = "/generated/project")
         -> ProviderSessionReference
     {

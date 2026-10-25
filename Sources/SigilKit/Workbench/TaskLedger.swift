@@ -248,8 +248,13 @@ public struct TaskLedger: Codable, Equatable, Sendable {
         return path
     }
     private static func storedPath(_ path: String) -> Bool {
-        absolute(path) && URL(fileURLWithPath: path).standardizedFileURL.path == path
-            && physicalSystemPath(path) == path
+        guard absolute(path), physicalSystemPath(path) == path else { return false }
+        if path == "/" { return true }
+        // Foundation standardization may remove /private, undoing POSIX
+        // canonical identity. Validate stored spelling without another resolver.
+        return path.split(separator: "/", omittingEmptySubsequences: false).dropFirst().allSatisfy {
+            !$0.isEmpty && $0 != "." && $0 != ".."
+        }
     }
     private static func absolute(_ path: String) -> Bool {
         path.hasPrefix("/") && !path.utf8.contains(0) && path.utf8.count <= 16_384
