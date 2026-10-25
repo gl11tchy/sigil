@@ -1702,3 +1702,24 @@ ledger problem text to the initial open assertion. No test skipped or weakened.
 Static formatting/strict lint/whitespace pass; corrected CI must confirm the fix.
 Repository two-round-without-progress limit remains active; no local native run.
 Reference: https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/Strings/Articles/ManipulatingPaths.html
+
+
+REA-1176 CI673 at1e3318e completed failure (14m23s), with concrete progress:
+AppModelTests, TaskLedgerIntegrationTests and TaskLedgerTests passed, including
+all-provider launch/restoration/native-link/path regressions. Full Swift Testing
+completed1397 tests/117 suites with one issue; XCTest37 passed; browser260 passed/
+two existing skips. Prior nil-tab failure/crash is resolved. The sole remaining
+issue is simultaneousIndependentInstancesKeepEveryTask, caught NSPOSIXErrorDomain
+code2 (No such file or directory). All other store cases passed, including four
+commit phases, migration, corruption recovery, stale/future/symlink and append-only
+checks. App-hosted/debug-smoke/shipping gates did not run after Verify failed.
+
+The exact failing filesystem operation is unresolved. Add operation-level context
+while preserving NSError domain/code and capturing errno before Foundation error
+construction. Strengthen the concurrency fixture with an async two-writer start
+barrier and eight bounded fresh-ledger rounds; retain both successful-write and
+exact-row assertions. No error retry, swallowed failure, semantic locking change
+or claim that the race is fixed. This is one bounded diagnostic iteration after
+two repairs that each advanced execution; the two-round-without-progress limit
+remains active. Static formatting/strict lint/whitespace pass. PR191 remains held
+until concurrency is explained/resolved, exact-head CI passes and parent reviews.

@@ -235,7 +235,7 @@ public final class TaskLedgerStore: @unchecked Sendable {
         defer { close(parent) }
         let lockName = url.lastPathComponent + ".lock"
         let fd = openat(parent, lockName, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK, 0o600)
-        guard fd >= 0 else { throw posix() }
+        guard fd >= 0 else { throw posix("open lock", lockName) }
         defer { close(fd) }
         let info = try privateFile(fd)
         let deadline = ProcessInfo.processInfo.systemUptime + 1
@@ -272,12 +272,14 @@ public final class TaskLedgerStore: @unchecked Sendable {
             break
         }
         var fd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC)
-        guard fd >= 0 else { throw posix() }
+        guard fd >= 0 else { throw posix("open parent root") }
         do {
             for component in path.split(separator: "/").map(String.init) {
-                if create, mkdirat(fd, component, 0o700) != 0, errno != EEXIST { throw posix() }
+                if create, mkdirat(fd, component, 0o700) != 0, errno != EEXIST {
+                    throw posix("create parent component", component)
+                }
                 let next = openat(fd, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-                guard next >= 0 else { throw posix() }
+                guard next >= 0 else { throw posix("open parent component", component) }
                 close(fd)
                 fd = next
             }
@@ -297,7 +299,7 @@ public final class TaskLedgerStore: @unchecked Sendable {
         let fd = openat(parent, name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
         guard fd >= 0 else {
             if errno == ENOENT { return nil }
-            throw posix()
+            throw posix("open protocol file", name)
         }
         let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
         defer { try? handle.close() }
@@ -307,7 +309,9 @@ public final class TaskLedgerStore: @unchecked Sendable {
         }
         var data = Data()
         while data.count < Int(before.st_size) {
-            let chunk = try handle.read(upToCount: min(64 * 1024, Int(before.st_size) - data.count)) ?? Data()
+            let chunk: Data
+            do { chunk = try handle.read(upToCount: min(64 * 1024, Int(before.st_size) - data.count)) ?? Data() } catch
+            { throw context(error, operation: "read protocol file", target: name) }
             guard !chunk.isEmpty else { throw TaskLedger.Failure("The task ledger file was truncated during reading.") }
             data.append(chunk)
         }
@@ -324,15 +328,17 @@ public final class TaskLedgerStore: @unchecked Sendable {
     private func replace(_ data: Data, parent: Int32, name: String) throws {
         let temporary = ".task-ledger-\(UUID().uuidString).tmp"
         let fd = openat(parent, temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
-        guard fd >= 0 else { throw posix() }
+        guard fd >= 0 else { throw posix("create temporary file", temporary) }
         let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
         defer {
             try? handle.close()
             unlinkat(parent, temporary, 0)
         }
         _ = try privateFile(fd)
-        try handle.write(contentsOf: data)
-        guard fsync(fd) == 0 else { throw posix() }
+        do { try handle.write(contentsOf: data) } catch {
+            throw context(error, operation: "write temporary file", target: name)
+        }
+        guard fsync(fd) == 0 else { throw posix("sync temporary file", name) }
         let prepared = try privateFile(fd)
         var temporaryInfo = stat()
         var destination = stat()
@@ -346,9 +352,10 @@ public final class TaskLedgerStore: @unchecked Sendable {
                 throw TaskLedger.Failure("The task ledger destination is not a private regular file.")
             }
         } else if errno != ENOENT {
-            throw posix()
+            throw posix("inspect destination", name)
         }
-        guard renameat(parent, temporary, parent, name) == 0, fsync(parent) == 0 else { throw posix() }
+        guard renameat(parent, temporary, parent, name) == 0 else { throw posix("replace protocol file", name) }
+        guard fsync(parent) == 0 else { throw posix("sync parent directory", name) }
     }
 
     private func privateFile(_ fd: Int32) throws -> stat {
@@ -365,5 +372,18 @@ public final class TaskLedgerStore: @unchecked Sendable {
             && a.st_mtimespec.tv_sec == b.st_mtimespec.tv_sec && a.st_mtimespec.tv_nsec == b.st_mtimespec.tv_nsec
             && a.st_ctimespec.tv_sec == b.st_ctimespec.tv_sec && a.st_ctimespec.tv_nsec == b.st_ctimespec.tv_nsec
     }
-    private func posix() -> NSError { NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+    private func posix(_ operation: StaticString, _ target: String = "") -> NSError {
+        let code = errno
+        return context(
+            NSError(domain: NSPOSIXErrorDomain, code: Int(code)), operation: String(describing: operation),
+            target: target)
+    }
+    private func context(_ error: Error, operation: String, target: String) -> NSError {
+        let original = error as NSError
+        var info = original.userInfo
+        info[NSLocalizedDescriptionKey] =
+            "\(operation)\(target.isEmpty ? "" : " (\(target))"): \(original.localizedDescription)"
+        if let url { info[NSFilePathErrorKey] = url.path }
+        return NSError(domain: original.domain, code: original.code, userInfo: info)
+    }
 }

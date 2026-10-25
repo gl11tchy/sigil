@@ -24,17 +24,23 @@ struct TaskLedgerStoreTests {
     func simultaneousIndependentInstancesKeepEveryTask() async throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }
-        let url = fixture.url
-        try await withThrowingTaskGroup(of: String.self) { group in
-            for _ in 0..<2 {
-                group.addTask {
-                    try TaskLedgerStore(url: url).transaction { try $0.start(registration()) }.taskID
+        for round in 0..<8 {
+            let url = fixture.root.appendingPathComponent("round-\(round).json")
+            let start = ConcurrentStart()
+            try await withThrowingTaskGroup(of: String.self) { group in
+                for _ in 0..<2 {
+                    group.addTask {
+                        await start.waitForBoth()
+                        return try TaskLedgerStore(url: url).transaction { try $0.start(registration()) }.taskID
+                    }
                 }
+                var ids = Set<String>()
+                for try await id in group { ids.insert(id) }
+                #expect(ids.count == 2)
+                let status = TaskLedgerStore(url: url).read()
+                #expect(status.problem == nil)
+                #expect(Set(status.ledger.entries.map(\.taskID)) == ids)
             }
-            var ids = Set<String>()
-            for try await id in group { ids.insert(id) }
-            #expect(ids.count == 2)
-            #expect(Set(TaskLedgerStore(url: url).read().ledger.entries.map(\.taskID)) == ids)
         }
     }
 
@@ -184,6 +190,19 @@ struct TaskLedgerStoreTests {
         #expect(store.read().ledger == original)
     }
 
+    private actor ConcurrentStart {
+        private var waiting: [CheckedContinuation<Void, Never>] = []
+        func waitForBoth() async {
+            await withCheckedContinuation { continuation in
+                waiting.append(continuation)
+                if waiting.count == 2 {
+                    let ready = waiting
+                    waiting.removeAll()
+                    for continuation in ready { continuation.resume() }
+                }
+            }
+        }
+    }
     private struct InjectedFailure: Error {}
     private struct Fixture {
         let root: URL
