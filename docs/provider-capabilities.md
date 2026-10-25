@@ -115,6 +115,44 @@ This optional local gate requires installed CLIs; ordinary CI does not.
   change (REA-1351) does not change the checked baselines, parser, lifecycle or
   tab-binding identity rules.
 
+## Durable Sigil task identity
+
+`TaskLedger` gives every new tab a separate UUID before its child starts. The
+private, versioned `Library/Application Support/Sigil/tasks.json` store records
+provider, canonical project/workspace, observed worktree branch, creation time,
+title/archive metadata and the native conversation ID when verified. A terminal
+replacement carries the same task ID. Saved native resume entries add an optional
+task ID; older snapshots still decode and use the existing restoration checks.
+Tasks whose provider cannot resume do not become automatically restorable.
+
+Grok's app-chosen ID is known at launch. Claude's app-chosen argument remains
+pending in this ledger until exact validated native history is present. Codex
+annotation follows the existing verified process/file or explicit-link action
+above. Ledger IDs, legacy ownership strings and terminal titles never authorize
+a live native binding. An independently verified `/new` conversation gets another
+task while retaining the earlier record; a process restart alone does not.
+Two processes resuming one qualified conversation may share its task ID. Duplicate
+late claims require an explicit task ID rather than guessing from order.
+
+The legacy ownership list and immutable preference records remain readable and
+untouched for migration. Qualified native identity plus canonical workspace
+deduplicates migrations; unknown IDs stay pending. Existing names, pins, archives
+and notes keep their conversation-keyed preferences. Migration seeds new records
+once; later metadata changes update only the changed fields.
+
+Cooperating app copies reread under one bounded file lock before an update.
+Atomic primary/receipt/backup replacements retain committed identities. Missing,
+corrupt, unsupported or interrupted state exposes a read-only problem and blocks
+a new child launch. Recovery is offered only for a validated candidate that
+preserves known identities; the native recovery action first saves original
+bytes in private recovery files. A stale unproven backup or future schema cannot
+trigger legacy-only reconstruction or downgrade recovery. The sync/rename protocol
+and failure fixtures cover process interruption; they do not establish universal
+power-loss or uncooperative-writer guarantees.
+
+This is the REA-1176 model/store contract. REA-1177 still owns the consuming
+workbench view, and phone commands still use their existing addressing contract.
+
 ## Provider availability in New Session and Settings
 
 Both the inline one-click surface and the Options sheet show every provider's

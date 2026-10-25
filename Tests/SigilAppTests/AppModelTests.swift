@@ -740,7 +740,11 @@ struct AppModelTests {
 
         #expect(model.tabs.count == 1)
         #expect(model.tabs[0].workingDirectory.resolvingSymlinksInPath().path == cwdB.path)
-        #expect(fixture.settings.openTabs.tabs == [.init(sessionID: id, cwd: cwdB.path, model: "", effort: "")])
+        let taskID = try #require(model.taskID(for: model.tabs[0]))
+        #expect(
+            fixture.settings.openTabs.tabs == [
+                .init(sessionID: id, cwd: cwdB.path, model: "", effort: "", taskID: taskID)
+            ])
         #expect(fixture.settings.openTabs.selectedCWD == cwdB.path)
         model.closeAllTabsAndWait()
     }

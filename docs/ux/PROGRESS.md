@@ -1619,3 +1619,44 @@ cancelled during Verify before pushing this source correction. No native result
 or pass is claimed from that run. The next head waits for cancellation readback
 before admission; gates remain strictly serial. Static format/lint/whitespace
 checks pass after the correction. Required implementation CI/review still pending.
+
+
+### REA-1176 — durable task ledger implementation, CI pending · 2026-10-25
+
+Sole serial worker, isolated `feat/rea-1176-task-ledger` from reviewed merged main
+`55dff7f870c664be0778b9668db8ea7bbc99abc3`. Prior REA-1240/PR189 is Done after
+parent source review and exact-head CI667; main CI668 passed. Official build668.1
+was separately installed/read back as1.0.0(413), preserving build406 backups;
+no running-process/manual UX claim. PR162/183 holds and other work remain intact.
+
+Normal PR191 baseline `d65c2fcd5fdae9f010a1ceb6b05cd59c4495c133` failed CI669
+(40153842882,8m16s) as intended: `TaskLedgerTests.swift:11 cannot find TaskLedger
+in scope`, plus cascading type errors. Actual checkout09ff5e92, based onmain55dff7.
+Browser260 passed/two existing skips; native runtime/later gates did not execute.
+This is missing-feature compile-time evidence, not runtime customer data-loss proof.
+
+Local implementation adds the versioned pure ledger and atomic private JSON store,
+qualified identity/idempotent retained-source migration, bounded cross-copy locking,
+commit receipt/backup and explicit validated recovery preserving original bytes.
+AppModel registers durably before child start, retains taskID through replacements
+and saved snapshots, annotates only existing validated native proof, and exposes
+storage failures/read-only restoration reasons. Grok ID is immediately known;
+Claude awaits exact validated history; Codex binding rules are unchanged. Verified
+new conversations retain old tasks; restarts alone never invent one. Metadata
+updates merge changed fields, retaining existing conversation-keyed preferences.
+No consuming workbench view or phone protocol/capability change.
+
+Generated focused tests cover serialization/pre-output IDs, duplicate/provider/cwd
+identity, unknown legacy IDs, repeated/interrupted migration, each commit boundary,
+failed writes, independent/concurrent stores, two app models/processes sharing a
+task, native link/history proof, restart/restoration, corrupt/future/unsafe files
+and explicit recovery preserving post-migration tasks. Worktree branch inspection
+uses bounded read-only Git metadata. One existing snapshot assertion adds the
+actual task ID while preserving all earlier native/path/model/effort assertions.
+
+Static swift-format/strict lint/whitespace checks pass. Compilation/runtime and
+integrated required CI remain pending, CI-only. PR191 remains DO NOT MERGE until
+passing exact-head CI and Tediore's final source/comments review. No local native
+build/test, process enumeration, paid/personal provider data, extra worker,
+workflow/protection/security/access change or overlapping gate. Original ledger
+bytes are preserved as an exact prefix; no manual runtime or power-loss claim.

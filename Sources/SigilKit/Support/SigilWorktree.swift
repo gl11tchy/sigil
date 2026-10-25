@@ -62,6 +62,18 @@ public enum SigilWorktree {
         return nil
     }
 
+    /// A workspace fact, never native conversation proof. Missing/deleted or
+    /// detached worktrees retain their ledger record with an unknown branch.
+    public static func branch(at directory: URL, root: URL = root) -> String? {
+        guard projectPath(of: GrokPaths.canonicalPath(directory.path), root: root) != nil,
+            let result = GitOutput.run(
+                git: URL(fileURLWithPath: "/usr/bin/git"),
+                arguments: ["-C", directory.path, "symbolic-ref", "--short", "-q", "HEAD"],
+                timeout: .seconds(1)), result.status == 0
+        else { return nil }
+        return result.text.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
+    }
+
     /// True when `directory` or a folder above it holds a `.git` entry.
     public static func isInRepository(_ directory: URL) -> Bool {
         nearestRepository(directory) != nil

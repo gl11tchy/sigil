@@ -447,6 +447,20 @@ final class AppSettings {
         return (ids, readable)
     }
 
+    /// Keep both legacy sources readable during the task-ledger migration.
+    /// An incomplete source stays pending; its IDs are never a replacement ledger.
+    var taskLedgerMigrationSource: (ids: [String], readable: Bool) {
+        let records = storedSigilConversationRecords()
+        let object = defaults.object(forKey: Key.sigilConversations)
+        let decoded = defaults.data(forKey: Key.sigilConversations).flatMap {
+            try? JSONDecoder().decode([String].self, from: $0)
+        }
+        return (
+            Array(Set(sigilConversations + records.ids + (decoded ?? []))).sorted(),
+            records.readable && (object == nil || decoded != nil)
+        )
+    }
+
     /// Ownership preferences already contain sidebar IDs, including provider
     /// prefixes. No history lookup, cwd match, provider validation or notes scan.
     /// Reconciliation after completion recovers failed actions and other copies.
