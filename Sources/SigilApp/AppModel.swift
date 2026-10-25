@@ -2781,7 +2781,10 @@ final class AppModel {
                 showHistoryValidationError()
                 return
             }
-            guard session.isHistoryValidated else {
+            guard session.isHistoryValidated,
+                entry.provider != .grokBuild
+                    || !store.isGrokHistoryUncertain(for: session)
+            else {
                 showHistoryValidationError()
                 return
             }
