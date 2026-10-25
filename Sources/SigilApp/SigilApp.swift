@@ -242,6 +242,11 @@ struct GrokCommands: Commands {
             Button("Close Tab") { launch.whenReady(Self.closeTabOrKeyWindow) }
                 .keyboardShortcut("w", modifiers: .command)
                 .disabled(model?.tabs.isEmpty ?? true)
+            Button("Reopen Closed Tab") {
+                launch.whenReady { model in Task { await model.reopenClosedTab() } }
+            }
+            .keyboardShortcut("t", modifiers: [.command, .shift])
+            .disabled(!(model?.canReopenClosedTab ?? false))
             Divider()
             Button("Export Transcript…") {
                 launch.whenReady { $0.exportSelectedTranscript() }
