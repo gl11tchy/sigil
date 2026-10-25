@@ -337,7 +337,7 @@ struct RightPanelTests {
         #expect(RightPanel(defaults: defaults).width == RightPanel.minWidth)
     }
 
-    @Test @MainActor func notesTellOtherProvidersThatNotesAreForGrokBuild() {
+    @Test @MainActor func notesExplainMissingIdentityOrUnsupportedProvider() {
         let suite = "RightPanelTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -356,12 +356,32 @@ struct RightPanelTests {
             )
         }
 
-        #expect(
-            RightPanelView.notesPlaceholder(for: tab(.claudeCode))
-                == "Notes are available for Grok Build sessions.")
-        #expect(
-            RightPanelView.notesPlaceholder(for: tab(.grokBuild))
-                == "Open a conversation to keep notes on it.")
+        let cases: [(CLIProvider, String)] = [
+            (.claudeCode, "Notes need a verified conversation identity from Claude Code."),
+            (.codex, "Notes need a verified conversation identity from Codex."),
+            (.grokBuild, "Notes need a verified conversation identity from Grok Build."),
+            (.devin, "Devin does not report a conversation Sigil can keep notes on."),
+            (.cursor, "Cursor does not report a conversation Sigil can keep notes on."),
+            (.kimi, "Kimi Code does not report a conversation Sigil can keep notes on."),
+        ]
+        for (provider, expected) in cases {
+            let pending = tab(provider)
+            #expect(pending.sessionID == nil)
+            #expect(RightPanelView.notesPlaceholder(for: pending) == expected)
+            #expect(pending.sessionReference == nil)
+        }
+
+        let id = UUID()
+        let grok = TerminalTab(
+            spec: GrokLaunchSpec(
+                executable: URL(fileURLWithPath: "/usr/bin/true"),
+                workingDirectory: FileManager.default.temporaryDirectory,
+                mode: .new(sessionID: id), provider: .grokBuild
+            ),
+            settings: settings
+        )
+        #expect(grok.sessionID == id.uuidString.lowercased())
+        #expect(grok.capabilities.notes)
         #expect(
             RightPanelView.notesPlaceholder(for: nil)
                 == "Open a conversation to keep notes on it.")

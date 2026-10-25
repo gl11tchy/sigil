@@ -1619,3 +1619,58 @@ cancelled during Verify before pushing this source correction. No native result
 or pass is claimed from that run. The next head waits for cancellation readback
 before admission; gates remain strictly serial. Static format/lint/whitespace
 checks pass after the correction. Required implementation CI/review still pending.
+
+
+## REA-1262 — capability-based Notes placeholder · 2026-10-25
+
+The sole serial worker selected this existing audited, dependency-free XS copy
+correction on current main `55dff7f870c664be0778b9668db8ea7bbc99abc3`.
+REA-1176/PR191 remains stopped and unmerged at `767fc8848ae78a75f65661a2477e4d5491da0a66`
+with the concurrent-store lock-open ENOENT unresolved; no further ledger edit or
+CI run. REA-1177/1187 remain excluded. PR162/183 holds and installed verified
+main build413 remain unchanged. Fresh active-task metadata showed only this
+Sigil worker; GitHub active/queued run lists were empty before implementation.
+
+Source reproduction against that exact main: the Notes placeholder and its
+existing Claude --continue test say notes are Grok-only, while provider
+capabilities enable notes for Grok, Claude Code and Codex. This is source/copy
+evidence, not an observed runtime/customer-impact claim.
+
+The placeholder now distinguishes a notes-capable provider awaiting a verified
+conversation identity from a provider without notes. Names use CLIProvider.name;
+no-tab guidance is retained. Focused existing RightPanelTests now cover all six
+providers with pending identities and assert the text does not invent an ID;
+Grok's assigned native ID still enables notes. The notes-editor branch is
+byte-identical to main. Identity matching, note keys, native binding, capability
+definitions and persistence are unchanged; this does not implement REA-1221 or
+use the unfinished task ledger.
+
+Targeted Swift format/strict lint and whitespace checks passed. The static
+comparison verified the unchanged editor branch and identity/store files. Native
+RightPanelTests and the integrated gate remain CI-only and pending; results will
+be recorded on the PR and existing Linear issue without claiming local execution.
+The real-app renamed-debug-bundle AX/window-ID screenshot criterion is explicitly
+unverified under the preserved held routes; CI is not a substitute. No local
+native build/test, process enumeration, permission request, personal provider
+data, extra worker, workflow/security/access change, distribution or app update.
+Stop before merge for parent final source/current-comments review and exact-head CI.
+
+
+### REA-1262 CI675 failure and fixture repair1 · 2026-10-25
+
+CI675 (`40160198207`) at `85270dda94c3f9ec9376f251374b07f712c831c3`
+completed failure in 8m15s. Checkout log confirms `62482e7feccf123439e7154fd3ba9ceefa7071de`;
+its expected parents and identical tree `c2d1467daa8752043d5cacfd9cdf37c9bd8a5265`
+were verified through GitHub. Sidereal Node309 and Site58 passed; browser260
+passed with two existing skips. Production Sigil linked. Native tests did not
+execute: the new Grok fixture omitted the required `sessionID:` label in
+`.new(id)` at RightPanelTests.swift:379. Later hosted/smoke/iPhone/shipping gates
+did not run. This is a test compilation error, not a product runtime result.
+
+Repair1 adds only that argument label plus this evidence; production and all
+assertions remain unchanged. The declared enum case was read directly. Strict
+format lint and whitespace pass. The corrected head must receive its own CI;
+no pass or parent approval is inferred. No local native test/build or rerun of
+the unchanged failure. The repository two-round-without-progress limit remains
+active. Real-app AX/window-ID acceptance stays unverified; PR162/183/191 holds
+and installed main build413 remain untouched.
