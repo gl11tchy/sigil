@@ -1654,3 +1654,23 @@ unverified under the preserved held routes; CI is not a substitute. No local
 native build/test, process enumeration, permission request, personal provider
 data, extra worker, workflow/security/access change, distribution or app update.
 Stop before merge for parent final source/current-comments review and exact-head CI.
+
+
+### REA-1262 CI675 failure and fixture repair1 · 2026-10-25
+
+CI675 (`40160198207`) at `85270dda94c3f9ec9376f251374b07f712c831c3`
+completed failure in 8m15s. Checkout log confirms `62482e7feccf123439e7154fd3ba9ceefa7071de`;
+its expected parents and identical tree `c2d1467daa8752043d5cacfd9cdf37c9bd8a5265`
+were verified through GitHub. Sidereal Node309 and Site58 passed; browser260
+passed with two existing skips. Production Sigil linked. Native tests did not
+execute: the new Grok fixture omitted the required `sessionID:` label in
+`.new(id)` at RightPanelTests.swift:379. Later hosted/smoke/iPhone/shipping gates
+did not run. This is a test compilation error, not a product runtime result.
+
+Repair1 adds only that argument label plus this evidence; production and all
+assertions remain unchanged. The declared enum case was read directly. Strict
+format lint and whitespace pass. The corrected head must receive its own CI;
+no pass or parent approval is inferred. No local native test/build or rerun of
+the unchanged failure. The repository two-round-without-progress limit remains
+active. Real-app AX/window-ID acceptance stays unverified; PR162/183/191 holds
+and installed main build413 remain untouched.

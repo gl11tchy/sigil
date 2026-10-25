@@ -376,7 +376,7 @@ struct RightPanelTests {
             spec: GrokLaunchSpec(
                 executable: URL(fileURLWithPath: "/usr/bin/true"),
                 workingDirectory: FileManager.default.temporaryDirectory,
-                mode: .new(id), provider: .grokBuild
+                mode: .new(sessionID: id), provider: .grokBuild
             ),
             settings: settings
         )
