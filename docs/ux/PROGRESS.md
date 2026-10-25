@@ -1692,3 +1692,12 @@ remain unchanged. No local native execution, unchanged rerun or softened test.
 Native runtime result awaits corrected exact-head CI. One repair round is
 recorded; repository two-round-without-progress stop condition remains active.
 Parent final source/current-comment review remains before merge.
+
+
+## REA-1200 — Notification navigation baseline (2026-10-25)
+
+- Sole serial worker; isolated `fix/rea-1200-notification-navigation` worktree from current main `70d7923605ae3cb4e8dc512f12f655fcaf0c419d`. Fresh open PR/comments, Linear dependencies/ownership and task/CI state checked; no blocker or concurrent work. PR162/183/191/192 holds and installed official build416 remain unchanged.
+- The existing native simulator suite can capture the changed SessionScreen and retain PNG attachments in CI results; the established legacy xcresult export route reads generated artifacts without a local app build or AX/process route. REA-1200 has no dependencies or mandatory physical-device criterion.
+- Baseline regression opens a generated missing tab on a fully connected fake Mac, expects the closed-session message and no select command, and captures the actual simulator view. Production is unchanged. Execution remains CI-only; expected failure has not yet been observed.
+- Scope: buffer the latest valid pre-attach notification, keep pending navigation bound to its Mac/connection generation, resolve absence only from a complete authenticated tab list, and preserve unknown-Mac protection. No real notification credentials, provider data, physical phone, deployment or app replacement.
+- Stop for parent final exact-head source/current-comments review and passing required CI before merge. Two repair rounds without progress stop the branch.

@@ -58,6 +58,31 @@ final class NativeFlowTests: XCTestCase {
         XCTAssertEqual(store.errorMessage, "Pair this Mac again before opening its session.")
     }
 
+    func testNotificationForClosedSessionShowsVerifiedMissingMessage() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        let original = fixture.store.selectedTabID
+        fixture.store.open(tabID: "closed-notification-tab", macID: fixture.store.activeMacID)
+        XCTAssertEqual(fixture.store.errorMessage, "That session is closed on localhost.")
+        XCTAssertEqual(fixture.store.selectedTabID, original)
+        XCTAssertFalse(fixture.mac.requests.contains { $0.action == "select" && $0.tabID == "closed-notification-tab" })
+
+        let controller = UIHostingController(rootView: SessionScreen().environment(fixture.store))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        try await Task.sleep(for: .milliseconds(350))
+        controller.view.layoutIfNeeded()
+        let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
+        let image = renderer.image { context in window.layer.render(in: context.cgContext) }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "REA-1200 closed notification session"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testReconnectCannotMoveDraftToUnrelatedConversation() throws {
         let store = RemoteStore(isDemo: true)
         let connection = RemoteConnection()
