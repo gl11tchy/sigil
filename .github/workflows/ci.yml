@@ -124,8 +124,8 @@ jobs:
         run: |
           Scripts/build-app.sh
           for binary in Sigil sigil-mcp; do
-            echo "==> lipo -verify_arch arm64 x86_64 dist/Sigil.app/Contents/MacOS/$binary"
-            lipo -verify_arch arm64 x86_64 "dist/Sigil.app/Contents/MacOS/$binary"
+            echo "==> lipo dist/Sigil.app/Contents/MacOS/$binary -verify_arch arm64 x86_64"
+            lipo "dist/Sigil.app/Contents/MacOS/$binary" -verify_arch arm64 x86_64
           done
 
       - name: Smoke-launch release bundle

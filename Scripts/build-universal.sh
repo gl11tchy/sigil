@@ -42,7 +42,7 @@ for architecture in arm64 x86_64; do
       echo "error: missing $product output ($architecture): $products/$product" >&2
       exit 1
     fi
-    "$LIPO" -verify_arch "$architecture" "$products/$product"
+    "$LIPO" "$products/$product" -verify_arch "$architecture"
   done
   if [[ "$architecture" == arm64 ]]; then
     ARM_PRODUCTS="$products"
@@ -54,8 +54,8 @@ done
 for product in Sigil sigil-mcp; do
   "$LIPO" -create "$ARM_PRODUCTS/$product" "$INTEL_PRODUCTS/$product" -output "$OUTPUT/$product"
   chmod +x "$OUTPUT/$product"
-  echo "==> lipo -verify_arch arm64 x86_64 $OUTPUT/$product"
-  "$LIPO" -verify_arch arm64 x86_64 "$OUTPUT/$product"
+  echo "==> lipo $OUTPUT/$product -verify_arch arm64 x86_64"
+  "$LIPO" "$OUTPUT/$product" -verify_arch arm64 x86_64
   "$LIPO" -info "$OUTPUT/$product"
 done
 SUCCESS=1

@@ -6,46 +6,68 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const helper = new URL('../../Scripts/build-universal.sh', import.meta.url);
-const swift = `#!/usr/bin/env python3
-import json,os,sys
-from pathlib import Path
-a=sys.argv[1:]
-with open(os.environ['SIGIL_TEST_TRACE'],'a') as f:f.write(json.dumps({'tool':'swift','args':a})+'\\n')
-assert a[0]=='build' and a.count('--arch')==1
-arch=a[a.index('--arch')+1]
-assert arch in ['arm64','x86_64']
-assert a[a.index('--build-system')+1]=='native'
-assert a[a.index('-c')+1]=='release'
-products=Path(a[a.index('--scratch-path')+1])/'products with spaces'
-if '--show-bin-path' in a:
- print(products)
- sys.exit(0)
-if os.environ.get('SIGIL_TEST_FAIL_ARCH')==arch:
- print('generated '+arch+' compile failure',file=sys.stderr)
- sys.exit(42)
-products.mkdir(parents=True,exist_ok=True)
-for name in ['Sigil','sigil-mcp']:
- if os.environ.get('SIGIL_TEST_MISSING_MCP')==arch and name=='sigil-mcp':continue
- value='arm64' if os.environ.get('SIGIL_TEST_WRONG_ARCH')==arch else arch
- p=products/name;p.write_text(json.dumps({'slices':[value],'product':name,'fresh':True}));p.chmod(0o755)
+// Shell fakes avoid fourteen Python startups per successful build. Their input
+// grammar follows lipo's captured CI usage, including input-first -verify_arch.
+const swift = `#!/bin/bash
+set -euo pipefail
+printf swift >> "$SIGIL_TEST_TRACE"
+printf '\\t%s' "$@" >> "$SIGIL_TEST_TRACE"
+printf '\\n' >> "$SIGIL_TEST_TRACE"
+architecture=""; products=""; configuration=""; build_system=""; show=0
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    build) shift ;;
+    -c) configuration="$2"; shift 2 ;;
+    --build-system) build_system="$2"; shift 2 ;;
+    --arch) [[ -z "$architecture" ]] || exit 1; architecture="$2"; shift 2 ;;
+    --scratch-path) products="$2/products with spaces"; shift 2 ;;
+    --show-bin-path) show=1; shift ;;
+    *) exit 1 ;;
+  esac
+done
+[[ "$configuration" == release && "$build_system" == native && -n "$products" ]]
+[[ "$architecture" == arm64 || "$architecture" == x86_64 ]]
+if [[ "$show" == 1 ]]; then printf '%s\\n' "$products"; exit 0; fi
+if [[ "\${SIGIL_TEST_FAIL_ARCH:-}" == "$architecture" ]]; then
+  printf 'generated %s compile failure\\n' "$architecture" >&2; exit 42
+fi
+mkdir -p "$products"
+for product in Sigil sigil-mcp; do
+  if [[ "\${SIGIL_TEST_MISSING_MCP:-}" == "$architecture" && "$product" == sigil-mcp ]]; then continue; fi
+  slice="$architecture"
+  if [[ "\${SIGIL_TEST_WRONG_ARCH:-}" == "$architecture" ]]; then slice=arm64; fi
+  printf '%s\\nfresh\\n' "$slice" > "$products/$product"
+  chmod +x "$products/$product"
+done
 `;
-const lipo = `#!/usr/bin/env python3
-import json,os,sys
-from pathlib import Path
-a=sys.argv[1:]
-with open(os.environ['SIGIL_TEST_TRACE'],'a') as f:f.write(json.dumps({'tool':'lipo','args':a})+'\\n')
-if a[0]=='-verify_arch':
- data=json.loads(Path(a[-1]).read_text())
- sys.exit(0 if set(a[1:-1])<=set(data['slices']) else 1)
-if a[0]=='-create':
- output=Path(a[a.index('-output')+1])
- if os.environ.get('SIGIL_TEST_MERGE_FAIL')==output.name:sys.exit(43)
- data=[json.loads(Path(p).read_text()) for p in a[1:a.index('-output')]]
- assert all(x['fresh'] for x in data)
- output.write_text(json.dumps({'slices':[s for x in data for s in x['slices']],'product':output.name}))
- output.chmod(0o755)
-elif a[0]=='-info':print('generated lipo info: arm64 x86_64')
-else:raise Exception('unexpected lipo args: '+str(a))
+const lipo = `#!/bin/bash
+set -euo pipefail
+printf lipo >> "$SIGIL_TEST_TRACE"
+printf '\\t%s' "$@" >> "$SIGIL_TEST_TRACE"
+printf '\\n' >> "$SIGIL_TEST_TRACE"
+case "$1" in
+  -create)
+    shift; slices=""
+    while [[ "$1" != -output ]]; do
+      { IFS= read -r part; IFS= read -r freshness; } < "$1"
+      [[ "$freshness" == fresh ]]
+      slices="\${slices:+$slices }$part"
+      shift
+    done
+    output="$2"
+    if [[ "\${SIGIL_TEST_MERGE_FAIL:-}" == "\${output##*/}" ]]; then exit 43; fi
+    printf '%s\\nfresh\\n' "$slices" > "$output"
+    chmod +x "$output"
+    ;;
+  -info) printf 'generated lipo info: arm64 x86_64\\n' ;;
+  *)
+    input="$1"; shift
+    if [[ "$1" != -verify_arch ]]; then echo 'expected input before -verify_arch' >&2; exit 64; fi
+    shift
+    IFS= read -r slices < "$input"
+    for architecture in "$@"; do [[ " $slices " == *" $architecture "* ]] || exit 1; done
+    ;;
+esac
 `;
 
 function fixture(t) {
@@ -61,24 +83,29 @@ function fixture(t) {
   writeFileSync(join(tools, 'swift'), swift, { mode: 0o755 });
   writeFileSync(join(tools, 'lipo'), lipo, { mode: 0o755 });
   writeFileSync(join(tools, 'xcrun'), '#!/bin/bash\n[[ "$*" == "--find lipo" ]] || exit 1\nprintf "%s\\n" "$SIGIL_TEST_LIPO"\n', { mode: 0o755 });
-  const trace = join(directory, 'trace.jsonl');
+  const trace = join(directory, 'trace.tsv');
   // A failed compile must not make stale cached outputs eligible for packaging.
   for (const arch of ['arm64', 'x86_64']) {
     const products = join(root, '.build/universal', arch, 'products with spaces');
     mkdirSync(products, { recursive: true });
     for (const name of ['Sigil', 'sigil-mcp']) {
-      writeFileSync(join(products, name), JSON.stringify({ slices: [arch], product: name, fresh: false }), { mode: 0o755 });
+      writeFileSync(join(products, name), arch + '\nstale\n', { mode: 0o755 });
     }
   }
   return {
-    root, output,
+    root, output, tools,
     run(extra = {}) {
       return spawnSync('bash', [join(scripts, 'build-universal.sh'), output], {
         cwd: directory, encoding: 'utf8', timeout: 10000,
         env: { ...process.env, PATH: tools + ':' + process.env.PATH, SIGIL_TEST_TRACE: trace, SIGIL_TEST_LIPO: join(tools, 'lipo'), ...extra },
       });
     },
-    trace() { return readFileSync(trace, 'utf8').trim().split('\n').map(JSON.parse); },
+    trace() {
+      return readFileSync(trace, 'utf8').trimEnd().split('\n').map(line => {
+        const [tool, ...args] = line.split('\t');
+        return { tool, args };
+      });
+    },
   };
 }
 
@@ -88,7 +115,7 @@ test('universal builder compiles isolated native slices and joins both executabl
   assert.equal(result.error, undefined);
   assert.equal(result.status, 0, result.stdout + result.stderr);
   for (const product of ['Sigil', 'sigil-mcp']) {
-    assert.deepEqual(JSON.parse(readFileSync(join(f.output, product), 'utf8')).slices, ['arm64', 'x86_64']);
+    assert.deepEqual(readFileSync(join(f.output, product), 'utf8').split('\n')[0].split(' '), ['arm64', 'x86_64']);
   }
   const commands = f.trace();
   const builds = commands.filter(x => x.tool === 'swift' && !x.args.includes('--show-bin-path'));
@@ -97,7 +124,7 @@ test('universal builder compiles isolated native slices and joins both executabl
   const scratch = builds.map(x => x.args[x.args.indexOf('--scratch-path') + 1]);
   assert.notEqual(scratch[0], scratch[1]);
   assert.ok(scratch.every(x => x.startsWith(f.root + '/.build/universal/')));
-  const verifies = commands.filter(x => x.tool === 'lipo' && x.args[0] === '-verify_arch');
+  const verifies = commands.filter(x => x.tool === 'lipo' && x.args[1] === '-verify_arch');
   assert.equal(verifies.filter(x => x.args.includes('arm64') && x.args.includes('x86_64')).length, 2);
 });
 
@@ -145,7 +172,7 @@ test('CI requires universal bundles before merge and keeps publication main-push
   const publish = steps.find(x => x.split('\n')[0] === 'Publish latest GitHub Release');
   assert.match(publish, /if: github.event_name == 'push' && github.ref == 'refs\/heads\/main'/);
   const build = steps.find(x => x.split('\n')[0] === 'Build release bundle');
-  assert.match(build, /lipo -verify_arch arm64 x86_64 "dist\/Sigil.app\/Contents\/MacOS\/\$binary"/);
+  assert.match(build, /lipo "dist\/Sigil.app\/Contents\/MacOS\/\$binary" -verify_arch arm64 x86_64/);
   assert.match(readFileSync(new URL('../../Scripts/build-app.sh', import.meta.url), 'utf8'), /"\$SCRIPT_DIR\/build-universal.sh"/);
 });
 
@@ -158,4 +185,28 @@ test('architecture copy names both slices and separates Intel execution from CI 
   const readme = readFileSync(new URL('../../README.md', import.meta.url), 'utf8');
   assert.match(readme, /execution on Intel hardware is not verified/);
   assert.match(readme, /CI does not enable this fallback/);
+});
+
+test('installer dirty input guard includes original and native-slice dependency checkouts', t => {
+  const f = fixture(t);
+  const installer = readFileSync(new URL('../../Scripts/install-latest.sh', import.meta.url), 'utf8');
+  const guard = installer.match(/^build_inputs_differ_from_head\(\) \{[\s\S]*?^\}/m)?.[0];
+  assert.ok(guard);
+  // Execute only the pure guard with fake Git, never the installer/build path.
+  writeFileSync(join(f.tools, 'git'), '#!/bin/bash\nif [[ -n "${SIGIL_TEST_DIRTY_CHECKOUT:-}" && "${2%/}" == "${SIGIL_TEST_DIRTY_CHECKOUT%/}" ]]; then\n  printf " M generated.swift\\n"\nfi\nexit 0\n', { mode: 0o755 });
+  const checkouts = [
+    join(f.root, '.build/checkouts/Legacy'),
+    join(f.root, '.build/universal/arm64/checkouts/Arm'),
+    join(f.root, '.build/universal/x86_64/checkouts/Intel'),
+  ];
+  for (const path of checkouts) mkdirSync(join(path, '.git'), { recursive: true });
+  const results = [...checkouts, ''].map(dirty => {
+    const result = spawnSync('bash', ['-c', guard + '\nif build_inputs_differ_from_head; then exit 0; else exit 1; fi'], {
+      encoding: 'utf8', timeout: 10000,
+      env: { ...process.env, ROOT: f.root, PATH: f.tools + ':' + process.env.PATH, SIGIL_TEST_DIRTY_CHECKOUT: dirty },
+    });
+    assert.equal(result.error, undefined);
+    return result.status;
+  });
+  assert.deepEqual(results, [0, 0, 0, 1], 'dirty legacy/arm64/x86_64 rejected; clean state accepted');
 });

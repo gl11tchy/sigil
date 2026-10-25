@@ -203,8 +203,8 @@ if [[ "$built_universal" == "1" ]]; then
     echo "error: lipo is required to verify a universal build" >&2
     exit 1
   fi
-  "$LIPO" -verify_arch arm64 x86_64 "$BINARY"
-  "$LIPO" -verify_arch arm64 x86_64 "$MCP_BINARY"
+  "$LIPO" "$BINARY" -verify_arch arm64 x86_64
+  "$LIPO" "$MCP_BINARY" -verify_arch arm64 x86_64
   "$LIPO" -info "$BINARY"
   "$LIPO" -info "$MCP_BINARY"
 elif [[ -n "$LIPO" ]]; then
