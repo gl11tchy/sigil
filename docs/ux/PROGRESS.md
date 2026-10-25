@@ -1672,3 +1672,23 @@ No local native build/test/process enumeration, personal conversation/pairing,
 real provider call, credential/access setting change, deployment, new public
 distribution, workflow edit or extra worker. Required exact-head CI and parent
 final source/current-comment review remain before any merge.
+
+
+### REA-1220 CI677 fixture repair1 · 2026-10-25
+
+CI677 (`40163619862`) at `ba8f3ce819356ba02ff4d205c39f4f84bec56a1d`
+completed failure in15m40s. Actual checkout35ffac63662b38e08a6d35231eb475fbb4fb022a
+has expected main/head parents and matches branch tree5812096bae008df53242809aeff23c3ac3c4aa40.
+Verify passed: both new Mac tests,1372SwiftTesting/114suites,37XCTest,318Node,
+58Site,260browser/two skips, hosted gate and debug signature/smoke. iOS
+production typecheck32files passed. The real-relay test executable then failed
+to compile at RelayTests.swift:478: the new fake-host Boolean was passed to its
+existing string-only send helper. iOS runtime/native app/extensions/TextKit
+gates did not run; missing native artifact is downstream of that compile error.
+
+Repair1 sends the exact Boolean JSON control directly through the fake host's
+socket. Production, strict relay schema, string-only helper and all assertions
+remain unchanged. No local native execution, unchanged rerun or softened test.
+Native runtime result awaits corrected exact-head CI. One repair round is
+recorded; repository two-round-without-progress stop condition remains active.
+Parent final source/current-comment review remains before merge.

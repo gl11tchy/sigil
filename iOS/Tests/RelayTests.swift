@@ -475,7 +475,7 @@ final class FakeMac {
         guard let socket else { throw TestFailure("no registered host") }
         let closedBefore = closedHostSockets
         revoked = true
-        try await send(["revoke": true], on: socket)
+        try await socket.send(.string(#"{"revoke":true}"#))
         try await RelayTests.until("relay processed revoke and closed host") { self.closedHostSockets > closedBefore }
     }
 
