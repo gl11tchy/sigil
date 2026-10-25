@@ -1619,3 +1619,107 @@ cancelled during Verify before pushing this source correction. No native result
 or pass is claimed from that run. The next head waits for cancellation readback
 before admission; gates remain strictly serial. Static format/lint/whitespace
 checks pass after the correction. Required implementation CI/review still pending.
+
+
+### REA-1176 — durable task ledger implementation, CI pending · 2026-10-25
+
+Sole serial worker, isolated `feat/rea-1176-task-ledger` from reviewed merged main
+`55dff7f870c664be0778b9668db8ea7bbc99abc3`. Prior REA-1240/PR189 is Done after
+parent source review and exact-head CI667; main CI668 passed. Official build668.1
+was separately installed/read back as1.0.0(413), preserving build406 backups;
+no running-process/manual UX claim. PR162/183 holds and other work remain intact.
+
+Normal PR191 baseline `d65c2fcd5fdae9f010a1ceb6b05cd59c4495c133` failed CI669
+(40153842882,8m16s) as intended: `TaskLedgerTests.swift:11 cannot find TaskLedger
+in scope`, plus cascading type errors. Actual checkout09ff5e92, based onmain55dff7.
+Browser260 passed/two existing skips; native runtime/later gates did not execute.
+This is missing-feature compile-time evidence, not runtime customer data-loss proof.
+
+Local implementation adds the versioned pure ledger and atomic private JSON store,
+qualified identity/idempotent retained-source migration, bounded cross-copy locking,
+commit receipt/backup and explicit validated recovery preserving original bytes.
+AppModel registers durably before child start, retains taskID through replacements
+and saved snapshots, annotates only existing validated native proof, and exposes
+storage failures/read-only restoration reasons. Grok ID is immediately known;
+Claude awaits exact validated history; Codex binding rules are unchanged. Verified
+new conversations retain old tasks; restarts alone never invent one. Metadata
+updates merge changed fields, retaining existing conversation-keyed preferences.
+No consuming workbench view or phone protocol/capability change.
+
+Generated focused tests cover serialization/pre-output IDs, duplicate/provider/cwd
+identity, unknown legacy IDs, repeated/interrupted migration, each commit boundary,
+failed writes, independent/concurrent stores, two app models/processes sharing a
+task, native link/history proof, restart/restoration, corrupt/future/unsafe files
+and explicit recovery preserving post-migration tasks. Worktree branch inspection
+uses bounded read-only Git metadata. One existing snapshot assertion adds the
+actual task ID while preserving all earlier native/path/model/effort assertions.
+
+Static swift-format/strict lint/whitespace checks pass. Compilation/runtime and
+integrated required CI remain pending, CI-only. PR191 remains DO NOT MERGE until
+passing exact-head CI and Tediore's final source/comments review. No local native
+build/test, process enumeration, paid/personal provider data, extra worker,
+workflow/protection/security/access change or overlapping gate. Original ledger
+bytes are preserved as an exact prefix; no manual runtime or power-loss claim.
+
+
+REA-1176 pre-final source correction: qualified native-reference reuse now stores
+the newly observed branch while retaining taskID/createdAt; a focused regression
+covers reopening after a branch rename. An incomplete legacy source remains an
+exposed migration warning, without presenting the blocking storage-unavailable
+alert at startup. Actual store failures still prevent dispatch and offer only
+safe recovery. Static formatting/strict lint/whitespace pass.
+
+CI670 at31af4df was superseded during Verify and cancellation requested before
+pushing this correction. Cancellation is not yet confirmed; no runtime result is
+claimed and no replacement CI will be admitted until active/queued lists are empty.
+This is a bounded source-review correction, not a skipped check or protection change.
+
+
+REA-1176 CI671 at a08e5ee completed failure (8m16s): browser260 passed/two
+existing skips; production Sigil compiled and linked. New OpenTabsSnapshotTests
+line48 nested #require expansion failed in the CI compiler; native runtime and
+later gates did not run. Repair1 splits encoding/decoding into separate required
+unwraps, retaining both checks and every task/native/provider assertion. Searched
+focused fixtures for other nested Testing macros; none remain. Static formatting,
+strict lint and whitespace pass. Corrected exact-head CI remains prerequisite;
+no local native execution, skip/workflow change or merge approval.
+
+
+REA-1176 CI672 at faba454 completed failure (8m44s). Macro repair compiled;
+separate XCTest37 passed, and Swift Testing began running. All six provider-launch
+cases returned nil; AppModel's copied-session test then indexed empty tabs and
+crashed. No complete Swift Testing summary or ledger-suite runtime result; later
+gates did not execute. This is concrete execution progress beyond CI671, not a pass.
+
+Repair2 source diagnosis: storedPath compared POSIX canonical /private paths with
+Foundation standardizedFileURL spelling. Apple's path documentation demonstrates
+/private removal by standardization; this is a source-based diagnosis without a
+local native probe. Replace that comparison with lexical validation retaining
+absolute/private-alias/dot-component checks. Add a generated existing temporary
+workspace/store/serialization regression. Preserve the copied-session count/path/
+identity assertions and require its first element before indexing; add diagnostic
+ledger problem text to the initial open assertion. No test skipped or weakened.
+Static formatting/strict lint/whitespace pass; corrected CI must confirm the fix.
+Repository two-round-without-progress limit remains active; no local native run.
+Reference: https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/Strings/Articles/ManipulatingPaths.html
+
+
+REA-1176 CI673 at1e3318e completed failure (14m23s), with concrete progress:
+AppModelTests, TaskLedgerIntegrationTests and TaskLedgerTests passed, including
+all-provider launch/restoration/native-link/path regressions. Full Swift Testing
+completed1397 tests/117 suites with one issue; XCTest37 passed; browser260 passed/
+two existing skips. Prior nil-tab failure/crash is resolved. The sole remaining
+issue is simultaneousIndependentInstancesKeepEveryTask, caught NSPOSIXErrorDomain
+code2 (No such file or directory). All other store cases passed, including four
+commit phases, migration, corruption recovery, stale/future/symlink and append-only
+checks. App-hosted/debug-smoke/shipping gates did not run after Verify failed.
+
+The exact failing filesystem operation is unresolved. Add operation-level context
+while preserving NSError domain/code and capturing errno before Foundation error
+construction. Strengthen the concurrency fixture with an async two-writer start
+barrier and eight bounded fresh-ledger rounds; retain both successful-write and
+exact-row assertions. No error retry, swallowed failure, semantic locking change
+or claim that the race is fixed. This is one bounded diagnostic iteration after
+two repairs that each advanced execution; the two-round-without-progress limit
+remains active. Static formatting/strict lint/whitespace pass. PR191 remains held
+until concurrency is explained/resolved, exact-head CI passes and parent reviews.

@@ -16,6 +16,7 @@ struct CodexTabBindingTests {
         await fixture.store.reload()
         await fixture.awaitBinding()
         #expect(tab.nativeSessionID == first)
+        let firstTaskID = try #require(fixture.model.taskID(for: tab))
         let next = UUID().uuidString.lowercased()
         tab.controller.send(text: "\(first) \(next)\r")
         #expect(await waitUntil { tab.controller.bufferText().contains("HELD=\(next)") })
@@ -29,6 +30,10 @@ struct CodexTabBindingTests {
         #expect(await fixture.model.linkCodexSession(chosen, to: tab.id))
         await fixture.awaitBinding()
         #expect(tab.nativeSessionID == next)
+        let nextTaskID = try #require(fixture.model.taskID(for: tab))
+        #expect(nextTaskID != firstTaskID)
+        #expect(fixture.model.taskLedger.entries.first(where: { $0.taskID == firstTaskID })?.conversationID == first)
+        #expect(fixture.model.taskLedger.entries.first(where: { $0.taskID == nextTaskID })?.conversationID == next)
     }
 
     @Test func anOutsideWriterNeverBindsAWaitingTabOrEnablesRestart() async throws {

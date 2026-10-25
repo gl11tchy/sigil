@@ -37,5 +37,18 @@ struct OpenTabsSnapshotTests {
         let decoded = try #require(OpenTabsSnapshot.decode(data))
         #expect(decoded.selectedSessionID == "same")
         #expect(decoded.selectedCWD == nil)
+        #expect(decoded.tabs.first?.taskID == nil)
+    }
+
+    @Test func anExplicitTaskIDRoundTripsWithoutReplacingNativeIdentity() throws {
+        let task = UUID().uuidString.lowercased()
+        let snapshot = OpenTabsSnapshot(
+            tabs: [.init(sessionID: "native", cwd: "/generated/project", provider: .claudeCode, taskID: task)],
+            selectedSessionID: "native")
+        let encoded = try #require(snapshot.encode())
+        let decoded = try #require(OpenTabsSnapshot.decode(encoded))
+        #expect(decoded.tabs.first?.taskID == task)
+        #expect(decoded.tabs.first?.sessionID == "native")
+        #expect(decoded.tabs.first?.provider == .claudeCode)
     }
 }

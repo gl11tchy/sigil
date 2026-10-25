@@ -12,6 +12,7 @@ enum UnrestoredReason: Equatable, Sendable {
     case folderUnavailable(String)
     case historyMissing
     case historyUnavailable(String)
+    case taskLedgerUnavailable(String)
     case checkingProviders
     case historyLoading
     case waitingForEarlierTab
@@ -35,6 +36,11 @@ final class AppModel {
 
     let settings: AppSettings
     let store: SessionStore
+    @ObservationIgnored private let taskLedgerStore: TaskLedgerStore
+    private(set) var taskLedger = TaskLedger()
+    private(set) var taskLedgerProblem: String?
+    private var tabTaskIDs: [TerminalTab.ID: String] = [:]
+    @ObservationIgnored private var taskAnnotations: [String: TaskAnnotation] = [:]
     /// The right-hand utility column: scratch shell and per-conversation notes.
     let panel: RightPanel
     let remoteControl: RemoteControl
@@ -172,7 +178,11 @@ final class AppModel {
             try FileManager.default.trashItem(at: url, resultingItemURL: nil)
         },
         presentError: @escaping ErrorPresenter = { error in
-            NSAlert(error: error).runModal()
+            if error is TaskLedgerRecoveryError {
+                _ = NSApplication.shared.presentError(error)
+            } else {
+                NSAlert(error: error).runModal()
+            }
         },
         // Optional defaults, coalesced below: Swift 6.1.2 (CI) segfaults in
         // SILGen when these closures/URLs are default argument expressions.
@@ -187,10 +197,13 @@ final class AppModel {
         providerProbe: ProviderProbe? = nil,
         providerCheckClock: (@Sendable () -> TimeInterval)? = nil,
         providerCheckSleep: ProviderChecks.Sleep? = nil,
-        sidebarClock: (@Sendable () -> TimeInterval)? = nil
+        sidebarClock: (@Sendable () -> TimeInterval)? = nil,
+        taskLedgerStore: TaskLedgerStore? = nil
     ) {
         self.settings = settings
         self.store = store
+        self.taskLedgerStore =
+            taskLedgerStore ?? TaskLedgerStore(url: Self.isRunningAutomatedTests ? nil : TaskLedgerStore.defaultURL)
         self.sidebarClock = sidebarClock ?? { ProcessInfo.processInfo.systemUptime }
         self.panel = panel ?? RightPanel()
         self.providerChecks = ProviderChecks(
@@ -221,6 +234,9 @@ final class AppModel {
             self.chooseInitialProviderIfReady()
             if !self.deferredOpenTabs.isEmpty { self.restoreOpenTabs() }
         }
+        refreshTaskLedger()
+        taskAnnotations = currentTaskAnnotations()
+        observeTaskLedgerPreferences()
     }
 
     /// Stores a Kimi Platform API key in the Keychain. Returns false when it was not stored.
@@ -265,6 +281,8 @@ final class AppModel {
         didAppear = true
         if !Self.isRunningAutomatedTests { startCrashStateRefresh() }
         if Self.isSmokeTest { return }
+        reconcileTaskLedger()
+        if taskLedgerStore.read().problem != nil { presentTaskLedgerProblem() }
         observeStoreForHousekeeping()
         store.start()
         if !Self.isRunningAutomatedTests {
@@ -1304,6 +1322,7 @@ final class AppModel {
                 if !self.store.isLoading {
                     self.panel.notesStore.prepareSearch(for: self.store.sessions)
                     self.seedSigilConversations()
+                    self.reconcileTaskLedger()
                     self.recordStartedCodexSessions()
                     self.pruneMissingPins()
                     // Native history is loaded asynchronously. A startup's
@@ -1347,6 +1366,7 @@ final class AppModel {
             provider: .codex, sessionID: session.nativeSessionID, cwd: tab.workingDirectory.path)
         tab.codexBindingGeneration = generation
         tab.adoptTranscript(transcript, generation: generation ?? tab.controller.processGeneration)
+        annotateTaskConversation(tab)
         if let chosenName, chosenName != tab.automaticTitle {
             renameTab(tab, to: chosenName)
         }
@@ -2288,10 +2308,16 @@ final class AppModel {
             guard next != settings.conversationNames else { return }
             settings.conversationNames = next
             settings.recordSigilConversations([id])
+            persistTaskTitle(
+                tab,
+                title: ConversationNaming.name(
+                    sessionID: id, cwd: tab.workingDirectory.path,
+                    in: next, samePath: samePath))
             return
         }
         let trimmed = ConversationNaming.normalized(raw)
         tab.sessionTitle = (trimmed == nil || trimmed == automaticTitle(for: tab)) ? nil : trimmed
+        persistTaskTitle(tab, title: tab.sessionTitle)
     }
 
     func resetTabName(_ tab: TerminalTab) {
@@ -2309,9 +2335,11 @@ final class AppModel {
             if next != settings.conversationNames {
                 settings.conversationNames = next
             }
+            persistTaskTitle(tab, title: nil)
             return
         }
         tab.sessionTitle = nil
+        persistTaskTitle(tab, title: nil)
     }
 
     /// The tab's own default label. Not a user name and not a CLI summary.
@@ -2560,14 +2588,15 @@ final class AppModel {
             themeVariables: settings.theme.grokThemeEnvironment,
             provider: session.provider, sessionFile: session.provider == .grokBuild ? nil : session.directory
         )
-        let tab = add(spec)
+        guard let tab = add(spec) else { return }
         tab.sessionTitle = title(for: session)
     }
 
     @discardableResult
-    private func add(_ spec: GrokLaunchSpec) -> TerminalTab {
+    private func add(_ spec: GrokLaunchSpec, taskID: String? = nil) -> TerminalTab? {
         let tabID = UUID()
         let tab = TerminalTab(id: tabID, spec: tagged(spec, tabID: tabID), settings: settings)
+        guard registerTask(for: tab, preferredID: taskID) else { return nil }
         tab.onUnseenActivityChange = { [weak self] in self?.refreshDockIndicator() }
         tab.onSettle = { [weak self, weak tab] in
             if let self, let tab { self.restartForThemeWhenSettled(tab) }
@@ -2660,6 +2689,7 @@ final class AppModel {
         spec.bridgeSocketPath = nil
         let tabID = UUID()
         let tab = TerminalTab(id: tabID, spec: tagged(spec, tabID: tabID), settings: settings)
+        tabTaskIDs[tab.id] = tabTaskIDs.removeValue(forKey: old.id)
         restoredSavedTabOrder[tab.id] = restoredSavedTabOrder.removeValue(forKey: old.id)
         tab.onUnseenActivityChange = { [weak self] in self?.refreshDockIndicator() }
         tab.onSettle = { [weak self, weak tab] in
@@ -2691,6 +2721,7 @@ final class AppModel {
         remoteControl.forgetTab(id)
         // Do not let a quick reopen overlap two Grok processes on one session.
         tabs[index].terminateAndWait()
+        tabTaskIDs[id] = nil
         tabs.remove(at: index)
         if selectedTabID == id {
             clearDeferredSelection()
@@ -2805,6 +2836,7 @@ final class AppModel {
         transcriptExports.stopAll()
         stopAndWait(tabs)
         tabs.removeAll()
+        tabTaskIDs.removeAll()
         selectedTabID = nil
         refreshDockIndicator()
     }
@@ -3397,6 +3429,7 @@ final class AppModel {
             let selectedWasRemoved = selectedTabID.map(removedIDs.contains) ?? false
             let firstRemovedIndex = tabs.firstIndex { removedIDs.contains($0.id) }
             tabs.removeAll { removedIDs.contains($0.id) }
+            tabTaskIDs = tabTaskIDs.filter { !removedIDs.contains($0.key) }
             dropOrphanedProjectPin(for: session)
             deferredOpenTabs.removeAll {
                 entryMatches($0, sessionID: session.id, cwd: session.cwd)
@@ -3672,6 +3705,199 @@ final class AppModel {
 
     // MARK: - Persistence
 
+    func taskID(for tab: TerminalTab) -> String? { tabTaskIDs[tab.id] }
+
+    private struct TaskAnnotation: Equatable {
+        var title: String?
+        var archived = false
+    }
+    private func taskAnnotationKey(_ sidebarID: String, _ cwd: String) -> String {
+        sidebarID + "\u{0}" + TaskLedger.canonicalWorkspacePath(cwd)
+    }
+    private func currentTaskAnnotations() -> [String: TaskAnnotation] {
+        var result: [String: TaskAnnotation] = [:]
+        for name in settings.conversationNames {
+            result[taskAnnotationKey(name.sessionID, name.cwd), default: .init()].title = ConversationNaming.normalized(
+                name.name)
+        }
+        for entry in settings.archivedConversations {
+            result[taskAnnotationKey(sidebarID(entry), entry.cwd), default: .init()].archived = true
+        }
+        return result
+    }
+
+    private func observeTaskLedgerPreferences() {
+        withObservationTracking {
+            _ = settings.sigilConversations
+            _ = settings.conversationNames
+            _ = settings.archivedConversations
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.reconcileTaskLedger()
+                self.observeTaskLedgerPreferences()
+            }
+        }
+    }
+
+    private func refreshTaskLedger() {
+        let status = taskLedgerStore.read()
+        taskLedger = status.ledger
+        taskLedgerProblem = status.problem
+    }
+
+    /// Exact already-validated history/native references only. Claude's launch
+    /// argument or a matching folder/title alone is not verified history.
+    private func verifiedTaskReference(for tab: TerminalTab) -> ProviderSessionReference? {
+        guard let reference = tab.sessionReference else { return nil }
+        if reference.provider == .grokBuild { return reference }
+        if reference.provider == .codex, tab.learnedSessionReference != nil { return reference }
+        return store.sessions.contains {
+            $0.isHistoryValidated && !$0.isSubagent && $0.provider == reference.provider
+                && $0.nativeSessionID == reference.sessionID && samePath($0.cwd, reference.cwd)
+        } ? reference : nil
+    }
+
+    /// Merge the retained ownership source, then annotate tasks whose existing
+    /// adapter proof is now available. No matching rule or provider file is changed.
+    func reconcileTaskLedger() {
+        refreshTaskLedger()
+        guard taskLedgerStore.read().problem == nil else { return }
+        let source = settings.taskLedgerMigrationSource
+        let annotations = currentTaskAnnotations()
+        let changed = Set(taskAnnotations.keys).union(annotations.keys).filter {
+            taskAnnotations[$0] != annotations[$0]
+        }
+        let existing = Set(
+            taskLedger.entries.compactMap { $0.conversation.map { taskAnnotationKey($0.sidebarID, $0.cwd) } })
+        let owned = Set(source.ids)
+        let resolved = store.sessions.filter {
+            $0.isHistoryValidated && !$0.isSubagent && owned.contains($0.id)
+                && !existing.contains(taskAnnotationKey($0.id, $0.cwd))
+        }.map { session -> TaskLedger.LegacyConversation in
+            let annotation = annotations[taskAnnotationKey(session.id, session.cwd)]
+            return .init(
+                conversation: session.reference,
+                projectPath: SigilWorktree.projectPath(of: TaskLedger.canonicalWorkspacePath(session.cwd))
+                    ?? session.cwd,
+                branch: SigilWorktree.branch(at: URL(fileURLWithPath: session.cwd)),
+                title: annotation?.title, archivedAt: annotation?.archived == true ? Date() : nil)
+        }
+        let pending = tabs.compactMap { tab -> (String, ProviderSessionReference)? in
+            guard let id = tabTaskIDs[tab.id],
+                taskLedger.entries.first(where: { $0.taskID == id })?.conversationID == nil,
+                let reference = verifiedTaskReference(for: tab)
+            else { return nil }
+            return (id, reference)
+        }
+        let newlyBound = Set(pending.map { $0.0 })
+        do {
+            try taskLedgerStore.transaction { ledger in
+                // Bind live pending tasks before resolving the same legacy ID, so
+                // migration reuses their pre-output UUID rather than inventing one.
+                for (id, reference) in pending { try ledger.bind(taskID: id, conversation: reference) }
+                try ledger.migrate(legacyIDs: source.ids, resolved: resolved)
+                for entry in ledger.entries {
+                    guard let reference = entry.conversation else { continue }
+                    let key = taskAnnotationKey(reference.sidebarID, reference.cwd)
+                    guard changed.contains(key) || newlyBound.contains(entry.taskID) else { continue }
+                    let annotation = annotations[key]
+                    let previous = taskAnnotations[key]
+                    if newlyBound.contains(entry.taskID) {
+                        try ledger.setMetadata(
+                            taskID: entry.taskID, title: annotation?.title ?? entry.title,
+                            archivedAt: annotation?.archived == true ? (entry.archivedAt ?? Date()) : entry.archivedAt)
+                        continue
+                    }
+                    try ledger.setMetadata(
+                        taskID: entry.taskID,
+                        title: previous?.title != annotation?.title ? annotation?.title : entry.title,
+                        archivedAt: (previous?.archived ?? false) != (annotation?.archived ?? false)
+                            ? (annotation?.archived == true ? (entry.archivedAt ?? Date()) : nil) : entry.archivedAt)
+                }
+            }
+            taskAnnotations = annotations
+            refreshTaskLedger()
+            if !source.readable {
+                taskLedgerProblem =
+                    "Some legacy task references could not be read. Migration remains pending; original preferences are retained."
+            }
+        } catch {
+            refreshTaskLedger()
+            taskLedgerProblem = error.localizedDescription
+        }
+    }
+
+    private func registerTask(for tab: TerminalTab, preferredID: String?, presentFailure: Bool = true) -> Bool {
+        let workspace = TaskLedger.canonicalWorkspacePath(tab.workingDirectory.path)
+        let reference = verifiedTaskReference(for: tab)
+        let annotation = reference.flatMap { currentTaskAnnotations()[taskAnnotationKey($0.sidebarID, $0.cwd)] }
+        let request = TaskLedger.Registration(
+            taskID: preferredID ?? UUID().uuidString.lowercased(),
+            provider: tab.spec.provider,
+            projectPath: SigilWorktree.projectPath(of: workspace) ?? workspace,
+            workspacePath: workspace, branch: SigilWorktree.branch(at: tab.workingDirectory),
+            conversation: reference, createdAt: Date())
+        do {
+            let id = try taskLedgerStore.transaction { ledger in
+                let previous = Set(ledger.entries.map(\.taskID))
+                let entry = try ledger.start(request)
+                if !previous.contains(entry.taskID) {
+                    try ledger.setMetadata(
+                        taskID: entry.taskID, title: annotation?.title,
+                        archivedAt: annotation?.archived == true ? Date() : nil)
+                }
+                return entry.taskID
+            }
+            tabTaskIDs[tab.id] = id
+            refreshTaskLedger()
+            return true
+        } catch {
+            refreshTaskLedger()
+            taskLedgerProblem = error.localizedDescription
+            if presentFailure, !isRestoringTabs { presentTaskLedgerProblem() }
+            return false
+        }
+    }
+
+    private func annotateTaskConversation(_ tab: TerminalTab) {
+        guard let id = tabTaskIDs[tab.id], let reference = verifiedTaskReference(for: tab) else { return }
+        if let previous = taskLedger.entries.first(where: { $0.taskID == id })?.conversationID,
+            previous != reference.sessionID
+        {
+            // An independently verified `/new` conversation is another task,
+            // not a process restart or permission to rewrite the old identity.
+            _ = registerTask(for: tab, preferredID: nil, presentFailure: false)
+            return
+        }
+        do {
+            try taskLedgerStore.transaction { try $0.bind(taskID: id, conversation: reference) }
+            refreshTaskLedger()
+        } catch {
+            refreshTaskLedger()
+            taskLedgerProblem = error.localizedDescription
+        }
+    }
+
+    private func persistTaskTitle(_ tab: TerminalTab, title: String?) {
+        guard let id = tabTaskIDs[tab.id] else { return }
+        do {
+            try taskLedgerStore.transaction { ledger in
+                guard let entry = ledger.entries.first(where: { $0.taskID == id }) else { return }
+                try ledger.setMetadata(taskID: id, title: title, archivedAt: entry.archivedAt)
+            }
+            refreshTaskLedger()
+        } catch { taskLedgerProblem = error.localizedDescription }
+    }
+
+    private func presentTaskLedgerProblem() {
+        let status = taskLedgerStore.read()
+        guard let message = taskLedgerProblem ?? status.problem else { return }
+        presentError(TaskLedgerRecoveryError(message: message, store: taskLedgerStore, canRecover: status.canRecover))
+        refreshTaskLedger()
+        if !status.canRecover { taskLedgerProblem = status.problem ?? message }
+    }
+
     /// All retained intents, in saved order. Availability facts come from restoration,
     /// never a provider probe or history read while the view asks for rows.
     var unrestoredTabs: [UnrestoredTab] {
@@ -3710,6 +3936,11 @@ final class AppModel {
     func retryUnrestoredTabs() async {
         loadOpenTabsSnapshotIfNeeded()
         guard !Task.isCancelled, !deferredOpenTabs.isEmpty else { return }
+        reconcileTaskLedger()
+        if taskLedgerStore.read().problem != nil {
+            presentTaskLedgerProblem()
+            reconcileTaskLedger()
+        }
         let generation = UUID()
         unrestoredRetry = (generation, .checkingProviders)
         defer {
@@ -3916,7 +4147,12 @@ final class AppModel {
                 themeVariables: settings.theme.grokThemeEnvironment,
                 provider: entry.provider, sessionFile: entry.provider == .grokBuild ? nil : directory
             )
-            let tab = add(spec)
+            guard let tab = add(spec, taskID: entry.taskID) else {
+                unrestoredReasons[entryKey(entry)] = .taskLedgerUnavailable(
+                    taskLedgerProblem ?? "The task could not be saved.")
+                deferredOpenTabs.append(entry)
+                continue
+            }
             if let order = savedOpenTabOrder.firstIndex(where: { sameEntry($0, entry) }) {
                 if let index = tabs.firstIndex(where: { (restoredSavedTabOrder[$0.id] ?? -1) > order }) {
                     tabs.removeLast()
@@ -3953,7 +4189,8 @@ final class AppModel {
             guard let sessionID = tab.nativeSessionID else { return nil }
             return OpenTabsSnapshot.Entry(
                 sessionID: sessionID, cwd: tab.workingDirectory.path,
-                model: tab.spec.model ?? "", effort: tab.spec.reasoningEffort ?? "", provider: tab.spec.provider)
+                model: tab.spec.model ?? "", effort: tab.spec.reasoningEffort ?? "", provider: tab.spec.provider,
+                taskID: tabTaskIDs[tab.id])
         }
         let liveKeys = Set(entries.map { entryKey($0) })
         // Keep deferred references in their saved positions without sorting
@@ -4115,6 +4352,22 @@ private enum TabMessagingChangeError: Error, LocalizedError, Sendable {
         case .helperMissing: return "This build has no sigil-mcp helper."
         case .socketInUse: return "Another copy of Sigil is already using tab messaging."
         }
+    }
+}
+
+private struct TaskLedgerRecoveryError: Error, LocalizedError, RecoverableError {
+    let message: String
+    let store: TaskLedgerStore
+    let canRecover: Bool
+    var errorDescription: String? { "Saved tasks are unavailable" }
+    var recoverySuggestion: String? { message + " No new session was started. Existing terminals can keep running." }
+    var recoveryOptions: [String] { canRecover ? ["Recover Saved Tasks", "Cancel"] : ["OK"] }
+    func attemptRecovery(optionIndex: Int) -> Bool {
+        guard canRecover, optionIndex == 0 else { return false }
+        do {
+            try store.recover()
+            return true
+        } catch { return false }
     }
 }
 
