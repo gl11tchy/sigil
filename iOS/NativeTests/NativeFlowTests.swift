@@ -35,6 +35,10 @@ final class NativeFlowTests: XCTestCase {
         try await RelayTests.lostPairingReplyAsksForANewCode(port: relayPort)
     }
 
+    func testRevokedWhilePhoneIsAwayStopsReconnect() async throws {
+        try await RelayTests.revokedWhilePhoneIsAwayStopsReconnect(port: relayPort)
+    }
+
     func testEventReplayCannotReplaceOutput() async throws {
         try await RelayTests.rejectsReplayedEvents(port: relayPort)
         try await RelayTests.oldHelloAndOldStateCannotAuthorizeReconnect(port: relayPort)

@@ -1619,3 +1619,76 @@ cancelled during Verify before pushing this source correction. No native result
 or pass is claimed from that run. The next head waits for cancellation readback
 before admission; gates remain strictly serial. Static format/lint/whitespace
 checks pass after the correction. Required implementation CI/review still pending.
+
+
+## REA-1220 — offline phone revocation routing hint · 2026-10-25
+
+Same sole worker selected this existing audited, dependency-free ticket on
+verified main `55dff7f870c664be0778b9668db8ea7bbc99abc3`. Fresh task/CI/PR/Linear
+checks found no competing worker or active/queued run. PR192 remains held at
+`2a0344606bb3197ed2073ad799b83a135daf2f7e`: green CI676 and parent source review
+found no implementation defect, but the real-app criterion is unverified. One
+read-only assessment found no supported exact-head app/non-held isolated route;
+this was recorded/read back on REA-1262. The xcresulttool exit64 is a cache-write
+failure, not broad security or current AX-denial evidence. PR162/183/191 holds
+and installed official main build413 remain unchanged.
+
+A generated real-WebSocket test against unchanged production main reproduced
+the bug: after a host revokes while no phone is present, a returning phone gets
+close1008 with no unauthorized frame. One test failed on that exact missing
+frame; no product/customer-impact or native runtime baseline is inferred.
+
+The relay now accepts only the current authenticated room host's exact revoke
+control shape for its registered ticket. It closes rooms sharing that pairing
+and returns the existing unauthorized frame before closing future ticket
+routes. The in-memory hints cap at1,000, expire after30days and are lost on
+restart. They are routing hints, not independently authenticated device proof.
+Existing end-to-end authentication, route sealing, input/rate limits and account
+settings remain unchanged. Stale socket/room callbacks cannot affect a new
+pairing. No ticket/frame is logged or persisted by this mechanism.
+
+The Mac removes local state immediately, then best-effort sends on only its
+captured old socket/session. Connected phones first receive the existing
+refusal for compatibility with older relays, then the new hint, then close.
+There is no acknowledgement wait, offline queue or retry. Ordinary stop does
+not create a tombstone. The README records bounded retention, restart loss and
+unreachable-relay limits.
+
+Nine focused relay cases passed: offline/connected/shared pairing behavior,
+revoke-plus-close, unauthorized senders/foreign tickets/no ticket, stale socket,
+expiry/restart loss and cap/refresh. Final full Sidereal Node suite:318passed,
+zero failures/skips. Node26.4.0/npm11.17.0 locally; CI Node22 remains required.
+Committed dependencies installed with scripts disabled; audit0 vulnerabilities.
+Targeted Swift formatting/strict lint, JS syntax and whitespace passed.
+
+New Mac integration/wire-order and iOS fake-relay regressions remain CI-only
+and pending. The Mac fixture waits on a generated host-close marker, not
+arbitrary sleeps or process inspection. The phone test checks the revoked
+message and no new phase after the first reconnect delay; it runs in both
+existing iOS relay and native-app suites. The ticket explicitly permits this
+fake-relay acceptance route, with no new Mac AX/bundle prerequisite.
+
+No local native build/test/process enumeration, personal conversation/pairing,
+real provider call, credential/access setting change, deployment, new public
+distribution, workflow edit or extra worker. Required exact-head CI and parent
+final source/current-comment review remain before any merge.
+
+
+### REA-1220 CI677 fixture repair1 · 2026-10-25
+
+CI677 (`40163619862`) at `ba8f3ce819356ba02ff4d205c39f4f84bec56a1d`
+completed failure in15m40s. Actual checkout35ffac63662b38e08a6d35231eb475fbb4fb022a
+has expected main/head parents and matches branch tree5812096bae008df53242809aeff23c3ac3c4aa40.
+Verify passed: both new Mac tests,1372SwiftTesting/114suites,37XCTest,318Node,
+58Site,260browser/two skips, hosted gate and debug signature/smoke. iOS
+production typecheck32files passed. The real-relay test executable then failed
+to compile at RelayTests.swift:478: the new fake-host Boolean was passed to its
+existing string-only send helper. iOS runtime/native app/extensions/TextKit
+gates did not run; missing native artifact is downstream of that compile error.
+
+Repair1 sends the exact Boolean JSON control directly through the fake host's
+socket. Production, strict relay schema, string-only helper and all assertions
+remain unchanged. No local native execution, unchanged rerun or softened test.
+Native runtime result awaits corrected exact-head CI. One repair round is
+recorded; repository two-round-without-progress stop condition remains active.
+Parent final source/current-comment review remains before merge.

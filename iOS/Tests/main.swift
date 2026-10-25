@@ -116,6 +116,7 @@ enum TestMain {
 
         if let port = ProcessInfo.processInfo.environment["SIGIL_RELAY_PORT"] {
             for (name, test) in [
+                ("offline revocation stops reconnect", RelayTests.revokedWhilePhoneIsAwayStopsReconnect),
                 ("old hello and state cannot authorize reconnect", RelayTests.oldHelloAndOldStateCannotAuthorizeReconnect),
                 ("old authorization cannot connect new epoch", RelayTests.oldAuthorizationCannotConnectNewEpoch),
                 ("old send failure cannot consume fresh handshake", RelayTests.oldSendFailureCannotConsumeNewHandshake),

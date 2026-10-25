@@ -163,6 +163,30 @@ export class SourceLimits {
   }
 }
 
+// Routing hints only: device authentication remains end to end. Memory is bounded,
+// expires after 30 days, and is deliberately lost when this relay restarts.
+export class RevokedTickets {
+  #tickets = new Map();
+  #now;
+  constructor({ now = Date.now } = {}) { this.#now = now; }
+  add(ticket) {
+    this.sweep();
+    this.#tickets.delete(ticket);
+    this.#tickets.set(ticket, this.#now() + 30 * 86400000);
+    while (this.#tickets.size > 1000) this.#tickets.delete(this.#tickets.keys().next().value);
+  }
+  has(ticket) {
+    const expiry = this.#tickets.get(ticket);
+    if (expiry === undefined) return false;
+    if (expiry <= this.#now()) { this.#tickets.delete(ticket); return false; }
+    return true;
+  }
+  sweep() {
+    const time = this.#now();
+    for (const [ticket, expiry] of this.#tickets) if (expiry <= time) this.#tickets.delete(ticket);
+  }
+}
+
 export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns = null } = {}) {
   if (!Number.isInteger(maxRooms) || maxRooms < 1 || maxRooms > 100) throw new RangeError('Room capacity must be between 1 and 100.');
   const origin = new URL(publicOrigin);
@@ -172,6 +196,7 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
   }
   const rooms = new Map();
   const tickets = new Map();
+  const revokedTickets = new RevokedTickets({ now });
   const limits = new SourceLimits({ now });
   const wss = new WebSocketServer({ noServer: true, maxPayload: 110000, perMessageDeflate: false });
   const files = publicFiles();
@@ -436,6 +461,11 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
               ws.close(1008); return;
             }
             if (role === 'phone') {
+              if (revokedTickets.has(route.ticket)) {
+                send(ws, { error: 'unauthorized' });
+                ws.close(1008);
+                return;
+              }
               const byTicket = tickets.has(route.ticket);
               id = byTicket ? tickets.get(route.ticket) : route.room;
               room = rooms.get(id);
@@ -471,6 +501,23 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
             } else { take('phone'); room.peer = peer; send(room.host, { type: 'peer', peer }); }
             return;
           }
+          if ('revoke' in value) {
+            if (role !== 'host' || rooms.get(id) !== room || room.host !== ws || !room.ticket
+              || value.revoke !== true || Object.keys(value).length !== 1) { ws.close(1008); return; }
+            const ticket = room.ticket;
+            revokedTickets.add(ticket);
+            tickets.delete(ticket);
+            // Copies sharing this pairing cannot keep a connected phone alive.
+            for (const [other, candidate] of rooms) {
+              if (candidate.ticket !== ticket) continue;
+              const phone = candidate.phone;
+              candidate.phone = null; // Preserve the queued refusal instead of terminating it below.
+              send(phone, { error: 'unauthorized' });
+              phone?.close(1008);
+              deleteRoom(other);
+            }
+            return;
+          }
           if (role === 'host' && room.host === ws && ('pushToken' in value || 'push' in value)) {
             if ('pushToken' in value ? !registerPush(room, value) : !queuePush(ws, room, id, value.push)) ws.close(1008);
             return;
@@ -491,7 +538,7 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
       ws.on('close', () => {
         clearTimeout(routeTimer);
         routingKey = null;
-        if (!routed) return;
+        if (!routed || rooms.get(id) !== room) return;
         if (role === 'host' && room.host === ws) {
           room.host = null; room.disconnectedAt = now();
           const next = room.ticket && tickets.get(room.ticket) === id && liveRoomFor(room.ticket, id);
@@ -519,6 +566,7 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
   }
   const timer = setInterval(() => {
     expireRooms();
+    revokedTickets.sweep();
     limits.sweep();
     for (const ws of wss.clients) {
       if (!ws.alive) ws.terminate();
