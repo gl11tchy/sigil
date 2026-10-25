@@ -377,9 +377,9 @@ test('approval viewport caps a long card without stretching a short operation', 
   } finally { mac.close(); }
 });
 
-for (const keys of [false, true]) {
-  test(`approval viewport scrolls at tiny heights with terminal keys ${keys ? 'open' : 'closed'}`, async ({ page, baseURL }, testInfo) => {
-    await page.setViewportSize({ width: 390, height: 844 });
+for (const size of [{ width: 390, height: 844 }, { width: 844, height: 390 }]) for (const keys of [false, true]) {
+  test(`approval viewport scrolls at tiny heights in ${size.width}x${size.height} with terminal keys ${keys ? 'open' : 'closed'}`, async ({ page, baseURL }, testInfo) => {
+    await page.setViewportSize(size);
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     const mac = await pair(page, baseURL, '', { state: approvalViewportState() });
@@ -394,8 +394,10 @@ for (const keys of [false, true]) {
       await page.locator('.output').scrollIntoViewIfNeeded();
       const output = await approvalViewportGeometry(page);
       await testInfo.attach('approval-tiny-output-geometry', { body: JSON.stringify(output, null, 2), contentType: 'application/json' });
-      console.log(`REA-1192 tiny-output ${testInfo.project.name} keys=${keys}: ${JSON.stringify(output)}`);
-      expect(output.layoutHeight).toBe(844);
+      console.log(`REA-1192 tiny-output ${testInfo.project.name} keys=${keys}: ${JSON.stringify({ size, ...output })}`);
+      await page.screenshot({ path: testInfo.outputPath(`approval-viewport-tiny-output-keys-${keys ? 'open' : 'closed'}.png`) });
+      expect(output.layoutHeight).toBe(size.height);
+      expect(output.body.width).toBe(size.width);
       expect(output.visualHeight).toBe(200);
       expect(output.terminal.height).toBeGreaterThanOrEqual(100);
       expect(output.terminal.top).toBeGreaterThanOrEqual(output.controls.top - 1);
@@ -412,13 +414,16 @@ for (const keys of [false, true]) {
         expect(choice.y).toBeGreaterThanOrEqual(Math.max(card.y, viewport.y) - 1);
         expect(choice.y + choice.height).toBeLessThanOrEqual(Math.min(card.y + card.height, viewport.y + viewport.height) + 1);
       }
-      if (keys) await page.getByRole('button', { name: 'Up arrow', exact: true }).click({ trial: true });
+      if (keys) {
+        await page.getByRole('button', { name: 'Up arrow', exact: true }).click({ trial: true });
+        await page.locator('#keys button').last().click({ trial: true });
+      }
       await page.locator('#message').fill('Generated response to the terminal question');
       await page.locator('#send').click({ trial: true });
       const input = await approvalViewportGeometry(page), message = await page.locator('#message').boundingBox();
       const scrollTop = await controls.evaluate(el => el.scrollTop);
       await testInfo.attach('approval-tiny-viewport-geometry', { body: JSON.stringify({ output, input, scrollTop }, null, 2), contentType: 'application/json' });
-      console.log(`REA-1192 tiny ${testInfo.project.name} keys=${keys}: ${JSON.stringify({ output, input, scrollTop })}`);
+      console.log(`REA-1192 tiny ${testInfo.project.name} keys=${keys}: ${JSON.stringify({ size, output, input, scrollTop })}`);
       await page.screenshot({ path: testInfo.outputPath(`approval-viewport-tiny-keys-${keys ? 'open' : 'closed'}.png`) });
       expect(message.y).toBeGreaterThanOrEqual(input.controls.top - 1);
       expect(message.y + message.height).toBeLessThanOrEqual(input.controls.bottom + 1);
