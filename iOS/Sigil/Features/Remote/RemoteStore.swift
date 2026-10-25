@@ -559,7 +559,6 @@ final class RemoteStore {
                 selectedTabID = tab.id
                 prompt = nil
                 refreshOutput()
-                reflectLiveActivity()
             } else {
                 // A tap accepted before a send failed cannot acknowledge that
                 // later uncertainty merely because navigation is now possible.
