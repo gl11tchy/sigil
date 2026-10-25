@@ -20,28 +20,35 @@ struct StopWorkingPrompt: Equatable {
     let running: [CLIProvider]
     /// A command holds the panel terminal. Only quit and a shell restart stop it.
     let panelJob: Bool
+    /// Quit also warns about open tabs without a persistable provider identity.
+    let unsavable: Int
 
     var count: Int { working + running.count }
 
-    /// Nil when the action stops none of `tabs` and no panel command.
+    /// Quit includes ended unsavable tabs; the other actions warn only about work they stop.
     @MainActor
     init?(action: Action, stopping tabs: [TerminalTab], panelJob: Bool = false) {
         let stopping = tabs.filter(\.shouldWarnBeforeStopping)
-        guard !stopping.isEmpty || panelJob else { return nil }
+        let unsavable = action == .quit ? tabs.filter { $0.nativeSessionID == nil }.count : 0
+        guard !stopping.isEmpty || panelJob || unsavable > 0 else { return nil }
         let running = stopping.filter { $0.spec.provider != .grokBuild && $0.activity != .working }
         self.init(
             action: action, working: stopping.count - running.count,
-            running: running.map(\.spec.provider), panelJob: panelJob)
+            running: running.map(\.spec.provider), panelJob: panelJob, unsavable: unsavable)
     }
 
-    init(action: Action, working: Int, running: [CLIProvider], panelJob: Bool = false) {
+    init(action: Action, working: Int, running: [CLIProvider], panelJob: Bool = false, unsavable: Int = 0) {
         self.action = action
         self.working = working
         self.running = running
         self.panelJob = panelJob
+        self.unsavable = action == .quit ? unsavable : 0
     }
 
     var messageText: String {
+        if count == 0, !panelJob, unsavable > 0 {
+            return unsavable == 1 ? "This tab cannot reopen. Quit anyway?" : "These tabs cannot reopen. Quit anyway?"
+        }
         let subject: String
         if count == 0 {
             subject = "A command is still running in the panel terminal."
@@ -63,9 +70,18 @@ struct StopWorkingPrompt: Equatable {
     }
 
     var informativeText: String {
-        guard panelJob else { return sessionsInformativeText }
-        if count == 0 { return "The command will stop." }
-        return "\(sessionsInformativeText) The command in the panel terminal will stop too."
+        let stopping: String
+        if panelJob {
+            stopping =
+                count == 0
+                ? "The command will stop."
+                : "\(sessionsInformativeText) The command in the panel terminal will stop too."
+        } else {
+            stopping = count == 0 && unsavable > 0 ? "" : sessionsInformativeText
+        }
+        guard unsavable > 0 else { return stopping }
+        let warning = "\(unsavable) \(unsavable == 1 ? "tab" : "tabs") will not reopen next time."
+        return stopping.isEmpty ? warning : "\(stopping) \(warning)"
     }
 
     private var sessionsInformativeText: String {

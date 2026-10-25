@@ -1519,3 +1519,86 @@ threads and revised code/pixels is required before merge; no next ticket.
   data, active-app input, permission/security/credential change, app replacement
   or extra agent. Parent Tediore reviews exact final head before merge; no next
   ticket. REA-1240's baseline/implementation remain separate and stopped.
+
+
+## REA-1240 · unrestored saved-tab model · 2026-10-18 · BLOCKED
+
+- Isolated serial branch `fix/rea-1240-unrestored-tab-reasons`, base
+  `cfddae6068f82f7b075e93df566d2a3110dd1262`;
+  [PR189](https://github.com/gl11tchy-team/sigil/pull/189), remote head
+  `fcf972de219f8f7b0e80bc2ffeb28b1df821c812`. **Test-only baseline, not a
+  review-ready implementation; do not merge.** Production remains unchanged.
+- CI660 was cancelled before native execution after finding that a fake shell
+  basename would select the real-shell fallback. Corrected fixtures use `zsh`,
+  ignore its supplied command, assert selected-shell identity, provide generated
+  native history before provider deferral, and scope notes/key storage.
+- [CI661](https://github.com/gl11tchy-team/sigil/actions/runs/39159144064) and
+  [CI662](https://github.com/gl11tchy-team/sigil/actions/runs/39159990994) both
+  stopped at unchanged `Sidereal/test/browser/web-search-poll.spec.mjs:219`: an
+  extra `alpha` query preceded the key action. Each reported 257 browser passes,
+  one failure and two skips. **Neither reached native compilation/tests, so the
+  required native baseline is not reproduced.** No customer impact is inferred.
+- CI662 checked out merge `a9d7e782a4863d91c29c44e2f12ac0b5b5362b53`, with
+  expected base/head parents and branch-identical tree
+  `a4e81e0e7b7402df43d92032f82786d0103fac92`. Static Swift formatting/lint and
+  whitespace checks passed. The missing quit-warning assertion remains an
+  intentional future native failure, not an observed native result.
+- Applying EXPERIENCE.md mission rule 6 to the two attempts that could not
+  reach the prerequisite: stop this branch as blocked instead of another CI
+  loop or production edit before reproduction. Draft model-contract notes and
+  future synthetic regressions are saved outside the repository in
+  `../rea-1240-evidence/CONTRACT-DRAFT.md` and `FUTURE-REGRESSION-TESTS.swift`.
+  This ledger append stays local; no prose-only CI run is triggered.
+- Original ticket audit/ownership/six unchecked criteria and its existing
+  blocking relation are preserved; comments remain empty. Main and protected
+  PR183/PR162 heads/ledger bytes were rechecked unchanged. No additional worker,
+  local native build/test, process enumeration, personal provider data, active
+  app input, permission/security/credential changes, installed-app replacement,
+  public distribution, merge or next ticket. Parent must choose how to unblock
+  the native baseline before implementation can continue.
+
+
+## REA-1240 — retained reopen reasons, Retry/Forget and honest quit · 2026-10-25
+
+Same sole worker resumed existing PR189 after reviewed REA-1458/PR190 merge to
+main `10fbbc440544cb278dc61f494ed512f14a0785d2` and successful CI664. Historical
+blocked evidence above is preserved. No re-audit or extra worker.
+
+Observed native baseline: branch `07dff79ec5ee7628ac29cfdb726a4b521a483eaf`, CI665
+<https://github.com/gl11tchy/sigil/actions/runs/40148708275>. Its GitHub test merge
+`c08d9c6eb0a475219b658ca84392521d9efdb401` has the expected main/head parents and
+exact branch tree `0e7e0f30576c52e4646dde9cae7dfa44029dd9f6`. Browser gate: 260 passes,
+two existing skips. Native Swift Testing: 1,360 tests/114 suites, exactly one
+issue: quit informative text `Devin will stop.` omitted `1 tab will not reopen
+next time.` The unavailable-Codex saved-intent and both startup cases passed.
+Later app-hosted/shipping gates did not run after the intentional red. This is
+synthetic evidence, not customer incidence.
+
+Implementation now exposes every retained entry with title and typed reason,
+keeps pending/failed/unverified history separate from confirmed absence, and
+adds targeted-provider Retry plus intent-only Forget. Awaited completion reads
+current intents and respects existing provider/history generations; saved order
+slots remain stable after Forget. Quit counts tabs without native identity,
+including ended ones, without inventing running work. No snapshot format,
+provider identity, lifecycle parsing, workbench view or workflow changes.
+
+Generated CI-only regressions cover exact probe text/title, folder/history
+absence, failed history with/without unverified rows, ordered recovery, Forget
+during held provider/history work plus a new model reading the saved snapshot,
+file/name preservation, older provider/history completions, saved-order gaps,
+provider/cwd identity separation, 513 legacy entries, stale rows and quit text.
+Fixture gates have bounded waits/failure cleanup; fake shells and CLI homes,
+settings, notes, keys and pairing are isolated. Static swift-format format/lint
+and git diff --check pass. New implementation has not compiled or run yet;
+required exact-head CI and Tediore final source/comment review remain pending.
+PR189 must not merge until both pass. Protected PR162/183 remain untouched.
+
+Separate app maintenance after passing CI664 installed official build-664.1,
+1.0.0 (406), from exact main10fbbc44. ZIP SHA256
+`72ceccdebf940c7d35b9882b98fba6af55143c23ed1ecbed8488db384cb6e24a`
+matched GitHub; both executables arm64; deep strict signature checks passed;
+all22 installed bundle entries match. Build404 is preserved twice. No local
+native build/test, process enumeration, app interaction/quit/relaunch, credential,
+security or billing change. This on-disk update does not validate REA-1240 or
+resolve held manual app acceptance. Full receipt remains outside the repository
+in `sigil-app-maintenance-2026-10-25/VERIFICATION-RECEIPT.json`.
