@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname, basename, relative, isAbsolute } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { join, dirname, basename, relative, isAbsolute, normalize } from 'node:path';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 
 const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
 const steps = workflow.split('\n      - name: ').slice(1);
@@ -79,4 +81,117 @@ test('app downloads survive manual runs and failed release publishing without du
   ]) {
     assert.equal(runs({ zip_app: { outcome: zip }, publish_release: { outcome: release } }, () => cancelled), expected);
   }
+});
+
+test('the exact release bundle must survive smoke launch before zip or publication', () => {
+  const build = step('Build release bundle');
+  const smoke = step('Smoke-launch release bundle');
+  const zip = step('Zip the app');
+  const publish = step('Publish latest GitHub Release');
+  assert.ok(smoke, 'release bundle currently goes straight from build to zip');
+  assert.equal(steps.indexOf(smoke), steps.indexOf(build) + 1);
+  assert.equal(steps.indexOf(zip), steps.indexOf(smoke) + 1);
+  const condition = block => block.match(/\n        if: (.+)\n/)?.[1];
+  assert.equal(condition(smoke), condition(build));
+  assert.equal(condition(zip), condition(build));
+  assert.equal(condition(smoke), "github.event_name != 'pull_request'");
+  assert.doesNotMatch(smoke, /continue-on-error|always\(/);
+  assert.match(smoke, /run: Scripts\/smoke-launch.sh dist\/Sigil.app\n/);
+  assert.match(zip, /run: ditto -c -k --keepParent dist\/Sigil.app dist\/Sigil.zip\n/);
+  assert.match(publish, /if: github.event_name == 'push' && github.ref == 'refs\/heads\/main'\n/);
+  assert.match(publish, /gh release create "\$tag" dist\/Sigil.zip/);
+  const verify = readFileSync(new URL('../../Scripts/verify.sh', import.meta.url), 'utf8');
+  assert.match(verify, /"\$SCRIPT_DIR\/smoke-launch.sh" "\$APP"/);
+  assert.doesNotMatch(verify, /SIGIL_SMOKE_TEST=1/);
+});
+
+test('smoke helper isolates a generated bundle, stops it and preserves its bytes', t => {
+  const helper = fileURLToPath(new URL('../../Scripts/smoke-launch.sh', import.meta.url));
+  assert.ok(existsSync(helper), 'shared smoke helper is missing');
+  const root = mkdtempSync(join(tmpdir(), 'sigil-smoke-fixture-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const app = join(root, 'bundle with spaces', 'Sigil.app');
+  const bin = join(app, 'Contents/MacOS/Sigil');
+  mkdirSync(dirname(bin), { recursive: true });
+  const receipt = join(root, 'receipt');
+  const stopped = join(root, 'stopped');
+  writeFileSync(bin, `#!/bin/bash
+set -eu
+printf '%s\\n' "$HOME" "$CFFIXED_USER_HOME" "$GROK_HOME" "$TMPDIR" "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME" "$SIGIL_SMOKE_TEST" "$1" "$PWD" > "$SIGIL_FIXTURE_RECEIPT"
+trap 'printf stopped > "$SIGIL_FIXTURE_STOPPED"; exit 0' TERM
+while :; do sleep 0.1; done
+`, { mode: 0o755 });
+  const hash = () => createHash('sha256').update(readFileSync(bin)).digest('hex');
+  const before = hash();
+  const result = spawnSync('bash', [helper, relative(root, app)], {
+    cwd: root, encoding: 'utf8', timeout: 15000,
+    env: { ...process.env, SIGIL_FIXTURE_RECEIPT: receipt, SIGIL_FIXTURE_STOPPED: stopped },
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /alive after 3s/);
+  assert.ok(result.stdout.includes(before), 'receipt identifies the launched executable');
+  const [home, fixed, grok, tmp, cache, config, flag, arg, cwd] = readFileSync(receipt, 'utf8').trim().split('\n');
+  assert.notEqual(home, process.env.HOME);
+  assert.equal(fixed, home);
+  for (const path of [grok, tmp, cache, config]) assert.equal(normalize(dirname(path)), normalize(home));
+  assert.equal(flag, '1');
+  assert.equal(arg, '--smoke-test');
+  assert.equal(cwd, normalize(home));
+  assert.equal(existsSync(home), false, 'temporary smoke state is removed');
+  assert.equal(readFileSync(stopped, 'utf8'), 'stopped');
+  assert.equal(hash(), before);
+});
+
+test('an early clean exit fails the release gate and retains crash output', t => {
+  const helper = fileURLToPath(new URL('../../Scripts/smoke-launch.sh', import.meta.url));
+  assert.ok(existsSync(helper), 'shared smoke helper is missing');
+  const root = mkdtempSync(join(tmpdir(), 'sigil-smoke-exit-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const app = join(root, 'Sigil.app');
+  const bin = join(app, 'Contents/MacOS/Sigil');
+  mkdirSync(dirname(bin), { recursive: true });
+  const receipt = join(root, 'home');
+  writeFileSync(bin, '#!/bin/bash\nprintf "%s" "$HOME" > "$SIGIL_FIXTURE_RECEIPT"\necho generated-startup-failure >&2\nexit 0\n', { mode: 0o755 });
+  const zip = join(root, 'zipped');
+  const release = join(root, 'published');
+  const result = spawnSync('bash', ['-e', '-c', 'bash "$1" "$2"\ntouch "$3"\ntouch "$4"', 'fixture', helper, app, zip, release], {
+    encoding: 'utf8', timeout: 15000, env: { ...process.env, SIGIL_FIXTURE_RECEIPT: receipt },
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /generated-startup-failure/);
+  assert.match(result.stderr, /exited during the smoke check/);
+  assert.equal(existsSync(readFileSync(receipt, 'utf8')), false);
+  assert.equal(existsSync(zip), false);
+  assert.equal(existsSync(release), false);
+});
+
+test('smoke helper rejects invalid input before creating smoke state', t => {
+  const helper = fileURLToPath(new URL('../../Scripts/smoke-launch.sh', import.meta.url));
+  const root = mkdtempSync(join(tmpdir(), 'sigil-smoke-invalid-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const app = join(root, 'MissingExecutable.app');
+  mkdirSync(app);
+  for (const args of [[], [root], [app], [app, app]]) {
+    const result = spawnSync('bash', [helper, ...args], { encoding: 'utf8', timeout: 5000 });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /usage:|executable is missing/);
+    assert.doesNotMatch(result.stderr, /unbound variable/);
+  }
+});
+
+test('smoke launch refuses an executable that changed while running', t => {
+  const helper = fileURLToPath(new URL('../../Scripts/smoke-launch.sh', import.meta.url));
+  const root = mkdtempSync(join(tmpdir(), 'sigil-smoke-mutated-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const app = join(root, 'Sigil.app');
+  const bin = join(app, 'Contents/MacOS/Sigil');
+  mkdirSync(dirname(bin), { recursive: true });
+  writeFileSync(bin, '#!/bin/bash\necho "# mutation" >> "$0"\ntrap "exit 0" TERM\nwhile :; do sleep 0.1; done\n', { mode: 0o755 });
+  const result = spawnSync('bash', [helper, app], { encoding: 'utf8', timeout: 15000 });
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /executable changed during the smoke check/);
 });

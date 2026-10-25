@@ -127,6 +127,10 @@ jobs:
           SIGIL_ALLOW_THIN: "1"
         run: Scripts/build-app.sh
 
+      - name: Smoke-launch release bundle
+        if: github.event_name != 'pull_request'
+        run: Scripts/smoke-launch.sh dist/Sigil.app
+
       - name: Zip the app
         id: zip_app
         if: github.event_name != 'pull_request'

@@ -11,35 +11,13 @@ APP=""
 BIN=""
 MCP_BIN=""
 FORMAT_STATUS=""
-SMOKE_PID=""
-SMOKE_ROOT=""
-SMOKE_LOG=""
+BUILD_ROOT=""
 RELEASE_SUM=""
 
-stop_smoke() {
-  if [[ -n "${SMOKE_PID}" ]]; then
-    kill "$SMOKE_PID" 2>/dev/null || true
-    for _ in {1..20}; do
-      if ! kill -0 "$SMOKE_PID" 2>/dev/null; then
-        break
-      fi
-      sleep 0.1
-    done
-    if kill -0 "$SMOKE_PID" 2>/dev/null; then
-      kill -KILL "$SMOKE_PID" 2>/dev/null || true
-    fi
-    wait "$SMOKE_PID" 2>/dev/null || true
-    SMOKE_PID=""
-  fi
-}
-
 cleanup() {
-  stop_smoke
-  if [[ -n "${SMOKE_ROOT}" ]]; then
-    rm -rf "$SMOKE_ROOT"
-    SMOKE_ROOT=""
+  if [[ -n "$BUILD_ROOT" ]]; then
+    rm -rf "$BUILD_ROOT"
   fi
-  SMOKE_LOG=""
 }
 trap cleanup EXIT
 
@@ -108,14 +86,14 @@ fi
 echo "==> Scripts/build-app.sh"
 # Verification needs a runnable local bundle, not a release artifact. A debug
 # bundle avoids an expensive universal release rebuild after the tests.
-# Write it under the smoke temp dir so dist/Sigil.app is not replaced.
+# Write it under a temporary directory so dist/Sigil.app is not replaced.
 RELEASE_BIN="$RELEASE_APP/Contents/MacOS/Sigil"
 if [[ -x "$RELEASE_BIN" ]]; then
   RELEASE_SUM="$(shasum -a 256 "$RELEASE_BIN" | awk '{print $1}')"
 fi
 
-SMOKE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/sigil-smoke-home.XXXXXX")"
-APP="$SMOKE_ROOT/Sigil.app"
+BUILD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/sigil-verify-bundle.XXXXXX")"
+APP="$BUILD_ROOT/Sigil.app"
 BIN="$APP/Contents/MacOS/Sigil"
 MCP_BIN="$APP/Contents/MacOS/sigil-mcp"
 
@@ -147,34 +125,9 @@ fi
 plutil -lint "$APP/Contents/Info.plist" >/dev/null || fail "Info.plist"
 codesign --verify --deep --strict "$APP" || fail "bundle signature"
 
-echo "==> launch smoke check"
-SMOKE_LOG="$SMOKE_ROOT/sigil.log"
-mkdir -p "$SMOKE_ROOT/.grok" "$SMOKE_ROOT/tmp" "$SMOKE_ROOT/cache" "$SMOKE_ROOT/config"
-# The smoke flag prevents session restore and bridge registration. The temporary
-# homes are a second boundary against touching a developer's real state.
-HOME="$SMOKE_ROOT" \
-  CFFIXED_USER_HOME="$SMOKE_ROOT" \
-  GROK_HOME="$SMOKE_ROOT/.grok" \
-  TMPDIR="$SMOKE_ROOT/tmp" \
-  XDG_CACHE_HOME="$SMOKE_ROOT/cache" \
-  XDG_CONFIG_HOME="$SMOKE_ROOT/config" \
-  SIGIL_SMOKE_TEST=1 \
-  "$BIN" --smoke-test >"$SMOKE_LOG" 2>&1 &
-SMOKE_PID=$!
-sleep 3
-if ! kill -0 "$SMOKE_PID" 2>/dev/null; then
-  echo "---- smoke output ----" >&2
-  cat "$SMOKE_LOG" >&2 || true
-  rm -f "$SMOKE_LOG"
-  wait "$SMOKE_PID" 2>/dev/null || true
-  SMOKE_PID=""
-  fail "Sigil exited during the smoke check"
-fi
-stop_smoke
-rm -f "$SMOKE_LOG"
-rm -rf "$SMOKE_ROOT"
-SMOKE_ROOT=""
-SMOKE_LOG=""
+"$SCRIPT_DIR/smoke-launch.sh" "$APP" || fail "launch smoke check"
+rm -rf "$BUILD_ROOT"
+BUILD_ROOT=""
 
 echo
 echo "==== verify: PASS ===="
