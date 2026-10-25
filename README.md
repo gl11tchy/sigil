@@ -143,7 +143,7 @@ multi-selection, `Return` opens it, and `F2` renames it.
 
 ## Requirements
 
-- macOS 14 or later; Apple silicon for the currently published CI zip
+- macOS 14 or later on Apple silicon or Intel
 - At least one supported provider CLI, installed and signed in separately
 - For Grok: `~/.grok/bin/grok` (set another path in Settings)
 - Optional: `~/.grok/bin/grok-sigil`, the themed CLI build described below
@@ -157,14 +157,14 @@ that process needs the same access to your files and network that it has in a te
 Scripts/build-app.sh
 ```
 
-This attempts a universal release build containing Apple silicon (`arm64`) and
-Intel (`x86_64`) executables, verifies both architectures, and writes `dist/Sigil.app`.
-The universal build currently fails; without an explicit fallback, the script
-stops instead of packaging an old or single-architecture executable.
+This builds Apple silicon (`arm64`) and Intel (`x86_64`) release executables in
+separate native SwiftPM scratch directories, joins them with `lipo`, verifies both
+architectures in Sigil and sigil-mcp, and writes `dist/Sigil.app`. A failed slice
+or merge stops the build instead of packaging a stale or thin executable.
 
-CI currently sets `SIGIL_ALLOW_THIN=1` and publishes an **arm64-only** zip for
-Apple silicon. That artifact does not support Intel Macs. Universal-build repair
-is tracked separately in [REA-1228](https://linear.app/reasonable-glyph/issue/REA-1228/make-the-universal-arm64-x86-64-build-succeed-and-stop-shipping-a-thin).
+CI builds and smoke-launches the universal bundle on pull requests as well as
+main. Only a push to main publishes the resulting zip. Architecture presence is
+checked in CI; execution on Intel hardware is not verified by the arm64 runner.
 
 Release builds need Apple's Metal Toolchain. Install it once if Xcode does not have it:
 
@@ -178,8 +178,8 @@ For a faster local bundle on the current Mac:
 SIGIL_CONFIG=debug Scripts/build-app.sh
 ```
 
-To allow a release build to fall back to the current Mac's architecture (the
-same fallback currently enabled in CI):
+For an explicit local-only escape hatch, allow a failed universal build to fall
+back to the current Mac's architecture. CI does not enable this fallback:
 
 ```sh
 SIGIL_ALLOW_THIN=1 Scripts/build-app.sh

@@ -94,7 +94,7 @@ test('the exact release bundle must survive smoke launch before zip or publicati
   const condition = block => block.match(/\n        if: (.+)\n/)?.[1];
   assert.equal(condition(smoke), condition(build));
   assert.equal(condition(zip), condition(build));
-  assert.equal(condition(smoke), "github.event_name != 'pull_request'");
+  assert.equal(condition(smoke), undefined, 'release architecture/smoke checks also gate PRs');
   assert.doesNotMatch(smoke, /continue-on-error|always\(/);
   assert.match(smoke, /run: Scripts\/smoke-launch.sh dist\/Sigil.app\n/);
   assert.match(zip, /run: ditto -c -k --keepParent dist\/Sigil.app dist\/Sigil.zip\n/);
