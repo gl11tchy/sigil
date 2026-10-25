@@ -511,12 +511,17 @@ final class FakeMac {
         try await send(["peer": peer, "data": sealed], on: socket)
     }
 
-    func releaseInput() async throws {
+    func releaseInput(error: String? = nil) async throws {
         guard let request = delayedInput, let socket, let peer, let deviceKey else { throw TestFailure("no delayed input") }
         delayedInput = nil
         pauseInput = false
-        let reply = Reply(challenge: request.challenge, sequence: request.sequence,
+        var reply = Reply(challenge: request.challenge, sequence: request.sequence,
                           state: state("echo: \(request.text ?? "")"), ticket: ticket, clientNonce: request.clientNonce)
+        if let error {
+            reply.ok = false
+            reply.error = error
+            reply.state = nil
+        }
         let sealed = try RemoteCrypto.seal(reply, key: deviceKey, direction: "mac")
         try await send(["peer": peer, "data": sealed], on: socket)
     }
