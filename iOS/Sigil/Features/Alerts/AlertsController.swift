@@ -9,6 +9,7 @@ final class AlertsController: NSObject, UIApplicationDelegate, UNUserNotificatio
     /// Set by the app scene once the store exists; the delegate is made earlier.
     static weak var store: RemoteStore?
     private static var pendingToken: String?
+    private static var pendingOpen: (tabID: String, macID: String)?
 
     func application(
         _ application: UIApplication,
@@ -47,6 +48,23 @@ final class AlertsController: NSObject, UIApplicationDelegate, UNUserNotificatio
             pendingToken = nil
             store.setPushToken(token)
         }
+        if let target = pendingOpen {
+            pendingOpen = nil
+            store.open(tabID: target.tabID, macID: target.macID)
+        }
+    }
+
+    /// The service extension supplies the pairing identity after opening the
+    /// sealed alert. Unattributed or malformed input cannot choose a current Mac.
+    @MainActor
+    static func receiveNotification(tabID: String, macID: String?) {
+        guard !tabID.isEmpty, tabID.utf8.count <= 64,
+            let macID, !macID.isEmpty, macID.utf8.count <= 64 else { return }
+        if let store {
+            store.open(tabID: tabID, macID: macID)
+        } else {
+            pendingOpen = (tabID, macID)
+        }
     }
 
     /// The app is open: show the banner anyway, the session may not be the one on screen.
@@ -62,7 +80,7 @@ final class AlertsController: NSObject, UIApplicationDelegate, UNUserNotificatio
         let info = response.notification.request.content.userInfo
         guard let tabID = info["tabID"] as? String else { return }
         let macID = info["macID"] as? String
-        await MainActor.run { Self.store?.open(tabID: tabID, macID: macID) }
+        await MainActor.run { Self.receiveNotification(tabID: tabID, macID: macID) }
     }
 
     /// The environment APNs will deliver to, which is what the relay has to be told.

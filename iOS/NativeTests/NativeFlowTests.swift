@@ -74,6 +74,11 @@ final class NativeFlowTests: XCTestCase {
         window.makeKeyAndVisible()
         defer { window.isHidden = true }
         try await Task.sleep(for: .milliseconds(350))
+        try await RelayTests.until("notification navigation settled") { !fixture.store.busy }
+        _ = try await fixture.connection.request("state")
+        XCTAssertEqual(fixture.store.errorMessage, "That session is closed on localhost.")
+        XCTAssertEqual(fixture.store.selectedTabID, original)
+        XCTAssertFalse(fixture.mac.requests.contains { $0.action == "select" && $0.tabID == "closed-notification-tab" })
         controller.view.layoutIfNeeded()
         let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
         let image = renderer.image { context in window.layer.render(in: context.cgContext) }
@@ -81,6 +86,205 @@ final class NativeFlowTests: XCTestCase {
         attachment.name = "REA-1200 closed notification session"
         attachment.lifetime = .keepAlways
         add(attachment)
+
+        fixture.store.errorMessage = nil // Dismiss the completed navigation error.
+        try await RelayTests.until("watch before later session appears") { fixture.mac.requests.contains { $0.action == "watch" } }
+        try await fixture.mac.selectOnMac("T2", eventSequence: 10)
+        try await RelayTests.until("Mac chose another session") { fixture.store.selectedTabID == "T2" }
+        fixture.mac.firstTab = .init(id: "closed-notification-tab", title: "Later session", status: "idle")
+        try await fixture.mac.pushEvent(rows: ["a later session"], eventSequence: 11)
+        _ = try await fixture.connection.request("state")
+        try await RelayTests.until("later snapshot settled") { !fixture.store.busy }
+        XCTAssertEqual(fixture.store.selectedTabID, "T2", "The completed missing-target intent cannot reopen later")
+        XCTAssertNil(fixture.store.errorMessage)
+        XCTAssertFalse(fixture.mac.requests.contains { $0.action == "select" && $0.tabID == "closed-notification-tab" })
+    }
+
+    func testNotificationBeforeAttachUsesLatestMacBoundTarget() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        let firstID = try XCTUnwrap(fixture.store.activeMacID)
+        let second = try await notificationMac(in: fixture)
+        defer { second.mac.stop() }
+        let credentials = fixture.store.macs
+        fixture.store.enterBackground()
+
+        let previous = AlertsController.store
+        AlertsController.store = nil
+        defer {
+            // Drain any intent even if an earlier assertion throws.
+            AlertsController.attach(RemoteStore(isDemo: true))
+            AlertsController.store = previous
+        }
+        AlertsController.receiveNotification(tabID: "T2", macID: firstID)
+        AlertsController.receiveNotification(tabID: "T2", macID: second.id)
+        AlertsController.receiveNotification(tabID: "T1", macID: nil)
+        AlertsController.receiveNotification(tabID: String(repeating: "x", count: 65), macID: firstID)
+
+        // CI may refuse Keychain writes. Seed only these generated known
+        // pairings through the existing delegate; persistence is not asserted.
+        let connection = RemoteConnection()
+        let cold = RemoteStore(isDemo: false, restoreSavedPairings: false, connection: connection)
+        defer { cold.enterBackground() }
+        for credential in credentials { cold.connection(connection, didSave: credential) }
+        cold.switchTo(macID: firstID)
+        AlertsController.attach(cold)
+        try await RelayTests.until("latest cold notification on its named Mac") {
+            cold.isConnected && cold.activeMacID == second.id && cold.selectedTabID == "T2" && !cold.busy
+        }
+        _ = try await connection.request("state")
+        XCTAssertFalse(fixture.mac.requests.contains { $0.action == "select" && $0.tabID == "T2" },
+                       "An identical tab ID on the other Mac cannot receive the selection")
+        XCTAssertEqual(second.mac.requests.filter { $0.action == "select" && $0.tabID == "T2" }.count, 1)
+        // Reattaching cannot replay the consumed notification.
+        AlertsController.attach(cold)
+        _ = try await connection.request("state")
+        XCTAssertEqual(second.mac.requests.filter { $0.action == "select" && $0.tabID == "T2" }.count, 1)
+    }
+
+    func testNotificationWaitsForCompleteAuthenticatedTabList() async throws {
+        let fixture = try await backgroundFixture(truncatedTabs: true)
+        defer { fixture.stop() }
+        try await RelayTests.until("partial-list watch") { fixture.mac.requests.contains { $0.action == "watch" } }
+        fixture.store.open(tabID: "not-in-partial-list", macID: fixture.store.activeMacID)
+        _ = try await fixture.connection.request("state")
+        XCTAssertTrue(fixture.store.errorMessage?.contains("may still be open") == true)
+        XCTAssertFalse(fixture.mac.requests.contains { $0.action == "select" })
+
+        fixture.mac.truncatedTabs = false
+        try await fixture.mac.pushEvent(rows: ["complete list"], eventSequence: 10)
+        try await RelayTests.until("complete list proves closure") {
+            fixture.store.errorMessage == "That session is closed on localhost."
+        }
+        _ = try await fixture.connection.request("state")
+        XCTAssertEqual(fixture.store.selectedTabID, "T1")
+        XCTAssertFalse(fixture.mac.requests.contains { $0.action == "select" })
+    }
+
+    func testLatestNotificationReplacesPartialListIntent() async throws {
+        let fixture = try await backgroundFixture(truncatedTabs: true)
+        defer { fixture.stop() }
+        try await RelayTests.until("latest-intent watch") { fixture.mac.requests.contains { $0.action == "watch" } }
+        try await fixture.mac.selectOnMac("T2", eventSequence: 10)
+        try await RelayTests.until("other session selected") { fixture.store.selectedTabID == "T2" }
+        fixture.store.open(tabID: "obsolete", macID: fixture.store.activeMacID)
+        fixture.store.open(tabID: "latest", macID: fixture.store.activeMacID)
+        fixture.mac.firstTab = .init(id: "latest", title: "Latest target", status: "idle")
+        fixture.mac.truncatedTabs = false
+        try await fixture.mac.pushEvent(rows: ["latest target exists"], eventSequence: 11)
+        try await RelayTests.until("latest target selected") { fixture.store.selectedTabID == "latest" && !fixture.store.busy }
+        _ = try await fixture.connection.request("state")
+        XCTAssertNil(fixture.store.errorMessage)
+        XCTAssertEqual(fixture.mac.requests.filter { $0.action == "select" }.compactMap(\.tabID), ["latest"])
+    }
+
+    func testNotificationIntentCannotCrossConnectionEpoch() async throws {
+        let fixture = try await backgroundFixture(truncatedTabs: true)
+        defer { fixture.stop() }
+        try await RelayTests.until("epoch watch") { fixture.mac.requests.contains { $0.action == "watch" } }
+        try await fixture.mac.selectOnMac("T2", eventSequence: 10)
+        try await RelayTests.until("epoch starting selection") { fixture.store.selectedTabID == "T2" }
+        fixture.store.open(tabID: "appears-after-reconnect", macID: fixture.store.activeMacID)
+        let epoch = fixture.connection.commandEpoch
+        fixture.store.reconnect()
+        fixture.mac.firstTab = .init(id: "appears-after-reconnect", title: "New epoch target", status: "idle")
+        try await RelayTests.until("new authenticated connection") {
+            fixture.store.isConnected && fixture.connection.commandEpoch != epoch && fixture.mac.connections >= 2
+        }
+        _ = try await fixture.connection.request("state")
+        try await RelayTests.until("epoch dispatch settled") { !fixture.store.busy }
+        XCTAssertEqual(fixture.store.selectedTabID, "T2")
+        XCTAssertFalse(fixture.mac.requests.contains { $0.action == "select" })
+    }
+
+    func testNotificationIntentCannotMoveToAnotherMac() async throws {
+        let fixture = try await backgroundFixture(truncatedTabs: true)
+        defer { fixture.stop() }
+        let firstID = try XCTUnwrap(fixture.store.activeMacID)
+        let second = try await notificationMac(in: fixture)
+        defer { second.mac.stop() }
+        try await RelayTests.until("second Mac watch") { second.mac.requests.contains { $0.action == "watch" } }
+        try await second.mac.selectOnMac("T2", eventSequence: 10)
+        try await RelayTests.until("second Mac selection") { fixture.store.selectedTabID == "T2" }
+        second.mac.firstTab = .init(id: "shared-target", title: "Other Mac target", status: "idle")
+        fixture.store.switchTo(macID: firstID)
+        try await RelayTests.until("first Mac resumed") { fixture.store.isConnected && fixture.store.activeMacID == firstID }
+        fixture.store.open(tabID: "shared-target", macID: firstID)
+        fixture.store.switchTo(macID: second.id)
+        try await RelayTests.until("second Mac resumed") { fixture.store.isConnected && fixture.store.activeMacID == second.id }
+        _ = try await fixture.connection.request("state")
+        try await RelayTests.until("Mac switch navigation settled") { !fixture.store.busy }
+        XCTAssertEqual(fixture.store.selectedTabID, "T2")
+        XCTAssertFalse(second.mac.requests.contains { $0.action == "select" && $0.tabID == "shared-target" })
+        XCTAssertFalse(fixture.mac.requests.contains { $0.action == "select" && $0.tabID == "shared-target" })
+    }
+
+    func testNotificationWhileOfflineWaitsForFreshState() async throws {
+        let fixture = try await backgroundFixture()
+        defer { fixture.stop() }
+        try await RelayTests.until("offline notification watch") { fixture.mac.requests.contains { $0.action == "watch" } }
+        fixture.store.enterBackground()
+        fixture.store.errorMessage = nil
+        fixture.store.open(tabID: "missing-after-offline", macID: fixture.store.activeMacID)
+        XCTAssertNil(fixture.store.errorMessage, "Old visible/cache rows do not prove closure while unavailable")
+        XCTAssertFalse(fixture.mac.requests.contains { $0.action == "select" })
+        fixture.store.enterForeground()
+        try await RelayTests.until("fresh state resolves offline notification") {
+            fixture.store.isConnected && fixture.store.errorMessage == "That session is closed on localhost."
+        }
+        _ = try await fixture.connection.request("state")
+        XCTAssertFalse(fixture.mac.requests.contains { $0.action == "select" })
+    }
+
+    func testManualSelectionCancelsWaitingNotification() async throws {
+        let fixture = try await backgroundFixture(truncatedTabs: true)
+        defer { fixture.stop() }
+        try await RelayTests.until("manual selection watch") { fixture.mac.requests.contains { $0.action == "watch" } }
+        fixture.store.open(tabID: "later-target", macID: fixture.store.activeMacID)
+        fixture.store.select(try XCTUnwrap(fixture.store.tabs.first { $0.id == "T2" }))
+        try await RelayTests.until("manual selection completed") { fixture.store.selectedTabID == "T2" && !fixture.store.busy }
+        fixture.mac.firstTab = .init(id: "later-target", title: "Later target", status: "idle")
+        fixture.mac.truncatedTabs = false
+        try await fixture.mac.pushEvent(rows: ["later target present"], eventSequence: 10)
+        _ = try await fixture.connection.request("state")
+        try await RelayTests.until("manual target settled") { !fixture.store.busy }
+        XCTAssertEqual(fixture.store.selectedTabID, "T2")
+        XCTAssertEqual(fixture.mac.requests.filter { $0.action == "select" }.compactMap(\.tabID), ["T2"])
+    }
+
+    func testNotificationWaitsForOwnedSendWithoutHidingUncertainty() async throws {
+        for refused in [false, true] {
+            let fixture = try await backgroundFixture()
+            defer { fixture.stop() }
+            fixture.mac.pauseInput = true
+            fixture.store.draft = "Generated notification send"
+            fixture.store.sendDraft()
+            try await RelayTests.until("notification waits behind input") { fixture.inputCount == 1 && fixture.store.busy }
+            fixture.store.open(tabID: "T2", macID: fixture.store.activeMacID)
+            try await fixture.mac.releaseInput(error: refused ? "Generated input refusal" : nil)
+            try await RelayTests.until("notification selected after send settled") {
+                fixture.store.selectedTabID == "T2" && !fixture.store.busy
+            }
+            _ = try await fixture.connection.request("state")
+            let dispatch = fixture.mac.requests.filter { ["input", "key", "select"].contains($0.action) }
+            XCTAssertEqual(dispatch.map(\.action), refused ? ["input", "select"] : ["input", "key", "select"])
+            XCTAssertEqual(fixture.inputCount, 1)
+            XCTAssertEqual(fixture.enterCount, refused ? 0 : 1)
+            XCTAssertEqual(fixture.store.drafts["T1"] ?? "", refused ? "Generated notification send" : "")
+            XCTAssertEqual(fixture.store.sendMayBeIncomplete, refused)
+            if refused { XCTAssertTrue(fixture.store.errorMessage?.contains("Send may be incomplete") == true) }
+        }
+    }
+
+    func testNotificationNavigationInDemoKeepsMacScope() {
+        let store = RemoteStore(isDemo: true)
+        store.open(tabID: "demo-2", macID: "demo-mac-1")
+        XCTAssertEqual(store.selectedTabID, "demo-2")
+        store.open(tabID: "not-in-demo", macID: "demo-mac-1")
+        XCTAssertEqual(store.errorMessage, "That session is closed on Studio.")
+        store.open(tabID: "demo-1", macID: "forgotten-mac")
+        XCTAssertEqual(store.selectedTabID, "demo-2")
+        XCTAssertEqual(store.errorMessage, "Pair this Mac again before opening its session.")
     }
 
     func testReconnectCannotMoveDraftToUnrelatedConversation() throws {
@@ -1034,9 +1238,10 @@ final class NativeFlowTests: XCTestCase {
         }
     }
 
-    private func backgroundFixture() async throws -> BackgroundSendFixture {
+    private func backgroundFixture(truncatedTabs: Bool = false) async throws -> BackgroundSendFixture {
         let port = try relayPort
         let mac = FakeMac(origin: URL(string: "http://localhost:\(port)")!)
+        mac.truncatedTabs = truncatedTabs
         let budget = BackgroundTaskFixture()
         let connection = RemoteConnection()
         let store = RemoteStore(isDemo: false, restoreSavedPairings: false, connection: connection, backgroundTask: budget.task)
@@ -1048,6 +1253,22 @@ final class NativeFlowTests: XCTestCase {
             return fixture
         } catch {
             fixture.stop()
+            throw error
+        }
+    }
+
+    private func notificationMac(in fixture: BackgroundSendFixture) async throws -> (mac: FakeMac, id: String) {
+        let previous = try XCTUnwrap(fixture.store.activeMacID)
+        let mac = FakeMac(origin: URL(string: "http://localhost:\(try relayPort)")!)
+        do {
+            let room = try await mac.register()
+            XCTAssertNil(fixture.store.pair(with: "http://localhost:\(try relayPort)/#room=\(room)&key=\(mac.pairingKey)"))
+            try await RelayTests.until("known second notification Mac") {
+                fixture.store.isConnected && fixture.store.activeMacID != nil && fixture.store.activeMacID != previous
+            }
+            return (mac, try XCTUnwrap(fixture.store.activeMacID))
+        } catch {
+            mac.stop()
             throw error
         }
     }
