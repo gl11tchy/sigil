@@ -2744,6 +2744,7 @@ final class AppModel {
             if !refreshedHistory {
                 let previousSelection = selectedTabID
                 let previousNewSessionFocus = newSessionFocusToken
+                let previousAppliedScan = store.appliedScanSequence
                 await store.reload()
                 canonicalPathCache.removeAll(keepingCapacity: true)
                 // Another close becomes the newest intent; delete/archive/quit can
@@ -2756,6 +2757,12 @@ final class AppModel {
                                 && tabMatches($0, sessionID: sidebarID(entry), cwd: entry.cwd)
                         })
                 else { return }
+                // A newer forced scan can supersede this reload without
+                // publishing yet. Its older visible rows are not fresh proof.
+                guard !store.isLoading, store.appliedScanSequence > previousAppliedScan else {
+                    showHistoryValidationError()
+                    return
+                }
                 refreshedHistory = true
                 settings.reloadSharedLists()
                 continue
