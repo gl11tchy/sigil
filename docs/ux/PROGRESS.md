@@ -1673,3 +1673,13 @@ CI670 at31af4df was superseded during Verify and cancellation requested before
 pushing this correction. Cancellation is not yet confirmed; no runtime result is
 claimed and no replacement CI will be admitted until active/queued lists are empty.
 This is a bounded source-review correction, not a skipped check or protection change.
+
+
+REA-1176 CI671 at a08e5ee completed failure (8m16s): browser260 passed/two
+existing skips; production Sigil compiled and linked. New OpenTabsSnapshotTests
+line48 nested #require expansion failed in the CI compiler; native runtime and
+later gates did not run. Repair1 splits encoding/decoding into separate required
+unwraps, retaining both checks and every task/native/provider assertion. Searched
+focused fixtures for other nested Testing macros; none remain. Static formatting,
+strict lint and whitespace pass. Corrected exact-head CI remains prerequisite;
+no local native execution, skip/workflow change or merge approval.

@@ -45,7 +45,8 @@ struct OpenTabsSnapshotTests {
         let snapshot = OpenTabsSnapshot(
             tabs: [.init(sessionID: "native", cwd: "/generated/project", provider: .claudeCode, taskID: task)],
             selectedSessionID: "native")
-        let decoded = try #require(OpenTabsSnapshot.decode(try #require(snapshot.encode())))
+        let encoded = try #require(snapshot.encode())
+        let decoded = try #require(OpenTabsSnapshot.decode(encoded))
         #expect(decoded.tabs.first?.taskID == task)
         #expect(decoded.tabs.first?.sessionID == "native")
         #expect(decoded.tabs.first?.provider == .claudeCode)
