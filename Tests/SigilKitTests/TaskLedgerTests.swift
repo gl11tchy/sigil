@@ -60,6 +60,20 @@ struct TaskLedgerTests {
     }
 
     @Test
+    func reopeningAQualifiedTaskRefreshesItsObservedBranchWithoutANewIdentity() throws {
+        var ledger = TaskLedger()
+        var original = registration(conversation: reference())
+        original.branch = "sigil/first"
+        let entry = try ledger.start(original)
+        var reopened = registration(conversation: reference())
+        reopened.branch = "sigil/renamed"
+        let result = try ledger.start(reopened)
+        #expect(result.taskID == entry.taskID && result.createdAt == entry.createdAt)
+        #expect(result.branch == "sigil/renamed")
+        #expect(ledger.entries.count == 1)
+    }
+
+    @Test
     func duplicateLateBindingsRequireAnExplicitTaskInsteadOfGuessing() throws {
         var ledger = TaskLedger()
         let a = try ledger.start(registration())

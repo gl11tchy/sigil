@@ -99,15 +99,16 @@ public struct TaskLedger: Codable, Equatable, Sendable {
             return entries[index]
         }
         if let reference = request.conversation {
-            let matches = entries.filter { self.matches($0, reference) }
+            let matches = entries.indices.filter { self.matches(entries[$0], reference) }
             guard matches.count <= 1 else {
                 throw Failure("Several tasks reference this conversation. An explicit saved task ID is required.")
             }
-            if let match = matches.first {
-                guard match.projectPath == request.projectPath else {
+            if let index = matches.first {
+                guard entries[index].projectPath == request.projectPath else {
                     throw Failure("The saved task belongs to a different project.")
                 }
-                return match
+                if let branch = request.branch { entries[index].branch = branch }
+                return entries[index]
             }
         }
         let entry = Entry(

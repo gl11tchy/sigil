@@ -1660,3 +1660,16 @@ passing exact-head CI and Tediore's final source/comments review. No local nativ
 build/test, process enumeration, paid/personal provider data, extra worker,
 workflow/protection/security/access change or overlapping gate. Original ledger
 bytes are preserved as an exact prefix; no manual runtime or power-loss claim.
+
+
+REA-1176 pre-final source correction: qualified native-reference reuse now stores
+the newly observed branch while retaining taskID/createdAt; a focused regression
+covers reopening after a branch rename. An incomplete legacy source remains an
+exposed migration warning, without presenting the blocking storage-unavailable
+alert at startup. Actual store failures still prevent dispatch and offer only
+safe recovery. Static formatting/strict lint/whitespace pass.
+
+CI670 at31af4df was superseded during Verify and cancellation requested before
+pushing this correction. Cancellation is not yet confirmed; no runtime result is
+claimed and no replacement CI will be admitted until active/queued lists are empty.
+This is a bounded source-review correction, not a skipped check or protection change.

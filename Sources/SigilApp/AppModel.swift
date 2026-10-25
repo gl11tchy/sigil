@@ -282,7 +282,7 @@ final class AppModel {
         if !Self.isRunningAutomatedTests { startCrashStateRefresh() }
         if Self.isSmokeTest { return }
         reconcileTaskLedger()
-        if taskLedgerProblem != nil { presentTaskLedgerProblem() }
+        if taskLedgerStore.read().problem != nil { presentTaskLedgerProblem() }
         observeStoreForHousekeeping()
         store.start()
         if !Self.isRunningAutomatedTests {
