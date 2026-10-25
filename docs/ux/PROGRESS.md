@@ -1489,3 +1489,33 @@ threads and revised code/pixels is required before merge; no next ticket.
   active-app interaction, permission/security/credential change or distribution.
   Official installed 398/latest 653.1 was checked without disrupting sessions.
   PR183's real-app hold and protected PR162 remain. No merge or next ticket.
+
+
+## REA-1458 · Chats-close browser synchronization · 2026-10-20
+
+- Sole worker, isolated `test/rea-1458-chats-close-sync` from fresh main
+  `cfddae6068f82f7b075e93df566d2a3110dd1262`. Original ticket and acceptance
+  criteria are preserved. PR189 stays test-only and DO NOT MERGE; held PR183 and
+  protected PR162 heads/ledger bytes are preserved. No duplicate worker or repair.
+- Unchanged Chromium case passed once locally. A controlled early release after
+  typing but before Done reproduced exact pre-key `['a', 'alpha']` on unchanged
+  production. This proves the missing in-flight assumption can produce the CI
+  symptom; it is not a historical CI event trace or customer-impact claim.
+- The first `a` reply is explicitly held through typing, completed close handling
+  and terminal-key queuing. Two bounded browser-round-trip schedules preserve
+  exact pre-key `['a']`, actual `key: interrupt`, challenge/sequence checks,
+  hidden error UI and empty errors. Finally cleanup releases/drains held work
+  and awaits the owned socket closing. No production or workflow/gate change.
+- Chromium target: six passes (three per schedule); deliberate removal of stale
+  search cancellation: two expected failures at the exact original assertion,
+  with cleanup proven. Mutation reverted byte-for-byte. Full focused Chromium
+  file after restoration: eight passes. Static syntax/whitespace checks passed.
+- Local WebKit original/gated cases stop at pairing before this regression; no
+  local WebKit pass is claimed. No timeout inflation, retry masking, added skip
+  or local runtime/security workaround. Exact-head normal CI must supply both
+  engine and native results. [Methodology and limits](../qa/rea-1458.md); actual
+  final-head CI receipts/current comments are recorded on the PR.
+- No local native test/build, process enumeration, real conversation/provider
+  data, active-app input, permission/security/credential change, app replacement
+  or extra agent. Parent Tediore reviews exact final head before merge; no next
+  ticket. REA-1240's baseline/implementation remain separate and stopped.

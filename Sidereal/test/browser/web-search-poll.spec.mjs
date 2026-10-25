@@ -3,9 +3,37 @@ import { WebSocket } from 'ws';
 import { once } from 'node:events';
 import { randomKey, importKey, seal, open } from '../../public/crypto.mjs';
 
-// A synthetic Mac over the actual relay and encryption that takes a fixed time per request.
+// A synthetic Mac over the actual relay and encryption, with delayed replies by default.
 // Never touches user sessions.
 const DELAY = 600;
+async function bounded(promise, label, milliseconds = 5000) {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`Synthetic Mac timed out: ${label}`)), milliseconds);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+
+// Receipt and release are separate facts. A deadline fails a stranded fixture;
+// it never advances the scenario or substitutes for either acknowledgment.
+function heldSearch() {
+  let acknowledge, allowReply, captured = false, held = false;
+  const received = new Promise(resolve => { acknowledge = resolve; });
+  const permission = new Promise(resolve => { allowReply = resolve; });
+  return {
+    async beforeReply(request) {
+      if (captured || request.action !== 'chats' || request.text !== 'a') return false;
+      captured = true; held = true; acknowledge(request.sequence);
+      try { await bounded(permission, 'release of a', 15000); }
+      finally { held = false; }
+      return true;
+    },
+    received: () => bounded(received, 'receipt of a'),
+    release() { allowReply(); },
+    isHeld: () => held,
+  };
+}
 let sharedRoom, previousHost;
 async function slowMac(page, origin, options = {}) {
   if (!sharedRoom) {
@@ -40,7 +68,9 @@ async function slowMac(page, origin, options = {}) {
         actions.push({ action: request.action, text: request.text, tabID: request.tabID, sequence: request.sequence,
           index: request.index, name: request.name, provider: request.provider });
         if (request.action === 'pair') key = await importKey(request.text);
-        await new Promise(resolve => setTimeout(resolve, options.delay ?? DELAY));
+        if (!await options.replyGate?.beforeReply(request)) {
+          await new Promise(resolve => setTimeout(resolve, options.delay ?? DELAY));
+        }
         if (request.action === 'select') selected = request.tabID;
         const payload = { challenge, sequence: request.sequence, clientNonce: request.clientNonce, ok: true, ticket,
           state: { tabs, selectedTabID: selected, terminal: `Session ${selected}\nReady.`, mac: 'synthetic-mac', capabilities: options.capabilities ?? ['sessionOps'] } };
@@ -67,7 +97,21 @@ async function slowMac(page, origin, options = {}) {
     ws.close();
     throw new Error(`${error.message}; synthetic actions=${actions.map(item => item.action)}; errors=${errors.map(item => item.message)}`);
   }
-  return { actions, errors, close: () => ws.close() };
+  return { actions, errors, close: () => ws.close(),
+    async dispose() {
+      options.replyGate?.release();
+      ws.off('message', onMessage);
+      try { await bounded(serial, 'held request cleanup'); }
+      finally {
+        if (ws.readyState !== WebSocket.CLOSED) {
+          const closed = once(ws, 'close');
+          ws.terminate();
+          await bounded(closed, 'socket cleanup');
+        }
+      }
+    },
+    isClosed: () => ws.readyState === WebSocket.CLOSED,
+  };
 }
 const searches = actions => actions.filter(item => item.action === 'chats');
 const queries = actions => searches(actions).filter(item => item.text);
@@ -200,24 +244,65 @@ test('a session picked right after typing is not held behind obsolete searches',
   } finally { mac.close(); }
 });
 
-test('a key pressed after the Chats sheet closes never waits for the query left in it', async ({ page, baseURL }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  const mac = await slowMac(page, baseURL);
-  try {
-    await page.getByRole('button', { name: 'Terminal keys' }).click();
-    await page.getByRole('button', { name: 'Browse open and saved chats' }).click();
-    await expect(page.locator('#saved-list button')).toHaveCount(3);
-    // The first key goes out; the rest wait behind it until the sheet closes.
-    await page.locator('#session-search').pressSequentially('a');
-    await expect.poll(() => queries(mac.actions)[0]?.text).toBe('a');
-    await page.locator('#session-search').pressSequentially('lpha');
-    await page.locator('#sessions-close').click();
-    await expect(page.locator('#sessions-dialog')).toBeHidden();
-    await page.getByRole('button', { name: 'Stop current response' }).click();
-    await expect.poll(() => mac.actions.some(item => item.action === 'key')).toBe(true);
-    const at = mac.actions.findIndex(item => item.action === 'key');
-    expect(queries(mac.actions.slice(0, at)).map(item => item.text)).toEqual(['a']);
-    await expect(page.locator('#error')).toBeHidden();
-    expect(mac.errors).toEqual([]);
-  } finally { mac.close(); }
-});
+for (const extraTurns of [0, 3]) {
+  test(`a key pressed after the Chats sheet closes never waits for the query left in it (${extraTurns} extra browser turns)`, async ({ page, baseURL }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const gate = heldSearch();
+    let mac;
+    try {
+      mac = await slowMac(page, baseURL, { replyGate: gate });
+      await page.getByRole('button', { name: 'Terminal keys' }).click();
+      await page.getByRole('button', { name: 'Browse open and saved chats' }).click();
+      await expect(page.locator('#saved-list button')).toHaveCount(3);
+      await page.locator('#session-search').pressSequentially('a');
+      const sequence = await gate.received();
+      expect(queries(mac.actions).map(item => item.text)).toEqual(['a']);
+      expect(queries(mac.actions)[0].sequence).toBe(sequence);
+      expect(gate.isHeld()).toBe(true);
+      await page.locator('#session-search').pressSequentially('lpha');
+      await expect(page.locator('#session-search')).toHaveValue('alpha');
+      expect(gate.isHeld()).toBe(true);
+      await page.evaluate(() => {
+        // Installed after the application's handlers: close has run clearSaved,
+        // and Stop's synchronous request/enqueue section has run before each ack.
+        globalThis.fixtureChatsClosed = new Promise(resolve => {
+          document.getElementById('sessions-dialog').addEventListener('close', () => resolve(true), { once: true });
+        });
+        globalThis.fixtureKeyQueued = new Promise(resolve => {
+          document.getElementById('interrupt').addEventListener('click', () => resolve(true), { once: true });
+        });
+      });
+      // Vary scheduling by completed browser round trips, never elapsed sleeps.
+      for (let turn = 0; turn < extraTurns; turn++) await page.evaluate(() => {});
+      await page.locator('#sessions-close').click();
+      await bounded(page.evaluate(() => globalThis.fixtureChatsClosed), 'Chats close handling');
+      await expect(page.locator('#sessions-dialog')).toBeHidden();
+      expect(gate.isHeld()).toBe(true);
+      await page.getByRole('button', { name: 'Stop current response' }).click();
+      await bounded(page.evaluate(() => globalThis.fixtureKeyQueued), 'terminal-key queuing');
+      for (let turn = 0; turn < extraTurns; turn++) await page.evaluate(() => {});
+      expect(gate.isHeld()).toBe(true);
+      expect(queries(mac.actions).map(item => item.text)).toEqual(['a']);
+      expect(mac.actions.some(item => item.action === 'key')).toBe(false);
+      console.log(JSON.stringify({ fixture: 'REA-1458', extraTurns, heldThroughKeyQueuing: true, sequence }));
+      gate.release();
+      await expect.poll(() => mac.actions.some(item => item.action === 'key')).toBe(true);
+      const at = mac.actions.findIndex(item => item.action === 'key');
+      expect(queries(mac.actions.slice(0, at)).map(item => item.text)).toEqual(['a']);
+      expect(mac.actions[at]).toMatchObject({ action: 'key', text: 'interrupt', tabID: 'one' });
+      const sequences = mac.actions.map(item => item.sequence);
+      expect(sequences).toEqual(sequences.map((_, index) => sequences[0] + index));
+      await expect(page.locator('#error')).toBeHidden();
+      expect(mac.errors).toEqual([]);
+    } finally {
+      gate.release();
+      await mac?.dispose();
+      expect(gate.isHeld()).toBe(false);
+      if (mac) {
+        expect(mac.isClosed()).toBe(true);
+        expect(mac.errors).toEqual([]);
+        console.log(JSON.stringify({ fixture: 'REA-1458', extraTurns, held: gate.isHeld(), socketClosed: mac.isClosed() }));
+      }
+    }
+  });
+}
