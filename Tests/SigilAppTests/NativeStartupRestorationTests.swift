@@ -409,16 +409,21 @@ struct NativeStartupRestorationTests {
             .init(
                 sessionID: id, cwd: fixture.base.root.appendingPathComponent("another-folder").path, provider: .codex),
             .init(sessionID: id, cwd: fixture.base.root.path + "/.", provider: .codex),
+            .init(sessionID: id, cwd: fixture.base.root.path, provider: .codex),
         ]
         fixture.base.settings.openTabs = .init(
             tabs: entries, selectedSessionID: id, selectedCWD: entries[1].cwd, selectedProvider: .claudeCode)
         let model = fixture.model(fixture.base.store)
         defer { model.closeAllTabsAndWait() }
         model.restoreOpenTabs()
+        let rows = model.unrestoredTabs
+        #expect(rows.map(\.entry) == entries)
+        #expect(Set(rows.map(\.id)).count == entries.count)
         let row = try #require(model.unrestoredTabs.first)
         model.forgetUnrestoredTab(row)
         #expect(model.unrestoredTabs.map(\.entry) == Array(entries[1...2]))
         #expect(fixture.base.settings.openTabs.tabs == Array(entries[1...2]))
+        #expect(model.unrestoredTabs.map(\.id) == Array(rows[1...2]).map(\.id))
         #expect(fixture.base.settings.openTabs.selectedProvider == .claudeCode)
     }
 

@@ -3675,8 +3675,14 @@ final class AppModel {
     /// All retained intents, in saved order. Availability facts come from restoration,
     /// never a provider probe or history read while the view asks for rows.
     var unrestoredTabs: [UnrestoredTab] {
-        deferredOpenTabs.map { entry in
+        var occurrences: [String: Int] = [:]
+        return deferredOpenTabs.map { entry in
             let key = entryKey(entry)
+            // Row identity also preserves the original reference. Canonical aliases
+            // and repeated snapshot rows still share one Forget/restoration intent.
+            let reference = key + "\u{0}" + entry.cwd
+            let occurrence = occurrences[reference, default: 0]
+            occurrences[reference] = occurrence + 1
             let known = store.sessions.first { $0.id == sidebarID(entry) && samePath($0.cwd, entry.cwd) }
             let folder = URL(fileURLWithPath: entry.cwd).lastPathComponent
             let title =
@@ -3694,7 +3700,8 @@ final class AppModel {
             } else {
                 reason = unrestoredReasons[key] ?? .historyLoading
             }
-            return UnrestoredTab(id: key, entry: entry, title: title, reason: reason)
+            return UnrestoredTab(
+                id: reference + "\u{0}" + String(occurrence), entry: entry, title: title, reason: reason)
         }
     }
 
@@ -3811,7 +3818,7 @@ final class AppModel {
             recordUnrestoredReason(.historyLoading)
             return
         }
-        if store.isLoading || (store.appliedScanSequence == 0 && store.hasUnvalidatedHistory) {
+        if store.appliedScanSequence == 0, store.hasUnvalidatedHistory {
             recordUnrestoredReason(.historyLoading)
             return
         }

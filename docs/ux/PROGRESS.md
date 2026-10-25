@@ -1602,3 +1602,20 @@ native build/test, process enumeration, app interaction/quit/relaunch, credentia
 security or billing change. This on-disk update does not validate REA-1240 or
 resolve held manual app acceptance. Full receipt remains outside the repository
 in `sigil-app-maintenance-2026-10-25/VERIFICATION-RECEIPT.json`.
+
+
+Pre-final source review corrected an interface collision in the alias fixture:
+all original references remain exposed, with unique row IDs (including repeated
+raw entries), while existing canonical/provider/workspace intent matching still
+controls restoration and Forget. Remaining distinct rows keep their IDs when
+another intent is forgotten. The regression asserts all three properties.
+The initial restoration guards remain unchanged; only explicit Retry owns the
+new cross-await hold. A broad loading guard was removed before final validation
+to preserve normal Grok startup behavior. Pending history is still represented
+from the store's current loading state.
+
+Superseded CI666 at `8afc79798cf5ad5f439e5117127103039057784b` was requested
+cancelled during Verify before pushing this source correction. No native result
+or pass is claimed from that run. The next head waits for cancellation readback
+before admission; gates remain strictly serial. Static format/lint/whitespace
+checks pass after the correction. Required implementation CI/review still pending.
