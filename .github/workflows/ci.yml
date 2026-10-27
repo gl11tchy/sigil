@@ -6,17 +6,30 @@ on:
       - main
   pull_request:
   workflow_dispatch:
+    inputs:
+      about_diagnostic:
+        description: Run only the isolated About host diagnostic
+        required: false
+        default: false
+        type: boolean
+      expected_source_sha:
+        description: Full reviewed source SHA, required only for About diagnostics
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'workflow_dispatch' && inputs.about_diagnostic == true && 'about-host-diagnostic' || format('ci-{0}-{1}', github.workflow, github.ref) }}
+  cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && inputs.about_diagnostic == true) }}
 
 jobs:
   verify:
-    name: Build, test, and smoke check
+    # A focused run must not emit a skipped check under the required gate's name.
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.about_diagnostic == true && 'Normal verification not selected for About diagnostic' || 'Build, test, and smoke check' }}
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.about_diagnostic == true) }}
     # Requires a fresh Tart VM with Xcode 26+ and an iOS 26+ runtime on the owner's Mac
     # (gl11tchy/gh-runner-broker mac/macos-supervisor.sh). Jobs wait while the Mac is off.
     runs-on: [self-hosted, sigil-vm]
@@ -145,4 +158,58 @@ jobs:
           name: Sigil.app
           retention-days: 7
           path: dist/Sigil.zip
+          if-no-files-found: error
+
+  about_diagnostic:
+    name: Isolated About host diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.about_diagnostic == true
+    runs-on: [self-hosted, sigil-vm]
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      SIGIL_EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+    steps:
+      - name: Validate exact dispatch source
+        run: |
+          if [[ ! "$SIGIL_EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || [[ "$GITHUB_SHA" != "$SIGIL_EXPECTED_SOURCE_SHA" ]]; then
+            echo "::error::Selected ref does not match the reviewed source SHA"
+            exit 1
+          fi
+
+      - name: Check out exact source without retained credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify checkout boundary
+        run: |
+          [[ "$(git rev-parse HEAD)" == "$SIGIL_EXPECTED_SOURCE_SHA" ]]
+          [[ -z "$(git status --porcelain --untracked-files=all)" ]]
+          if git config --local --get-regexp 'http\..*\.extraheader' >/dev/null; then
+            echo "::error::Checkout retained a credential header"
+            exit 1
+          fi
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          sw_vers
+
+      - name: Run only the isolated About diagnostic
+        id: about
+        env:
+          SIGIL_SIDEBAR_ARTIFACTS: ${{ runner.temp }}/sigil-about-${{ github.run_id }}-${{ github.run_attempt }}
+        run: Scripts/sidebar-host-test.sh --about-only
+
+      - name: Retain About diagnostic evidence
+        if: always() && steps.about.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: about-host-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          path: ${{ runner.temp }}/sigil-about-${{ github.run_id }}-${{ github.run_attempt }}/
           if-no-files-found: error

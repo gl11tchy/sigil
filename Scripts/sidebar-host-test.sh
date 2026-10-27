@@ -3,21 +3,23 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODE="${1:-test}"
-if [[ "$MODE" != --build-only && "$MODE" != test ]]; then
-  echo "Usage: $0 [--build-only]" >&2
+if [[ "$MODE" != --build-only && "$MODE" != test && "$MODE" != --about-only ]]; then
+  echo "Usage: $0 [--build-only|--about-only]" >&2
   exit 2
 fi
-if [[ "$MODE" == test && "${CI:-}" != true ]]; then
+if [[ "$MODE" != --build-only && "${CI:-}" != true ]]; then
   echo "Sidebar app-hosted tests require CI; use --build-only locally." >&2
   exit 2
 fi
 
 python3 - "$ROOT" "$MODE" <<'PY'
+import hashlib
 import json
 import os
 from pathlib import Path
 import plistlib
 import platform
+import re
 import signal
 import subprocess
 import sys
@@ -26,9 +28,44 @@ import time
 
 root = Path(sys.argv[1])
 build_only = sys.argv[2] == '--build-only'
+about_only = sys.argv[2] == '--about-only'
 sys.path.insert(0, str(root / 'Scripts'))
 from sidebar_host_results import validate
 from about_host_results import validate as validate_about
+
+def digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+def source_sha():
+    return subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+
+def require_clean_source(expected):
+    if source_sha() != expected or subprocess.check_output([
+        'git', '-C', str(root), 'status', '--porcelain', '--untracked-files=all'
+    ], text=True).strip():
+        raise SystemExit('About diagnostics require the exact clean reviewed source.')
+
+if about_only:
+    expected = os.environ.get('SIGIL_EXPECTED_SOURCE_SHA', '')
+    if (os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('GITHUB_EVENT_NAME') != 'workflow_dispatch'
+            or not re.fullmatch(r'[0-9a-f]{40}', expected)
+            or os.environ.get('GITHUB_SHA') != expected):
+        raise SystemExit('About diagnostics require a source-pinned GitHub Actions run.')
+    require_clean_source(expected)
+    artifacts = Path(os.environ['SIGIL_SIDEBAR_ARTIFACTS'])
+    if not artifacts.is_absolute() or artifacts.resolve().is_relative_to(root.resolve()):
+        raise SystemExit('About diagnostic evidence must be outside the source checkout.')
+    artifacts.mkdir(parents=True, exist_ok=False)
+    diagnostic_log = artifacts / 'about-activation.log'
+    provenance = {
+        'sourceSHA': expected,
+        'sourceTree': subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD^{tree}'], text=True).strip(),
+        'runID': os.environ['GITHUB_RUN_ID'], 'attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+        'selector': 'SigilSidebarHostTests/AboutBuildIdentityHostTests',
+        'fixtureSHA256': digest(root / 'Tests/SigilAppTests/AboutBuildIdentityHostTests.swift'),
+        'stage': 'source-verified',
+    }
+    (artifacts / 'about-source.json').write_text(json.dumps(provenance, indent=2) + '\n')
 
 def run(command, environment, timeout, require_success=True):
     process = subprocess.Popen(command, env=environment, start_new_session=True)
@@ -65,6 +102,9 @@ with tempfile.TemporaryDirectory(prefix='sigil-sidebar-host-') as temporary:
         'XDG_CACHE_HOME': str(home / 'cache'), 'XDG_CONFIG_HOME': str(home / 'config'),
         'PATH': f'{home / "bin"}:/usr/bin:/bin:/usr/sbin:/sbin', 'SHELL': str(shell),
     }
+    if about_only:
+        diagnostic_input = home / 'about-activation.log'
+        isolated['SIGIL_ABOUT_DIAGNOSTIC_LOG'] = str(diagnostic_input)
     environment = os.environ.copy()
     environment.update(isolated)
     derived = work / 'DerivedData'
@@ -98,17 +138,41 @@ with tempfile.TemporaryDirectory(prefix='sigil-sidebar-host-') as temporary:
     # Documented xctestrun EnvironmentVariables apply to the actual test host process.
     target.setdefault('EnvironmentVariables', {}).update(isolated)
     test_run.write_bytes(plistlib.dumps(parameters))
+    if about_only:
+        require_clean_source(expected)
+        products = derived / 'Build/Products'
+        identities = {}
+        for bundle in ['SigilSidebarFixtureHost.app', 'SigilSidebarHostTests.xctest']:
+            matches = list(products.glob(f'*/{bundle}/Contents/Info.plist'))
+            if len(matches) != 1:
+                raise SystemExit(f'Expected one fresh diagnostic product: {bundle}')
+            info = plistlib.loads(matches[0].read_bytes())
+            name = info['CFBundleExecutable']
+            if Path(name).name != name:
+                raise SystemExit('Invalid diagnostic product executable.')
+            binary = matches[0].parent / 'MacOS' / name
+            if binary.is_symlink() or not binary.resolve().is_relative_to(derived.resolve()):
+                raise SystemExit('Diagnostic product escaped fresh DerivedData.')
+            identities[bundle] = {'path': str(binary.relative_to(derived)), 'sha256': digest(binary)}
+        provenance.update(stage='built-source-pinned', products=identities,
+                          testHostPath=target['TestHostPath'], testBundlePath=target['TestBundlePath'],
+                          xctestrunSHA256=digest(test_run))
+        (artifacts / 'about-source.json').write_text(json.dumps(provenance, indent=2) + '\n')
     if build_only:
         print('Sidebar host: build-for-testing and app-host configuration passed; no app or test was launched.')
     else:
-        artifacts = Path(os.environ.get('SIGIL_SIDEBAR_ARTIFACTS', root / '.build/sidebar-host-verification'))
-        artifacts.mkdir(parents=True, exist_ok=True)
+        if not about_only:
+            artifacts = Path(os.environ.get('SIGIL_SIDEBAR_ARTIFACTS', root / '.build/sidebar-host-verification'))
+            artifacts.mkdir(parents=True, exist_ok=True)
         # Run each suite separately so the existing exact-six sidebar gate is
         # unchanged and the new About check has its own mandatory one-case gate.
-        for suite, prefix, validator in (
+        suites = (
             ('SidebarVersionNoticeTests', 'sidebar-host', validate),
             ('AboutBuildIdentityHostTests', 'about-host', validate_about),
-        ):
+        )
+        if about_only:
+            suites = (suites[1],)
+        for suite, prefix, validator in suites:
             result = artifacts / f'{prefix}-{time.time_ns()}.xcresult'
             test_status = run([
                 'xcodebuild', '-xctestrun', str(test_run), '-destination', f'platform=macOS,arch={platform.machine()}',
@@ -124,9 +188,26 @@ with tempfile.TemporaryDirectory(prefix='sigil-sidebar-host-') as temporary:
             tree = json.loads(subprocess.check_output([
                 'xcrun', 'xcresulttool', 'get', 'test-results', 'tests', '--path', str(result)
             ], env=environment, timeout=30))
+            if about_only:
+                (artifacts / 'about-summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+                (artifacts / 'about-tests.json').write_text(json.dumps(tree, indent=2) + '\n')
+                if diagnostic_input.is_file():
+                    if diagnostic_input.is_symlink() or diagnostic_input.stat().st_size > 65536:
+                        raise SystemExit('Invalid About activation trace.')
+                    diagnostic_log.write_bytes(diagnostic_input.read_bytes())
+                require_clean_source(expected)
+                for product in identities.values():
+                    if digest(derived / product['path']) != product['sha256']:
+                        raise SystemExit('A diagnostic product changed after testing.')
             try:
                 outcome = validator(summary, tree, test_status)
             except ValueError as error:
                 raise SystemExit(f'{error}: {summary}')
+            if about_only:
+                if not diagnostic_log.is_file():
+                    raise SystemExit('The passing About diagnostic did not retain its activation trace.')
+                provenance.update(stage='validated-exact-one-pass', testExit=test_status,
+                                  activationLogSHA256=digest(diagnostic_log))
+                (artifacts / 'about-source.json').write_text(json.dumps(provenance, indent=2) + '\n')
             print(f'{suite}: {outcome}. Evidence: {result}')
 PY
