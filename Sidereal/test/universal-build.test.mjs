@@ -169,8 +169,9 @@ test('CI requires universal bundles before merge and keeps publication main-push
     assert.ok(step);
     assert.doesNotMatch(step, /\n        if:/);
   }
-  const publish = steps.find(x => x.split('\n')[0] === 'Publish latest GitHub Release');
-  assert.match(publish, /if: github.event_name == 'push' && github.ref == 'refs\/heads\/main'/);
+  const release = workflow.split('\n  release:\n')[1];
+  assert.match(release, /if: github.event_name == 'push' && github.ref == 'refs\/heads\/main'/);
+  assert.match(release, /needs: verify/);
   const build = steps.find(x => x.split('\n')[0] === 'Build release bundle');
   assert.match(build, /lipo "dist\/Sigil.app\/Contents\/MacOS\/\$binary" -verify_arch arm64 x86_64/);
   assert.match(readFileSync(new URL('../../Scripts/build-app.sh', import.meta.url), 'utf8'), /"\$SCRIPT_DIR\/build-universal.sh"/);

@@ -11,6 +11,27 @@ const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.m
 const steps = workflow.split('\n      - name: ').slice(1);
 const step = name => steps.find(block => block.split('\n')[0] === name);
 
+test('REA-1224 verification cannot retain a write credential or admit a fork', () => {
+  assert.match(workflow, /^permissions:\n  contents: read\n/m);
+  const verify = workflow.split('\n  verify:\n')[1]?.split('\n  release:\n')[0];
+  assert.ok(verify);
+  assert.match(verify, /if: github\.event_name != 'pull_request' \|\| github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
+  assert.match(verify, /persist-credentials: false/);
+  assert.doesNotMatch(verify, /contents: write|secrets\.GITHUB_TOKEN|gh release/);
+});
+
+test('REA-1224 publishing has its own main-push job and exact artifact boundary', () => {
+  const release = workflow.split('\n  release:\n')[1];
+  assert.ok(release, 'publication still runs with PR verification');
+  assert.match(release, /needs: verify/);
+  assert.match(release, /if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
+  assert.match(release, /permissions:\n      contents: write/);
+  assert.match(release, /artifact-ids: .*needs\.verify\.outputs\.artifact_id/);
+  assert.match(release, /EXPECTED_ZIP_SHA256: .*needs\.verify\.outputs\.zip_sha256/);
+  assert.match(release, /persist-credentials: false/);
+  assert.equal((workflow.match(/contents: write/g) || []).length, 1);
+});
+
 test('restored result bundles are removed before any check without deleting build caches', t => {
   const cleanup = step('Clear restored native verification evidence');
   assert.ok(cleanup);
@@ -61,27 +82,54 @@ test('native result uploads are isolated from build caches and other run attempt
   assert.match(producer, /ARTIFACTS="\$\{SIGIL_NATIVE_ARTIFACTS:-/);
 });
 
-test('app downloads survive manual runs and failed release publishing without duplicating releases', () => {
+test('app downloads are retained before a separate publisher, including manual runs and publish failure', () => {
   const upload = step('Upload app zip');
   const publish = step('Publish latest GitHub Release');
   assert.match(upload, /\n          retention-days: 7\n/);
-  assert.ok(steps.indexOf(publish) < steps.indexOf(upload));
+  assert.ok(steps.indexOf(upload) < steps.indexOf(publish));
   assert.match(step('Zip the app'), /\n        id: zip_app\n/);
-  assert.match(publish, /\n        id: publish_release\n/);
+  assert.match(upload, /\n        id: app_artifact\n/);
+  assert.match(upload, /name: Sigil\.app-.*github\.run_id.*github\.run_attempt/);
+  assert.match(upload, /dist\/Sigil\.zip\n            dist\/release\.json/);
+  assert.doesNotMatch(upload, /overwrite:|publish_release/);
   const condition = upload.match(/\n        if: \$\{\{ (.+) \}\}/)?.[1];
   assert.ok(condition);
-  const runs = new Function('steps', 'cancelled', `return (${condition})`);
-  for (const [zip, release, cancelled, expected] of [
-    ['success', 'success', false, false],
-    ['success', 'skipped', false, true],
-    ['success', 'failure', false, true],
+  const runs = new Function('steps', 'cancelled', 'return (' + condition + ')');
+  for (const [zip, metadata, cancelled, expected] of [
+    ['success', 'success', false, true],
     ['failure', 'skipped', false, false],
+    ['success', 'failure', false, false],
     ['skipped', 'skipped', false, false],
-    ['success', 'failure', true, false],
+    ['success', 'success', true, false],
   ]) {
-    assert.equal(runs({ zip_app: { outcome: zip }, publish_release: { outcome: release } }, () => cancelled), expected);
+    assert.equal(runs({ zip_app: { outcome: zip }, release_metadata: { outcome: metadata } }, () => cancelled), expected);
   }
+  const verify = workflow.split('\n  verify:\n')[1].split('\n  release:\n')[0];
+  const release = workflow.split('\n  release:\n')[1];
+  const verifyIf = verify.match(/\n    if: (.+)\n/)?.[1];
+  const releaseIf = release.match(/\n    if: (.+)\n/)?.[1];
+  const allowed = expression => new Function('github', 'return (' + expression + ')');
+  const github = (event, ref, repository) => ({
+    event_name: event, ref, repository: 'fixture/sigil',
+    event: { pull_request: { head: { repo: { full_name: repository } } } },
+  });
+  for (const [event, ref, repository, verifies, publishes] of [
+    ['push', 'refs/heads/main', 'fixture/sigil', true, true],
+    ['push', 'refs/heads/feature', 'fixture/sigil', true, false],
+    ['workflow_dispatch', 'refs/heads/main', 'fixture/sigil', true, false],
+    ['workflow_dispatch', 'refs/heads/feature', 'fixture/sigil', true, false],
+    ['pull_request', 'refs/pull/1/merge', 'fixture/sigil', true, false],
+    ['pull_request', 'refs/pull/2/merge', 'outside/fork', false, false],
+  ]) {
+    const context = github(event, ref, repository);
+    assert.equal(allowed(verifyIf)(context), verifies);
+    assert.equal(allowed(releaseIf)(context), publishes);
+  }
+  assert.match(release, /ref: .*github\.sha/);
+  assert.match(release, /merge-multiple: true/);
+  assert.doesNotMatch(release, /Scripts\/(verify|build-app|smoke-launch)\.sh|npm |swift build|swift test/);
 });
+
 
 test('the exact release bundle must survive smoke launch before zip or publication', () => {
   const build = step('Build release bundle');
@@ -98,8 +146,8 @@ test('the exact release bundle must survive smoke launch before zip or publicati
   assert.doesNotMatch(smoke, /continue-on-error|always\(/);
   assert.match(smoke, /run: Scripts\/smoke-launch.sh dist\/Sigil.app\n/);
   assert.match(zip, /run: ditto -c -k --keepParent dist\/Sigil.app dist\/Sigil.zip\n/);
-  assert.match(publish, /if: github.event_name == 'push' && github.ref == 'refs\/heads\/main'\n/);
-  assert.match(publish, /gh release create "\$tag" dist\/Sigil.zip/);
+  assert.match(workflow.split('\n  release:\n')[1], /if: github.event_name == 'push' && github.ref == 'refs\/heads\/main'\n/);
+  assert.match(publish, /run: python3 Scripts\/ci-release\.py publish release/);
   const verify = readFileSync(new URL('../../Scripts/verify.sh', import.meta.url), 'utf8');
   assert.match(verify, /"\$SCRIPT_DIR\/smoke-launch.sh" "\$APP"/);
   assert.doesNotMatch(verify, /SIGIL_SMOKE_TEST=1/);
