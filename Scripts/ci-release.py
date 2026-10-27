@@ -12,7 +12,6 @@ import tempfile
 import time
 
 MAX_ZIP_BYTES = 200 * 1024 * 1024
-OLD_BUILD = re.compile(r"(latest|build-[0-9]+\.[0-9]+)")
 
 
 class ReleaseError(Exception):
@@ -135,6 +134,11 @@ def matching_release(items, tag):
     return matches[0] if matches else None
 
 
+def build_order(tag):
+    match = re.fullmatch(r"build-([0-9]+)\.([0-9]+)", tag)
+    return tuple(map(int, match.groups())) if match else None
+
+
 def validate_release(release, tag, title, notes, metadata, github):
     if not release or release.get("draft") is not False or release.get("prerelease") is not False:
         raise ReleaseError("Missing, draft or incomplete release; preserving it without automatic repair")
@@ -193,6 +197,9 @@ def publish(directory, env, github=None):
              + "\nVerified artifact ID: " + env["EXPECTED_ARTIFACT_ID"]
              + "\nSource ZIP SHA256: " + identity["sha256"])
     items = github.releases()
+    order = build_order(tag)
+    if any((build_order(item.get("tag_name", "")) or (0, 0)) > order for item in items):
+        raise ReleaseError("A newer build release exists; preserving all release state")
     existing = matching_release(items, tag)
     if existing:
         validate_release(existing, tag, title, notes, metadata, github)
@@ -212,10 +219,11 @@ def publish(directory, env, github=None):
             if create_error:
                 raise ReleaseError("Publication outcome uncertain; no retry attempted: " + str(error)) from create_error
             raise
-    # Preserve the existing old-build cleanup policy, only after a proven publication.
+    # Prune only older builds, even if a newer release appeared after our first read.
     for item in items[:100]:
         old = item.get("tag_name", "")
-        if old != tag and OLD_BUILD.fullmatch(old):
+        old_order = build_order(old)
+        if old == "latest" or (old_order is not None and old_order < order):
             try:
                 github.delete(old)
             except ReleaseError:

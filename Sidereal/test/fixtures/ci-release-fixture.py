@@ -117,6 +117,9 @@ class FakeGitHub:
         if scenario == "uncertain-partial":
             item.update(draft=True, published_at=None, assets=[])
             raise module.ReleaseError("generated uncertain create after draft")
+        if scenario == "newer-after-create":
+            self.items.insert(0, {"tag_name": "build-12.10"})
+            self.tags["build-12.10"] = sha
 
     def delete(self, tag):
         self.writes.append("delete:" + tag)
@@ -128,6 +131,7 @@ github = FakeGitHub()
 ok = False
 error = None
 tag = None
+preserved_state = None
 try:
     record()
     if scenario == "transport":
@@ -142,9 +146,11 @@ try:
         print(json.dumps(dict(ok=True, error=None, tag=again["tag"], **{
             key: state[key] for key in ["created", "writes", "apiCalls"]})))
         sys.exit(0)
+    older_producers = {"older-producer-rerun", "older-existing-rerun",
+                       "numeric-newer-attempt", "newer-run-release"}
     seeded = {"rerun", "release-only-rerun", "verification-rerun", "edited-notes",
               "wrong-asset-digest", "missing-asset-digest", "draft-collision"}
-    if scenario in seeded:
+    if scenario in seeded | older_producers:
         module.publish(root, env, github)
         github.writes.clear()
     if scenario in {"release-only-rerun", "verification-rerun"}:
@@ -185,6 +191,25 @@ try:
         github.items[0]["draft"] = True
     if scenario == "tag-collision":
         github.tags["build-12.1"] = "b" * 40
+    if scenario in older_producers:
+        old_env, old_manifest, old_bytes = dict(env), (root / "release.json").read_bytes(), archive.read_bytes()
+        old_release = json.loads(json.dumps(github.items[0]))
+        env["GITHUB_RUN_ATTEMPT"] = "10" if scenario == "numeric-newer-attempt" else "2"
+        if scenario == "newer-run-release":
+            env.update(GITHUB_RUN_NUMBER="13", GITHUB_RUN_ID="78", GITHUB_RUN_ATTEMPT="1")
+        env["EXPECTED_ARTIFACT_ID"] = "1235"
+        archive.write_bytes(b"generated newer ZIP bytes; no application")
+        record()
+        module.publish(root, env, github)
+        if scenario == "older-existing-rerun":
+            github.items.append(old_release)
+            github.tags["build-12.1"] = old_env["GITHUB_SHA"]
+        env.update(old_env)
+        env["GITHUB_RUN_ATTEMPT"] = "11"
+        archive.write_bytes(old_bytes)
+        (root / "release.json").write_bytes(old_manifest)
+        github.writes.clear()
+        preserved_state = json.dumps(dict(items=github.items, tags=github.tags), sort_keys=True)
     if scenario == "prune":
         github.items.extend({"tag_name": tag} for tag in ["build-11.1", "latest", "manual-owner-release"])
     result = module.publish(root, env, github)
@@ -197,4 +222,6 @@ try:
 except (module.ReleaseError, ValueError, OSError) as failure:
     error = str(failure)
 print(json.dumps(dict(ok=ok, error=error, tag=tag, created=github.created, writes=github.writes,
-                      notes=github.last_notes, remaining=[item["tag_name"] for item in github.items])))
+                      notes=github.last_notes, remaining=[item["tag_name"] for item in github.items],
+                      preserved=preserved_state == json.dumps(dict(items=github.items, tags=github.tags),
+                                                              sort_keys=True))))

@@ -67,6 +67,27 @@ test('rerunning verification gets a new attempt artifact/tag, then release rerun
   assert.deepEqual(result.writes, ['create:build-12.2', 'delete:build-12.1']);
 });
 
+for (const scenario of ['older-producer-rerun', 'older-existing-rerun',
+  'numeric-newer-attempt', 'newer-run-release']) {
+  test(scenario + ' preserves newer and older release state without mutation', t => {
+    const result = run(t, scenario);
+    assert.equal(result.ok, false);
+    assert.match(result.error, /newer build release/);
+    assert.deepEqual(result.writes, []);
+    assert.equal(result.preserved, true);
+    if (scenario === 'older-existing-rerun') {
+      assert.deepEqual(result.remaining, ['build-12.2', 'build-12.1']);
+    }
+  });
+}
+
+test('cleanup preserves a newer release that appears after the initial listing', t => {
+  const result = run(t, 'newer-after-create');
+  assert.equal(result.ok, true, result.error);
+  assert.deepEqual(result.writes, ['create:build-12.1']);
+  assert.deepEqual(result.remaining, ['build-12.10', 'build-12.1']);
+});
+
 for (const scenario of [
   'tampered-zip', 'wrong-output-hash', 'wrong-output-size', 'wrong-source',
   'wrong-run', 'wrong-repository', 'future-attempt', 'malformed-manifest',
