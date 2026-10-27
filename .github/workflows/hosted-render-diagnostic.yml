@@ -1,0 +1,68 @@
+name: Hosted render diagnostic
+
+on:
+  push:
+    branches: [diagnostic/rea-1194-hosted-render-20261027]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-render-diagnostic-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    name: REA-1194 diagnostic (not merge verification)
+    if: github.repository == 'gl11tchy/sigil'
+    runs-on: macos-26
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - name: Require the observed hosted image
+        env:
+          SIGIL_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          [[ "$SIGIL_RUNNER_ENVIRONMENT" == github-hosted ]]
+          [[ "$RUNNER_OS" == macOS && "$RUNNER_ARCH" == ARM64 ]]
+          [[ "$ImageOS" == macos26 && "$ImageVersion" == 20261013.0424.1 ]]
+          [[ "$(xcodebuild -version)" == $'Xcode 26.6\nBuild version 17F113' ]]
+          printf 'Runner: %s / %s; image: %s / %s\n' "$RUNNER_OS" "$RUNNER_ARCH" "$ImageOS" "$ImageVersion"
+          xcodebuild -version
+
+      - name: Check out the exact diagnostic commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check checkout credentials
+        run: |
+          if git config --local --get-regexp 'http\..*\.extraheader' >/dev/null; then
+            echo "::error::Checkout retained a credential header"
+            exit 1
+          fi
+
+      - name: Use the observed Node version
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.3
+
+      - name: Run the bounded diagnostic
+        env:
+          SIGIL_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          SIGIL_EXPECTED_SHA: ${{ github.sha }}
+          SIGIL_RENDER_ARTIFACTS: ${{ runner.temp }}/sigil-render-${{ github.run_id }}-${{ github.run_attempt }}
+        run: python3 Scripts/hosted-render-diagnostic.py
+
+      - name: Retain every diagnostic outcome
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hosted-render-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/sigil-render-${{ github.run_id }}-${{ github.run_attempt }}/evidence/**
+          if-no-files-found: error
+          retention-days: 7
