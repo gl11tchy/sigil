@@ -17,9 +17,9 @@ SPEC = importlib.util.spec_from_file_location("foreground_driver", SCRIPTS / "ab
 driver = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(driver)
 sys.path.pop(0)
-SCENARIOS = ["pass-v1", "pass-v2", "wrong-source", "dirty-source", "wrong-target", "escaped-app",
+SCENARIOS = ["pass-v1", "pass-v2", "ambient-runner-home", "wrong-source", "dirty-source", "wrong-target", "escaped-app", "unresolved-placeholder",
              "failed-case", "skipped-case", "duplicate-case", "wrong-case", "authorization-failure",
-             "parse-failure", "changed-product", "missing-receipt", "wrong-receipt"]
+             "parse-failure", "changed-product", "missing-receipt", "wrong-receipt", "wrong-env-diagnostic", "wrong-requested-home"]
 
 
 class ForegroundDriverTests(unittest.TestCase):
@@ -66,6 +66,8 @@ class ForegroundDriverTests(unittest.TestCase):
                                       "UITargetAppPath": "__TESTROOT__/Debug/SigilSidebarFixtureHost.app"}
                             if scenario == "escaped-app":
                                 target["UITargetAppPath"] = str(Path(temporary) / "outside.app")
+                            if scenario == "unresolved-placeholder":
+                                target["UITargetAppPath"] = "__UNKNOWN__/SigilSidebarFixtureHost.app"
                             name = "SigilSidebarHostTests" if scenario == "wrong-target" else "SigilAboutUITests"
                             parameters = {"__xctestrun_metadata__": {"FormatVersion": 1}, name: target}
                             if scenario == "pass-v2":
@@ -80,6 +82,22 @@ class ForegroundDriverTests(unittest.TestCase):
                             launch = target["EnvironmentVariables"]
                             assert launch["HOME"] == str(home) and launch["GITHUB_SHA"] == "a" * 40
                             assert Path(launch["SIGIL_UI_HOST_PATH"]) == state["app"]
+                            plan = json.loads(launch["SIGIL_UI_LAUNCH_PLAN"])
+                            assert plan["sourceSHA"] == "a" * 40 and plan["nonce"] == launch["SIGIL_UI_NONCE"]
+                            assert Path(plan["generatedRoot"]) == home.parent.resolve()
+                            # Model a runner that substitutes its own HOME without touching the
+                            # explicit AUT payload. No process or personal-home file is accessed.
+                            ambient = dict(launch)
+                            if scenario == "ambient-runner-home":
+                                ambient["HOME"] = str(Path(temporary) / "other-runner-home")
+                                ambient["CFFIXED_USER_HOME"] = str(Path(temporary) / "other-runner-home")
+                                assert ambient["HOME"] != plan["environment"]["HOME"]
+                            assert plan["environment"]["HOME"] == str(home)
+                            for key in ["CODEX_HOME", "CLAUDE_CONFIG_DIR", "GROK_HOME", "TMPDIR", "SHELL"]:
+                                assert Path(plan["environment"][key]).is_relative_to(home)
+                            Path(launch["SIGIL_UI_RESULT_PATH"]).with_name("foreground-environment.json").write_text(json.dumps({
+                                "sourceSHA": "a" * 40, "nonce": "wrong" if scenario == "wrong-env-diagnostic" else plan["nonce"], "stage": "launch-environment-validated",
+                                "runnerHOME": ambient["HOME"], "runnerCFFIXED_USER_HOME": ambient["CFFIXED_USER_HOME"]}))
                             result = Path(command[command.index("-resultBundlePath") + 1])
                             result.mkdir()
                             (result / "generated-raw-result").write_text(scenario)
@@ -88,9 +106,13 @@ class ForegroundDriverTests(unittest.TestCase):
                             if scenario == "changed-product":
                                 (state["app"] / "Contents/MacOS/SigilSidebarFixtureHost").write_bytes(b"changed product")
                             if scenario != "missing-receipt":
+                                requested = dict(plan["environment"])
+                                if scenario == "wrong-requested-home":
+                                    requested["HOME"] = str(Path(temporary) / "outside-home")
                                 Path(launch["SIGIL_UI_RESULT_PATH"]).write_text(json.dumps({
                                     "sourceSHA": "a" * 40, "nonce": "wrong" if scenario == "wrong-receipt" else launch["SIGIL_UI_NONCE"],
                                     "hostPath": str(state["app"].resolve()), "foreground": True,
+                                    "requestedLaunchEnvironment": requested,
                                     "bundleID": "com.gl11tchy.sigil.sidebar-fixture-host"}))
 
                     def wait(self, timeout):
@@ -125,21 +147,29 @@ class ForegroundDriverTests(unittest.TestCase):
                                "GITHUB_SHA": "a" * 40, "SIGIL_EXPECTED_SOURCE_SHA": ("c" if scenario == "wrong-source" else "a") * 40,
                                "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1", "SIGIL_SIDEBAR_ARTIFACTS": str(artifacts)}
                 failure = None
+                temporary_factory = tempfile.TemporaryDirectory
+                def generated_temporary(**kwargs):
+                    # Literal underscores in a generated directory are not placeholder tokens.
+                    return temporary_factory(prefix=kwargs["prefix"] + "literal__underscores-")
                 with patch.dict(os.environ, environment, clear=True), patch.object(driver, "ROOT", root), \
                         patch.object(subprocess, "Popen", Process), patch.object(subprocess, "check_output", output), \
+                        patch.object(tempfile, "TemporaryDirectory", generated_temporary), \
                         contextlib.redirect_stdout(io.StringIO()):
                     try:
                         driver.main()
                     except (ValueError, OSError) as error:
                         failure = str(error)
-                self.assertEqual(failure is None, scenario in ["pass-v1", "pass-v2"], failure)
+                self.assertEqual(failure is None, scenario in ["pass-v1", "pass-v2", "ambient-runner-home"], failure)
                 expected_errors = {
                     "wrong-source": "source-pinned GitHub Actions dispatch", "dirty-source": "exact clean reviewed source",
                     "wrong-target": "separate XCTest UI target", "escaped-app": "escaped fresh DerivedData",
+                    "unresolved-placeholder": "Unsupported UI product placeholder",
                     "failed-case": "exactly one foreground", "skipped-case": "exactly one foreground",
                     "duplicate-case": "exactly one foreground", "wrong-case": "exactly one foreground",
                     "authorization-failure": "exactly one foreground", "changed-product": "product changed after execution",
                     "missing-receipt": "No such file", "wrong-receipt": "exact launched fixture",
+                    "wrong-env-diagnostic": "Environment diagnostic does not match",
+                    "wrong-requested-home": "exact launched fixture",
                 }
                 if scenario in expected_errors:
                     self.assertIn(expected_errors[scenario], failure)
@@ -147,7 +177,7 @@ class ForegroundDriverTests(unittest.TestCase):
                     self.assertEqual(calls, [])
                     continue
                 record = json.loads((artifacts / "foreground-source.json").read_text())
-                if scenario in ["wrong-target", "escaped-app"]:
+                if scenario in ["wrong-target", "escaped-app", "unresolved-placeholder"]:
                     self.assertEqual(len(calls), 1)
                     self.assertTrue((artifacts / "foreground.xctestrun").is_file())
                     self.assertIn("productCandidates", record)
@@ -155,6 +185,12 @@ class ForegroundDriverTests(unittest.TestCase):
                 self.assertEqual(len(calls), 2)
                 self.assertTrue((artifacts / "foreground.xcresult/generated-raw-result").is_file())
                 self.assertTrue((artifacts / "foreground-test.log").is_file())
+                plan_file = artifacts / "foreground-launch-plan.json"
+                self.assertEqual(driver.digest(plan_file), record["launchPlanSHA256"])
+                if scenario == "ambient-runner-home":
+                    observation = json.loads((artifacts / "foreground-environment.json").read_text())
+                    plan = json.loads(plan_file.read_text())
+                    self.assertNotEqual(observation["runnerHOME"], plan["environment"]["HOME"])
                 self.assertEqual(record["stage"] == "validated-exact-one-foreground-pass", failure is None)
                 if scenario == "parse-failure":
                     self.assertEqual(record["stage"], "reading-results")

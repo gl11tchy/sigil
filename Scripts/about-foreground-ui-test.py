@@ -87,7 +87,7 @@ def main():
     save()
     try:
         with tempfile.TemporaryDirectory(prefix="sigil-about-xcui-") as temporary:
-            work = Path(temporary)
+            work = Path(temporary).resolve()
             home, derived = work / "home", work / "DerivedData"
             for name in ("tmp", ".codex", ".claude", ".grok", "cache", "config", "bin"):
                 (home / name).mkdir(parents=True, exist_ok=True)
@@ -140,7 +140,7 @@ def main():
                     raise ValueError("Missing UI product path")
                 for token, value in substitutions.items():
                     raw = raw.replace(token, str(value))
-                if "__" in raw:
+                if re.search(r"__[A-Z][A-Z0-9_]*__", raw):
                     raise ValueError(f"Unsupported UI product placeholder: {raw}")
                 return checked_product_path(Path(raw), derived)
 
@@ -169,9 +169,19 @@ def main():
                         raise ValueError("Wrong application identity")
                     (artifacts / "foreground-host-Info.plist").write_bytes(info_path.read_bytes())
             app = bundles["SigilSidebarFixtureHost.app"]
+            for key, value in isolated.items():
+                if key != "PATH":
+                    checked_product_path(Path(value), work)
+            plan = {"sourceSHA": expected, "nonce": record["nonce"], "generatedRoot": str(work),
+                    "environment": isolated}
+            plan_data = json.dumps(plan, indent=2, sort_keys=True)
+            plan_path = artifacts / "foreground-launch-plan.json"
+            plan_path.write_text(plan_data)
+            record["launchPlanSHA256"] = digest(plan_path)
             target.setdefault("EnvironmentVariables", {}).update({**isolated, "CI": "true", "GITHUB_ACTIONS": "true",
                 "GITHUB_SHA": expected, "SIGIL_EXPECTED_SOURCE_SHA": expected, "SIGIL_UI_DERIVED_DATA": str(derived),
                 "SIGIL_UI_HOST_PATH": str(app), "SIGIL_UI_NONCE": record["nonce"],
+                "SIGIL_UI_LAUNCH_PLAN": plan_data,
                 "SIGIL_UI_RESULT_PATH": str(artifacts / "foreground-state.json")})
             test_run.write_bytes(plistlib.dumps(parameters))
             (artifacts / "foreground.xctestrun").write_bytes(test_run.read_bytes())
@@ -215,9 +225,18 @@ def main():
             state = json.loads(receipt.read_text())
             if (state.get("sourceSHA") != expected or state.get("nonce") != record["nonce"]
                     or state.get("hostPath") != str(app.resolve()) or state.get("foreground") is not True
-                    or state.get("bundleID") != "com.gl11tchy.sigil.sidebar-fixture-host"):
+                    or state.get("bundleID") != "com.gl11tchy.sigil.sidebar-fixture-host"
+                    or state.get("requestedLaunchEnvironment") != isolated):
                 raise ValueError("Foreground receipt does not match the exact launched fixture")
-            record.update(stage="validated-exact-one-foreground-pass", receiptSHA256=digest(receipt))
+            diagnostic = artifacts / "foreground-environment.json"
+            if diagnostic.is_symlink() or diagnostic.stat().st_size > 32768:
+                raise ValueError("Invalid bounded environment diagnostic")
+            observed = json.loads(diagnostic.read_text())
+            if (observed.get("sourceSHA") != expected or observed.get("nonce") != record["nonce"]
+                    or observed.get("stage") != "launch-environment-validated"):
+                raise ValueError("Environment diagnostic does not match the launch plan")
+            record.update(stage="validated-exact-one-foreground-pass", receiptSHA256=digest(receipt),
+                          environmentDiagnosticSHA256=digest(diagnostic))
             save()
             print("One XCTest UI foreground launch passed; About/Close remain untested.")
     except Exception as error:
