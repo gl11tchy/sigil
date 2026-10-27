@@ -32,6 +32,7 @@ about_only = sys.argv[2] == '--about-only'
 sys.path.insert(0, str(root / 'Scripts'))
 from sidebar_host_results import validate
 from about_host_results import validate as validate_about
+from about_host_products import checked_product_path, resolve_product_bundles
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -114,10 +115,23 @@ with tempfile.TemporaryDirectory(prefix='sigil-sidebar-host-') as temporary:
         '-derivedDataPath', str(derived), '-disableAutomaticPackageResolution', '-jobs', '2',
         'build-for-testing', '-quiet',
     ], environment, 900)
-    test_runs = list((derived / 'Build/Products').glob('*.xctestrun'))
+    products = derived / 'Build/Products'
+    test_runs = list(products.glob('*.xctestrun'))
+    if about_only:
+        checked_product_path(products, derived)
+        candidates = []
+        for parent, directories, _ in os.walk(products, followlinks=False):
+            candidates.extend(str((Path(parent) / name).relative_to(derived))
+                              for name in directories if name.endswith(('.app', '.xctest')))
+        provenance.update(stage='products-discovered', productCandidates=sorted(candidates),
+                          xctestrunCandidates=[str(path.relative_to(derived)) for path in test_runs])
+        (artifacts / 'about-source.json').write_text(json.dumps(provenance, indent=2) + '\n')
     if len(test_runs) != 1:
         raise SystemExit(f'Expected one built test run, found {len(test_runs)}.')
     test_run = test_runs[0]
+    if about_only:
+        checked_product_path(test_run, derived)
+        (artifacts / 'about.xctestrun').write_bytes(test_run.read_bytes())
     parameters = plistlib.loads(test_run.read_bytes())
     version = parameters['__xctestrun_metadata__']['FormatVersion']
     if version == 2:
@@ -133,6 +147,10 @@ with tempfile.TemporaryDirectory(prefix='sigil-sidebar-host-') as temporary:
     if len(targets) != 1 or targets[0][0] != 'SigilSidebarHostTests':
         raise SystemExit('Expected only the sidebar app-hosted fixture target.')
     target = targets[0][1]
+    if about_only:
+        provenance.update(stage='paths-recorded', testHostPath=target.get('TestHostPath'),
+                          testBundlePath=target.get('TestBundlePath'))
+        (artifacts / 'about-source.json').write_text(json.dumps(provenance, indent=2) + '\n')
     if 'SigilSidebarFixtureHost.app' not in target['TestHostPath']:
         raise SystemExit('The fixture must run inside the isolated SwiftUI app host.')
     # Documented xctestrun EnvironmentVariables apply to the actual test host process.
@@ -140,20 +158,25 @@ with tempfile.TemporaryDirectory(prefix='sigil-sidebar-host-') as temporary:
     test_run.write_bytes(plistlib.dumps(parameters))
     if about_only:
         require_clean_source(expected)
-        products = derived / 'Build/Products'
+        (artifacts / 'about.xctestrun').write_bytes(test_run.read_bytes())
         identities = {}
-        for bundle in ['SigilSidebarFixtureHost.app', 'SigilSidebarHostTests.xctest']:
-            matches = list(products.glob(f'*/{bundle}/Contents/Info.plist'))
-            if len(matches) != 1:
-                raise SystemExit(f'Expected one fresh diagnostic product: {bundle}')
-            info = plistlib.loads(matches[0].read_bytes())
-            name = info['CFBundleExecutable']
-            if Path(name).name != name:
-                raise SystemExit('Invalid diagnostic product executable.')
-            binary = matches[0].parent / 'MacOS' / name
-            if binary.is_symlink() or not binary.resolve().is_relative_to(derived.resolve()):
-                raise SystemExit('Diagnostic product escaped fresh DerivedData.')
-            identities[bundle] = {'path': str(binary.relative_to(derived)), 'sha256': digest(binary)}
+        try:
+            bundles = resolve_product_bundles(target, test_run, derived)
+            provenance['resolvedProductPaths'] = {name: str(path) for name, path in bundles.items()}
+            (artifacts / 'about-source.json').write_text(json.dumps(provenance, indent=2) + '\n')
+            for bundle, path in bundles.items():
+                info = plistlib.loads(checked_product_path(path / 'Contents/Info.plist', derived).read_bytes())
+                name = info['CFBundleExecutable']
+                if not isinstance(name, str) or name in ('', '.', '..') or Path(name).name != name:
+                    raise ValueError('Invalid diagnostic product executable.')
+                binary = checked_product_path(path / 'Contents/MacOS' / name, derived)
+                if not binary.is_file():
+                    raise ValueError('Diagnostic product executable is not a regular file.')
+                identities[bundle] = {'path': str(binary.relative_to(derived)), 'sha256': digest(binary)}
+        except (KeyError, OSError, ValueError) as error:
+            provenance.update(stage='product-path-failed', error=str(error))
+            (artifacts / 'about-source.json').write_text(json.dumps(provenance, indent=2) + '\n')
+            raise SystemExit(f'Diagnostic product resolution failed: {error}')
         provenance.update(stage='built-source-pinned', products=identities,
                           testHostPath=target['TestHostPath'], testBundlePath=target['TestBundlePath'],
                           xctestrunSHA256=digest(test_run))
@@ -197,7 +220,7 @@ with tempfile.TemporaryDirectory(prefix='sigil-sidebar-host-') as temporary:
                     diagnostic_log.write_bytes(diagnostic_input.read_bytes())
                 require_clean_source(expected)
                 for product in identities.values():
-                    if digest(derived / product['path']) != product['sha256']:
+                    if digest(checked_product_path(derived / product['path'], derived)) != product['sha256']:
                         raise SystemExit('A diagnostic product changed after testing.')
             try:
                 outcome = validator(summary, tree, test_status)
