@@ -1,5 +1,10 @@
 # Agent rules
 
+Run Sigil CI only on standard GitHub-hosted runners using
+`.github/workflows/github-hosted-ci.yml`. Never run CI on the owner's Mac, a VPS,
+or a self-hosted runner. Keep the retired `ci.yml` workflow disabled; old refs
+still contain its self-hosted runner selection.
+
 After a merge to `main` that changes the Mac app, install it on this Mac before you stop:
 
 ```sh

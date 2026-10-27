@@ -7,23 +7,31 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+const workflow = readFileSync(new URL('../../.github/workflows/github-hosted-ci.yml', import.meta.url), 'utf8');
 const steps = workflow.split('\n      - name: ').slice(1);
 const step = name => steps.find(block => block.split('\n')[0] === name);
 
-test('REA-1224 verification cannot retain a write credential or admit a fork', () => {
+test('public fork verification uses a disposable hosted runner without a write credential or secrets', () => {
   assert.match(workflow, /^permissions:\n  contents: read\n/m);
   const verify = workflow.split('\n  verify:\n')[1]?.split('\n  release:\n')[0];
   assert.ok(verify);
-  assert.match(verify, /if: github\.event_name != 'pull_request' \|\| github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
+  assert.match(verify, /\n    runs-on: macos-26\n/);
+  assert.match(verify, /DEVELOPER_DIR: \/Applications\/Xcode_26\.6\.app\/Contents\/Developer/);
+  assert.match(verify, /Expected Xcode 26\.6/);
+  assert.match(verify, /SIGIL_RUNNER_ENVIRONMENT: \$\{\{ runner\.environment \}\}/);
+  assert.match(verify, /if \[\[ "\$SIGIL_RUNNER_ENVIRONMENT" != github-hosted \]\]; then/);
+  assert.doesNotMatch(verify, /github\.event\.pull_request\.head\.repo\.full_name/);
   assert.match(verify, /persist-credentials: false/);
-  assert.doesNotMatch(verify, /contents: write|secrets\.GITHUB_TOKEN|gh release/);
+  assert.doesNotMatch(verify, /contents: write|secrets(?:\.|\[)|GH_TOKEN:|GITHUB_TOKEN:|gh release/);
 });
 
 test('REA-1224 publishing has its own main-push job and exact artifact boundary', () => {
   const release = workflow.split('\n  release:\n')[1];
   assert.ok(release, 'publication still runs with PR verification');
   assert.match(release, /needs: verify/);
+  assert.match(release, /\n    runs-on: ubuntu-latest\n/);
+  assert.match(release, /SIGIL_RUNNER_ENVIRONMENT: \$\{\{ runner\.environment \}\}/);
+  assert.match(release, /if \[\[ "\$SIGIL_RUNNER_ENVIRONMENT" != github-hosted \]\]; then/);
   assert.match(release, /if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
   assert.match(release, /permissions:\n      contents: write/);
   assert.match(release, /artifact-ids: .*needs\.verify\.outputs\.artifact_id/);

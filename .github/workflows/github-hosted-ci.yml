@@ -17,10 +17,11 @@ concurrency:
 jobs:
   verify:
     name: Build, test, and smoke check
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    # Requires a fresh Tart VM with Xcode 26+ and an iOS 26+ runtime on the owner's Mac
-    # (gl11tchy/gh-runner-broker mac/macos-supervisor.sh). Jobs wait while the Mac is off.
-    runs-on: [self-hosted, sigil-vm]
+    # Public fork PRs use this fresh hosted runner with the same read-only token.
+    # Standard GitHub-hosted ARM64 image; no local/VPS runner or nested VM.
+    runs-on: macos-26
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     timeout-minutes: 45
     outputs:
       artifact_id: ${{ steps.app_artifact.outputs.artifact-id }}
@@ -28,6 +29,16 @@ jobs:
       zip_bytes: ${{ steps.release_metadata.outputs.zip_bytes }}
       verify_attempt: ${{ steps.release_metadata.outputs.verify_attempt }}
     steps:
+      - name: Require GitHub-hosted execution
+        env:
+          SIGIL_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          if [[ "$SIGIL_RUNNER_ENVIRONMENT" != github-hosted ]]; then
+            echo "::error::Sigil CI requires a standard GitHub-hosted runner"
+            exit 1
+          fi
+          printf 'Runner: %s / %s; image: %s / %s\n' "$RUNNER_OS" "$RUNNER_ARCH" "${ImageOS:-unknown}" "${ImageVersion:-unknown}"
+
       - name: Check out source
         uses: actions/checkout@v4
         with:
@@ -53,6 +64,7 @@ jobs:
       - name: Show Xcode and Swift toolchain
         id: toolchain
         run: |
+          [[ "$(xcodebuild -version | head -n 1)" == "Xcode 26.6" ]] || { echo "::error::Expected Xcode 26.6"; exit 1; }
           toolchain="$(xcodebuild -version && swift --version)"
           printf '%s\n' "$toolchain"
           printf 'cache-key=%s\n' "$(printf '%s\n' "$toolchain" | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
@@ -169,11 +181,21 @@ jobs:
     name: Publish verified release
     needs: verify
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, sigil-vm]
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: write
     steps:
+      - name: Require GitHub-hosted execution
+        env:
+          SIGIL_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          if [[ "$SIGIL_RUNNER_ENVIRONMENT" != github-hosted ]]; then
+            echo "::error::Sigil CI requires a standard GitHub-hosted runner"
+            exit 1
+          fi
+          printf 'Runner: %s / %s; image: %s / %s\n' "$RUNNER_OS" "$RUNNER_ARCH" "${ImageOS:-unknown}" "${ImageVersion:-unknown}"
+
       - name: Check out verified release source
         uses: actions/checkout@v4
         with:

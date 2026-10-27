@@ -108,11 +108,12 @@ and reconnect grace; it does not relax production rate or socket limits.
 Result bundles contain test evidence
 and a synthetic accessibility-size composer screenshot.
 
-The `sigil-vm` runner uses a digest-pinned Tahoe/Xcode 26.5 image with iOS 26.5.
-Provisioning checks Xcode, simulator availability, Metal and first-launch readiness
-before publishing its base. The previous Xcode 16.4 base remains available for
-rollback. No GitHub-hosted capacity is used. Native checks still fail rather than
-skipping the application build.
+The [GitHub-hosted CI workflow](../.github/workflows/github-hosted-ci.yml) uses the
+standard `macos-26` ARM64 runner and pins Xcode 26.6. It records the actual runner
+image and toolchain, checks Metal, and requires an installed iOS 26+ simulator
+runtime. Native checks fail rather than skipping the application build. Sigil CI
+must not run on the owner's Mac, a VPS, or a self-hosted runner. Universal builds
+verify both executable slices; they do not establish execution on Intel hardware.
 
 Simulator builds do not prove distribution signing, physical-device Keychain
 entitlements, APNs delivery, notification service activation, or Live Activity
