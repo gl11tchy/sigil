@@ -192,13 +192,14 @@ jobs:
       PYTHONDONTWRITEBYTECODE: "1"
       SIGIL_TASK_LEDGER_DIAGNOSTIC: ${{ inputs.task_ledger_diagnostic }}
       SIGIL_EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
-      SIGIL_LEDGER_ARTIFACTS: ${{ runner.temp }}/sigil-ledger-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
       - name: Run source-pinned single-test diagnostic
+        env:
+          SIGIL_LEDGER_ARTIFACTS: ${{ runner.temp }}/sigil-ledger-${{ github.run_id }}-${{ github.run_attempt }}
         run: python3 -B Scripts/task_ledger_diagnostic.py
       - name: Retain task ledger diagnostic evidence
         if: always()
@@ -208,5 +209,5 @@ jobs:
           retention-days: 7
           if-no-files-found: error
           path: |
-            ${{ env.SIGIL_LEDGER_ARTIFACTS }}/*.json
-            ${{ env.SIGIL_LEDGER_ARTIFACTS }}/*.log
+            ${{ runner.temp }}/sigil-ledger-${{ github.run_id }}-${{ github.run_attempt }}/*.json
+            ${{ runner.temp }}/sigil-ledger-${{ github.run_id }}-${{ github.run_attempt }}/*.log
