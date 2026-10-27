@@ -438,7 +438,7 @@ function renderOutput(changedSession = false, prepended = false) {
     // new text after it, and hold any other repaint until the selection ends.
     const selection = changedSession || prepended ? null : globalThis.getSelection?.();
     const selecting = Boolean(selection && !selection.isCollapsed && terminal.contains(selection.anchorNode));
-    const extending = Boolean(displayedOutput) && output.startsWith(displayedOutput)
+    const extending = selecting && Boolean(displayedOutput) && output.startsWith(displayedOutput)
       && ($('find-bar').hidden || !$('find-query').value);
     if (selecting && !extending) { updateLatest(); return; }
     if (selecting) terminal.append(output.slice(displayedOutput.length));
