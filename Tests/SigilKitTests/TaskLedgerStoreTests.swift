@@ -31,7 +31,24 @@ struct TaskLedgerStoreTests {
                 for _ in 0..<2 {
                     group.addTask {
                         await start.waitForBoth()
-                        return try TaskLedgerStore(url: url).transaction { try $0.start(registration()) }.taskID
+                        do {
+                            return try TaskLedgerStore(lockFailureDiagnosticURL: url).transaction {
+                                try $0.start(registration())
+                            }.taskID
+                        } catch {
+                            if let diagnostic = (error as NSError).userInfo["SigilTaskLedgerLockDiagnostic"]
+                                as? [String: String]
+                            {
+                                if let data = try? JSONSerialization.data(
+                                    withJSONObject: diagnostic, options: [.sortedKeys])
+                                {
+                                    emitLedgerDiagnostic("SIGIL_LEDGER_LOCK_DIAGNOSTIC \(String(decoding: data, as: UTF8.self))")
+                                } else {
+                                    emitLedgerDiagnostic("SIGIL_LEDGER_LOCK_DIAGNOSTIC_ENCODING_FAILED")
+                                }
+                            }
+                            throw error
+                        }
                     }
                 }
                 var ids = Set<String>()
@@ -40,6 +57,7 @@ struct TaskLedgerStoreTests {
                 let status = TaskLedgerStore(url: url).read()
                 #expect(status.problem == nil)
                 #expect(Set(status.ledger.entries.map(\.taskID)) == ids)
+                emitLedgerDiagnostic("SIGIL_LEDGER_ROUND_COMPLETED \(round)")
             }
         }
     }
@@ -212,6 +230,18 @@ struct TaskLedgerStoreTests {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         }
         func cleanup() { try? FileManager.default.removeItem(at: root) }
+    }
+}
+
+private let ledgerDiagnosticOutputLock = NSLock()
+
+private func emitLedgerDiagnostic(_ line: String) {
+    ledgerDiagnosticOutputLock.lock()
+    defer { ledgerDiagnosticOutputLock.unlock() }
+    do {
+        try FileHandle.standardOutput.write(contentsOf: Data((line + "\n").utf8))
+    } catch {
+        Issue.record("Could not retain bounded ledger diagnostic output.")
     }
 }
 

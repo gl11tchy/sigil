@@ -6,17 +6,30 @@ on:
       - main
   pull_request:
   workflow_dispatch:
+    inputs:
+      task_ledger_diagnostic:
+        description: Run only the isolated two-writer task ledger diagnostic
+        required: false
+        default: false
+        type: boolean
+      expected_source_sha:
+        description: Full reviewed SHA required for the task ledger diagnostic
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'workflow_dispatch' && inputs.task_ledger_diagnostic == true && 'task-ledger-lock-diagnostic' || format('ci-{0}-{1}', github.workflow, github.ref) }}
+  cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && inputs.task_ledger_diagnostic == true) }}
 
 jobs:
   verify:
-    name: Build, test, and smoke check
+    # A skipped diagnostic path must not appear under the normal required check name.
+    name: ${{ github.event_name == 'workflow_dispatch' && inputs.task_ledger_diagnostic == true && 'Normal verification not selected for ledger diagnostic' || 'Build, test, and smoke check' }}
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.task_ledger_diagnostic == true) }}
     # Requires a fresh Tart VM with Xcode 26+ and an iOS 26+ runtime on the owner's Mac
     # (gl11tchy/gh-runner-broker mac/macos-supervisor.sh). Jobs wait while the Mac is off.
     runs-on: [self-hosted, sigil-vm]
@@ -167,3 +180,33 @@ jobs:
           retention-days: 7
           path: dist/Sigil.zip
           if-no-files-found: error
+
+  task_ledger_diagnostic:
+    name: Isolated task ledger lock diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.task_ledger_diagnostic == true
+    runs-on: [self-hosted, sigil-vm]
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      SIGIL_TASK_LEDGER_DIAGNOSTIC: ${{ inputs.task_ledger_diagnostic }}
+      SIGIL_EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+      SIGIL_LEDGER_ARTIFACTS: ${{ runner.temp }}/sigil-ledger-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run source-pinned single-test diagnostic
+        run: python3 -B Scripts/task_ledger_diagnostic.py
+      - name: Retain task ledger diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-ledger-lock-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            ${{ env.SIGIL_LEDGER_ARTIFACTS }}/*.json
+            ${{ env.SIGIL_LEDGER_ARTIFACTS }}/*.log

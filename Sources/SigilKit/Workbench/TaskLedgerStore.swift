@@ -36,6 +36,7 @@ public final class TaskLedgerStore: @unchecked Sendable {
     private let url: URL?
     private let mutex = NSLock()
     private let beforeCommit: (@Sendable (CommitPhase) throws -> Void)?
+    private let diagnosesLockOpenFailure: Bool
     private var cached = TaskLedger()
     private static let byteLimit = 16 * 1024 * 1024
 
@@ -43,6 +44,14 @@ public final class TaskLedgerStore: @unchecked Sendable {
     public init(url: URL? = nil, beforeCommit: (@Sendable (CommitPhase) throws -> Void)? = nil) {
         self.url = url
         self.beforeCommit = beforeCommit
+        self.diagnosesLockOpenFailure = false
+    }
+
+    /// Internal opt-in for the generated two-writer diagnostic, never ordinary app stores.
+    init(lockFailureDiagnosticURL: URL) {
+        self.url = lockFailureDiagnosticURL
+        self.beforeCommit = nil
+        self.diagnosesLockOpenFailure = true
     }
 
     public func read() -> Status {
@@ -235,7 +244,8 @@ public final class TaskLedgerStore: @unchecked Sendable {
         defer { close(parent) }
         let lockName = url.lastPathComponent + ".lock"
         let fd = openat(parent, lockName, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK, 0o600)
-        guard fd >= 0 else { throw posix("open lock", lockName) }
+        let openErrno = errno
+        guard fd >= 0 else { throw lockOpenFailure(openErrno, parent: parent, name: lockName) }
         defer { close(fd) }
         let info = try privateFile(fd)
         let deadline = ProcessInfo.processInfo.systemUptime + 1
@@ -372,6 +382,49 @@ public final class TaskLedgerStore: @unchecked Sendable {
             && a.st_mtimespec.tv_sec == b.st_mtimespec.tv_sec && a.st_mtimespec.tv_nsec == b.st_mtimespec.tv_nsec
             && a.st_ctimespec.tv_sec == b.st_ctimespec.tv_sec && a.st_ctimespec.tv_nsec == b.st_ctimespec.tv_nsec
     }
+    private func lockOpenFailure(_ code: Int32, parent: Int32, name: String) -> NSError {
+        let original = context(
+            NSError(domain: NSPOSIXErrorDomain, code: Int(code)), operation: "open lock", target: name)
+        guard diagnosesLockOpenFailure, let url else { return original }
+        let root = url.deletingLastPathComponent()
+        guard root.lastPathComponent.hasPrefix("ledger-"),
+            UUID(uuidString: String(root.lastPathComponent.dropFirst("ledger-".count))) != nil,
+            root.deletingLastPathComponent().standardizedFileURL.path
+                == FileManager.default.temporaryDirectory.standardizedFileURL.path,
+            (0..<8).contains(where: { url.lastPathComponent == "round-\($0).json" })
+        else { return original }
+
+        var descriptor = stat()
+        let descriptorResult = fstat(parent, &descriptor)
+        let descriptorErrno = errno
+        var pathname = stat()
+        let pathnameResult = lstat(root.path, &pathname)
+        let pathnameErrno = errno
+        var diagnostic = [
+            "lockOpenResult": "-1", "lockOpenErrno": String(code), "parentFD": String(parent),
+            "generatedRoot": root.lastPathComponent, "lockName": name,
+            "sameDirectoryIdentity": descriptorResult == 0 && pathnameResult == 0
+                ? String(descriptor.st_dev == pathname.st_dev && descriptor.st_ino == pathname.st_ino) : "unknown",
+        ]
+        for (prefix, result, code, value) in [
+            ("descriptor", descriptorResult, descriptorErrno, descriptor),
+            ("pathname", pathnameResult, pathnameErrno, pathname),
+        ] {
+            diagnostic["\(prefix).result"] = String(result)
+            if result == 0 {
+                diagnostic["\(prefix).device"] = String(value.st_dev)
+                diagnostic["\(prefix).inode"] = String(value.st_ino)
+                diagnostic["\(prefix).mode"] = String(value.st_mode, radix: 8)
+                diagnostic["\(prefix).links"] = String(value.st_nlink)
+            } else {
+                diagnostic["\(prefix).errno"] = String(code)
+            }
+        }
+        var info = original.userInfo
+        info["SigilTaskLedgerLockDiagnostic"] = diagnostic
+        return NSError(domain: original.domain, code: original.code, userInfo: info)
+    }
+
     private func posix(_ operation: StaticString, _ target: String = "") -> NSError {
         let code = errno
         return context(
