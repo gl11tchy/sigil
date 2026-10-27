@@ -16,16 +16,21 @@ mkdir -p "$ARTIFACTS"
 # Only this synthetic fixture's streams are captured. Writes are unbuffered,
 # capped independently at 2 MiB, with a separate bounded phase-marker file.
 exec 3>&1 4>&2
-exec > >(python3 scripts/native-output-log.py "$ARTIFACTS" stdout)
+# Explicit asynchronous children are waitable by this shell, including /bin/bash
+# on the hosted Mac. Process-substitution PIDs were not waitable in its EXIT trap.
+mkfifo "$WORK/stdout.pipe" "$WORK/stderr.pipe"
+python3 scripts/native-output-log.py "$ARTIFACTS" stdout < "$WORK/stdout.pipe" >&3 2>&4 &
 STDOUT_LOGGER=$!
-exec 2> >(python3 scripts/native-output-log.py "$ARTIFACTS" stderr >&4)
+python3 scripts/native-output-log.py "$ARTIFACTS" stderr < "$WORK/stderr.pipe" >&4 2>&4 &
 STDERR_LOGGER=$!
+exec > "$WORK/stdout.pipe" 2> "$WORK/stderr.pipe"
 phase() {
   printf 'SIGIL_TEXTKIT time=%s phase=%s\n' "$(date +%s)" "$1"
 }
 cleanup() {
-  local rc=$?
-  phase "script-exit-$rc"
+  local rc=$? stdout_rc=0 stderr_rc=0
+  # The body status precedes cleanup; it must not claim the final script status.
+  phase "body-exit-$rc"
   if [ -z "${SIGIL_NATIVE_TEST_DEVICE:-}" ] && [ -n "$DEVICE" ]; then
     xcrun simctl shutdown "$DEVICE" >/dev/null 2>&1 || true
     xcrun simctl delete "$DEVICE" >/dev/null 2>&1 || true
@@ -33,8 +38,16 @@ cleanup() {
   rm -rf "$WORK"
   # Close both writers and wait for capture to drain before artifact upload.
   exec 1>&3 2>&4
-  wait "$STDOUT_LOGGER" || rc=1
-  wait "$STDERR_LOGGER" || rc=1
+  wait "$STDOUT_LOGGER" || stdout_rc=$?
+  wait "$STDERR_LOGGER" || stderr_rc=$?
+  if [ "$stdout_rc" -ne 0 ]; then
+    printf 'TextKit stdout capture failed (exit %s)\n' "$stdout_rc" >&2
+    if [ "$rc" -eq 0 ]; then rc="$stdout_rc"; fi
+  fi
+  if [ "$stderr_rc" -ne 0 ]; then
+    printf 'TextKit stderr capture failed (exit %s)\n' "$stderr_rc" >&2
+    if [ "$rc" -eq 0 ]; then rc="$stderr_rc"; fi
+  fi
   exit "$rc"
 }
 trap cleanup EXIT

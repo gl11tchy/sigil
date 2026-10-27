@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, basename, relative, isAbsolute, normalize } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -159,6 +159,76 @@ test('TextKit marker parsing survives raw read boundaries without accepting an i
   const root = captureTextkit(t, 'stdout', input);
   assert.deepEqual(readFileSync(join(root, 'textkit-stdout.log')), input);
   assert.equal(readFileSync(join(root, 'textkit-phases.log'), 'utf8'), marker);
+});
+
+function captureTextkitShell(t, body, { stderrCaptureFailure = false } = {}) {
+  const driver = readFileSync(new URL('../../iOS/scripts/native-output-test.sh', import.meta.url), 'utf8');
+  const boundary = '\nphase build-start\n';
+  assert.equal(driver.split(boundary).length, 2, 'fixture stops before any native build or launch');
+  let prefix = driver.slice(0, driver.indexOf(boundary));
+  const sourceCd = 'cd "$(dirname "$0")/.."';
+  assert.equal(prefix.split(sourceCd).length, 2);
+  prefix = prefix.replace(sourceCd, 'cd "$SIGIL_FIXTURE_IOS_ROOT"');
+  assert.doesNotMatch(prefix, /xcrun swiftc|codesign|simctl (?:create|boot|install|launch)|xcodebuild/);
+  const root = mkdtempSync(join(tmpdir(), 'sigil-textkit-shell-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const artifacts = join(root, 'artifacts');
+  const home = join(root, 'home');
+  const temp = join(root, 'tmp');
+  const bin = join(root, 'bin');
+  for (const directory of [artifacts, home, temp, bin]) mkdirSync(directory);
+  const nativeCalled = join(root, 'native-called');
+  writeFileSync(join(bin, 'xcrun'), '#!/bin/bash\nprintf unexpected > "$SIGIL_FIXTURE_NATIVE_CALLED"\nexit 97\n', { mode: 0o755 });
+  if (stderrCaptureFailure) writeFileSync(join(artifacts, 'textkit-stderr.log'), 'reserved synthetic file');
+  const fixture = join(root, 'fixture.sh');
+  writeFileSync(fixture, prefix + '\n' + body + '\n');
+  const env = {
+    ...process.env, HOME: home, TMPDIR: temp + '/', PATH: bin + ':' + process.env.PATH,
+    SIGIL_NATIVE_ARTIFACTS: artifacts,
+    SIGIL_FIXTURE_IOS_ROOT: fileURLToPath(new URL('../../iOS', import.meta.url)),
+    SIGIL_FIXTURE_NATIVE_CALLED: nativeCalled,
+  };
+  delete env.SIGIL_NATIVE_TEST_DEVICE;
+  const result = spawnSync('/bin/bash', [fixture], { env, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024, timeout: 10000 });
+  assert.equal(result.error, undefined);
+  assert.equal(existsSync(nativeCalled), false, 'no native tool may execute in this synthetic fixture');
+  assert.deepEqual(readdirSync(temp), [], 'owned FIFO directory is cleaned');
+  return { result, artifacts };
+}
+
+test('TextKit shell owns both logger children and drains both streams before success', t => {
+  const { result, artifacts } = captureTextkitShell(t, `python3 - <<'PY'
+import sys
+sys.stdout.write('o' * 131072 + '\\n')
+sys.stderr.write('e' * 131072 + '\\n')
+PY
+exit 0`);
+  assert.equal(result.status, 0, result.stderr.slice(-1000));
+  assert.deepEqual(readFileSync(join(artifacts, 'textkit-stdout.log'), 'utf8'), result.stdout);
+  assert.deepEqual(readFileSync(join(artifacts, 'textkit-stderr.log'), 'utf8'), result.stderr);
+  assert.ok(result.stdout.startsWith('o'.repeat(131072) + '\n'));
+  assert.equal(result.stderr, 'e'.repeat(131072) + '\n');
+  assert.match(readFileSync(join(artifacts, 'textkit-phases.log'), 'utf8'), /phase=body-exit-0\n$/);
+});
+
+test('TextKit shell preserves a failing body status after both captures drain', t => {
+  const { result, artifacts } = captureTextkitShell(t, 'printf "synthetic stdout\\n"\nprintf "synthetic stderr\\n" >&2\nexit 7');
+  assert.equal(result.status, 7, result.stderr);
+  assert.match(readFileSync(join(artifacts, 'textkit-phases.log'), 'utf8'), /phase=body-exit-7\n$/);
+  assert.equal(readFileSync(join(artifacts, 'textkit-stderr.log'), 'utf8'), 'synthetic stderr\n');
+});
+
+test('TextKit shell fails when an owned logger fails after a successful body', t => {
+  const { result } = captureTextkitShell(t, 'printf "synthetic stdout\\n"\nexit 0', { stderrCaptureFailure: true });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /TextKit stderr capture failed \(exit 1\)/);
+  assert.doesNotMatch(result.stderr, /not a child of this shell/);
+});
+
+test('TextKit shell reports logger failure while preserving the original body failure', t => {
+  const { result } = captureTextkitShell(t, 'exit 7', { stderrCaptureFailure: true });
+  assert.equal(result.status, 7);
+  assert.match(result.stderr, /TextKit stderr capture failed \(exit 1\)/);
 });
 
 test('app downloads are retained before a separate publisher, including manual runs and publish failure', () => {
