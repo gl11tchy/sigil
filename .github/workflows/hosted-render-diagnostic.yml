@@ -16,7 +16,7 @@ jobs:
     name: REA-1194 diagnostic (not merge verification)
     if: github.repository == 'gl11tchy/sigil'
     runs-on: macos-26
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
@@ -24,12 +24,24 @@ jobs:
         env:
           SIGIL_RUNNER_ENVIRONMENT: ${{ runner.environment }}
         run: |
-          [[ "$SIGIL_RUNNER_ENVIRONMENT" == github-hosted ]]
-          [[ "$RUNNER_OS" == macOS && "$RUNNER_ARCH" == ARM64 ]]
-          [[ "$ImageOS" == macos26 && "$ImageVersion" == 20261013.0424.1 ]]
-          [[ "$(xcodebuild -version)" == $'Xcode 26.6\nBuild version 17F113' ]]
           printf 'Runner: %s / %s; image: %s / %s\n' "$RUNNER_OS" "$RUNNER_ARCH" "$ImageOS" "$ImageVersion"
-          xcodebuild -version
+          if [[ "$SIGIL_RUNNER_ENVIRONMENT" != github-hosted || "$RUNNER_OS" != macOS || "$RUNNER_ARCH" != ARM64 ]]; then
+            echo '::error::Unexpected runner identity'
+            exit 1
+          fi
+          if [[ "$ImageOS" != macos26 || "$ImageVersion" != 20261021.0445.8 ]]; then
+            echo '::error::Unexpected hosted image'
+            exit 1
+          fi
+          if ! toolchain=$(xcodebuild -version); then
+            echo '::error::Cannot read Xcode identity'
+            exit 1
+          fi
+          printf '%s\n' "$toolchain"
+          if [[ "$toolchain" != $'Xcode 26.6\nBuild version 17F113' ]]; then
+            echo '::error::Unexpected Xcode identity'
+            exit 1
+          fi
 
       - name: Check out the exact diagnostic commit
         uses: actions/checkout@v4

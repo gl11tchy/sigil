@@ -38,6 +38,16 @@ def fixture(phase="clean"):
 
 
 class ReportValidation(unittest.TestCase):
+    def test_baseline_and_candidate_reports_cannot_be_replayed_as_each_other(self):
+        for source in (module.BASELINE, module.SOURCE):
+            report = fixture()
+            for record in report["records"]:
+                record["attachments"]["hosted-render-identity"]["source"] = source
+            self.assertTrue(module.validate(report, "clean", HEAD, FILE, source)["passed"])
+            other = module.SOURCE if source == module.BASELINE else module.BASELINE
+            with self.assertRaises(ValueError):
+                module.validate(report, "clean", HEAD, FILE, other)
+
     def test_focused_node_report_rejects_missing_zero_or_incomplete_checks(self):
         text = "\n".join([
             "# Subtest: REA-1194 exact prefixes handle long middle edits, truncation and prepend",
