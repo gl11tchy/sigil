@@ -12,6 +12,14 @@ on:
         required: false
         default: false
         type: boolean
+      about_diagnostic_driver:
+        description: Diagnostic proof to run when About diagnostics are selected
+        required: false
+        default: hosted-about
+        type: choice
+        options:
+          - hosted-about
+          - xcui-foreground
       expected_source_sha:
         description: Full reviewed source SHA, required only for About diagnostics
         required: false
@@ -203,7 +211,13 @@ jobs:
         id: about
         env:
           SIGIL_SIDEBAR_ARTIFACTS: ${{ runner.temp }}/sigil-about-${{ github.run_id }}-${{ github.run_attempt }}
-        run: Scripts/sidebar-host-test.sh --about-only
+          SIGIL_ABOUT_DRIVER: ${{ inputs.about_diagnostic_driver }}
+        run: |
+          case "$SIGIL_ABOUT_DRIVER" in
+            ""|hosted-about) Scripts/sidebar-host-test.sh --about-only ;;
+            xcui-foreground) python3 -B Scripts/about-foreground-ui-test.py ;;
+            *) echo "::error::Unknown diagnostic driver"; exit 1 ;;
+          esac
 
       - name: Retain About diagnostic evidence
         if: always() && steps.about.outcome != 'skipped'
