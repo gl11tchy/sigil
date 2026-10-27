@@ -70,9 +70,10 @@ test('native result uploads are isolated from build caches and other run attempt
   const producerStep = step('iPhone app, shipping extensions, and native relay tests');
   const output = producerStep.match(/\n          SIGIL_NATIVE_ARTIFACTS: (.+)\n/)?.[1];
   const upload = step('Upload native verification evidence');
-  const path = upload.match(/\n          path: (.+)\n/)?.[1];
+  const paths = upload.match(/\n          path: \|\n((?:            [^\n]+\n)+)/)?.[1]
+    .trim().split('\n').map(path => path.trim());
   assert.ok(output);
-  assert.ok(path);
+  assert.ok(paths);
   assert.match(producerStep, /\n        id: native_verification\n/);
   assert.match(upload, /\n        if: always\(\) && steps\.native_verification\.outcome != 'skipped'\n/);
   assert.match(upload, /\n          if-no-files-found: error\n/);
@@ -88,8 +89,10 @@ test('native result uploads are isolated from build caches and other run attempt
     return contexts[context];
   });
   const first = render(output, '100', '1');
-  assert.equal(dirname(render(path, '100', '1')), first);
-  assert.equal(basename(render(path, '100', '1')), '*.xcresult');
+  for (const path of paths) assert.equal(dirname(render(path, '100', '1')), first);
+  assert.deepEqual(paths.map(path => basename(render(path, '100', '1'))), [
+    '*.xcresult', 'textkit-stdout.log', 'textkit-stderr.log', 'textkit-phases.log',
+  ]);
   assert.notEqual(first, render(output, '101', '1'));
   assert.notEqual(first, render(output, '100', '2'));
   assert.ok(first.startsWith('/tmp/sigil-ci-results/'));
@@ -97,6 +100,65 @@ test('native result uploads are isolated from build caches and other run attempt
   assert.ok(cached.startsWith('..') || isAbsolute(cached));
   const producer = readFileSync(new URL('../../iOS/scripts/native-test.sh', import.meta.url), 'utf8');
   assert.match(producer, /ARTIFACTS="\$\{SIGIL_NATIVE_ARTIFACTS:-/);
+});
+
+test('hosted job budget leaves native and release gates intact', () => {
+  const verify = workflow.split('\n  verify:\n')[1].split('\n  release:\n')[0];
+  const release = workflow.split('\n  release:\n')[1];
+  assert.match(verify, /\n    timeout-minutes: 90\n/);
+  assert.match(release, /\n    timeout-minutes: 15\n/);
+  const native = readFileSync(new URL('../../iOS/NativeTests/IOSOutputNativeTests.swift', import.meta.url), 'utf8');
+  assert.match(native, /asyncAfter\(deadline: \.now\(\) \+ 900\)/);
+  const driver = readFileSync(new URL('../../iOS/scripts/native-output-test.sh', import.meta.url), 'utf8');
+  assert.match(driver, /set -euo pipefail/);
+  assert.match(driver, /grep -q '\^OK ' "\$WORK\/output.txt"/);
+});
+
+const textkitLogger = fileURLToPath(new URL('../../iOS/scripts/native-output-log.py', import.meta.url));
+function captureTextkit(t, stream, input) {
+  const root = mkdtempSync(join(tmpdir(), 'sigil-textkit-log-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const result = spawnSync('python3', [textkitLogger, root, stream], {
+    input, maxBuffer: 4 * 1024 * 1024,
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0, result.stderr.toString());
+  assert.deepEqual(result.stdout, input, 'capture must keep draining and mirror the complete stream');
+  return root;
+}
+
+test('TextKit capture caps raw bytes but retains later bounded synthetic markers', t => {
+  const prefix = Buffer.alloc(2 * 1024 * 1024 + 64, 'x');
+  const marker = 'SIGIL_TEXTKIT time=1 phase=case-complete case=7 result=pass\n';
+  const input = Buffer.concat([prefix, Buffer.from('\n' + marker)]);
+  const root = captureTextkit(t, 'stdout', input);
+  const raw = readFileSync(join(root, 'textkit-stdout.log'));
+  assert.deepEqual(raw.subarray(0, 2 * 1024 * 1024), prefix.subarray(0, 2 * 1024 * 1024));
+  assert.equal(raw.subarray(2 * 1024 * 1024).toString(),
+    '\n[SIGIL_TEXTKIT log truncated at 2097152 bytes; stream still drained]\n');
+  assert.equal(readFileSync(join(root, 'textkit-phases.log'), 'utf8'), marker);
+});
+
+test('TextKit stderr is retained separately and cannot supply phase evidence', t => {
+  const input = Buffer.from('SIGIL_TEXTKIT time=1 phase=not-a-stdout-marker\nsynthetic error\n');
+  const root = captureTextkit(t, 'stderr', input);
+  assert.deepEqual(readFileSync(join(root, 'textkit-stderr.log')), input);
+  assert.equal(existsSync(join(root, 'textkit-phases.log')), false);
+});
+
+test('TextKit phase retention rejects oversized lines and caps marker count', t => {
+  const markers = Array.from({ length: 66 }, (_, index) => `SIGIL_TEXTKIT time=1 phase=case-${index}\n`);
+  const oversized = 'SIGIL_TEXTKIT ' + 'x'.repeat(1024) + '\n';
+  const root = captureTextkit(t, 'stdout', Buffer.from(oversized + markers.join('')));
+  assert.equal(readFileSync(join(root, 'textkit-phases.log'), 'utf8'), markers.slice(0, 64).join(''));
+});
+
+test('TextKit marker parsing survives raw read boundaries without accepting an incomplete line', t => {
+  const marker = 'SIGIL_TEXTKIT time=1 phase=app-task-start\n';
+  const input = Buffer.from('x'.repeat(65520) + '\n' + marker + 'SIGIL_TEXTKIT incomplete');
+  const root = captureTextkit(t, 'stdout', input);
+  assert.deepEqual(readFileSync(join(root, 'textkit-stdout.log')), input);
+  assert.equal(readFileSync(join(root, 'textkit-phases.log'), 'utf8'), marker);
 });
 
 test('app downloads are retained before a separate publisher, including manual runs and publish failure', () => {

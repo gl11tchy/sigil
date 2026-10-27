@@ -22,7 +22,9 @@ jobs:
     runs-on: macos-26
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
-    timeout-minutes: 45
+    # Hosted verification reached TextKit after ~42m; retain its unchanged 15m
+    # watchdog and budget for the remaining universal build/smoke/ZIP gates.
+    timeout-minutes: 90
     outputs:
       artifact_id: ${{ steps.app_artifact.outputs.artifact-id }}
       zip_sha256: ${{ steps.release_metadata.outputs.zip_sha256 }}
@@ -144,7 +146,11 @@ jobs:
         with:
           name: iPhone-native-verification
           retention-days: 7
-          path: ${{ runner.temp }}/sigil-native-${{ github.run_id }}-${{ github.run_attempt }}/*.xcresult
+          path: |
+            ${{ runner.temp }}/sigil-native-${{ github.run_id }}-${{ github.run_attempt }}/*.xcresult
+            ${{ runner.temp }}/sigil-native-${{ github.run_id }}-${{ github.run_attempt }}/textkit-stdout.log
+            ${{ runner.temp }}/sigil-native-${{ github.run_id }}-${{ github.run_attempt }}/textkit-stderr.log
+            ${{ runner.temp }}/sigil-native-${{ github.run_id }}-${{ github.run_attempt }}/textkit-phases.log
           if-no-files-found: error
 
       - name: Build release bundle
