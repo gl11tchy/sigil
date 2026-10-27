@@ -108,7 +108,9 @@ jobs:
         with:
           name: sidereal-browser-screenshots
           retention-days: 7
-          path: Sidereal/test-results/**/*.png
+          path: |
+            Sidereal/test-results/**/*.png
+            Sidereal/test-results/**/short-return-identities.json
           if-no-files-found: warn
 
       - name: Upload scoped Swift verification diagnostics

@@ -11,6 +11,15 @@ const workflow = readFileSync(new URL('../../.github/workflows/github-hosted-ci.
 const steps = workflow.split('\n      - name: ').slice(1);
 const step = name => steps.find(block => block.split('\n')[0] === name);
 
+test('REA-1202 request identities are retained with browser screenshots on failure', () => {
+  const upload = step('Upload Sidereal browser screenshots');
+  assert.match(upload, /\n        if: always\(\)\n/);
+  assert.match(upload, /\n          retention-days: 7\n/);
+  const paths = upload.match(/\n          path: \|\n((?:            [^\n]+\n)+)/)?.[1]
+    .trim().split('\n').map(path => path.trim());
+  assert.deepEqual(paths, ['Sidereal/test-results/**/*.png', 'Sidereal/test-results/**/short-return-identities.json']);
+});
+
 test('public fork verification uses a disposable hosted runner without a write credential or secrets', () => {
   assert.match(workflow, /^permissions:\n  contents: read\n/m);
   const verify = workflow.split('\n  verify:\n')[1]?.split('\n  release:\n')[0];
