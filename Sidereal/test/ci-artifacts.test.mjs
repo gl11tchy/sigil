@@ -116,7 +116,9 @@ test('app downloads are retained before a separate publisher, including manual r
   const release = workflow.split('\n  release:\n')[1];
   const verifyIf = verify.match(/\n    if: (.+)\n/)?.[1];
   const releaseIf = release.match(/\n    if: (.+)\n/)?.[1];
-  const allowed = expression => new Function('github', 'return (' + expression + ')');
+  assert.equal(verifyIf, undefined, 'hosted verification must not filter fork PRs');
+  // A job without an if condition runs on every admitted event.
+  const allowed = expression => new Function('github', 'return (' + (expression ?? 'true') + ')');
   const github = (event, ref, repository) => ({
     event_name: event, ref, repository: 'fixture/sigil',
     event: { pull_request: { head: { repo: { full_name: repository } } } },
@@ -127,7 +129,7 @@ test('app downloads are retained before a separate publisher, including manual r
     ['workflow_dispatch', 'refs/heads/main', 'fixture/sigil', true, false],
     ['workflow_dispatch', 'refs/heads/feature', 'fixture/sigil', true, false],
     ['pull_request', 'refs/pull/1/merge', 'fixture/sigil', true, false],
-    ['pull_request', 'refs/pull/2/merge', 'outside/fork', false, false],
+    ['pull_request', 'refs/pull/2/merge', 'outside/fork', true, false],
   ]) {
     const context = github(event, ref, repository);
     assert.equal(allowed(verifyIf)(context), verifies);
