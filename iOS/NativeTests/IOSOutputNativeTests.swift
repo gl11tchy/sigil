@@ -36,27 +36,41 @@ enum IOSOutputNativeTests {
     static let foreground = "e0e0e0"
     static let background = "101010"
 
+    // Fixed synthetic phases only; no output contents, environment or paths.
+    static func phase(_ value: String) {
+        print("SIGIL_TEXTKIT time=\(Date().timeIntervalSince1970) phase=\(value)")
+    }
+
     static func runAll(_ output: NativeOutput) async {
         setvbuf(stdout, nil, _IOLBF, 0)
+        phase("app-task-start")
         // A hung run fails rather than waits for ever.
         DispatchQueue.global().asyncAfter(deadline: .now() + 900) {
+            print("SIGIL_TEXTKIT time=\(Date().timeIntervalSince1970) phase=watchdog-fired")
             print("FAIL timed out")
             exit(2)
         }
+        phase("watchdog-start seconds=900")
         var failed = 0
         var passed = 0
         func run(_ name: String, _ test: () async throws -> Void) async {
+            let index = passed + failed + 1
+            phase("case-start case=\(index)")
             do {
                 try await test()
                 passed += 1
                 print("PASS \(name)")
+                phase("case-complete case=\(index) result=pass")
             } catch {
                 failed += 1
                 print("FAIL \(name): \(error)")
+                phase("case-complete case=\(index) result=fail")
             }
         }
         do {
+            phase("setup-start")
             let shown = try await Shown(output)
+            phase("setup-complete")
             await run("show equals a full rebuild over random diffs") { try await showEqualsFullRebuild(shown) }
             await run("show at the screen cap edits only the ends") { try await showAtCapEditsOnlyTheEnds(shown) }
             await run("show past the screen cap keeps the end in view") { try await showPastCapKeepsTheEnd(shown) }
@@ -67,7 +81,9 @@ enum IOSOutputNativeTests {
         } catch {
             failed += 1
             print("FAIL setup: \(error)")
+            phase("setup-failed")
         }
+        phase("run-complete passed=\(passed) failed=\(failed)")
         print(failed == 0 ? "OK \(passed)" : "FAILED \(failed)")
         exit(failed == 0 ? 0 : 1)
     }

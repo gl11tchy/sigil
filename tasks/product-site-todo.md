@@ -149,7 +149,7 @@ Do not edit `tasks/plan.md` or `tasks/todo.md`.
 **Files likely touched:**
 - `Scripts/verify.sh`
 - `.gitignore`
-- `.github/workflows/ci.yml`
+- `.github/workflows/github-hosted-ci.yml`
 
 **Estimated scope:** S
 

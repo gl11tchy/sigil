@@ -44,6 +44,14 @@ test('REA-1194 changed tails format bounded lines in a 400KB history and reset s
     assert.ok(reader.lastWork.parsedLines < 20);
     assert.ok(reader.lastWork.formattedLines < 20);
   }
+  for (const at of [4095, 65_536, 200_001]) {
+    const changed = snapshot.slice(0, at) + 'changed\n' + snapshot.slice(at);
+    assert.equal(reader.update(changed), fullReadableOutput(changed));
+    assert.equal(reader.update(snapshot), fullReadableOutput(snapshot));
+  }
+  for (const next of [snapshot.slice(0, -50), 'prepended\n' + snapshot, snapshot.slice(180), snapshot]) {
+    assert.equal(reader.update(next), fullReadableOutput(next));
+  }
   for (const next of ['prepended\n' + snapshot, snapshot.slice(180), 'different session\n', snapshot]) {
     assert.equal(reader.update(next, { reset: true }), fullReadableOutput(next));
   }
@@ -54,6 +62,44 @@ test('REA-1194 native prefix comparisons retain exact UTF16 boundaries', () => {
   assert.equal(commonPrefixLength(start + 'left', start + 'right'), start.length);
   assert.equal(commonPrefixLength(start, start + 'tail'), start.length);
   assert.equal(commonPrefixLength('abc', 'ab'), 2);
+});
+
+test('REA-1194 exact prefixes handle long middle edits, truncation and prepend', () => {
+  const text = '0123456789abcdef'.repeat(25_000);
+  assert.equal(commonPrefixLength('', text), 0);
+  assert.equal(commonPrefixLength(text, ''), 0);
+  assert.equal(commonPrefixLength(text, text), text.length);
+  assert.equal(commonPrefixLength(text, text + '#'), text.length);
+  assert.equal(commonPrefixLength('#' + text, text), 0);
+  assert.equal(commonPrefixLength(text, text.slice(1)), 0);
+  for (const at of [0, 1, 2, 7, 8, 255, 256, 257, 4095, 4096, 4097, 17_123,
+    65_535, 65_536, 65_537, 123_457, 131_071, 131_072, 199_999, 262_143, 262_144, 399_999]) {
+    const changed = text.slice(0, at) + '#' + text.slice(at + 1);
+    assert.equal(commonPrefixLength(text, changed), at);
+    assert.equal(commonPrefixLength(changed, text), at);
+    assert.equal(commonPrefixLength(text, text.slice(0, at)), at);
+    assert.equal(commonPrefixLength(text.slice(0, at), text), at);
+  }
+});
+
+test('REA-1194 prefix boundaries match an independent scalar UTF16 oracle', () => {
+  const scalar = (left, right) => {
+    let at = 0;
+    while (at < left.length && at < right.length && left.charCodeAt(at) === right.charCodeAt(at)) at++;
+    return at;
+  };
+  for (const boundary of [1, 2, 3, 4, 7, 8, 15, 16, 255, 256, 4095, 4096,
+    65_535, 65_536, 262_143, 262_144]) {
+    const prefix = 'x'.repeat(boundary - 1);
+    for (const [left, right] of [['', ''], ['a', 'ab'], ['\ud83d\ude00', '\ud83d\ude03'],
+      ['e\u0301', 'e\u0300'], ['\ud83d', '\ud83dx'], ['\ude00x', '\ude00y'],
+      ['👩‍💻', '👩‍🔧'], ['क्‍ष', 'क्‍त']]) {
+      const a = prefix + left, b = prefix + right;
+      const expected = scalar(a, b);
+      assert.equal(commonPrefixLength(a, b), expected);
+      assert.equal(commonPrefixLength(b, a), expected);
+    }
+  }
 });
 
 test('REA-1194 retained states equal full formatting across generated rewrites and chrome boundaries', () => {

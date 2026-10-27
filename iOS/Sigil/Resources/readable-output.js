@@ -225,13 +225,15 @@ export function readableOutput(snapshot) {
   return new RegExp(`^[\\s┌┐└┘│─━${SPINNER}]*$`).test(output) ? '' : output;
 }
 
-// Compare every character, using native substring comparisons for the stable
-// prefix. These chunks are comparison units, never formatter overlap guesses.
+// Extend only by fully compared blocks, refining a failed block down to one
+// UTF16 unit. Powers of two bound native comparisons without guessing an overlap.
 export function commonPrefixLength(left, right) {
   const count = Math.min(left.length, right.length);
-  let at = 0;
-  while (at + 4096 <= count && right.startsWith(left.slice(at, at + 4096), at)) at += 4096;
-  while (at < count && left[at] === right[at]) at++;
+  let at = 0, width = 1;
+  while (width <= count / 2) width *= 2;
+  for (; width >= 1; width /= 2) {
+    if (at + width <= count && right.startsWith(left.slice(at, at + width), at)) at += width;
+  }
   return at;
 }
 

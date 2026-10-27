@@ -1,15 +1,53 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, basename, relative, isAbsolute, normalize } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+const workflow = readFileSync(new URL('../../.github/workflows/github-hosted-ci.yml', import.meta.url), 'utf8');
 const steps = workflow.split('\n      - name: ').slice(1);
 const step = name => steps.find(block => block.split('\n')[0] === name);
+
+test('REA-1202 request identities are retained with browser screenshots on failure', () => {
+  const upload = step('Upload Sidereal browser screenshots');
+  assert.match(upload, /\n        if: always\(\)\n/);
+  assert.match(upload, /\n          retention-days: 7\n/);
+  const paths = upload.match(/\n          path: \|\n((?:            [^\n]+\n)+)/)?.[1]
+    .trim().split('\n').map(path => path.trim());
+  assert.deepEqual(paths, ['Sidereal/test-results/**/*.png', 'Sidereal/test-results/**/short-return-identities.json']);
+});
+
+test('public fork verification uses a disposable hosted runner without a write credential or secrets', () => {
+  assert.match(workflow, /^permissions:\n  contents: read\n/m);
+  const verify = workflow.split('\n  verify:\n')[1]?.split('\n  release:\n')[0];
+  assert.ok(verify);
+  assert.match(verify, /\n    runs-on: macos-26\n/);
+  assert.match(verify, /DEVELOPER_DIR: \/Applications\/Xcode_26\.6\.app\/Contents\/Developer/);
+  assert.match(verify, /Expected Xcode 26\.6/);
+  assert.match(verify, /SIGIL_RUNNER_ENVIRONMENT: \$\{\{ runner\.environment \}\}/);
+  assert.match(verify, /if \[\[ "\$SIGIL_RUNNER_ENVIRONMENT" != github-hosted \]\]; then/);
+  assert.doesNotMatch(verify, /github\.event\.pull_request\.head\.repo\.full_name/);
+  assert.match(verify, /persist-credentials: false/);
+  assert.doesNotMatch(verify, /contents: write|secrets(?:\.|\[)|GH_TOKEN:|GITHUB_TOKEN:|gh release/);
+});
+
+test('REA-1224 publishing has its own main-push job and exact artifact boundary', () => {
+  const release = workflow.split('\n  release:\n')[1];
+  assert.ok(release, 'publication still runs with PR verification');
+  assert.match(release, /needs: verify/);
+  assert.match(release, /\n    runs-on: ubuntu-latest\n/);
+  assert.match(release, /SIGIL_RUNNER_ENVIRONMENT: \$\{\{ runner\.environment \}\}/);
+  assert.match(release, /if \[\[ "\$SIGIL_RUNNER_ENVIRONMENT" != github-hosted \]\]; then/);
+  assert.match(release, /if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
+  assert.match(release, /permissions:\n      contents: write/);
+  assert.match(release, /artifact-ids: .*needs\.verify\.outputs\.artifact_id/);
+  assert.match(release, /EXPECTED_ZIP_SHA256: .*needs\.verify\.outputs\.zip_sha256/);
+  assert.match(release, /persist-credentials: false/);
+  assert.equal((workflow.match(/contents: write/g) || []).length, 1);
+});
 
 test('restored result bundles are removed before any check without deleting build caches', t => {
   const cleanup = step('Clear restored native verification evidence');
@@ -32,9 +70,10 @@ test('native result uploads are isolated from build caches and other run attempt
   const producerStep = step('iPhone app, shipping extensions, and native relay tests');
   const output = producerStep.match(/\n          SIGIL_NATIVE_ARTIFACTS: (.+)\n/)?.[1];
   const upload = step('Upload native verification evidence');
-  const path = upload.match(/\n          path: (.+)\n/)?.[1];
+  const paths = upload.match(/\n          path: \|\n((?:            [^\n]+\n)+)/)?.[1]
+    .trim().split('\n').map(path => path.trim());
   assert.ok(output);
-  assert.ok(path);
+  assert.ok(paths);
   assert.match(producerStep, /\n        id: native_verification\n/);
   assert.match(upload, /\n        if: always\(\) && steps\.native_verification\.outcome != 'skipped'\n/);
   assert.match(upload, /\n          if-no-files-found: error\n/);
@@ -50,8 +89,10 @@ test('native result uploads are isolated from build caches and other run attempt
     return contexts[context];
   });
   const first = render(output, '100', '1');
-  assert.equal(dirname(render(path, '100', '1')), first);
-  assert.equal(basename(render(path, '100', '1')), '*.xcresult');
+  for (const path of paths) assert.equal(dirname(render(path, '100', '1')), first);
+  assert.deepEqual(paths.map(path => basename(render(path, '100', '1'))), [
+    '*.xcresult', 'textkit-stdout.log', 'textkit-stderr.log', 'textkit-phases.log',
+  ]);
   assert.notEqual(first, render(output, '101', '1'));
   assert.notEqual(first, render(output, '100', '2'));
   assert.ok(first.startsWith('/tmp/sigil-ci-results/'));
@@ -61,27 +102,185 @@ test('native result uploads are isolated from build caches and other run attempt
   assert.match(producer, /ARTIFACTS="\$\{SIGIL_NATIVE_ARTIFACTS:-/);
 });
 
-test('app downloads survive manual runs and failed release publishing without duplicating releases', () => {
+test('hosted job budget leaves native and release gates intact', () => {
+  const verify = workflow.split('\n  verify:\n')[1].split('\n  release:\n')[0];
+  const release = workflow.split('\n  release:\n')[1];
+  assert.match(verify, /\n    timeout-minutes: 90\n/);
+  assert.match(release, /\n    timeout-minutes: 15\n/);
+  const native = readFileSync(new URL('../../iOS/NativeTests/IOSOutputNativeTests.swift', import.meta.url), 'utf8');
+  assert.match(native, /asyncAfter\(deadline: \.now\(\) \+ 900\)/);
+  const driver = readFileSync(new URL('../../iOS/scripts/native-output-test.sh', import.meta.url), 'utf8');
+  assert.match(driver, /set -euo pipefail/);
+  assert.match(driver, /grep -q '\^OK ' "\$WORK\/output.txt"/);
+});
+
+const textkitLogger = fileURLToPath(new URL('../../iOS/scripts/native-output-log.py', import.meta.url));
+function captureTextkit(t, stream, input) {
+  const root = mkdtempSync(join(tmpdir(), 'sigil-textkit-log-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const result = spawnSync('python3', [textkitLogger, root, stream], {
+    input, maxBuffer: 4 * 1024 * 1024,
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0, result.stderr.toString());
+  assert.deepEqual(result.stdout, input, 'capture must keep draining and mirror the complete stream');
+  return root;
+}
+
+test('TextKit capture caps raw bytes but retains later bounded synthetic markers', t => {
+  const prefix = Buffer.alloc(2 * 1024 * 1024 + 64, 'x');
+  const marker = 'SIGIL_TEXTKIT time=1 phase=case-complete case=7 result=pass\n';
+  const input = Buffer.concat([prefix, Buffer.from('\n' + marker)]);
+  const root = captureTextkit(t, 'stdout', input);
+  const raw = readFileSync(join(root, 'textkit-stdout.log'));
+  assert.deepEqual(raw.subarray(0, 2 * 1024 * 1024), prefix.subarray(0, 2 * 1024 * 1024));
+  assert.equal(raw.subarray(2 * 1024 * 1024).toString(),
+    '\n[SIGIL_TEXTKIT log truncated at 2097152 bytes; stream still drained]\n');
+  assert.equal(readFileSync(join(root, 'textkit-phases.log'), 'utf8'), marker);
+});
+
+test('TextKit stderr is retained separately and cannot supply phase evidence', t => {
+  const input = Buffer.from('SIGIL_TEXTKIT time=1 phase=not-a-stdout-marker\nsynthetic error\n');
+  const root = captureTextkit(t, 'stderr', input);
+  assert.deepEqual(readFileSync(join(root, 'textkit-stderr.log')), input);
+  assert.equal(existsSync(join(root, 'textkit-phases.log')), false);
+});
+
+test('TextKit phase retention rejects oversized lines and caps marker count', t => {
+  const markers = Array.from({ length: 66 }, (_, index) => `SIGIL_TEXTKIT time=1 phase=case-${index}\n`);
+  const oversized = 'SIGIL_TEXTKIT ' + 'x'.repeat(1024) + '\n';
+  const root = captureTextkit(t, 'stdout', Buffer.from(oversized + markers.join('')));
+  assert.equal(readFileSync(join(root, 'textkit-phases.log'), 'utf8'), markers.slice(0, 64).join(''));
+});
+
+test('TextKit marker parsing survives raw read boundaries without accepting an incomplete line', t => {
+  const marker = 'SIGIL_TEXTKIT time=1 phase=app-task-start\n';
+  const input = Buffer.from('x'.repeat(65520) + '\n' + marker + 'SIGIL_TEXTKIT incomplete');
+  const root = captureTextkit(t, 'stdout', input);
+  assert.deepEqual(readFileSync(join(root, 'textkit-stdout.log')), input);
+  assert.equal(readFileSync(join(root, 'textkit-phases.log'), 'utf8'), marker);
+});
+
+function captureTextkitShell(t, body, { stderrCaptureFailure = false } = {}) {
+  const driver = readFileSync(new URL('../../iOS/scripts/native-output-test.sh', import.meta.url), 'utf8');
+  const boundary = '\nphase build-start\n';
+  assert.equal(driver.split(boundary).length, 2, 'fixture stops before any native build or launch');
+  let prefix = driver.slice(0, driver.indexOf(boundary));
+  const sourceCd = 'cd "$(dirname "$0")/.."';
+  assert.equal(prefix.split(sourceCd).length, 2);
+  prefix = prefix.replace(sourceCd, 'cd "$SIGIL_FIXTURE_IOS_ROOT"');
+  assert.doesNotMatch(prefix, /xcrun swiftc|codesign|simctl (?:create|boot|install|launch)|xcodebuild/);
+  const root = mkdtempSync(join(tmpdir(), 'sigil-textkit-shell-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const artifacts = join(root, 'artifacts');
+  const home = join(root, 'home');
+  const temp = join(root, 'tmp');
+  const bin = join(root, 'bin');
+  for (const directory of [artifacts, home, temp, bin]) mkdirSync(directory);
+  const nativeCalled = join(root, 'native-called');
+  writeFileSync(join(bin, 'xcrun'), '#!/bin/bash\nprintf unexpected > "$SIGIL_FIXTURE_NATIVE_CALLED"\nexit 97\n', { mode: 0o755 });
+  if (stderrCaptureFailure) writeFileSync(join(artifacts, 'textkit-stderr.log'), 'reserved synthetic file');
+  const fixture = join(root, 'fixture.sh');
+  writeFileSync(fixture, prefix + '\n' + body + '\n');
+  const env = {
+    ...process.env, HOME: home, TMPDIR: temp + '/', PATH: bin + ':' + process.env.PATH,
+    SIGIL_NATIVE_ARTIFACTS: artifacts,
+    SIGIL_FIXTURE_IOS_ROOT: fileURLToPath(new URL('../../iOS', import.meta.url)),
+    SIGIL_FIXTURE_NATIVE_CALLED: nativeCalled,
+  };
+  delete env.SIGIL_NATIVE_TEST_DEVICE;
+  const result = spawnSync('/bin/bash', [fixture], { env, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024, timeout: 10000 });
+  assert.equal(result.error, undefined);
+  assert.equal(existsSync(nativeCalled), false, 'no native tool may execute in this synthetic fixture');
+  assert.deepEqual(readdirSync(temp), [], 'owned FIFO directory is cleaned');
+  return { result, artifacts };
+}
+
+test('TextKit shell owns both logger children and drains both streams before success', t => {
+  const { result, artifacts } = captureTextkitShell(t, `python3 - <<'PY'
+import sys
+sys.stdout.write('o' * 131072 + '\\n')
+sys.stderr.write('e' * 131072 + '\\n')
+PY
+exit 0`);
+  assert.equal(result.status, 0, result.stderr.slice(-1000));
+  assert.deepEqual(readFileSync(join(artifacts, 'textkit-stdout.log'), 'utf8'), result.stdout);
+  assert.deepEqual(readFileSync(join(artifacts, 'textkit-stderr.log'), 'utf8'), result.stderr);
+  assert.ok(result.stdout.startsWith('o'.repeat(131072) + '\n'));
+  assert.equal(result.stderr, 'e'.repeat(131072) + '\n');
+  assert.match(readFileSync(join(artifacts, 'textkit-phases.log'), 'utf8'), /phase=body-exit-0\n$/);
+});
+
+test('TextKit shell preserves a failing body status after both captures drain', t => {
+  const { result, artifacts } = captureTextkitShell(t, 'printf "synthetic stdout\\n"\nprintf "synthetic stderr\\n" >&2\nexit 7');
+  assert.equal(result.status, 7, result.stderr);
+  assert.match(readFileSync(join(artifacts, 'textkit-phases.log'), 'utf8'), /phase=body-exit-7\n$/);
+  assert.equal(readFileSync(join(artifacts, 'textkit-stderr.log'), 'utf8'), 'synthetic stderr\n');
+});
+
+test('TextKit shell fails when an owned logger fails after a successful body', t => {
+  const { result } = captureTextkitShell(t, 'printf "synthetic stdout\\n"\nexit 0', { stderrCaptureFailure: true });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /TextKit stderr capture failed \(exit 1\)/);
+  assert.doesNotMatch(result.stderr, /not a child of this shell/);
+});
+
+test('TextKit shell reports logger failure while preserving the original body failure', t => {
+  const { result } = captureTextkitShell(t, 'exit 7', { stderrCaptureFailure: true });
+  assert.equal(result.status, 7);
+  assert.match(result.stderr, /TextKit stderr capture failed \(exit 1\)/);
+});
+
+test('app downloads are retained before a separate publisher, including manual runs and publish failure', () => {
   const upload = step('Upload app zip');
   const publish = step('Publish latest GitHub Release');
   assert.match(upload, /\n          retention-days: 7\n/);
-  assert.ok(steps.indexOf(publish) < steps.indexOf(upload));
+  assert.ok(steps.indexOf(upload) < steps.indexOf(publish));
   assert.match(step('Zip the app'), /\n        id: zip_app\n/);
-  assert.match(publish, /\n        id: publish_release\n/);
+  assert.match(upload, /\n        id: app_artifact\n/);
+  assert.match(upload, /name: Sigil\.app-.*github\.run_id.*github\.run_attempt/);
+  assert.match(upload, /dist\/Sigil\.zip\n            dist\/release\.json/);
+  assert.doesNotMatch(upload, /overwrite:|publish_release/);
   const condition = upload.match(/\n        if: \$\{\{ (.+) \}\}/)?.[1];
   assert.ok(condition);
-  const runs = new Function('steps', 'cancelled', `return (${condition})`);
-  for (const [zip, release, cancelled, expected] of [
-    ['success', 'success', false, false],
-    ['success', 'skipped', false, true],
-    ['success', 'failure', false, true],
+  const runs = new Function('steps', 'cancelled', 'return (' + condition + ')');
+  for (const [zip, metadata, cancelled, expected] of [
+    ['success', 'success', false, true],
     ['failure', 'skipped', false, false],
+    ['success', 'failure', false, false],
     ['skipped', 'skipped', false, false],
-    ['success', 'failure', true, false],
+    ['success', 'success', true, false],
   ]) {
-    assert.equal(runs({ zip_app: { outcome: zip }, publish_release: { outcome: release } }, () => cancelled), expected);
+    assert.equal(runs({ zip_app: { outcome: zip }, release_metadata: { outcome: metadata } }, () => cancelled), expected);
   }
+  const verify = workflow.split('\n  verify:\n')[1].split('\n  release:\n')[0];
+  const release = workflow.split('\n  release:\n')[1];
+  const verifyIf = verify.match(/\n    if: (.+)\n/)?.[1];
+  const releaseIf = release.match(/\n    if: (.+)\n/)?.[1];
+  assert.equal(verifyIf, undefined, 'hosted verification must not filter fork PRs');
+  // A job without an if condition runs on every admitted event.
+  const allowed = expression => new Function('github', 'return (' + (expression ?? 'true') + ')');
+  const github = (event, ref, repository) => ({
+    event_name: event, ref, repository: 'fixture/sigil',
+    event: { pull_request: { head: { repo: { full_name: repository } } } },
+  });
+  for (const [event, ref, repository, verifies, publishes] of [
+    ['push', 'refs/heads/main', 'fixture/sigil', true, true],
+    ['push', 'refs/heads/feature', 'fixture/sigil', true, false],
+    ['workflow_dispatch', 'refs/heads/main', 'fixture/sigil', true, false],
+    ['workflow_dispatch', 'refs/heads/feature', 'fixture/sigil', true, false],
+    ['pull_request', 'refs/pull/1/merge', 'fixture/sigil', true, false],
+    ['pull_request', 'refs/pull/2/merge', 'outside/fork', true, false],
+  ]) {
+    const context = github(event, ref, repository);
+    assert.equal(allowed(verifyIf)(context), verifies);
+    assert.equal(allowed(releaseIf)(context), publishes);
+  }
+  assert.match(release, /ref: .*github\.sha/);
+  assert.match(release, /merge-multiple: true/);
+  assert.doesNotMatch(release, /Scripts\/(verify|build-app|smoke-launch)\.sh|npm |swift build|swift test/);
 });
+
 
 test('the exact release bundle must survive smoke launch before zip or publication', () => {
   const build = step('Build release bundle');
@@ -98,8 +297,8 @@ test('the exact release bundle must survive smoke launch before zip or publicati
   assert.doesNotMatch(smoke, /continue-on-error|always\(/);
   assert.match(smoke, /run: Scripts\/smoke-launch.sh dist\/Sigil.app\n/);
   assert.match(zip, /run: ditto -c -k --keepParent dist\/Sigil.app dist\/Sigil.zip\n/);
-  assert.match(publish, /if: github.event_name == 'push' && github.ref == 'refs\/heads\/main'\n/);
-  assert.match(publish, /gh release create "\$tag" dist\/Sigil.zip/);
+  assert.match(workflow.split('\n  release:\n')[1], /if: github.event_name == 'push' && github.ref == 'refs\/heads\/main'\n/);
+  assert.match(publish, /run: python3 Scripts\/ci-release\.py publish release/);
   const verify = readFileSync(new URL('../../Scripts/verify.sh', import.meta.url), 'utf8');
   assert.match(verify, /"\$SCRIPT_DIR\/smoke-launch.sh" "\$APP"/);
   assert.doesNotMatch(verify, /SIGIL_SMOKE_TEST=1/);
