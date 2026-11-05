@@ -124,8 +124,10 @@ struct SidebarOrganizationTests {
                 AddedProject(path: "/workspace/new", addedAt: Date(timeIntervalSince1970: 15)),
                 AddedProject(path: "/workspace/b/web", addedAt: Date(timeIntervalSince1970: 5)),
             ],
-            into: projects
-        ) { $0 }
+            into: projects,
+            isAvailable: { _ in true },
+            canonicalPath: { $0 }
+        )
         #expect(merged.map(\.name) == ["api", "web", "new", "/workspace/b/web"])
         #expect(merged.first?.sessions.map(\.id) == ["b"])
         #expect(merged[2].sessions.isEmpty)

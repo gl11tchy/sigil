@@ -6,6 +6,24 @@ import SigilKit
 import UniformTypeIdentifiers
 import os
 
+enum UnrestoredReason: Equatable, Sendable {
+    case providerUnavailable(String)
+    case folderMissing
+    case folderUnavailable(String)
+    case historyMissing
+    case historyUnavailable(String)
+    case checkingProviders
+    case historyLoading
+    case waitingForEarlierTab
+}
+
+struct UnrestoredTab: Identifiable, Equatable, Sendable {
+    let id: String
+    let entry: OpenTabsSnapshot.Entry
+    let title: String
+    let reason: UnrestoredReason
+}
+
 /// Window-level state: the open tabs, the session sidebar, and the actions the menus call.
 @MainActor
 @Observable
@@ -62,6 +80,7 @@ final class AppModel {
     var findQuery = ""
     var findMatchIndex = 0
     var findMatchCount = 0
+    var isFindSearching = false
     /// The thread viewer can be collapsed for a full-width terminal.
     var isSidebarVisible = true {
         didSet {
@@ -97,12 +116,22 @@ final class AppModel {
     private var isRestoringTabs = false
     /// Saved entries that are temporarily unavailable stay here instead of being erased.
     private var deferredOpenTabs: [OpenTabsSnapshot.Entry] = []
+    private var unrestoredReasons: [String: UnrestoredReason] = [:]
+    private var unrestoredRetry: (generation: UUID, reason: UnrestoredReason)?
     private var savedOpenTabOrder: [OpenTabsSnapshot.Entry] = []
     @ObservationIgnored private var restoredSavedTabOrder: [TerminalTab.ID: Int] = [:]
     private var deferredSelectedEntry: OpenTabsSnapshot.Entry?
     /// Older snapshots saved only an ID. Keep it until the first matching tab
     /// can be restored or the user makes a new selection.
     private var deferredLegacySelectedSessionID: String?
+    private struct ClosedTab {
+        let token = UUID()
+        let entry: OpenTabsSnapshot.Entry
+        let index: Int
+    }
+    /// User closes only; archive, delete and quit must never populate this list.
+    private var closedTabs: [ClosedTab] = []
+    private var isReopeningClosedTab = false
     private let trashConversation: TrashConversation
     private let presentError: ErrorPresenter
     /// Shown before a close, archive or shell restart stops work still running.
@@ -139,6 +168,10 @@ final class AppModel {
     @ObservationIgnored private let providerChecks: ProviderChecks
     @ObservationIgnored private let hasInjectedProviderProbe: Bool
     @ObservationIgnored private(set) var codexBindingTask: Task<Void, Never>?
+    @ObservationIgnored var codexTranscriptResolver:
+        @Sendable (ChildProcessGeneration, URL, [GrokSession], URL) -> CodexSessionBinding.Transcript? = {
+            CodexSessionBinding.resolveTranscript(process: $0, historyRoot: $1, sessions: $2, workingDirectory: $3)
+        }
 
     init(
         settings: AppSettings = AppSettings(),
@@ -490,6 +523,7 @@ final class AppModel {
         unarchive(session)
         settings.pinnedConversations = SidebarOrganization.inserting(
             session, onto: settings.pinnedConversations, samePath: samePath)
+        settings.recordSigilConversations([session.id])
     }
 
     func unpin(_ session: GrokSession) {
@@ -557,6 +591,7 @@ final class AppModel {
         }
         settings.pinnedConversations = pinned
         settings.archivedConversations = archived
+        settings.recordSigilConversations(sessions.map(\.id))
         stopAndWait(
             tabs.filter { tab in
                 sessions.contains { tabMatches(tab, sessionID: $0.id, cwd: $0.cwd) }
@@ -568,6 +603,7 @@ final class AppModel {
                 removeTab(at: index)
             }
             dropDeferred(matching: session)
+            closedTabs.removeAll { entryMatches($0.entry, sessionID: session.id, cwd: session.cwd) }
         }
         refreshDockIndicator()
         persistOpenTabs()
@@ -738,6 +774,7 @@ final class AppModel {
             if let index = tabs.firstIndex(where: { $0.id == tab.id }) { removeTab(at: index) }
         }
         dropDeferred(inProjectPath: project.cwd)
+        closedTabs.removeAll { inProject($0.entry.cwd, project.cwd) }
         refreshDockIndicator()
         persistOpenTabs()
         if focusedProject.map({ samePath($0.cwd, project.cwd) }) == true {
@@ -804,10 +841,26 @@ final class AppModel {
         let projects = SidebarOrganization.projects(from: sessions, canonicalPath: canonicalPath)
         // A search ranks by match and Archived lists only archived chats.
         guard !SidebarOrganization.isSearching(searchText), sidebarSurface != .archived else {
-            return projects
+            return markingAddedProjectAvailability(projects)
         }
         return SidebarOrganization.merging(
-            added: settings.addedProjects, into: projects, canonicalPath: canonicalPath)
+            added: settings.addedProjects, into: projects,
+            isAvailable: Self.isProjectDirectoryAvailable, canonicalPath: canonicalPath)
+    }
+
+    /// Recheck a saved folder without changing its reference or rebuilding history.
+    func retryProjectAvailability() { invalidateSidebarFilesystem() }
+
+    /// Tag filtered groups without adding rows or changing their order/dates.
+    private func markingAddedProjectAvailability(_ projects: [SidebarProject]) -> [SidebarProject] {
+        let references = Dictionary(
+            settings.addedProjects.map { (canonicalPath($0.path), $0.path) },
+            uniquingKeysWith: { first, _ in first })
+        return projects.map { project in
+            var marked = project
+            if let path = references[project.id] { marked.isAvailable = Self.isProjectDirectoryAvailable(path) }
+            return marked
+        }
     }
 
     /// Adds a folder to Projects before it has a chat. A Sigil worktree adds its project.
@@ -888,14 +941,16 @@ final class AppModel {
             ?? project(at: path, from: store.sessions)
             ?? SidebarOrganization.merging(
                 added: settings.addedProjects.filter { samePath($0.path, path) },
-                into: [], canonicalPath: canonicalPath
+                into: [], isAvailable: Self.isProjectDirectoryAvailable, canonicalPath: canonicalPath
             ).first
     }
 
     private func project(at path: String, from sessions: [GrokSession]) -> SidebarProject? {
         let focused = canonicalPath(path)
-        return SidebarOrganization.projects(from: sessions, canonicalPath: canonicalPath)
-            .first { $0.id == focused || samePath($0.cwd, path) }
+        return markingAddedProjectAvailability(
+            SidebarOrganization.projects(from: sessions, canonicalPath: canonicalPath)
+        )
+        .first { $0.id == focused || samePath($0.cwd, path) }
     }
 
     /// Chats in the open project, or the full sidebar list.
@@ -1179,16 +1234,18 @@ final class AppModel {
         }
         // Earlier builds added a Sigil worktree as its own project, which
         // could then be pinned or left open. Each becomes its project.
+        // Folder availability is transient; only explicit Remove/Archive drops an added reference.
+        // Distinct saved aliases can converge temporarily; fold/deduplicate literal references only.
         let remainingAdded = SidebarOrganization.foldingWorktrees(
             settings.addedProjects, path: \.path,
-            moving: { AddedProject(path: $1, addedAt: $0.addedAt) }, samePath: samePath
-        ).filter { Self.isUsableDirectory(URL(fileURLWithPath: $0.path)) }
+            moving: { AddedProject(path: $1, addedAt: $0.addedAt) }, samePath: ==
+        )
         if remainingAdded != settings.addedProjects {
             settings.addedProjects = remainingAdded
         }
         let remainingProjectPins = pruningMissingProjects(
             SidebarOrganization.foldingWorktrees(
-                settings.pinnedProjects, path: { $0 }, moving: { $1 }, samePath: samePath))
+                settings.pinnedProjects, path: { $0 }, moving: { $1 }, samePath: ==))
         if remainingProjectPins != settings.pinnedProjects {
             settings.pinnedProjects = remainingProjectPins
         }
@@ -1271,6 +1328,7 @@ final class AppModel {
     /// Chats Sigil started before it kept a list: saved open tabs and chats
     /// in Sigil's own worktrees. Completes once a scan verifies all history coverage.
     func seedSigilConversations() {
+        settings.seedSigilConversationOwnership()
         // A scan with a read error may have missed chats; wait for a clean one.
         guard !settings.sigilConversationsSeeded, store.appliedScanSequence > 0, store.loadError == nil,
             !store.hasUnvalidatedHistory
@@ -1281,22 +1339,24 @@ final class AppModel {
         let worktrees = store.sessions
             .filter { SigilWorktree.projectPath(of: $0.cwd) != nil && !$0.isSubagent }
             .map(\.id)
-        settings.recordSigilConversations(saved + worktrees)
+        let persisted = settings.recordSigilConversations(saved + worktrees)
         // Seed verified chats now, and retry when incomplete files become readable.
-        if store.canPruneMissingProjects { settings.sigilConversationsSeeded = true }
+        if persisted, store.canPruneMissingProjects { settings.sigilConversationsSeeded = true }
     }
 
     /// A Codex tab can be renamed and colored before its chat id exists.
     /// Those values move onto the chat once the id is known, or the next
     /// summary replaces the name and the color disappears.
     private func adoptLearnedCodexSession(
-        _ tab: TerminalTab, session: GrokSession, generation: ChildProcessGeneration? = nil
+        _ tab: TerminalTab, transcript: CodexSessionBinding.Transcript, generation: ChildProcessGeneration?
     ) {
+        let session = transcript.session
         let chosenName = tab.sessionTitle
         let chosenColor = tab.markColor
         tab.learnedSessionReference = ProviderSessionReference(
             provider: .codex, sessionID: session.nativeSessionID, cwd: tab.workingDirectory.path)
         tab.codexBindingGeneration = generation
+        tab.adoptTranscript(transcript, generation: generation ?? tab.controller.processGeneration)
         if let chosenName, chosenName != tab.automaticTitle {
             renameTab(tab, to: chosenName)
         }
@@ -1326,12 +1386,13 @@ final class AppModel {
         }
         guard !waiting.isEmpty else { return }
         let sessions = store.sessions
+        let resolver = codexTranscriptResolver
         codexBindingTask = Task { [weak self] in
             let matches = await Task.detached(priority: .utility) {
-                waiting.compactMap { id, generation, cwd -> (UUID, ChildProcessGeneration, GrokSession)? in
+                waiting.compactMap {
+                    id, generation, cwd -> (UUID, ChildProcessGeneration, CodexSessionBinding.Transcript)? in
                     guard
-                        let match = CodexSessionBinding.resolve(
-                            process: generation, historyRoot: historyRoot, sessions: sessions, workingDirectory: cwd)
+                        let match = resolver(generation, historyRoot, sessions, cwd)
                     else { return nil }
                     return (id, generation, match)
                 }
@@ -1340,28 +1401,29 @@ final class AppModel {
             self.codexBindingTask = nil
             // Two process trees holding the same conversation are ambiguous,
             // regardless of tab order. Neither gets to claim it first.
-            let claims = Dictionary(grouping: matches, by: { $0.2.id })
-            let unambiguous = matches.filter { claims[$0.2.id]?.count == 1 }
+            let claims = Dictionary(grouping: matches, by: { $0.2.session.id })
+            let unambiguous = matches.filter { claims[$0.2.session.id]?.count == 1 }
             for (id, generation, _) in waiting {
                 guard let tab = self.tabs.first(where: { $0.id == id }), tab.controller.isRunning,
                     tab.controller.processGeneration == generation, tab.codexBindingGeneration == generation,
-                    unambiguous.first(where: { $0.0 == id })?.2.id != tab.sessionID
+                    unambiguous.first(where: { $0.0 == id })?.2.session.id != tab.sessionID
                 else { continue }
                 // `/new` can leave several files open. Earlier proof must not
                 // keep presenting the old conversation as this live process.
                 tab.markColor = self.tabColor(for: tab)
                 tab.learnedSessionReference = nil
                 tab.codexBindingGeneration = nil
+                tab.revokeTranscript()
                 self.persistOpenTabs()
                 self.remoteControl.noteChange()
                 self.remoteControl.noteTab(tab, model: self)
             }
-            for (id, generation, session) in unambiguous {
+            for (id, generation, transcript) in unambiguous {
                 guard let tab = self.tabs.first(where: { $0.id == id }), tab.controller.isRunning,
                     tab.controller.processGeneration == generation, tab.sessionReference == nil,
-                    self.canLinkCodexSession(session, to: tab)
+                    self.canLinkCodexSession(transcript.session, to: tab)
                 else { continue }
-                self.adoptLearnedCodexSession(tab, session: session, generation: generation)
+                self.adoptLearnedCodexSession(tab, transcript: transcript, generation: generation)
             }
         }
     }
@@ -1395,17 +1457,19 @@ final class AppModel {
         guard let tab = tabs.first(where: { $0.id == tabID }),
             codexLinkCandidates(for: tab).contains(where: { $0 == session })
         else { return false }
+        let process = tab.controller.processGeneration
         let validated = await Task.detached(priority: .utility) {
-            CodexSessionBinding.validateForExplicitLink(session)
+            CodexSessionBinding.transcriptForExplicitLink(session)
         }.value
         guard tabs.contains(where: { $0 === tab }), tab.sessionReference == nil,
+            tab.controller.processGeneration == process,
             canLinkCodexSession(session, to: tab)
         else { return false }
         guard let validated else {
             showError(title: "Conversation is unavailable", message: "Read history again, then try linking this tab.")
             return false
         }
-        adoptLearnedCodexSession(tab, session: validated)
+        adoptLearnedCodexSession(tab, transcript: validated, generation: nil)
         return true
     }
 
@@ -1550,6 +1614,7 @@ final class AppModel {
                 next: next, current: settings.conversationNames)
         else { return }
         settings.conversationNames = next
+        settings.recordSigilConversations([session.id])
         applyNameToOpenTabs(session)
     }
 
@@ -2123,10 +2188,14 @@ final class AppModel {
 
     /// Output and status changes reach the phone through the remote stream.
     private func wireRemoteStream(_ tab: TerminalTab) {
+        tab.controller.onFindChange = { [weak self, weak tab] in
+            guard let self, let tab, self.isFindBarVisible, self.selectedTabID == tab.id else { return }
+            self.refreshFindCounts()
+        }
         tab.onActivityChange = { [weak self, weak tab] in
             guard let self, let tab else { return }
             self.remoteControl.noteChange()
-            self.remoteControl.noteTab(tab, model: self)
+            self.remoteControl.noteTab(tab, model: self, suppressAlerts: tab.isCatchingUpLifecycle)
         }
         tab.controller.onRemoteOutput = { [weak self, weak tab] in
             guard let self, let tab else { return }
@@ -2195,6 +2264,7 @@ final class AppModel {
             samePath: samePath)
         guard next != settings.tabColors else { return }
         settings.tabColors = next
+        settings.recordSigilConversations([id])
     }
 
     func hasCustomTabName(_ tab: TerminalTab) -> Bool {
@@ -2227,6 +2297,7 @@ final class AppModel {
                 samePath: samePath)
             guard next != settings.conversationNames else { return }
             settings.conversationNames = next
+            settings.recordSigilConversations([id])
             return
         }
         let trimmed = ConversationNaming.normalized(raw)
@@ -2306,7 +2377,7 @@ final class AppModel {
 
     /// One click uses the same launch defaults as an ordinary new tab. The
     /// optional sheet is the only place that overrides them for this launch.
-    func startDefaultSession(_ provider: CLIProvider) async {
+    func startDefaultSession(_ provider: CLIProvider, worktreeRoot: URL = SigilWorktree.root) async {
         guard showsNewSessionSurface, !isStartingNewSession else { return }
         settings.finishInitialProviderSelection()
         let project = pendingSessionDirectory ?? newSessionDirectory
@@ -2320,17 +2391,22 @@ final class AppModel {
             showError(title: "Folder is unavailable", message: "Choose another folder in Options.")
             return
         }
-        var folder = project
-        if settings.startsInWorktree, SigilWorktree.isInRepository(project) {
-            do {
-                folder = try await SigilWorktree.create(for: project) ?? project
-            } catch {
-                showError(title: "Could not create a worktree", message: error.localizedDescription)
-                return
-            }
+        let result = await SessionWorktreeStart.start(
+            project: project,
+            useWorktree: settings.startsInWorktree && SigilWorktree.shouldDefaultToWorktree(project),
+            root: worktreeRoot,
+            validate: {
+                guard self.showsNewSessionSurface else { return "Session launch was cancelled." }
+                return await self.checkedProviderLaunchProblem(provider)
+            },
+            launch: { folder in
+                guard self.showsNewSessionSurface else { return false }
+                return self.newTab(in: folder, provider: provider) != nil
+            })
+        if case .started = result { focusSelectedTerminal() }
+        if let message = result.message, !Task.isCancelled || result.needsRecovery {
+            showError(title: "Could not start a session", message: message)
         }
-        guard showsNewSessionSurface else { return }
-        if newTab(in: folder, provider: provider) != nil { focusSelectedTerminal() }
     }
 
     /// Explicit refresh replaces all results; routine entry reuses bounded successes.
@@ -2486,8 +2562,10 @@ final class AppModel {
             executable: session.provider == .grokBuild ? grokExecutableURL : nil,
             workingDirectory: workingDirectory,
             mode: .resume(sessionID: session.nativeSessionID),
-            model: session.provider == .grokBuild ? settings.model.nilIfEmpty : nil,
-            reasoningEffort: session.provider == .grokBuild ? settings.effort.nilIfEmpty : nil,
+            model: session.provider == .grokBuild ? (session.modelID?.nilIfEmpty ?? settings.model.nilIfEmpty) : nil,
+            reasoningEffort: session.provider == .grokBuild
+                ? (session.reasoningEffort.flatMap { AppSettings.effortOptions.contains($0) ? $0.nilIfEmpty : nil }
+                    ?? settings.effort.nilIfEmpty) : nil,
             themeName: settings.theme.grokThemeName,
             themeVariables: settings.theme.grokThemeEnvironment,
             provider: session.provider, sessionFile: session.provider == .grokBuild ? nil : session.directory
@@ -2584,6 +2662,7 @@ final class AppModel {
         }
         if spec.provider != .grokBuild, let reference = old.sessionReference {
             spec.mode = .resume(sessionID: reference.sessionID)
+            spec.sessionFile = old.completionEventsURL ?? old.spec.sessionFile
         }
         // A restart follows the current Kimi sign-in, not the one it started with.
         spec.providerEnvironment = providerEnvironment(for: spec.provider) ?? [:]
@@ -2610,9 +2689,127 @@ final class AppModel {
 
     func closeTab(_ id: TerminalTab.ID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let entry = tabs[index].capabilities.resume ? openTabEntry(for: tabs[index]) : nil
         removeTab(at: index)
+        if let entry, canReopen(entry) {
+            closedTabs.removeAll { sameEntry($0.entry, entry) }
+            closedTabs.append(ClosedTab(entry: entry, index: index))
+            if closedTabs.count > 10 { closedTabs.removeFirst(closedTabs.count - 10) }
+        }
         refreshDockIndicator()
         persistOpenTabs()
+    }
+
+    var canReopenClosedTab: Bool {
+        !isStartingNewSession && !isReopeningClosedTab && closedTabs.contains { canReopen($0.entry) }
+    }
+
+    private func canReopen(_ entry: OpenTabsSnapshot.Entry) -> Bool {
+        entry.provider.capabilities.resume && !entry.sessionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !settings.archivedConversations.contains {
+                $0.sessionID == sidebarID(entry) && samePath($0.cwd, entry.cwd)
+            }
+    }
+
+    /// An unavailable folder/provider keeps the entry for another deliberate try.
+    /// A history refresh never grants a different provider, identity or workspace.
+    func reopenClosedTab() async {
+        guard canReopenClosedTab else { return }
+        isReopeningClosedTab = true
+        defer { isReopeningClosedTab = false }
+        settings.reloadSharedLists()
+        canonicalPathCache.removeAll(keepingCapacity: true)
+        var refreshedHistory = false
+        var discardedMissingHistory = false
+        while !Task.isCancelled, !isStartingNewSession {
+            closedTabs.removeAll { !canReopen($0.entry) }
+            guard let closed = closedTabs.last else {
+                if discardedMissingHistory { showHistoryValidationError() }
+                return
+            }
+            let entry = closed.entry
+            if let existing = tabs.first(where: {
+                $0.spec.provider == entry.provider && tabMatches($0, sessionID: sidebarID(entry), cwd: entry.cwd)
+            }) {
+                closedTabs.removeLast()
+                select(existing.id)
+                return
+            }
+            guard canLaunchProvider(entry.provider) else { return }
+            let workingDirectory = URL(fileURLWithPath: entry.cwd)
+            guard Self.isUsableDirectory(workingDirectory) else {
+                showError(title: "Folder is unavailable", message: "Restore the folder, then try again.")
+                return
+            }
+            if !refreshedHistory {
+                let previousSelection = selectedTabID
+                let previousNewSessionFocus = newSessionFocusToken
+                let previousAppliedScan = store.appliedScanSequence
+                await store.reload()
+                canonicalPathCache.removeAll(keepingCapacity: true)
+                // Another close becomes the newest intent; delete/archive/quit can
+                // remove this one while the scan waits. Do not consume either.
+                guard !Task.isCancelled, closedTabs.last?.token == closed.token else { return }
+                guard newSessionFocusToken == previousNewSessionFocus,
+                    selectedTabID == previousSelection
+                        || tabs.contains(where: {
+                            $0.id == selectedTabID && $0.spec.provider == entry.provider
+                                && tabMatches($0, sessionID: sidebarID(entry), cwd: entry.cwd)
+                        })
+                else { return }
+                // A newer forced scan can supersede this reload without
+                // publishing yet. Its older visible rows are not fresh proof.
+                guard !store.isLoading, store.appliedScanSequence > previousAppliedScan else {
+                    showHistoryValidationError()
+                    return
+                }
+                refreshedHistory = true
+                settings.reloadSharedLists()
+                continue
+            }
+            guard
+                let session = store.sessions.first(where: {
+                    $0.provider == entry.provider && $0.nativeSessionID == entry.sessionID
+                        && samePath($0.cwd, entry.cwd)
+                })
+            else {
+                if store.canPruneMissingProjects {
+                    closedTabs.removeLast()
+                    discardedMissingHistory = true
+                    continue
+                }
+                showHistoryValidationError()
+                return
+            }
+            guard session.isHistoryValidated,
+                entry.provider != .grokBuild
+                    || !store.isGrokHistoryUncertain(for: session)
+            else {
+                showHistoryValidationError()
+                return
+            }
+            switch Self.restorationPathStatus(session.directory, directory: entry.provider == .grokBuild) {
+            case .present: break
+            case .missing:
+                if store.canPruneMissingProjects {
+                    closedTabs.removeLast()
+                    discardedMissingHistory = true
+                    continue
+                }
+                showHistoryValidationError()
+                return
+            case .unavailable(let message):
+                showError(title: "Conversation is unavailable", message: message)
+                return
+            }
+            let tab = add(resumeSpec(for: entry, sessionFile: session.directory))
+            closedTabs.removeLast()
+            tabs.removeLast()
+            tabs.insert(tab, at: min(closed.index, tabs.count))
+            tab.sessionTitle = title(for: session)
+            select(tab.id)
+            return
+        }
     }
 
     /// Everything closing a tab does except writing the open-tab list.
@@ -2736,6 +2933,7 @@ final class AppModel {
         transcriptExports.stopAll()
         stopAndWait(tabs)
         tabs.removeAll()
+        closedTabs.removeAll()
         selectedTabID = nil
         refreshDockIndicator()
     }
@@ -3243,6 +3441,7 @@ final class AppModel {
         findQuery = ""
         findMatchIndex = 0
         findMatchCount = 0
+        isFindSearching = false
     }
 
     func applyFindQuery() {
@@ -3264,6 +3463,7 @@ final class AppModel {
     private func refreshFindCounts() {
         findMatchIndex = selectedTab?.controller.findMatchIndex ?? 0
         findMatchCount = selectedTab?.controller.findMatchCount ?? 0
+        isFindSearching = selectedTab?.controller.isFinding ?? false
     }
 
     /// Switching tabs hides the bar and clears find on the tab that had it.
@@ -3276,6 +3476,7 @@ final class AppModel {
         findQuery = ""
         findMatchIndex = 0
         findMatchCount = 0
+        isFindSearching = false
     }
 
     /// Closes any tab showing `session`, then moves its directory to the Trash.
@@ -3305,6 +3506,7 @@ final class AppModel {
         }
         do {
             try trashConversation(session.directory)
+            closedTabs.removeAll { entryMatches($0.entry, sessionID: session.id, cwd: session.cwd) }
             unpin(session)
             unarchive(session)
             resetName(session)
@@ -3600,38 +3802,156 @@ final class AppModel {
 
     // MARK: - Persistence
 
+    /// All retained intents, in saved order. Availability facts come from restoration,
+    /// never a provider probe or history read while the view asks for rows.
+    var unrestoredTabs: [UnrestoredTab] {
+        var occurrences: [String: Int] = [:]
+        return deferredOpenTabs.map { entry in
+            let key = entryKey(entry)
+            // Row identity also preserves the original reference. Canonical aliases
+            // and repeated snapshot rows still share one Forget/restoration intent.
+            let reference = key + "\u{0}" + entry.cwd
+            let occurrence = occurrences[reference, default: 0]
+            occurrences[reference] = occurrence + 1
+            let known = store.sessions.first { $0.id == sidebarID(entry) && samePath($0.cwd, entry.cwd) }
+            let folder = URL(fileURLWithPath: entry.cwd).lastPathComponent
+            let title =
+                ConversationNaming.name(
+                    sessionID: sidebarID(entry), cwd: entry.cwd, in: settings.conversationNames, samePath: samePath)
+                ?? known?.summary.nilIfEmpty
+                ?? "\(entry.provider.name) · \(folder.isEmpty ? entry.cwd : folder)"
+            let reason: UnrestoredReason
+            if let retry = unrestoredRetry {
+                reason = retry.reason
+            } else if !checkingProviders.isEmpty {
+                reason = .checkingProviders
+            } else if store.isLoading {
+                reason = .historyLoading
+            } else {
+                reason = unrestoredReasons[key] ?? .historyLoading
+            }
+            return UnrestoredTab(
+                id: reference + "\u{0}" + String(occurrence), entry: entry, title: title, reason: reason)
+        }
+    }
+
+    /// One explicit attempt refreshes only the retained providers, then their history.
+    /// Awaited work never owns a copy of the intents: Forget remains authoritative.
+    func retryUnrestoredTabs() async {
+        loadOpenTabsSnapshotIfNeeded()
+        guard !Task.isCancelled, !deferredOpenTabs.isEmpty else { return }
+        let generation = UUID()
+        unrestoredRetry = (generation, .checkingProviders)
+        defer {
+            if unrestoredRetry?.generation == generation { unrestoredRetry = nil }
+        }
+        await refreshProviderInstallations(only: Set(deferredOpenTabs.map(\.provider)))
+        guard !Task.isCancelled else { return }
+        guard unrestoredRetry?.generation == generation else {
+            if unrestoredRetry == nil { restoreOpenTabs() }
+            return
+        }
+        guard !deferredOpenTabs.isEmpty else { return }
+        unrestoredRetry = (generation, .historyLoading)
+        await store.reload()
+        guard !Task.isCancelled else { return }
+        guard unrestoredRetry?.generation == generation else {
+            // An older forced scan can keep the store loading after the latest
+            // result publishes. Re-read current state once that older work drains.
+            if unrestoredRetry == nil { restoreOpenTabs() }
+            return
+        }
+        unrestoredRetry = nil
+        restoreOpenTabs()
+    }
+
+    /// Removes only reopen intent. History, names, notes and workspace files stay owned
+    /// by their existing stores. A row already restored or forgotten is a no-op.
+    func forgetUnrestoredTab(_ row: UnrestoredTab) {
+        guard let entry = deferredOpenTabs.first(where: { sameEntry($0, row.entry) }) else { return }
+        // Repeated/alias references to this same canonical intent must not survive
+        // Forget and reopen it later. Other providers and workspaces remain distinct.
+        deferredOpenTabs.removeAll { sameEntry($0, entry) }
+        unrestoredReasons[entryKey(entry)] = nil
+        if deferredSelectedEntry.map({ sameEntry($0, entry) }) == true {
+            clearDeferredSelection()
+        } else if deferredLegacySelectedSessionID == entry.sessionID,
+            !deferredOpenTabs.contains(where: { $0.sessionID == entry.sessionID })
+        {
+            deferredLegacySelectedSessionID = nil
+        }
+        // Keep the original order slots: restored peers still refer to their
+        // indexes, and a later Retry must remain behind those peers.
+        persistOpenTabs()
+    }
+
+    private func loadOpenTabsSnapshotIfNeeded() {
+        guard !didLoadOpenTabsSnapshot else { return }
+        didLoadOpenTabsSnapshot = true
+        let snapshot = settings.openTabs
+        deferredOpenTabs = snapshot.tabs
+        savedOpenTabOrder = snapshot.tabs
+        if let selectedCWD = snapshot.selectedCWD, let selectedID = snapshot.selectedSessionID {
+            deferredSelectedEntry = .init(
+                sessionID: selectedID, cwd: selectedCWD, provider: snapshot.selectedProvider ?? .grokBuild)
+            deferredLegacySelectedSessionID = nil
+        } else {
+            deferredSelectedEntry = nil
+            deferredLegacySelectedSessionID = snapshot.selectedSessionID
+        }
+    }
+
+    private func recordUnrestoredReason(_ reason: UnrestoredReason) {
+        for entry in deferredOpenTabs { unrestoredReasons[entryKey(entry)] = reason }
+    }
+
+    private enum RestorationPathStatus {
+        case present
+        case missing
+        case unavailable(String)
+    }
+
+    private static func restorationPathStatus(_ url: URL, directory: Bool) -> RestorationPathStatus {
+        var info = stat()
+        guard stat(url.path, &info) == 0 else {
+            let code = errno
+            if code == ENOENT || code == ENOTDIR { return .missing }
+            return .unavailable(NSError(domain: NSPOSIXErrorDomain, code: Int(code)).localizedDescription)
+        }
+        let expected = directory ? mode_t(S_IFDIR) : mode_t(S_IFREG)
+        guard info.st_mode & mode_t(S_IFMT) == expected else {
+            return .unavailable(directory ? "The saved path is not a folder." : "The saved path is not a regular file.")
+        }
+        return .present
+    }
+
     /// Reopen saved tabs whose session directories still exist. Never starts a
     /// `.new` session: a launch must not create junk conversations on disk.
     @ObservationIgnored private var restorationHistoryValidation: Task<Void, Never>?
 
     func restoreOpenTabs() {
-        if !didLoadOpenTabsSnapshot {
-            didLoadOpenTabsSnapshot = true
-            let snapshot = settings.openTabs
-            deferredOpenTabs = snapshot.tabs
-            savedOpenTabOrder = snapshot.tabs
-            if let selectedCWD = snapshot.selectedCWD, let selectedID = snapshot.selectedSessionID {
-                deferredSelectedEntry = .init(
-                    sessionID: selectedID, cwd: selectedCWD, provider: snapshot.selectedProvider ?? .grokBuild)
-                deferredLegacySelectedSessionID = nil
-            } else {
-                deferredSelectedEntry = nil
-                deferredLegacySelectedSessionID = snapshot.selectedSessionID
-            }
-        }
+        loadOpenTabsSnapshotIfNeeded()
+        guard unrestoredRetry == nil else { return }
         // Retained fresh results must not restore a later saved entry ahead
         // of one whose required replacement check is still pending.
         guard checkingProviders.isEmpty,
             !deferredOpenTabs.contains(where: { providerChecks.requiresRestorationCheck($0.provider) })
-        else { return }
+        else {
+            recordUnrestoredReason(.checkingProviders)
+            return
+        }
         // Native paths come from the initial history scan. Starting Grok first
         // would reorder a mixed saved snapshot before those paths can be known.
         // A completed (even failed) scan lets genuinely missing entries defer
         // individually without holding back the available conversations.
         if store.appliedScanSequence == 0, deferredOpenTabs.contains(where: { $0.provider != .grokBuild }) {
+            recordUnrestoredReason(.historyLoading)
             return
         }
-        if store.appliedScanSequence == 0, store.hasUnvalidatedHistory { return }
+        if store.appliedScanSequence == 0, store.hasUnvalidatedHistory {
+            recordUnrestoredReason(.historyLoading)
+            return
+        }
         let candidates = deferredOpenTabs
         let previousSelection = selectedTabID
         let hadSavedSelection = deferredSelectedEntry != nil || deferredLegacySelectedSessionID != nil
@@ -3639,6 +3959,8 @@ final class AppModel {
         isRestoringTabs = true
         defer {
             isRestoringTabs = false
+            let retained = Set(deferredOpenTabs.map { entryKey($0) })
+            unrestoredReasons = unrestoredReasons.filter { retained.contains($0.key) }
             persistOpenTabs()
         }
         var restoredSelection: TerminalTab.ID?
@@ -3652,12 +3974,18 @@ final class AppModel {
             // Restore the ready prefix immediately, but never let a later
             // success overtake an earlier saved tab with a retry still pending.
             if waitsForEarlierRetry || providerChecks.isRecovering(entry.provider) {
+                unrestoredReasons[entryKey(entry)] = waitsForEarlierRetry ? .waitingForEarlierTab : .checkingProviders
                 waitsForEarlierRetry = true
                 deferredOpenTabs.append(entry)
                 continue
             }
             let known = store.sessions.first { $0.id == sidebarID(entry) && samePath($0.cwd, entry.cwd) }
             if let known, !known.isHistoryValidated {
+                unrestoredReasons[entryKey(entry)] =
+                    store.hasPendingHistoryValidation
+                    ? .historyLoading
+                    : .historyUnavailable(
+                        store.loadError ?? store.historyNotice ?? "Saved conversation history has not been verified.")
                 waitsForEarlierRetry = true
                 deferredOpenTabs.append(entry)
                 if restorationHistoryValidation == nil, store.hasPendingHistoryValidation {
@@ -3666,9 +3994,9 @@ final class AppModel {
                     }
                     restorationHistoryValidation = Task { [weak self] in
                         guard let self else { return }
-                        let validated = await self.store.validatedSessions(for: savedSessions)
+                        _ = await self.store.validatedSessions(for: savedSessions)
                         self.restorationHistoryValidation = nil
-                        if !validated.isEmpty { self.restoreOpenTabs() }
+                        self.restoreOpenTabs()
                     }
                 }
                 continue
@@ -3678,26 +4006,35 @@ final class AppModel {
                 ? GrokPaths.sessionDirectory(cwd: entry.cwd, sessionID: entry.sessionID)
                 : known?.directory
             let workingDirectory = URL(fileURLWithPath: entry.cwd)
-            let historyExists = directory.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
-            guard historyExists, Self.isUsableDirectory(workingDirectory),
-                providerLaunchProblem(entry.provider) == nil
-            else {
+            let reason: UnrestoredReason?
+            if let problem = providerLaunchProblem(entry.provider) {
+                reason = .providerUnavailable(problem)
+            } else {
+                switch Self.restorationPathStatus(workingDirectory, directory: true) {
+                case .missing: reason = .folderMissing
+                case .unavailable(let message): reason = .folderUnavailable(message)
+                case .present:
+                    if let directory {
+                        switch Self.restorationPathStatus(directory, directory: entry.provider == .grokBuild) {
+                        case .present: reason = nil
+                        case .missing: reason = .historyMissing
+                        case .unavailable(let message): reason = .historyUnavailable(message)
+                        }
+                    } else if store.canPruneMissingProjects {
+                        reason = .historyMissing
+                    } else {
+                        reason = .historyUnavailable(
+                            store.loadError ?? store.historyNotice
+                                ?? "Saved conversation history could not be verified.")
+                    }
+                }
+            }
+            if let reason {
+                unrestoredReasons[entryKey(entry)] = reason
                 deferredOpenTabs.append(entry)
                 continue
             }
-            let spec = GrokLaunchSpec(
-                executable: entry.provider == .grokBuild ? grokExecutableURL : nil,
-                workingDirectory: workingDirectory,
-                mode: .resume(sessionID: entry.sessionID),
-                model: entry.model.map(\.nilIfEmpty)
-                    ?? (entry.provider == .grokBuild ? settings.model.nilIfEmpty : nil),
-                reasoningEffort: entry.effort.map(\.nilIfEmpty)
-                    ?? (entry.provider == .grokBuild ? settings.effort.nilIfEmpty : nil),
-                themeName: settings.theme.grokThemeName,
-                themeVariables: settings.theme.grokThemeEnvironment,
-                provider: entry.provider, sessionFile: entry.provider == .grokBuild ? nil : directory
-            )
-            let tab = add(spec)
+            let tab = add(resumeSpec(for: entry, sessionFile: directory))
             if let order = savedOpenTabOrder.firstIndex(where: { sameEntry($0, entry) }) {
                 if let index = tabs.firstIndex(where: { (restoredSavedTabOrder[$0.id] ?? -1) > order }) {
                     tabs.removeLast()
@@ -3728,14 +4065,31 @@ final class AppModel {
         }
     }
 
+    private func resumeSpec(for entry: OpenTabsSnapshot.Entry, sessionFile: URL?) -> GrokLaunchSpec {
+        GrokLaunchSpec(
+            executable: entry.provider == .grokBuild ? grokExecutableURL : nil,
+            workingDirectory: URL(fileURLWithPath: entry.cwd),
+            mode: .resume(sessionID: entry.sessionID),
+            model: entry.model.map(\.nilIfEmpty)
+                ?? (entry.provider == .grokBuild ? settings.model.nilIfEmpty : nil),
+            reasoningEffort: entry.effort.map(\.nilIfEmpty)
+                ?? (entry.provider == .grokBuild ? settings.effort.nilIfEmpty : nil),
+            themeName: settings.theme.grokThemeName,
+            themeVariables: settings.theme.grokThemeEnvironment,
+            provider: entry.provider, sessionFile: entry.provider == .grokBuild ? nil : sessionFile
+        )
+    }
+
+    private func openTabEntry(for tab: TerminalTab) -> OpenTabsSnapshot.Entry? {
+        guard let sessionID = tab.nativeSessionID else { return nil }
+        return OpenTabsSnapshot.Entry(
+            sessionID: sessionID, cwd: tab.workingDirectory.path,
+            model: tab.spec.model ?? "", effort: tab.spec.reasoningEffort ?? "", provider: tab.spec.provider)
+    }
+
     private func persistOpenTabs() {
         guard !isRestoringTabs else { return }
-        var entries = tabs.compactMap { tab -> OpenTabsSnapshot.Entry? in
-            guard let sessionID = tab.nativeSessionID else { return nil }
-            return OpenTabsSnapshot.Entry(
-                sessionID: sessionID, cwd: tab.workingDirectory.path,
-                model: tab.spec.model ?? "", effort: tab.spec.reasoningEffort ?? "", provider: tab.spec.provider)
-        }
+        var entries = tabs.compactMap { openTabEntry(for: $0) }
         let liveKeys = Set(entries.map { entryKey($0) })
         // Keep deferred references in their saved positions without sorting
         // live tabs the user may have moved. Recovery after exhaustion can then
@@ -3865,6 +4219,12 @@ final class AppModel {
         var isDirectory: ObjCBool = false
         return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
             && isDirectory.boolValue
+    }
+
+    static func isProjectDirectoryAvailable(_ path: String) -> Bool {
+        let manager = FileManager.default
+        return isUsableDirectory(URL(fileURLWithPath: path))
+            && manager.isReadableFile(atPath: path) && manager.isExecutableFile(atPath: path)
     }
 
     func showError(title: String, message: String) {

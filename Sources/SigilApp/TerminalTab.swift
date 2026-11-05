@@ -29,7 +29,8 @@ final class TerminalTab: Identifiable {
             onActivityChange?()
         }
     }
-    /// Called after `activity` changes, so the phone stream can send the new status.
+    /// Called after state or lifecycle capability changes so the phone stream
+    /// can send the current status and observation support.
     var onActivityChange: (() -> Void)?
     /// When the turn in flight started, for the elapsed time beside "Working".
     private(set) var workingSince: Date?
@@ -52,10 +53,28 @@ final class TerminalTab: Identifiable {
     var markColor: TabColor?
 
     private var isSelected: () -> Bool = { false }
-    private let completionEventsURL: URL?
+    private(set) var completionEventsURL: URL?
+    private var adoptedTranscript: CodexSessionBinding.Transcript?
+    private var transcriptProcessGeneration: ChildProcessGeneration?
+    private(set) var isCatchingUpLifecycle = false
     private var completionWatchTask: Task<Void, Never>?
-    private var hasObservableLifecycle = false
+    private(set) var completionWatchGeneration: UUID?
+    private var hasObservableLifecycle = false {
+        didSet {
+            if hasObservableLifecycle != oldValue { onActivityChange?() }
+        }
+    }
     var isWatchingForCompletion: Bool { completionWatchTask != nil }
+    /// Power policy input only; it does not change the displayed lifecycle.
+    private(set) var lifecycleWorkRevision: UInt64?
+
+    var idleSleepWorkingTab: RemoteIdleSleep.WorkingTab? {
+        guard controller.isRunning, capabilities.lifecycle,
+            activity == .starting || activity == .working,
+            let generation = completionWatchGeneration, let revision = lifecycleWorkRevision
+        else { return nil }
+        return .init(id: id, generation: generation, revision: revision)
+    }
 
     init(
         id: UUID = UUID(),
@@ -80,6 +99,34 @@ final class TerminalTab: Identifiable {
     /// Automatic live bindings are rechecked. An explicit user link has no
     /// process proof to inherit or silently change.
     var codexBindingGeneration: ChildProcessGeneration?
+
+    /// Identity has already crossed the binding boundary. Tracking additionally
+    /// belongs to this still-running child generation and exact descriptor.
+    func adoptTranscript(_ transcript: CodexSessionBinding.Transcript, generation: ChildProcessGeneration?) {
+        guard spec.provider == .codex, nativeSessionID == transcript.session.nativeSessionID,
+            transcript.processGeneration == nil || transcript.processGeneration == generation
+        else { return }
+        stopTurnTracking()
+        completionEventsURL = transcript.session.directory
+        adoptedTranscript = transcript
+        transcriptProcessGeneration = generation
+        let journal = makeLifecycleJournal(readFromBeginning: true)
+        hasObservableLifecycle = journal?.canObserve == true
+        guard controller.isRunning, let journal, capabilities.lifecycle else { return }
+        if [.interrupted, .disconnected].contains(activity) { return }
+        watchForTurnCompletion(journal)
+    }
+
+    func revokeTranscript() {
+        guard spec.provider == .codex else { return }
+        stopTurnTracking()
+        completionEventsURL = nil
+        adoptedTranscript = nil
+        transcriptProcessGeneration = nil
+        hasObservableLifecycle = false
+        if case .exited = activity { return }
+        activity = .unknown
+    }
 
     /// No native ID is fabricated for providers that allocate one internally.
     var sessionReference: ProviderSessionReference? {
@@ -137,6 +184,7 @@ final class TerminalTab: Identifiable {
     }
 
     func start(isSelected: @escaping () -> Bool) {
+        if !controller.isRunning { stopTurnTracking() }
         self.isSelected = isSelected
         controller.onUserSubmit = { [weak self] in self?.noteTurnStarted() }
         controller.onActivity = { [weak self] in self?.noteTerminalOutput() }
@@ -159,15 +207,21 @@ final class TerminalTab: Identifiable {
     /// Return means input was submitted, not accepted or completed.
     func noteTurnStarted() {
         if case .exited = activity { return }
-        stopTurnTracking()
         lastSubmittedAt = Date()
+        if capabilities.lifecycle, completionWatchTask != nil {
+            // Keep the reader's active turn, offset and duplicate-event memory.
+            // Codex confirms accepted work with task_started; Return is only input.
+            if spec.provider == .grokBuild { activity = .working }
+            return
+        }
+        stopTurnTracking()
         let journal = makeLifecycleJournal()
         hasObservableLifecycle = journal?.canObserve == true
         guard capabilities.lifecycle, let journal else {
             activity = .unknown
             return
         }
-        activity = .working
+        activity = spec.provider == .codex ? .unknown : .working
         watchForTurnCompletion(journal)
     }
 
@@ -227,31 +281,65 @@ final class TerminalTab: Identifiable {
         }
     }
 
-    private func makeLifecycleJournal() -> ProviderLifecycleJournal? {
+    private func makeLifecycleJournal(readFromBeginning: Bool = false) -> ProviderLifecycleJournal? {
         guard spec.provider.capabilities.lifecycle, let completionEventsURL, let nativeSessionID else { return nil }
+        if let adoptedTranscript {
+            guard let transcriptProcessGeneration, controller.processGeneration == transcriptProcessGeneration else {
+                return nil
+            }
+            return ProviderLifecycleJournal(transcript: adoptedTranscript, readFromBeginning: readFromBeginning)
+        }
         return ProviderLifecycleJournal(url: completionEventsURL, provider: spec.provider, sessionID: nativeSessionID)
     }
 
     private func watchForTurnCompletion(_ initialJournal: ProviderLifecycleJournal) {
         guard completionWatchTask == nil, capabilities.lifecycle else { return }
+        let generation = UUID()
+        completionWatchGeneration = generation
+        let process = controller.processGeneration
+        let session = nativeSessionID
         var journal = initialJournal
         completionWatchTask = Task { [weak self] in
             while !Task.isCancelled {
                 let snapshot = journal
                 let result = await Task.detached(priority: .utility) {
                     var next = snapshot
+                    let catchingUp = next.isCatchingUp
                     let events = next.poll()
-                    return (next, events)
+                    return (next, events, catchingUp)
                 }.value
                 guard !Task.isCancelled else { return }
                 journal = result.0
-                guard let self else { return }
+                guard let self, self.completionWatchGeneration == generation else { return }
+                guard self.controller.processGeneration == process, self.nativeSessionID == session else {
+                    self.stopTurnTracking()
+                    self.hasObservableLifecycle = false
+                    self.activity = .unknown
+                    return
+                }
+                self.hasObservableLifecycle = journal.canObserve
                 for state in result.1 {
-                    if state == .idle { self.noteTurnCompleted() } else { self.activity = state }
+                    // Activity callbacks can synchronously interrupt or replace the process.
+                    guard !Task.isCancelled, self.completionWatchGeneration == generation else { return }
+                    if result.2 {
+                        self.isCatchingUpLifecycle = true
+                        self.activity = state
+                        self.isCatchingUpLifecycle = false
+                    } else if state == .idle {
+                        self.noteTurnCompleted(generation: generation)
+                    } else {
+                        self.activity = state
+                    }
+                }
+                guard !Task.isCancelled, self.completionWatchGeneration == generation else { return }
+                let workRevision = journal.validatedWorkRevision
+                if self.lifecycleWorkRevision != workRevision {
+                    self.lifecycleWorkRevision = workRevision
                 }
                 if !journal.canObserve {
                     self.hasObservableLifecycle = false
                     self.completionWatchTask = nil
+                    self.completionWatchGeneration = nil
                     return
                 }
                 try? await Task.sleep(for: .milliseconds(250))
@@ -259,16 +347,20 @@ final class TerminalTab: Identifiable {
         }
     }
 
-    private func noteTurnCompleted() {
+    private func noteTurnCompleted(generation: UUID) {
         guard activity == .working || activity == .waitingForApproval else { return }
         activity = .idle
+        guard completionWatchGeneration == generation else { return }
         if !isSelected() { markUnseenTurnCompletion() }
+        guard completionWatchGeneration == generation else { return }
         onSettle?()
     }
 
     private func stopTurnTracking() {
+        lifecycleWorkRevision = nil
         completionWatchTask?.cancel()
         completionWatchTask = nil
+        completionWatchGeneration = nil
     }
 
     func enqueueBridgePrompt(

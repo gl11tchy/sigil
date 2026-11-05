@@ -246,10 +246,12 @@ struct SidebarSnapshotTests {
         fixture.settings.showWorktreeSessions = true
         let folder = try fixture.directory("keys")
         try fixture.writeListedSession(id: "one", cwd: folder.path, summary: "Quartz")
+        try fixture.writeListedSession(id: "ownership-input", cwd: folder.path, summary: "Unclaimed")
         await fixture.store.reload()
         let model = snapshotModel(fixture, clock: SnapshotClock())
         defer { model.closeAllTabsAndWait() }
-        let session = try #require(fixture.store.sessions.first)
+        let session = try #require(fixture.store.sessions.first { $0.nativeSessionID == "one" })
+        let ownershipInput = try #require(fixture.store.sessions.first { $0.nativeSessionID == "ownership-input" })
         _ = model.sidebarSnapshot()
         func change(_ mutation: () -> Void) {
             let before = model.sidebarSnapshotBuildCount
@@ -268,7 +270,9 @@ struct SidebarSnapshotTests {
         change { model.settings.showWorktreeSessions.toggle() }
         change { model.settings.showWorktreeSessions.toggle() }
         change { model.settings.showOtherAppSessions = false }
-        change { model.settings.recordSigilConversations([session.id]) }
+        #expect(!model.settings.isSigilConversation(ownershipInput.id))
+        change { model.settings.recordSigilConversations([ownershipInput.id]) }
+        #expect(model.settings.isSigilConversation(ownershipInput.id))
         change { model.rename(session, to: "Named") }
         change { model.openArchived() }
         let project = try #require(model.sidebarProjects.first)

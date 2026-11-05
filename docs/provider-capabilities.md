@@ -275,6 +275,27 @@ writes or removes provider history. Multiple app copies may atomically replace t
 disposable cache, and each copy revalidates identities. Custom-root stores persist
 only when an isolated index location is explicitly injected.
 
+Saved tabs that cannot reopen remain available through `AppModel.unrestoredTabs`
+in saved order, with their original entry, title and typed reason. A completed
+provider check retains its exact problem message. Missing folders and confirmed
+missing history are separate from pending provider/history checks, failed reads,
+unverified saved metadata and entries waiting behind an earlier recovery. These
+are model facts for the workbench consumer; this contract adds no new view.
+
+`retryUnrestoredTabs()` refreshes the retained providers and reloads history under
+the existing provider and scan generations. Only the latest Retry owns its hold,
+and restoration rereads current saved intents after each await. Forget removes
+only that provider/conversation/workspace's reopen intent and persists immediately;
+it never deletes provider history, notes, names or workspace files. An older Retry
+cannot restore forgotten intent. Original saved-order slots remain stable around
+already restored peers, including after other entries are forgotten. Legacy
+snapshots still default to Grok, and this projection has no row cap.
+
+Quit warns how many open tabs have no persistable native identity and will not
+reopen next time. Ended tabs can carry that warning without being described as
+running work. The warning does not invent an identity or change close/archive
+behavior, provider resumption or Codex's independent binding proof.
+
 The scanner keeps metadata and display fields, not full transcripts. Oversized or
 unsupported records can still require a folder fallback.
 Search covers discovered titles and project paths; the Mac sidebar also searches
@@ -311,6 +332,28 @@ pruned by history scans. Seeding records verified chats when the scan has notice
 alone and completes its one-time migration only after coverage is complete.
 Every applied scan signals housekeeping even if the notice count stays equal.
 
+The Sigil-only list also includes chats the user pinned, named, archived or
+colored in Sigil. Its separate ownership migration unions those four saved
+preference categories without consulting history files. IDs are copied verbatim:
+these records already use sidebar IDs, including provider prefixes. Unknown or
+unreadable history cannot remove an ownership ID, and an unknown display value
+(such as a future color) does not hide its saved ID from the migration. Opening
+an outside chat or writing a note alone does not establish ownership.
+
+Ownership membership has independent, never-pruned addition records;
+the existing JSON list remains a compatibility projection. This prevents
+overlapping copies from losing distinct additions through a shared list write.
+One immutable record contains all new IDs in a commit, so bulk archive writes
+stay bounded instead of writing one preference for each chat. Record UUIDs are
+storage keys and cannot establish conversation identity.
+The `session.sigilConversationsSeeded2` marker follows a checked persistence
+barrier and identity readback. Failed writes retain in-memory IDs and retry on
+shared-list reload or store housekeeping; reconciliation also imports another
+copy's later ownership data after the initial migration has completed. A malformed
+ownership membership list is retained and cannot complete the migration. Ownership
+is a listing policy, not proof of native identity, supported history or live tab
+binding; provider validation and the original history-based seed remain separate.
+
 Filesystem events refresh native JSONL changes and the adjacent Codex title index.
 The Codex watcher excludes unrelated files in its parent directory. Grok still
 watches summaries rather than its frequently changing journals. Scanner and watcher
@@ -322,7 +365,7 @@ The internal states are starting, working, waiting for approval, confirmed idle,
 interrupted, exited, failed, disconnected, and unknown. A live CLI initially has
 unknown turn state. User submission means input was sent, not accepted.
 
-After submission, Claude Code, Devin, Cursor, Kimi and new Codex tabs keep an
+After submission, Claude Code, Devin, Cursor, Kimi and unmatched new Codex tabs keep an
 unknown state, with a neutral last-input tooltip and no Working loader or elapsed
 timer. They do not count as working on the Mac or in phone snapshots. A running
 CLI still requires confirmation before close or quit. No completion-watch task
@@ -331,6 +374,25 @@ enables observation only after its session metadata passes the existing scanner'
 shape, version and native identity checks. Missing or rejected metadata stays
 unknown. Codex writer identity invalidation ends its watch and disables lifecycle
 observation; Grok can still observe a journal created after submission.
+
+When a new Codex tab gains its verified conversation identity, it attaches the
+exact validated transcript to the current child process generation. The journal
+rechecks the owned process tree's sole writable rollout before and after each
+read; ambiguity, lost generation or a different file ends tracking. The file's
+device/inode and validated prefix also remain fixed. A cached row, folder/time
+match or user input cannot supply that proof. Explicit user links validate the
+selected envelope but retain tail-only reading without claiming process ownership.
+
+For an automatically verified rollout born after the child started, the journal
+reads from zero with the child birth time as its event boundary, in bounded chunks.
+Catch-up restores only the final observed state: an already active first turn
+becomes Working, while an already completed turn becomes Idle without an unread
+dot, settle callback or historical phone alert. Events published after the
+attachment boundary remain live, including completion of a caught-up active turn.
+The phone planner rebases silently during catch-up so that later live transitions
+can alert normally; registered phone activities can still receive current state.
+A partial record becomes live when its remaining bytes arrive.
+Restart retains the transcript and tails new events; it does not replay prior turns.
 
 Neither terminal title symbols nor output silence can complete a turn. The
 bounded journal reader checks native session/turn identity and a submission-time
@@ -344,6 +406,19 @@ the owned file's validated session identity, supported `event_msg` types, a vali
 post-submission timestamp and matching nonempty native turn IDs. Unknown or
 malformed event shapes cannot complete a turn. A new appended metadata header
 invalidates the current reader's writer/turn evidence.
+
+A validated Codex watcher keeps its reader across Return, including its active
+turn ID, original submission boundary, file offset and duplicate-event memory.
+Return during a turn preserves the observed state and elapsed time; Return on
+an idle tab stays idle until `task_started` confirms the next turn. The running
+turn's matching completion can still finish and notify once, while a later
+queued turn requires its own matching events. Interruption stops the watcher;
+the next submission opens a fresh reader at the current file end. Each watcher
+generation fences poll results and completion callbacks, so replaced processes
+cannot apply a stale batch or completion notification. Grok retains its input
+and chunk-event behavior. Late attachment also fences every poll by native
+session identity and child generation; it does not expand conversation identity evidence.
+
 These journal formats are version-sensitive, not promised stable provider APIs.
 Grok tab-message delivery waits for confirmed idle. An unknown or active tab
 keeps queued messages rather than typing them into an uncertain prompt.
@@ -402,6 +477,18 @@ writer racing the final check and atomic replacement is not a filesystem transac
 Synthetic tests prove the recorded cases, not every external editor's save protocol.
 
 ## Verification limits
+
+Folders explicitly added to Projects retain their saved reference, pin and
+focused path when missing or inaccessible. Successful history scans still fold
+legacy Sigil worktrees into their project but do not discard an added folder
+because it is unavailable. Distinct saved alias references/pins remain even when
+their canonical paths temporarily converge; pin display emits one row per project.
+The Mac's project row marks that state and offers
+Retry; a usable directory requires existence, directory type and read/traverse
+access. Retry rechecks the cached filesystem projection without rebuilding
+history. Explicit Remove/Archive retain their existing shared-list behavior and
+do not delete project files. These are folder facts, not new provider conversation
+identity evidence.
 
 Deterministic fixtures cover format changes, identity mismatch, delayed journals,
 partial lines, oversized records, duplicate completion, replacement, truncation,

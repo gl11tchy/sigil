@@ -1,5 +1,5 @@
 import { importKey, randomKey, seal, open } from './crypto.mjs';
-import { readableOutput } from './output.mjs';
+import { createReadableOutput, commonPrefixLength } from './output.mjs';
 import { pairingFromText } from './pairing.mjs';
 const $ = id => document.getElementById(id);
 const STATUS_LABELS = { working: 'Working', starting: 'Starting…', idle: 'Ready', exited: 'Session ended', unknown: 'Status unknown', waitingForApproval: 'Needs approval', interrupted: 'Stopped', failed: 'Failed', disconnected: 'Disconnected' };
@@ -33,7 +33,14 @@ let sessionTabs = [], canRestart = false;
 let freshHandshake = false;
 const histories = new Map();
 let pendingEarlier = null, earlierFlight = false, searchToken = 0;
+const SAVED_PAGE_SIZE = 40, SAVED_LIMIT = 400;
+let savedChats = [], savedOffset = 0, savedMore = false, savedLoading = false;
+let savedVisible = false, savedNotice = '', savedMac = null;
 let providerChoice = '', providerProblems = new Map();
+let newOptions = null, newProjects = [], projectTarget = null, worktreeChoice = null, canUseSessionOps = false;
+let newFlight = null;
+let sessionActionTarget = null, sessionActionMode = 'menu', sessionActionFlight = null;
+let newSheetEpoch = 0;
 let findIndex = 0, findMatches = [], displayedOutput = null;
 let rawOutput = '', rawMode = false;
 let credential, bootstrap, newDeviceKey, replacingMemory, socket, challenge, clientNonce, sequence = 0, selected;
@@ -41,8 +48,10 @@ let selectedStatus = null, selectedRunning, selectedCapabilities, currentPrompt 
 let connected = false, busy = false, selectingSession = false, stopped = false, revoked = false, unsaved = false, reconnectTimer, pollTimer, connectTimer, generation = 0;
 let commandEpoch = 0, queuedCommands = 0, reconnectDelay = 500;
 let incoming = Promise.resolve(), outgoing = Promise.resolve(), pending = new Map();
+const RETURN_RECONNECT_AFTER = 30_000;
+let hiddenAt = document.hidden ? Date.now() : null, pageEpoch = 0, refreshing = false, refreshFlight = null;
 // A modal sheet makes the page inert, so its errors show inside the sheet.
-const sheetErrors = { 'sessions-dialog': 'sessions-error', 'project-dialog': 'project-error' };
+const sheetErrors = { 'session-action-dialog': 'session-action-error', 'sessions-dialog': 'sessions-error', 'project-dialog': 'project-error' };
 const showError = text => {
   const open = Object.keys(sheetErrors).find(id => $(id).open);
   for (const id of ['error', ...Object.values(sheetErrors)]) { $(id).textContent = ''; $(id).hidden = true; }
@@ -64,15 +73,38 @@ async function storage(mode, value) {
     return await new Promise((resolve, reject) => {
       const transaction = db.transaction('pairing', mode === 'get' ? 'readonly' : 'readwrite');
       const store = transaction.objectStore('pairing');
-      const request = mode === 'get' ? store.get('mac') : mode === 'delete' ? store.delete('mac') : store.put(value, 'mac');
-      transaction.oncomplete = () => resolve(request.result);
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error);
+      let result, failure;
+      transaction.oncomplete = () => resolve(result);
+      transaction.onerror = transaction.onabort = () => reject(failure || transaction.error);
+      if (mode === 'delete') { store.delete('mac'); return; }
+      const request = store.get('mac');
+      request.onsuccess = () => {
+        try {
+          const saved = request.result;
+          if (mode === 'get') { result = saved; return; }
+          if (mode === 'put') {
+            // A stale tab saving its ticket must not erase another context's pending start.
+            result = saved?.room === value.room ? { ...value, pendingNew: saved.pendingNew } : value;
+          } else {
+            if (!saved || saved.room !== value.room) throw new Error('The saved pairing changed. Reload this page before starting.');
+            if (mode === 'claim') {
+              if (saved.pendingNew != null) { result = { claimed: false, pairing: saved }; return; }
+              const pairing = { ...saved, pendingNew: value.pendingNew };
+              store.put(pairing, 'mac'); result = { claimed: true, pairing }; return;
+            }
+            if (mode !== 'settle') throw new Error('Invalid storage operation.');
+            result = { ...saved };
+            if (!sameNewAttempt(saved.pendingNew, value.pendingNew)) return;
+            delete result.pendingNew;
+          }
+          store.put(result, 'mac');
+        } catch (error) { failure = error; transaction.abort(); }
+      };
     });
   } finally { db.close(); }
 }
 function updateControls() {
-  const disabled = !connected || busy;
+  const disabled = !connected || busy || refreshing;
   const ended = selectedRunning === false || selectedStatus === 'exited';
   document.querySelectorAll('#controls button, #controls textarea, #session-toolbar button, #session-toolbar select').forEach(element => {
     // Never disable a focused editor while a command is pending: it closes the phone keyboard.
@@ -82,7 +114,7 @@ function updateControls() {
     if (element.id === 'new') { element.disabled = disabled; return; }
     if (element.id === 'tabs') { element.disabled = disabled || tabCount === 0; return; }
     if (element.id === 'stop' || element.id === 'interrupt') {
-      element.disabled = !connected || !selected || ended || Boolean(selectingSession); return;
+      element.disabled = !connected || refreshing || !selected || ended || Boolean(selectingSession); return;
     }
     // Keys queue behind each other, but never land between a send's files and its Enter.
     if (element.dataset.key) { element.disabled = disabled || !selected || ended; return; }
@@ -93,11 +125,11 @@ function updateControls() {
   $('restart').hidden = !ended || !canRestart || selectedCapabilities?.resume === false;
   $('copy-output').hidden = !selected;
   $('sessions-toggle').hidden = !connected;
-  $('session-status').textContent = !connected ? 'Reconnecting…' : (STATUS_LABELS[selectedStatus] || 'No session');
-  $('session-status').dataset.state = connected ? selectedStatus || '' : 'offline';
-  if (document.body) document.body.dataset.connected = String(connected && !$('controls').hidden);
+  $('session-status').textContent = refreshing ? 'Refreshing…' : !connected ? 'Reconnecting…' : (STATUS_LABELS[selectedStatus] || 'No session');
+  $('session-status').dataset.state = refreshing ? 'refreshing' : connected ? selectedStatus || '' : 'offline';
+  if (document.body) document.body.dataset.connected = String(connected && !refreshing && !$('controls').hidden);
   // An ended session already says so in the bar above, and Send is off.
-  const composeStatus = selectingSession ? 'Switching…' : busy ? 'Sending…' : !connected && selected ? 'Offline · draft kept' : '';
+  const composeStatus = selectingSession ? 'Switching…' : busy ? 'Sending…' : refreshing ? 'Refreshing…' : !connected && selected ? 'Offline · draft kept' : '';
   $('compose-status').textContent = composeStatus;
   // The row under the composer only exists when it has something to say: a
   // status on the phone, or the send shortcut where a hardware keyboard is likely.
@@ -115,11 +147,19 @@ function updateControls() {
   $('welcome').querySelector('h2').textContent = revoked && credential ? 'Pair again' : credential ? 'Reconnecting to your Mac' : 'Pick up where you left off.';
   $('welcome').querySelector('p').textContent = waiting ? 'Keep Sigil open and your Mac awake.' : 'Your sessions. Your tools. Away from your desk.';
   $('welcome').querySelector('.pairing-steps').hidden = waiting;
+  for (const id of ['session-list', 'saved-list']) {
+    for (const button of Array.from($(id).children || [])) {
+      const controls = button.dataset.sessionRow ? button.children : [button];
+      for (const control of controls) control.disabled = disabled || (id === 'saved-list' && button.dataset.more === 'true' && savedLoading);
+    }
+  }
   const standalone = isStandaloneApp();
   for (const id of ['standalone-hint', 'standalone-panel-hint']) {
     const hint = $(id);
     if (hint) hint.hidden = !standalone;
   }
+  updateNewControls();
+  updateSessionActionControls();
 }
 function hasFinePointer() {
   return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
@@ -136,7 +176,9 @@ function offline(message = 'Disconnected') {
   if (selectingSession) $('tabs').value = selected || '';
   selectingSession = false;
   connected = false;
+  refreshing = false; refreshFlight = null;
   commandEpoch++;
+  clearSaved();
   $('status').textContent = $('status-live').textContent = message;
   $('status').dataset.connected = 'false';
   clearTimeout(pollTimer);
@@ -195,12 +237,6 @@ function applyTail(bucket, next) {
   const room = 400_000 - bucket.history.length;
   if (room > 0) bucket.history += scrolled.slice(0, room);
   bucket.tail = next;
-}
-function commonPrefixLength(left, right) {
-  const count = Math.min(left.length, right.length);
-  let index = 0;
-  while (index < count && left[index] === right[index]) index += 1;
-  return index;
 }
 function prependSlice(bucket, slice) {
   if (typeof slice !== 'string' || new TextEncoder().encode(slice).length > 12_000) {
@@ -295,10 +331,22 @@ function render(state) {
     throw new Error('Invalid Mac response');
   }
   const allTabsNew = freshHandshake && sessionTabs.length > 0 && !sessionTabs.some(tab => ids.has(tab.id));
+  const nextMac = typeof state.mac === 'string' ? state.mac : null;
+  if (nextMac !== savedMac) {
+    savedMac = nextMac;
+    clearSaved();
+    if (connected && $('sessions-dialog').open) {
+      const mac = savedMac, epoch = commandEpoch;
+      void Promise.resolve().then(() => {
+        if (connected && savedMac === mac && commandEpoch === epoch && $('sessions-dialog').open) searchSaved();
+      });
+    }
+  }
   freshHandshake = false;
   const previousTab = sessionTabs.find(tab => tab.id === selected);
   sessionTabs = state.tabs;
   canRestart = Array.isArray(state.capabilities) && state.capabilities.includes('restart');
+  canUseSessionOps = Array.isArray(state.capabilities) && state.capabilities.includes('sessionOps');
   const bucket = nextSelected ? historyFor(nextSelected) : null;
   let prepended = false;
   if (bucket) {
@@ -371,11 +419,14 @@ function render(state) {
 }
 // Polls usually return the same text; format it again only when it changes.
 let readableFrom = null, readableText = '';
+const readable = createReadableOutput();
 function renderOutput(changedSession = false, prepended = false) {
   const terminal = $('terminal');
   const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 60;
   const fromEnd = terminal.scrollHeight - terminal.scrollTop;
-  if (!rawMode && readableFrom !== rawOutput) { readableText = readableOutput(rawOutput); readableFrom = rawOutput; }
+  if (!rawMode && readableFrom !== rawOutput) {
+    readableText = readable.update(rawOutput, { reset: changedSession || prepended }); readableFrom = rawOutput;
+  }
   const output = rawMode ? rawOutput : readableText;
   $('empty-output').hidden = Boolean(output);
   const ended = Boolean(selected) && (selectedRunning === false || selectedStatus === 'exited');
@@ -409,91 +460,306 @@ function renderSessionList() {
   const openHeading = $('open-heading');
   if (openHeading) openHeading.hidden = matches.length === 0;
   // Preserve focus during state polls: only rebuild if the displayed entries change.
-  const signature = JSON.stringify([matches, selected]);
+  const signature = JSON.stringify([matches, selected, canUseSessionOps, generation, commandEpoch, savedMac]);
   if ($('session-list').dataset.signature === signature) return;
   $('session-list').dataset.signature = signature;
   const focusedID = document.activeElement?.dataset.tabId;
+  const focusedMore = document.activeElement?.dataset.sessionMore === 'true';
   let nextFocus;
   $('session-list').replaceChildren(...matches.map(tab => {
     const button = document.createElement('button');
     button.type = 'button';
+    button.disabled = !connected || busy || refreshing;
     button.setAttribute('aria-current', String(tab.id === selected));
     button.dataset.tabId = tab.id;
-    if (tab.id === focusedID) nextFocus = button;
+    if (tab.id === focusedID && !focusedMore) nextFocus = button;
     const title = document.createElement('span');
     title.textContent = tab.title;
     const status = document.createElement('small');
     status.textContent = STATUS_LABELS[tab.status] ?? 'Status unknown';
-    button.append(title, status);
+    if (canUseSessionOps) {
+      const label = document.createElement('span'); label.className = 'session-label';
+      const metadata = document.createElement('small'); metadata.className = 'session-metadata';
+      metadata.textContent = [tab.providerName, tab.folder].filter(value => typeof value === 'string' && value).join(' · ');
+      label.append(title, metadata); button.append(label, status);
+    } else button.append(title, status);
     button.onclick = () => {
-      if (!connected || busy) return;
+      if (!connected || busy || refreshing) return;
       void perform(async () => {
         if (!await changeSession('select', undefined, tab.id)) return;
         if ($('sessions-dialog').open) { $('sessions-dialog').close(); $('sessions-toggle').focus(); }
       });
     };
-    return button;
+    if (!canUseSessionOps) return button;
+    const row = document.createElement('div'); row.className = 'session-row'; row.dataset.sessionRow = 'true'; row.dataset.tabId = tab.id;
+    const more = document.createElement('button'); more.type = 'button'; more.textContent = '…';
+    more.dataset.sessionMore = 'true'; more.dataset.tabId = tab.id;
+    more.setAttribute('aria-label', `More actions for ${tab.title}`); more.setAttribute('aria-haspopup', 'dialog');
+    more.disabled = !connected || busy || refreshing; more.onclick = () => openSessionActions(tab);
+    if (tab.id === focusedID && focusedMore) nextFocus = more;
+    row.append(button, more); return row;
   }));
   if (focusedID) (nextFocus || $('session-search')).focus();
 }
+// A row is a live tab in one authenticated Mac connection, never the current picker selection.
+function sessionActionTab(context) {
+  if (!context || context !== sessionActionTarget || !connected || refreshing || !canUseSessionOps
+    || context.owner !== credential || context.generation !== generation || context.epoch !== commandEpoch
+    || context.mac !== savedMac || context.page !== pageEpoch || !$('sessions-dialog').open) return null;
+  const tab = sessionTabs.find(tab => tab.id === context.id);
+  return tab && ['provider', 'sessionID', 'cwd'].every(key => tab[key] === context[key]) ? tab : null;
+}
+function sessionActionRisk(tab) {
+  if (tab.processRunning === false || ['idle', 'exited'].includes(tab.status)) return 'inactive';
+  return tab.status === 'working' ? 'working' : 'uncertain';
+}
+function currentSessionAction(context, action) {
+  const tab = sessionActionTab(context);
+  const destructive = ['close', 'archive'].includes(action);
+  if (tab && destructive && context.confirmationRisk !== undefined && context.confirmationRisk !== sessionActionRisk(tab)) context.activityChanged = true;
+  const supported = tab && (action !== 'rename' || tab.capabilities?.rename !== false)
+    && (action !== 'archive' || (tab.canArchive === true && tab.capabilities?.archive !== false));
+  if (tab && !supported && sessionActionMode === action) context.capabilityChanged = action;
+  return Boolean(tab && supported && !context.uncertain && !context.needsRefresh
+    && context.capabilityChanged !== action && (!destructive || !context.activityChanged)
+    && (action !== 'rename' || tab.title === context.title));
+}
+function sessionActionMessage(text) {
+  $('session-action-error').textContent = text; $('session-action-error').hidden = !text;
+}
+function updateSessionActionControls() {
+  if (!$('session-action-dialog').open) return;
+  const context = sessionActionTarget, tab = sessionActionTab(context);
+  const unavailable = busy || Boolean(sessionActionFlight) || !tab;
+  const dispatched = sessionActionFlight?.context === context && sessionActionFlight.dispatched;
+  $('session-action-cancel').disabled = Boolean(dispatched);
+  $('session-action-accept').textContent = dispatched
+    ? { rename: 'Saving…', archive: 'Archiving…', close: 'Closing…' }[sessionActionMode]
+    : { rename: 'Save', archive: 'Archive', close: 'Close' }[sessionActionMode] || 'Save';
+  $('session-rename').disabled = unavailable || tab?.capabilities?.rename === false;
+  $('session-rename').title = tab?.capabilities?.rename === false ? 'This provider does not support renaming.' : '';
+  $('session-archive').hidden = !tab || tab.canArchive !== true || tab.capabilities?.archive === false;
+  $('session-archive').disabled = $('session-close-action').disabled = unavailable;
+  const name = $('session-name').value.trim();
+  const invalidName = new TextEncoder().encode(name).length > 80 || /\p{Cc}/u.test(name);
+  $('session-name').readOnly = Boolean(sessionActionFlight);
+  $('session-action-accept').disabled = unavailable || !currentSessionAction(context, sessionActionMode)
+    || (sessionActionMode === 'rename' && invalidName);
+  // A successful action reply renders state before its Promise resolves. Do not
+  // label that acknowledged rename as an external edit or leak a stale error on close.
+  if (sessionActionFlight?.context === context) return;
+  if (context?.uncertain) sessionActionMessage('No confirmed result. Check this session on your Mac before trying again.');
+  else if (!tab || (sessionActionMode === 'rename' && tab.title !== context.title)) sessionActionMessage('This session changed. Cancel and reopen its actions. Your edits are kept here.');
+  else if (context.capabilityChanged === sessionActionMode) sessionActionMessage(`${sessionActionMode === 'rename' ? 'Renaming' : 'Archiving'} is no longer available for this session. Cancel and reopen its actions. Your edits are kept here.`);
+  else if (['close', 'archive'].includes(sessionActionMode) && context.activityChanged) sessionActionMessage('This session’s activity changed. Cancel and reopen its actions before confirming.');
+  else if (context.needsRefresh) sessionActionMessage('Could not refresh this session. Your edits are kept. Cancel and reopen after reconnecting.');
+  else if (sessionActionMode === 'rename' && invalidName) sessionActionMessage('Use at most 80 UTF-8 bytes and no control characters.');
+}
+function openSessionActions(tab) {
+  if (!connected || busy || refreshing || !canUseSessionOps || !$('sessions-dialog').open) return;
+  // A detached row handler cannot bind a replacement row with the same tab id.
+  const current = sessionTabs.find(item => item.id === tab.id);
+  if (!current || !['title', 'provider', 'sessionID', 'cwd'].every(key => current[key] === tab[key])) return;
+  tab = current;
+  sessionActionTarget = { id: tab.id, provider: tab.provider, sessionID: tab.sessionID, cwd: tab.cwd,
+    title: tab.title, owner: credential, generation, epoch: commandEpoch, mac: savedMac, page: pageEpoch };
+  sessionActionMode = 'menu';
+  $('session-action-heading').textContent = tab.title;
+  $('session-action-detail').textContent = [tab.providerName, tab.folder].filter(value => typeof value === 'string' && value).join(' · ');
+  $('session-action-menu').hidden = false; $('session-rename-form').hidden = true;
+  $('session-action-accept').hidden = true; $('session-action-cancel').textContent = 'Done';
+  sessionActionMessage(''); $('session-action-dialog').showModal(); updateSessionActionControls();
+}
+function chooseSessionAction(action) {
+  const context = sessionActionTarget, tab = sessionActionTab(context);
+  if (!tab || busy || sessionActionFlight || !currentSessionAction(context, action)) return;
+  sessionActionMode = action;
+  $('session-action-menu').hidden = true; $('session-rename-form').hidden = action !== 'rename';
+  $('session-action-heading').textContent = `${action === 'rename' ? 'Rename' : action === 'archive' ? 'Archive' : 'Close'} “${tab.title}”${action === 'rename' ? '' : '?'}`;
+  $('session-action-cancel').textContent = 'Cancel'; $('session-action-accept').hidden = false;
+  $('session-action-accept').textContent = action === 'rename' ? 'Save' : action === 'archive' ? 'Archive' : 'Close';
+  $('session-action-accept').className = action === 'rename' ? 'primary' : 'destructive';
+  if (action === 'rename') {
+    $('session-name').value = tab.title; $('session-name').focus();
+    $('session-action-detail').textContent = 'Leave the name empty to restore the Mac’s title.';
+  } else {
+    const verb = action === 'archive' ? 'Archiving' : 'Closing';
+    context.confirmationRisk = sessionActionRisk(tab);
+    const uncertain = context.confirmationRisk === 'uncertain';
+    $('session-action-detail').textContent = tab.status === 'working' && tab.processRunning !== false
+      ? `It is still working. ${verb} stops it.`
+      : uncertain ? `It may still be running. ${verb} stops it.` : action === 'archive' ? 'This archives the conversation and closes its open tabs on your Mac.' : 'This closes the tab on your Mac.';
+    // The host owns archive's affected set, including path aliases and tabs omitted
+    // by a capped snapshot. Always disclose its stopping effect across that set.
+    if (action === 'archive') $('session-action-detail').textContent = 'This archives the conversation and stops all its open tabs on your Mac, including any that are working or whose status is unknown.';
+    $('session-action-cancel').focus();
+  }
+  sessionActionMessage(''); updateSessionActionControls();
+}
+async function submitSessionAction() {
+  const context = sessionActionTarget, action = sessionActionMode;
+  if (!['rename', 'archive', 'close'].includes(action) || busy || refreshing || sessionActionFlight
+    || !currentSessionAction(context, action)) return;
+  const name = $('session-name').value.trim();
+  if (action === 'rename' && (new TextEncoder().encode(name).length > 80 || /\p{Cc}/u.test(name))) {
+    updateSessionActionControls(); return;
+  }
+  const flight = sessionActionFlight = { context, action };
+  await perform(async () => {
+    try {
+      const reply = await enqueue(async () => {
+        if (!currentSessionAction(context, action) || !$('session-action-dialog').open) throw new Error('This session changed. Cancel and reopen its actions.');
+        // Keep the fresh read and write in one queue slot. Other local commands
+        // cannot slip between them; the host still owns the final mutation.
+        context.needsRefresh = true;
+        const fresh = await transmit('state', undefined, context.id, false);
+        if (!fresh.state) throw new Error('Could not refresh this session. Nothing was sent.');
+        context.needsRefresh = false;
+        if (!currentSessionAction(context, action) || !$('session-action-dialog').open) throw new Error('This session changed. Cancel and reopen its actions.');
+        return transmit(action, undefined, context.id, false, action === 'rename' ? { name } : {}, undefined, context);
+      });
+      if (sessionActionTarget === context && reply.ok === true) $('session-action-dialog').close();
+    } catch (error) {
+      if (sessionActionTarget !== context) return;
+      if (!error.verifiedReply && flight.dispatched) context.uncertain = true;
+      // A rejected rename retains edits. Read current host state before enabling a retry,
+      // so a name another client supplied is never overwritten by the retained draft.
+      if (action === 'rename' && error.verifiedReply && sessionActionTab(context)) {
+        context.needsRefresh = true;
+        try { const fresh = await request('state'); if (fresh.state) context.needsRefresh = false; } catch { /* keep retry disabled */ }
+      }
+      sessionActionMessage(error.message); updateSessionActionControls();
+    } finally {
+      if (sessionActionFlight === flight) sessionActionFlight = null;
+    }
+  });
+  updateSessionActionControls();
+}
+$('session-rename').onclick = () => chooseSessionAction('rename');
+$('session-archive').onclick = () => chooseSessionAction('archive');
+$('session-close-action').onclick = () => chooseSessionAction('close');
+$('session-action-accept').onclick = () => void submitSessionAction();
+$('session-rename-form').onsubmit = event => { event.preventDefault(); void submitSessionAction(); };
+$('session-name').oninput = () => { sessionActionMessage(''); updateSessionActionControls(); };
+$('session-action-cancel').onclick = () => { if (!sessionActionFlight?.dispatched) $('session-action-dialog').close(); };
+$('session-action-dialog').addEventListener('cancel', event => {
+  if (sessionActionFlight?.dispatched) event.preventDefault();
+});
+$('session-action-dialog').addEventListener('close', () => {
+  sessionActionTarget = null;
+  if ($('sessions-dialog').open) $('session-search').focus();
+});
 function searchSaved() {
   renderSessionList();
-  const query = $('session-search').value.trim();
-  const token = ++searchToken;
-  if (!query || !$('sessions-dialog').open) { dropWaitingSearch(); renderSaved([]); return; }
-  renderSaved([], { pending: true });
-  // The Mac reads 200 characters, and text over 8 KB drops the connection.
-  request('chats', utf8Limited(takeGraphemes(query, 200), 8192)).then(reply => {
-    if (reply.stale || token !== searchToken || $('session-search').value.trim() !== query) return;
-    renderSaved(reply.chats, { truncated: reply.chatsTruncated === true });
-  }).catch(error => { if (token === searchToken) showError(error.message); });
+  $('sessions-error').textContent = ''; $('sessions-error').hidden = true;
+  searchToken++;
+  savedChats = []; savedOffset = 0; savedMore = false; savedLoading = false; savedNotice = '';
+  savedVisible = connected && !refreshing && $('sessions-dialog').open;
+  if (!savedVisible) { dropWaitingSearch(); renderSaved(); return; }
+  void loadSavedPage();
 }
-function renderSaved(chats, options = {}) {
-  const query = $('session-search').value.trim();
-  const safe = [];
-  const rows = Array.isArray(chats) ? chats : [];
-  if (query) {
-    for (const chat of rows.slice(0, 40)) {
+function clearSaved() {
+  searchToken++; dropWaitingSearch();
+  savedChats = []; savedOffset = 0; savedMore = false; savedLoading = false;
+  savedVisible = false; savedNotice = '';
+  renderSaved();
+}
+function savedContext() {
+  return { token: searchToken, query: $('session-search').value.trim(), generation, epoch: commandEpoch, owner: credential, mac: savedMac };
+}
+function currentSaved(context) {
+  return connected && !refreshing && $('sessions-dialog').open && savedVisible
+    && context.token === searchToken && context.query === $('session-search').value.trim()
+    && context.generation === generation && context.epoch === commandEpoch
+    && context.owner === credential && context.mac === savedMac;
+}
+const savedIdentity = chat => JSON.stringify([chat.provider ?? 'grokBuild', chat.folder, chat.id]);
+async function loadSavedPage(offset = 0) {
+  const context = savedContext();
+  if (!currentSaved(context) || savedLoading || (offset > 0 && (!canUseSessionOps || !savedMore || offset !== savedOffset)) || offset >= SAVED_LIMIT) return;
+  savedLoading = true; savedNotice = ''; renderSaved();
+  try {
+    // The Mac reads 200 characters, and text over 8 KB drops the connection.
+    const text = utf8Limited(takeGraphemes(context.query, 200), 8192);
+    const reply = await request('chats', text, undefined, false, offset ? { index: offset } : {});
+    if (reply.stale || !currentSaved(context)) return;
+    savedMore = false;
+    if (!Array.isArray(reply.chats)) { savedNotice = 'Saved chats are unavailable. Try searching again.'; return; }
+    const page = reply.chats.slice(0, Math.min(SAVED_PAGE_SIZE, SAVED_LIMIT - offset));
+    const rows = new Map(savedChats.map(chat => [savedIdentity(chat), chat]));
+    const before = rows.size;
+    for (const chat of page) {
       if (!chat || typeof chat.id !== 'string' || typeof chat.title !== 'string' || typeof chat.folder !== 'string') continue;
       if (!chat.id || chat.id.length > 80 || chat.title.length > 300 || chat.folder.length > 4_096) continue;
       if (/[\u0000-\u001F]/.test(chat.id) || /[\u0000-\u001F]/.test(chat.folder)) continue;
-      safe.push({ id: chat.id, title: chat.title, folder: chat.folder, provider: chat.provider });
+      if (chat.provider !== undefined && (typeof chat.provider !== 'string' || !chat.provider || chat.provider.length > 32)) continue;
+      rows.set(savedIdentity(chat), { id: chat.id, title: chat.title, folder: chat.folder, provider: chat.provider });
+    }
+    savedChats = [...rows.values()].slice(0, SAVED_LIMIT);
+    if (!savedChats.length && (page.length || reply.chatsTruncated === true)) savedNotice = 'Saved chats are unavailable. Try searching again.';
+    // Advance by consumed rows, including duplicates after a concurrent list change.
+    savedOffset = offset + page.length;
+    const continuation = page.length > 0 && (page.length === SAVED_PAGE_SIZE || reply.chatsTruncated === true);
+    // Indexed chats predate sessionOps; Macs without that contract get one bounded page.
+    // Even an index-ignoring host cannot loop: a page must add a new identity.
+    savedMore = canUseSessionOps && reply.chats.length <= SAVED_PAGE_SIZE && rows.size > before
+      && continuation && savedOffset < SAVED_LIMIT && savedChats.length < SAVED_LIMIT;
+    if (continuation && !savedMore) {
+      savedNotice = context.query ? 'Showing the first matches. Narrow the search.'
+        : savedOffset >= SAVED_LIMIT ? 'Showing the first chats. Search to narrow the list.'
+        : 'Showing the available chats. Search to narrow the list.';
+    }
+  } catch (error) {
+    if (!currentSaved(context)) return;
+    savedMore = false;
+    if (error.verifiedReply && error.message === 'Unknown action.') {
+      savedVisible = false; savedChats = [];
+    } else {
+      savedNotice = 'Could not load saved chats.';
+      showError(error.message);
+    }
+  } finally {
+    if (currentSaved(context) || (context.token === searchToken && !savedVisible)) {
+      savedLoading = false; renderSaved();
     }
   }
+}
+function renderSaved() {
+  const context = savedContext();
   const heading = $('saved-heading');
-  if (heading) heading.hidden = !query;
+  if (heading) { heading.hidden = !savedVisible; heading.textContent = context.query ? 'Saved chats' : 'Recent chats'; }
   const empty = $('saved-empty');
   if (empty) {
-    if (options.truncated === true && safe.length > 0) {
-      empty.hidden = false;
-      empty.textContent = 'Showing the first matches.';
-    } else {
-      empty.hidden = !query || safe.length > 0 || options.pending === true;
-      if (query && safe.length === 0 && !options.pending && !Array.isArray(chats)) {
-        empty.textContent = 'The list was too long. Narrow the search.';
-      } else if (empty.textContent !== 'No matching chats.') {
-        empty.textContent = 'No matching chats.';
-      }
-    }
+    empty.hidden = !savedVisible || (!savedNotice && savedChats.length > 0);
+    empty.textContent = savedLoading && !savedChats.length ? 'Loading chats…'
+      : savedNotice || (context.query ? 'No matching chats.' : 'No recent chats.');
   }
-  $('saved-list').replaceChildren(...safe.map(chat => {
+  const buttons = savedChats.map(chat => {
     const button = document.createElement('button');
     button.type = 'button';
+    button.disabled = !connected || busy || refreshing;
     const title = document.createElement('span');
     title.textContent = chat.title;
     const folder = document.createElement('small');
     folder.textContent = chat.folder;
     button.append(title, folder);
     button.onclick = () => {
-      if (!connected || busy) return;
+      if (!currentSaved(context) || busy) return;
       const id = chat.id, folderPath = chat.folder;
       void perform(async () => {
-        if (!await changeSession('open', folderPath, undefined, { name: id, ...(chat.provider ? { provider: chat.provider } : {}) })) return;
+        if (!await changeSession('open', folderPath, undefined, { name: id, ...(chat.provider ? { provider: chat.provider } : {}) }, context)) return;
         $('sessions-dialog').close();
       });
     };
     return button;
-  }));
+  });
+  if (savedMore) {
+    const more = projectButton(savedLoading ? 'Loading…' : 'Show more', 'More saved chats', () => { if (currentSaved(context) && !busy) void loadSavedPage(savedOffset); });
+    more.dataset.more = 'true'; more.disabled = !connected || busy || refreshing || savedLoading;
+    buttons.push(more);
+  }
+  $('saved-list').replaceChildren(...buttons);
+  $('saved-list').setAttribute('aria-busy', String(savedLoading));
 }
 function projectButton(nameText, folderText, onClick) {
   const button = document.createElement('button');
@@ -506,26 +772,183 @@ function projectButton(nameText, folderText, onClick) {
   button.onclick = onClick;
   return button;
 }
-function renderProjects(projects, offset = 0, truncated = false) {
-  const safe = [];
-  for (const project of (Array.isArray(projects) ? projects : []).slice(0, 40)) {
-    if (!project || typeof project.name !== 'string' || typeof project.folder !== 'string') continue;
-    if (!project.name || !project.folder || project.folder.length > 4_096) continue;
-    if (/[\u0000-\u001F]/.test(project.folder)) continue;
-    safe.push({ name: project.name, folder: project.folder });
+const validPath = path => typeof path === 'string' && path.startsWith('/') && path.length <= 4_096 && !/[\u0000-\u001F\u007F]/.test(path);
+function projectRecord(project) {
+  if (!project || typeof project.name !== 'string' || !project.name || project.name.length > 96 || !validPath(project.folder)) return null;
+  return { name: project.name, folder: project.folder, repository: project.repository === true,
+    ...(typeof project.worktreeDefault === 'boolean' ? { worktreeDefault: project.worktreeDefault } : {}) };
+}
+function folderName(value) {
+  const name = value.trim();
+  return name && new TextEncoder().encode(name).length <= 80 && !name.startsWith('.') && !/[/:\p{Cc}\p{Cf}]/u.test(name) ? name : null;
+}
+function selectedProvider() { return newOptions?.providers.find(provider => provider.id === $('provider').value); }
+function allowsWorktree() { return canUseSessionOps && newOptions && projectTarget?.repository === true; }
+function defaultWorktree() { return projectTarget?.worktreeDefault ?? newOptions?.startsInWorktree ?? true; }
+function pendingNew() {
+  const attempt = credential?.pendingNew;
+  if (attempt == null) return null;
+  // Invalid stored markers still block creation; never interpret corruption as a resolved result.
+  return attempt && typeof attempt === 'object' && ['new', 'createProject'].includes(attempt.action)
+    && (attempt.folder === undefined || validPath(attempt.folder)) ? attempt : { action: 'unknown' };
+}
+function sameNewAttempt(left, right) {
+  if (!left || !right) return false;
+  if (left.id || right.id) return typeof left.id === 'string' && left.id === right.id;
+  // Legacy markers predate claim IDs. No new claim can replace one until it is settled.
+  return left.action === right.action && left.folder === right.folder;
+}
+async function refreshNewPending() {
+  const owner = credential;
+  const saved = await storage('get');
+  if (owner !== credential || newFlight) return;
+  if (!saved || saved.room !== owner.room) throw new Error('The saved pairing changed. Reload this page before starting.');
+  if (saved.pendingNew != null) owner.pendingNew = saved.pendingNew;
+  else delete owner.pendingNew;
+  updateNewControls();
+}
+function showNewOutcome() {
+  const attempt = pendingNew();
+  const notice = $('new-outcome');
+  notice.hidden = !attempt;
+  notice.textContent = !attempt ? '' : newFlight ? newFlight.dispatched
+    ? 'Waiting for the Mac. Closing this sheet will not cancel the request.' : 'Preparing the request. Closing this sheet will not cancel it.'
+    : attempt.action === 'createProject'
+      ? `The project result is unknown: ${attempt.folder}. Check projects to look for that exact folder. New creation and session starts stay blocked until it is found.`
+      : `The session start result is unknown${attempt.folder ? ` for ${attempt.folder}` : ''}. Open Sigil on your Mac and inspect its tabs and worktrees. Start sessions there while this result is unresolved; this phone will not retry it.`;
+  $('project-check').hidden = !attempt || attempt.action !== 'createProject' || Boolean(newFlight);
+}
+function updateNewControls() {
+  const locked = !connected || busy || refreshing || Boolean(pendingNew());
+  const provider = selectedProvider();
+  const takesModel = provider?.takesModel === true;
+  $('model-field').hidden = $('effort-field').hidden = !takesModel;
+  const choiceProblem = takesModel && (!newOptions.models.includes($('new-model').value)
+    || !newOptions.efforts.some(effort => effort.id === $('new-effort').value));
+  const problem = providerProblem() || (newOptions?.providers.length && !provider ? 'Choose a CLI from the Mac’s list.'
+    : choiceProblem ? 'The Mac did not advertise a model and effort to use.' : '');
+  $('provider-problem').textContent = problem;
+  $('provider-problem').hidden = !problem;
+  for (const id of ['provider', 'new-model', 'new-effort', 'new-worktree', 'project-name', 'project-location']) $(id).disabled = locked;
+  for (const button of Array.from($('project-list').children || [])) {
+    button.disabled = locked || (button.dataset.more !== 'true' && Boolean(problem));
+    if (button.dataset.more !== 'true') button.setAttribute('aria-pressed', String(button.dataset.folder === projectTarget?.folder));
   }
+  $('worktree-field').hidden = !allowsWorktree();
+  $('new-worktree').checked = worktreeChoice ?? defaultWorktree();
+  $('worktree-detail').hidden = !projectTarget;
+  $('worktree-detail').textContent = allowsWorktree()
+    ? $('new-worktree').checked ? 'A fresh checkout on its own branch, as the Mac does.' : 'Start in the selected project folder.'
+    : 'The Mac applies its worktree default for this folder.';
+  $('project-start').hidden = !newOptions;
+  $('project-start').disabled = locked || !projectTarget || Boolean(problem);
+  $('project-add').hidden = !canUseSessionOps || !newOptions?.locations.length;
+  $('project-add').disabled = locked;
+  $('project-create').disabled = locked || !folderName($('project-name').value)
+    || !newOptions?.locations.some(location => location.folder === $('project-location').value);
+  $('project-back').disabled = Boolean(newFlight);
+  $('project-check').disabled = !connected || busy || refreshing;
+  showNewOutcome();
+}
+function chooseProject(project) {
+  if (!connected || busy || refreshing || pendingNew() || providerProblem()) return;
+  projectTarget = project;
+  worktreeChoice = null;
+  updateNewControls();
+  // Older Macs keep the existing one-tap project flow and apply their own defaults.
+  if (!newOptions) void perform(() => startProject());
+}
+async function settleNew(attempt, owner = credential) {
+  if (!sameNewAttempt(owner?.pendingNew, attempt)) return;
+  try {
+    const saved = await storage('settle', { room: owner.room, pendingNew: attempt });
+    if (saved.pendingNew != null) owner.pendingNew = saved.pendingNew;
+    else delete owner.pendingNew;
+  } catch {
+    throw new Error('Could not save the result. New remains blocked; inspect Sigil on your Mac.');
+  }
+}
+async function newCommand(action, text, extra = {}) {
+  if (pendingNew()) throw new Error('A previous result is still unknown. Inspect Sigil on your Mac before starting again.');
+  const attempt = { id: randomKey(), action, ...(text ? { folder: action === 'createProject' ? `${text.replace(/\/$/, '')}/${extra.name}` : text } : {}) };
+  const owner = credential;
+  const flight = newFlight = { attempt, dispatched: false };
+  owner.pendingNew = attempt;
+  updateNewControls();
+  try {
+    // A reload must not turn a lost reply into permission to create a duplicate.
+    let claim;
+    try { claim = await storage('claim', { room: owner.room, pendingNew: attempt }); }
+    catch { delete owner.pendingNew; throw new Error('Could not save the pending request. Nothing was sent.'); }
+    owner.pendingNew = claim.pairing.pendingNew;
+    if (!claim.claimed) throw new Error('Another page has a pending result. New stays blocked; inspect Sigil on your Mac.');
+    flight.claimed = true;
+    if (credential !== owner) throw new Error('The paired Mac changed. Nothing was sent.');
+    const reply = await request(action, text, undefined, false, extra);
+    if (action === 'createProject' && projectRecord(reply.project)?.folder !== attempt.folder) {
+      throw new Error('The Mac returned an unexpected project. Check projects before trying again.');
+    }
+    await settleNew(attempt, owner);
+    return reply;
+  } catch (error) {
+    // A verified failure or a request never sent is conclusive. Connection failures are not.
+    if (flight.claimed && (!flight.dispatched || error.verifiedReply)) await settleNew(attempt, owner);
+    throw error;
+  } finally {
+    if (newFlight === flight) newFlight = null;
+    updateNewControls();
+  }
+}
+async function startProject() {
+  if (pendingNew() || !projectTarget || providerProblem()) return;
+  if (newOptions?.providers.length && !selectedProvider()) return;
+  const extra = providerField();
+  if (selectedProvider()?.takesModel && (!newOptions.models.includes(extra.model)
+    || !newOptions.efforts.some(effort => effort.id === extra.effort))) return;
+  await newCommand('new', projectTarget.folder || undefined, extra);
+  $('project-dialog').close();
+}
+async function findProject(folder) {
+  const owner = credential, current = generation;
+  // Authoritative project pages, bounded to 400 rows. Absence is never proof of failure.
+  for (let index = 0; index < 400; index += 40) {
+    const reply = await request('projects', undefined, undefined, false, { index });
+    if (credential !== owner || generation !== current) throw new Error('The connection changed. Check projects again after reconnecting.');
+    const projects = (Array.isArray(reply.projects) ? reply.projects : []).slice(0, 40).map(projectRecord).filter(Boolean);
+    const found = projects.find(project => project.folder === folder);
+    if (found) return found;
+    if (reply.projectsTruncated !== true && projects.length < 40) break;
+    if (!projects.length) break;
+  }
+  return null;
+}
+async function reconcileProject() {
+  const attempt = pendingNew();
+  if (attempt?.action !== 'createProject') return;
+  const sheet = newSheetEpoch;
+  const project = await findProject(attempt.folder);
+  if (!project) throw new Error('That exact folder is not in the Mac’s project list. The result stays unknown; inspect the folder in Sigil on your Mac.');
+  await settleNew(attempt);
+  if (sheet !== newSheetEpoch || !$('project-dialog').open) return;
+  renderProjects([project]);
+  projectTarget = project;
+  $('new-project-form').hidden = true; $('new-choices').hidden = false;
+  updateNewControls();
+}
+function renderProjects(projects, offset = 0, truncated = false) {
+  const safe = (Array.isArray(projects) ? projects : []).slice(0, 40).map(projectRecord).filter(Boolean);
+  newProjects = offset === 0 ? safe : [...newProjects, ...safe];
   const list = $('project-list');
   const kept = offset === 0 ? [] : Array.from(list.children || []).filter(button => button.dataset.more !== 'true');
-  const buttons = safe.map(project => projectButton(project.name, project.folder, () => {
-    if (!connected || busy || providerProblem()) return;
-    const folderPath = project.folder, extra = providerField();
-    $('project-dialog').close();
-    void perform(() => request('new', folderPath, undefined, false, extra));
-  }));
+  const buttons = safe.map(project => {
+    const button = projectButton(project.name, project.folder, () => chooseProject(project));
+    button.dataset.folder = project.folder;
+    return button;
+  });
   if (safe.length > 0 && (safe.length === 40 || truncated)) {
     const next = offset + safe.length;
     const more = projectButton('More projects', 'Show the next folders', () => {
-      if (!connected || busy) return;
+      if (!connected || busy || refreshing || pendingNew()) return;
       void perform(async () => {
         const reply = await request('projects', undefined, undefined, false, { index: next });
         renderProjects(reply.projects, next, reply.projectsTruncated === true);
@@ -536,16 +959,14 @@ function renderProjects(projects, offset = 0, truncated = false) {
   }
   if (offset === 0 && safe.length === 0) {
     buttons.push(projectButton('Current folder', 'The folder Sigil uses for a new session', () => {
-      if (!connected || busy || providerProblem()) return;
-      const extra = providerField();
-      $('project-dialog').close();
-      void perform(() => request('new', undefined, undefined, false, extra));
+      chooseProject({ name: 'Current folder', folder: '' });
     }));
   }
   list.replaceChildren(...kept, ...buttons);
   const empty = $('project-empty');
   if (empty) empty.hidden = list.children.length > 0;
-  showProviderProblem();
+  if (newOptions && !projectTarget) projectTarget = safe[0] || { name: 'Current folder', folder: '' };
+  updateNewControls();
   if (!$('project-dialog').open) $('project-dialog').showModal();
 }
 // The CLIs the Mac offers. A Mac from before the choice sends none, and New starts its default.
@@ -553,10 +974,20 @@ function renderProviders(options) {
   const providers = [];
   for (const provider of (Array.isArray(options?.providers) ? options.providers : []).slice(0, 20)) {
     if (!provider || typeof provider.id !== 'string' || typeof provider.name !== 'string') continue;
-    if (!provider.id || provider.id.length > 32 || !provider.name || provider.name.length > 96) continue;
+    if (!/^[a-zA-Z0-9_-]{1,32}$/.test(provider.id) || !provider.name || provider.name.length > 96 || /[\u0000-\u001F\u007F]/.test(provider.name)) continue;
     const problem = typeof provider.problem === 'string' ? provider.problem.slice(0, 300) : '';
-    providers.push({ id: provider.id, name: provider.name, problem });
+    providers.push({ id: provider.id, name: provider.name, problem, takesModel: provider.takesModel === true });
   }
+  const models = [...new Set((Array.isArray(options?.models) ? options.models : []).slice(0, 100)
+    .filter(model => typeof model === 'string' && new TextEncoder().encode(model).length <= 64 && !model.startsWith('-') && !/[\s\u0000-\u001F\u007F]/.test(model)))];
+  // The Mac advertises CLI default as its selected model, outside the named-model list.
+  if (options?.model === '' && !models.includes('')) models.unshift('');
+  const efforts = (Array.isArray(options?.efforts) ? options.efforts : []).slice(0, 20)
+    .filter(effort => effort && typeof effort.id === 'string' && /^[a-zA-Z0-9_-]{0,32}$/.test(effort.id)
+      && typeof effort.name === 'string' && effort.name.length <= 96 && !/[\u0000-\u001F\u007F]/.test(effort.name));
+  const locations = (Array.isArray(options?.locations) ? options.locations : []).slice(0, 8).map(projectRecord).filter(Boolean);
+  newOptions = options && typeof options === 'object' && !Array.isArray(options) ? { providers, models, efforts, locations,
+    ...(typeof options.startsInWorktree === 'boolean' ? { startsInWorktree: options.startsInWorktree } : {}) } : null;
   providerProblems = new Map(providers.map(provider => [provider.id, provider.problem]));
   $('provider').replaceChildren(...providers.map(provider => {
     const option = document.createElement('option');
@@ -568,21 +999,28 @@ function renderProviders(options) {
   const fallback = typeof options?.provider === 'string' ? options.provider : '';
   $('provider').value = [providerChoice, fallback].find(id => providerProblems.has(id)) || providers[0]?.id || '';
   $('provider-field').hidden = providers.length === 0;
-  showProviderProblem();
+  function choices(id, values, chosen) {
+    $(id).replaceChildren(...values.map(value => {
+      const option = document.createElement('option'); option.value = value.id; option.textContent = value.name || 'CLI default'; return option;
+    }));
+    $(id).value = values.some(value => value.id === chosen) ? chosen : values[0]?.id ?? '';
+  }
+  choices('new-model', models.map(model => ({ id: model, name: model })), options?.model);
+  choices('new-effort', efforts, options?.effort);
+  choices('project-location', locations.map(location => ({ id: location.folder, name: location.name })), locations[0]?.folder);
+  updateNewControls();
 }
 function providerField() {
-  return $('provider-field').hidden || !$('provider').value ? {} : { provider: $('provider').value };
+  const provider = selectedProvider();
+  return { ...(provider ? { provider: provider.id } : {}),
+    ...(provider?.takesModel ? { model: $('new-model').value, effort: $('new-effort').value } : {}),
+    ...(allowsWorktree() ? { worktree: worktreeChoice ?? defaultWorktree() } : {}) };
 }
 function providerProblem() {
   return $('provider-field').hidden ? '' : providerProblems.get($('provider').value) || '';
 }
 function showProviderProblem() {
-  const problem = providerProblem();
-  $('provider-problem').textContent = problem;
-  $('provider-problem').hidden = !problem;
-  for (const button of Array.from($('project-list').children || [])) {
-    if (button.dataset.more !== 'true') button.disabled = Boolean(problem);
-  }
+  updateNewControls();
 }
 // Find keeps every match as text offsets and highlights only the matches in view. A mark per
 // match made each keystroke rebuild and lay out the whole history.
@@ -687,10 +1125,28 @@ function chunkStarts(output) {
 // Paint the output as one text node per chunk, with no marks, in blocks of whole lines. A block ends
 // where a line starts findBlock characters or more into it, and before a line over findBlock long.
 function paintText(output) {
-  if (findText !== output) { findText = output; findStarts = chunkStarts(output); }
-  findNodes = output ? findStarts.map((start, index) => document.createTextNode(output.slice(start, findStarts[index + 1] ?? output.length))) : [];
+  const terminal = $('terminal');
+  let keptBlocks = 0, keptChunks = 0, from = 0;
+  if (findText && output && findBlocks.length) {
+    const shared = commonPrefixLength(findText, output);
+    // Rebuild the block containing the preceding chunk too: a changed newline,
+    // word or combining mark can change the last chunk's deterministic boundary.
+    const chunk = Math.max(0, findChunkAt(shared) - 1);
+    while (keptBlocks + 1 < findBlocks.length && findBlocks[keptBlocks + 1] <= chunk) keptBlocks++;
+    if (findBlockNodes.slice(0, keptBlocks).some((node, index) => terminal.childNodes[index] !== node)) keptBlocks = 0;
+    keptChunks = findBlocks[keptBlocks]; from = findStarts[keptChunks];
+  }
+  // Marks can split text nodes inside retained blocks. Restore those nodes before
+  // replacing the suffix, then the normal Find path recomputes its visible marks.
+  markMatches([]);
+  findText = output;
+  findStarts = findStarts.slice(0, keptChunks).concat(chunkStarts(output.slice(from)).map(start => start + from));
+  findNodes = findNodes.slice(0, keptChunks).concat(output ? findStarts.slice(keptChunks).map((start, index) =>
+    document.createTextNode(output.slice(start, findStarts[keptChunks + index + 1] ?? output.length))) : []);
+  const retainedBlocks = findBlocks.slice(0, keptBlocks), retainedNodes = findBlockNodes.slice(0, keptBlocks);
   findSplits = new Map(); findBlocks = findNodes.length ? [0] : []; findComplexBlocks = new Map();
-  for (let chunk = 1; chunk < findStarts.length; chunk++) {
+  if (findNodes.length) findBlocks = retainedBlocks.concat(keptChunks);
+  for (let chunk = keptChunks + 1; chunk < findStarts.length; chunk++) {
     const start = findStarts[chunk];
     if (output[start - 1] !== '\n') continue;
     const end = output.indexOf('\n', start);
@@ -698,12 +1154,16 @@ function paintText(output) {
   }
   // The last block is painted in the terminal itself, after the others: WebKit copies a selection
   // that ends after a block element with one more line.
-  findBlockNodes = findBlocks.slice(0, -1).map((chunk, index) => {
+  findBlockNodes = retainedNodes.concat(findBlocks.slice(keptBlocks, -1).map((chunk, index) => {
     const block = document.createElement('span');
-    block.append(...findNodes.slice(chunk, findBlocks[index + 1]));
+    block.append(...findNodes.slice(chunk, findBlocks[keptBlocks + index + 1]));
     return block;
-  });
-  $('terminal').replaceChildren(...findBlockNodes, ...findNodes.slice(findBlocks.at(-1) ?? 0));
+  }));
+  if (!keptBlocks) terminal.replaceChildren(...findBlockNodes, ...findNodes.slice(findBlocks.at(-1) ?? 0));
+  else {
+    while (terminal.childNodes.length > keptBlocks) terminal.lastChild.remove();
+    terminal.append(...findBlockNodes.slice(keptBlocks), ...findNodes.slice(findBlocks.at(-1) ?? 0));
+  }
 }
 // Whether the matches on a block are marked in WebKit: it has complex text.
 function findMarkable(block) {
@@ -978,14 +1438,13 @@ function closeFind() {
 }
 $('sessions-toggle').onclick = () => {
   $('session-search').value = '';
-  searchToken++;
-  renderSaved([]);
   renderSessionList(); $('sessions-dialog').showModal();
+  searchSaved();
   // On a touch screen, focus would raise the keyboard over the list.
   if (hasFinePointer()) $('session-search').focus();
 };
 $('sessions-close').onclick = () => $('sessions-dialog').close();
-$('sessions-dialog').addEventListener('close', () => { dropWaitingSearch(); if (!$('sessions-toggle').hidden) $('sessions-toggle').focus(); });
+$('sessions-dialog').addEventListener('close', () => { if ($('session-action-dialog').open) $('session-action-dialog').close(); clearSaved(); if (!$('sessions-toggle').hidden) $('sessions-toggle').focus(); });
 $('session-search').oninput = searchSaved;
 $('find-toggle').onclick = () => {
   $('find-bar').hidden = false; $('find-toggle').setAttribute('aria-expanded', 'true');
@@ -1015,21 +1474,21 @@ $('connection').addEventListener('toggle', () => { if ($('connection').open) $('
 let waitingSearch = null;
 // A cleared box or a closed sheet ends the query; skip it at its turn.
 function dropWaitingSearch() { if (waitingSearch) waitingSearch.stale = true; waitingSearch = null; }
-function request(action, text, tabID = selected, pairing = false, extra = {}) {
+function request(action, text, tabID = selected, pairing = false, extra = {}, returnRefresh) {
   if (!connected && !pairing && action !== 'state') return Promise.reject(new Error('Not connected.'));
-  if (action !== 'chats') return enqueue(() => transmit(action, text, tabID, pairing, extra));
+  if (action !== 'chats') return enqueue(() => transmit(action, text, tabID, pairing, extra, returnRefresh));
   // Typing can outrun the Mac. Last in line, the waiting search takes the newest query;
   // behind a later command it is skipped at its turn. Its callers see a stale token.
   const waiting = waitingSearch;
   if (waiting?.tail === outgoing && waiting.generation === generation && waiting.epoch === commandEpoch) {
-    Object.assign(waiting, { text, tabID });
+    Object.assign(waiting, { text, tabID, extra });
     return waiting.reply;
   }
   if (waiting) waiting.stale = true;
-  const search = waitingSearch = { text, tabID, generation, epoch: commandEpoch };
+  const search = waitingSearch = { text, tabID, extra, generation, epoch: commandEpoch };
   search.reply = enqueue(async () => {
     if (waitingSearch === search) waitingSearch = null;
-    return search.stale ? { stale: true } : transmit(action, search.text, search.tabID, pairing, extra);
+    return search.stale ? { stale: true } : transmit(action, search.text, search.tabID, pairing, search.extra);
   });
   search.tail = outgoing;
   return search.reply;
@@ -1050,12 +1509,14 @@ async function enqueue(send) {
     return await send();
   } finally { queuedCommands--; release(); }
 }
-async function transmit(action, text, tabID, pairing, extra = {}) {
+async function transmit(action, text, tabID, pairing, extra = {}, returnRefresh, sessionContext) {
+  if (returnRefresh && !currentReturnRefresh(returnRefresh)) return { stale: true };
   if (!socket || socket.readyState !== WebSocket.OPEN || !challenge || (!connected && !pairing && action !== 'state')) throw new Error('Not connected.');
   const ws = socket, current = generation, epoch = commandEpoch, seq = ++sequence;
   const message = { challenge, clientNonce, sequence: seq, action, ...(tabID ? { tabID } : {}), ...(text !== undefined ? { text } : {}), ...extra };
   const data = await seal(message, pairing ? bootstrap : credential.key, 'phone');
   if (current !== generation || epoch !== commandEpoch || ws.readyState !== WebSocket.OPEN) throw new Error('Connection lost.');
+  if (sessionContext && !currentSessionAction(sessionContext, action)) throw new Error('This session changed. Cancel and reopen its actions.');
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       if (current !== generation || epoch !== commandEpoch || socket !== ws) return;
@@ -1064,24 +1525,33 @@ async function transmit(action, text, tabID, pairing, extra = {}) {
       commandEpoch++;
       ws.close();
     }, 10000);
-    pending.set(seq, { resolve, reject, timer, action, tabID });
+    // The view token stays local; it is never part of the authenticated wire message.
+    pending.set(seq, { resolve, reject, timer, action, tabID, returnRefresh });
+    const flight = newFlight?.attempt.action === action && ['new', 'createProject'].includes(action) ? newFlight : null;
+    if (flight) flight.dispatched = true;
+    if (sessionContext && sessionActionFlight?.context === sessionContext) {
+      sessionActionFlight.dispatched = true; updateSessionActionControls();
+    }
     ws.send(JSON.stringify({ data }));
+    if (flight) updateNewControls();
   });
 }
 function poll() {
   clearTimeout(pollTimer);
+  if (!connected || document.hidden || refreshing) return;
   pollTimer = setTimeout(async () => {
     if (!connected || document.hidden) return;
     if (!busy) { try { await request('state'); } catch (error) { showError(error.message); } }
     if (connected) poll();
   }, 1000);
 }
-function connect() {
+function connect(isReturning = false) {
   clearTimeout(reconnectTimer);
   if (!credential || stopped) return;
   const current = ++generation;
   socket?.close();
-  offline('Connecting…');
+  const connectingMessage = isReturning ? 'Refreshing…' : 'Connecting…';
+  offline(connectingMessage);
   challenge = null; sequence = 0;
   const url = new URL('/connect', location.origin);
   url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -1110,7 +1580,7 @@ function connect() {
         ws.send(JSON.stringify({ route }));
       } else if (typeof frame.hello === 'string' && /^[a-f0-9]{64}$/.test(frame.hello)) {
         if (challenge === frame.hello) return;
-        offline('Connecting…');
+        offline(connectingMessage);
         for (const item of pending.values()) {
           clearTimeout(item.timer);
           item.reject(new Error('Connection changed. Check the terminal before sending again.'));
@@ -1122,8 +1592,12 @@ function connect() {
         freshHandshake = true;
         const authorizationEpoch = commandEpoch;
         const authorization = bootstrap ? request('pair', newDeviceKey, undefined, true) : request('state');
-        authorization.then(() => {
+        authorization.then(reply => {
           if (current !== generation || authorizationEpoch !== commandEpoch) return;
+          if (!reply.state) {
+            const error = new Error('The Mac did not return a fresh state.');
+            error.missingState = true; throw error;
+          }
           bootstrap = null; newDeviceKey = null;
           if (replacingMemory) {
             for (const list of replacingMemory.attachments.values()) for (const item of list) if (item.preview) URL.revokeObjectURL(item.preview);
@@ -1135,6 +1609,7 @@ function connect() {
           connected = true; busy = false;
           $('status').textContent = $('status-live').textContent = 'Connected'; $('status').dataset.connected = 'true';
           showError(''); updateControls(); poll();
+          if ($('sessions-dialog').open) searchSaved();
         }).catch(error => {
           if (current !== generation || authorizationEpoch !== commandEpoch) return;
           if (replacingMemory) {
@@ -1147,6 +1622,7 @@ function connect() {
             connect();
           }
           showError(error.message);
+          if (error.missingState) ws.close();
         });
       } else if (frame.error === 'unauthorized') {
         // A dropped pairing acknowledgement can leave the Mac already using the device key.
@@ -1172,7 +1648,9 @@ function connect() {
         if (reply.challenge !== challenge) return; // A delayed reply from an earlier Mac epoch.
         if (reply.ok !== true) {
           pending.delete(reply.sequence); clearTimeout(item.timer);
-          item.reject(new Error(reply.error || 'The Mac could not complete this action.'));
+          const error = new Error(reply.error || 'The Mac could not complete this action.');
+          error.verifiedReply = true;
+          item.reject(error);
           return;
         }
         if (typeof reply.ticket === 'string' && /^[a-f0-9]{64}$/.test(reply.ticket)
@@ -1182,6 +1660,10 @@ function connect() {
         }
         if (current !== generation || reply.clientNonce !== clientNonce || reply.challenge !== challenge
           || socket !== ws || ws.readyState !== WebSocket.OPEN) return;
+        if (item.returnRefresh && !currentReturnRefresh(item.returnRefresh)) {
+          pending.delete(reply.sequence); clearTimeout(item.timer);
+          item.resolve({ stale: true }); return;
+        }
         if (item.action === 'earlier') pendingEarlier = {
           tabID: item.tabID, slice: typeof reply.earlier === 'string' ? reply.earlier : '',
         };
@@ -1202,6 +1684,7 @@ function connect() {
             }
           }
           render(reply.state);
+          if (item.returnRefresh) item.returnRefresh.appliedTabID = selected;
           if (movedRestart) drafts.delete(item.tabID);
         }
         pending.delete(reply.sequence); clearTimeout(item.timer);
@@ -1223,13 +1706,14 @@ function connect() {
 }
 // The displayed picker can change before the Mac confirms its selection. Keep
 // the old draft readable and focused, but do not accept edits for an uncertain target.
-async function changeSession(action, text, tabID, extra = {}) {
+async function changeSession(action, text, tabID, extra = {}, savedTarget) {
   const current = generation, epoch = commandEpoch;
   const selection = selectingSession = { current, epoch };
   updateControls();
   try {
-    await request(action, text, tabID, false, extra);
-    return current === generation && epoch === commandEpoch;
+    const reply = savedTarget ? await enqueue(() => currentSaved(savedTarget)
+      ? transmit(action, text, tabID, false, extra) : { stale: true }) : await request(action, text, tabID, false, extra);
+    return !reply.stale && (!savedTarget || currentSaved(savedTarget)) && current === generation && epoch === commandEpoch;
   } catch (error) {
     if (current === generation && epoch === commandEpoch) throw error;
     return false;
@@ -1242,12 +1726,16 @@ async function changeSession(action, text, tabID, extra = {}) {
   }
 }
 async function perform(work) {
-  if (!connected || busy) return;
+  if (!connected || busy || refreshing) return;
   const current = generation, epoch = commandEpoch;
   busy = true; updateControls(); showError('');
   try { await work(); }
   catch (error) { showError(error.message); $('tabs').value = selected || ''; }
-  finally { if (generation === current && commandEpoch === epoch) { busy = false; updateControls(); } }
+  finally {
+    if (generation === current && commandEpoch === epoch) {
+      busy = false; updateControls(); refreshReturnedState();
+    }
+  }
 }
 function isImageFile(file) {
   return (file.type || '').startsWith('image/') || /\.(png|jpe?g|gif|webp|heic|heif|bmp|tiff?)$/i.test(file.name || '');
@@ -1415,7 +1903,7 @@ $('raw-toggle').onclick = () => {
 $('message').oninput = () => { resizeMessage(); updateControls(); };
 function maybeLoadEarlier() {
   const terminal = $('terminal');
-  if (!connected || !selected || earlierFlight) return;
+  if (!connected || refreshing || !selected || earlierFlight) return;
   const bucket = historyFor(selected);
   if (bucket.exhausted || terminal.scrollHeight <= terminal.clientHeight || terminal.scrollTop > 48) return;
   const loaded = bucket.history + bucket.tail;
@@ -1443,11 +1931,18 @@ $('compose').onsubmit = event => { event.preventDefault(); void perform(() => se
 $('paste').onclick = () => void perform(() => sendText(false));
 $('tabs').onchange = () => void perform(() => changeSession('select', undefined, $('tabs').value));
 $('new').onclick = () => void perform(async () => {
+  await refreshNewPending();
+  projectTarget = null; worktreeChoice = null;
+  const sheet = ++newSheetEpoch;
+  $('new-project-form').hidden = true; $('new-choices').hidden = false;
   let reply;
   try { reply = await request('projects'); } catch (error) {
     // A Mac without the project list starts New in its current folder.
     if (error.message !== 'Unknown action.') throw error;
-    await request('new');
+    if (pendingNew()) {
+      renderProviders(null); renderProjects([]); return;
+    }
+    await newCommand('new');
     return;
   }
   let options;
@@ -1455,13 +1950,46 @@ $('new').onclick = () => void perform(async () => {
     if (error.message !== 'Unknown action.') throw error;
   }
   renderProviders(options);
+  if (sheet !== newSheetEpoch) return;
   renderProjects(reply.projects, 0, reply.projectsTruncated === true);
 });
 $('provider').onchange = () => { providerChoice = $('provider').value; showProviderProblem(); };
+$('new-model').onchange = $('new-effort').onchange = () => updateNewControls();
+$('new-worktree').onchange = () => { worktreeChoice = $('new-worktree').checked; updateNewControls(); };
+$('project-start').onclick = () => void perform(() => startProject());
+$('project-add').onclick = () => {
+  if (!connected || busy || refreshing || pendingNew() || !canUseSessionOps || !newOptions?.locations.length) return;
+  $('new-choices').hidden = true; $('new-project-form').hidden = false;
+  $('project-name').value = ''; updateNewControls(); $('project-name').focus();
+};
+$('project-back').onclick = () => {
+  if (newFlight) return;
+  $('new-project-form').hidden = true; $('new-choices').hidden = false; $('project-add').focus();
+};
+$('project-name').oninput = $('project-location').onchange = () => updateNewControls();
+$('new-project-form').onsubmit = event => {
+  event.preventDefault();
+  const name = folderName($('project-name').value), location = newOptions?.locations.find(item => item.folder === $('project-location').value);
+  if (!connected || busy || refreshing || pendingNew() || !canUseSessionOps || !name || !location) return;
+  const sheet = newSheetEpoch;
+  void perform(async () => {
+    const reply = await newCommand('createProject', location.folder, { name });
+    if (sheet !== newSheetEpoch || !$('project-dialog').open) return;
+    const project = await findProject(reply.project.folder);
+    if (sheet !== newSheetEpoch || !$('project-dialog').open) return;
+    // Use authoritative repository metadata before offering a worktree for the new folder.
+    renderProjects(project ? [project, ...newProjects.filter(item => item.folder !== project.folder)] : [reply.project, ...newProjects]);
+    projectTarget = project || projectRecord(reply.project);
+    worktreeChoice = null;
+    $('new-project-form').hidden = true; $('new-choices').hidden = false; updateNewControls();
+    $('project-start').focus();
+  });
+};
+$('project-check').onclick = () => void perform(() => reconcileProject());
 $('project-cancel').onclick = () => $('project-dialog').close();
-$('project-dialog').addEventListener('close', () => { if (!$('new').disabled) $('new').focus(); });
+$('project-dialog').addEventListener('close', () => { ++newSheetEpoch; if (!$('new').disabled) $('new').focus(); });
 async function interrupt() {
-  if (!connected || !selected || selectingSession) return;
+  if (!connected || refreshing || !selected || selectingSession) return;
   try { await request('key', 'interrupt'); }
   catch (error) { showError(error.message); }
 }
@@ -1493,7 +2021,9 @@ $('message').addEventListener('keydown', event => {
   void perform(() => sendText(true));
 });
 // request() already sends in order, so a quick tap is queued instead of dropped.
-document.querySelectorAll('[data-key]').forEach(button => { button.onclick = () => request('key', button.dataset.key).catch(error => showError(error.message)); });
+document.querySelectorAll('[data-key]').forEach(button => { button.onclick = () => {
+  if (!refreshing) void request('key', button.dataset.key).catch(error => showError(error.message));
+}; });
 $('reconnect').onclick = $('welcome-reconnect').onclick = () => { stopped = false; revoked = false; reconnectDelay = 500; connect(); };
 // Forgetting cannot be undone from the phone, so it asks first.
 $('forget').onclick = () => {
@@ -1509,6 +2039,7 @@ async function forget() {
   $('keys').hidden = true; $('keys-toggle').setAttribute('aria-expanded', 'false');
   clearAttachments();
   rawOutput = ''; rawMode = false; displayedOutput = null; readableFrom = null; readableText = '';
+  readable.reset();
   histories.clear(); pendingEarlier = null; earlierFlight = false; searchToken++;
   sessionTabs = []; $('sessions-dialog').close(); $('project-dialog').close(); closeFind();
   $('raw-toggle').setAttribute('aria-pressed', 'false'); $('raw-toggle').textContent = 'Show raw terminal';
@@ -1542,6 +2073,7 @@ function stopScan() {
   if (scanner) scanner.hidden = true;
 }
 async function beginPair(pairing) {
+  clearSaved();
   // Pairing credentials are not replaced on disk until this Mac authenticates.
   // Contents from the previous Mac must not share an ID namespace with this one.
   if (credential && !replacingMemory) replacingMemory = {
@@ -1551,6 +2083,7 @@ async function beginPair(pairing) {
   drafts.clear(); attachmentDrafts.clear(); histories.clear(); sessionTabs = [];
   selected = null; selectedStatus = null; selectedRunning = undefined; selectedCapabilities = undefined;
   currentPrompt = null; promptSignature = null; tabsSignature = ''; rawOutput = ''; displayedOutput = null;
+  readable.reset(); readableFrom = null; readableText = '';
   pendingEarlier = null; earlierFlight = false; searchToken++;
   $('message').value = ''; $('terminal').textContent = ''; $('interaction').hidden = true;
   renderAttachments();
@@ -1671,14 +2204,57 @@ document.addEventListener('pointerdown', event => {
   const details = $('connection');
   if (details.open && !details.contains(event.target)) details.open = false;
 });
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    clearTimeout(pollTimer);
-    if ($('scanner') && !$('scanner').hidden) stopScan();
+function pausePage() {
+  // visibilitychange and pagehide describe the same hidden interval.
+  if (hiddenAt === null) { hiddenAt = Date.now(); pageEpoch++; }
+  clearTimeout(pollTimer);
+  if ($('scanner') && !$('scanner').hidden) stopScan();
+}
+function currentReturnRefresh(flight, tabID = flight.tabID) {
+  return refreshFlight === flight && refreshing && connected && !document.hidden && !stopped && !revoked
+    && flight.generation === generation && flight.epoch === commandEpoch && flight.socket === socket
+    && flight.pageEpoch === pageEpoch && tabID === selected;
+}
+function refreshReturnedState() {
+  if (!refreshing || refreshFlight || busy || document.hidden || !connected || stopped || revoked) return;
+  const flight = refreshFlight = { socket, generation, epoch: commandEpoch, pageEpoch, tabID: selected };
+  void request('state', undefined, selected, false, {}, flight).then(reply => {
+    if (reply.stale) return;
+    if (!reply.state) {
+      if (currentReturnRefresh(flight)) throw new Error('The Mac did not return a fresh state.');
+      return;
+    }
+    if (!currentReturnRefresh(flight, flight.appliedTabID)) return;
+    refreshing = false;
+    $('status').textContent = $('status-live').textContent = 'Connected'; $('status').dataset.connected = 'true';
+    updateControls(); poll();
+    if ($('sessions-dialog').open) searchSaved();
+  }).catch(error => {
+    if (!currentReturnRefresh(flight)) return;
+    showError(error.message); connect(true);
+  }).finally(() => {
+    if (refreshFlight !== flight) return;
+    refreshFlight = null;
+    // A second hide or a selection change supersedes the old read, not a command.
+    refreshReturnedState();
+  });
+}
+function resumePage() {
+  if (document.hidden || hiddenAt === null) return;
+  const elapsed = Date.now() - hiddenAt;
+  hiddenAt = null;
+  if (!credential || stopped || revoked) return;
+  // A long suspension is a recovery heuristic, not proof that the socket died.
+  if (!connected || !Number.isFinite(elapsed) || elapsed < 0 || elapsed > RETURN_RECONNECT_AFTER) {
+    connect(true); return;
   }
-  else if (connected) poll();
-  else if (!stopped) connect();
-});
+  refreshing = true;
+  $('status').textContent = $('status-live').textContent = 'Refreshing…'; $('status').dataset.connected = 'false';
+  updateControls(); refreshReturnedState();
+}
+document.addEventListener('visibilitychange', () => document.hidden ? pausePage() : resumePage());
+window.addEventListener('pagehide', pausePage);
+window.addEventListener('pageshow', event => { if (event.persisted) resumePage(); });
 function confirmReplace() {
   const dialog = $('replace-dialog');
   dialog.returnValue = '';

@@ -45,17 +45,50 @@
     <h3 id="open-heading">Open</h3>
     <div id="session-list"></div>
     <p id="session-no-results" hidden>No matching sessions.</p>
-    <h3 id="saved-heading" hidden>Saved chats</h3>
+    <h3 id="saved-heading" hidden>Recent chats</h3>
     <div id="saved-list"></div>
-    <p id="saved-empty" hidden>No matching chats.</p>
+    <p id="saved-empty" role="status" hidden>No recent chats.</p>
+  </dialog>
+  <dialog id="session-action-dialog" class="confirm" aria-labelledby="session-action-heading" aria-describedby="session-action-detail">
+    <div class="sheet-heading"><h2 id="session-action-heading">Session actions</h2></div>
+    <p id="session-action-detail"></p>
+    <p id="session-action-error" class="sheet-error" role="alert" hidden></p>
+    <div id="session-action-menu">
+      <button id="session-rename" type="button">Rename</button>
+      <button id="session-archive" type="button">Archive</button>
+      <button id="session-close-action" class="destructive" type="button">Close</button>
+    </div>
+    <form id="session-rename-form" hidden>
+      <label for="session-name">Name</label>
+      <input id="session-name" type="text" autocomplete="off" aria-describedby="session-name-help">
+      <p id="session-name-help" class="sheet-notice">At most 80 UTF-8 bytes. An empty name restores the Mac’s title.</p>
+    </form>
+    <div class="dialog-actions"><button id="session-action-cancel" type="button">Cancel</button><button id="session-action-accept" type="button" hidden>Save</button></div>
   </dialog>
   <dialog id="project-dialog" class="sheet" aria-labelledby="project-heading">
-    <div class="sheet-heading"><h2 id="project-heading">Choose a project</h2><button id="project-cancel" type="button">Cancel</button></div>
+    <div class="sheet-heading"><h2 id="project-heading">New session</h2><button id="project-cancel" type="button">Cancel</button></div>
     <p id="project-error" class="sheet-error" role="alert" hidden></p>
+    <p id="new-outcome" class="sheet-notice" role="status" hidden></p>
+    <button id="project-check" type="button" hidden>Check projects</button>
+    <div id="new-choices">
     <div id="provider-field" hidden><label for="provider">CLI</label><div class="provider-picker"><select id="provider" aria-describedby="provider-problem"></select><span class="chevron" aria-hidden="true"></span></div></div>
     <p id="provider-problem" hidden></p>
+    <div id="model-field" class="new-field" hidden><label for="new-model">Model</label><div class="provider-picker"><select id="new-model"></select><span class="chevron" aria-hidden="true"></span></div></div>
+    <div id="effort-field" class="new-field" hidden><label for="new-effort">Effort</label><div class="provider-picker"><select id="new-effort"></select><span class="chevron" aria-hidden="true"></span></div></div>
+    <button id="project-add" type="button" hidden>New project</button>
     <div id="project-list"></div>
     <p id="project-empty" hidden>No projects yet.</p>
+    <label id="worktree-field" class="worktree-row" hidden><span>Start in a new worktree</span><input id="new-worktree" type="checkbox" role="switch"></label>
+    <p id="worktree-detail" class="sheet-notice" hidden></p>
+    <button id="project-start" class="primary" type="button" hidden>Start session</button>
+    </div>
+    <form id="new-project-form" hidden>
+      <div class="sheet-heading"><h3>New project</h3><button id="project-back" type="button">Back</button></div>
+      <label for="project-name">Folder name</label><input id="project-name" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="project-name-help">
+      <p id="project-name-help" class="sheet-notice">Use a name without slashes, colons or a leading dot.</p>
+      <label for="project-location">Location</label><div class="provider-picker"><select id="project-location"></select><span class="chevron" aria-hidden="true"></span></div>
+      <button id="project-create" class="primary" type="submit">Create project</button>
+    </form>
   </dialog>
   <dialog id="replace-dialog" class="confirm" aria-labelledby="replace-heading" aria-describedby="replace-detail">
     <form method="dialog">

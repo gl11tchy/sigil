@@ -6,6 +6,39 @@ Pair a phone from Sigil Settings and control this Mac using the Sidereal PWA.
 The default is internet access through an HTTPS/WebSocket relay, not an exposed
 Mac listening port. Sigil must stay open and the Mac must stay awake.
 
+### Staying awake for phone alerts
+
+Sigil owns one `PreventUserIdleSystemSleep` request while an authenticated phone
+is connected, or while remote control is enabled, a paired phone has registered
+an alert token and at least one running tab has current validated lifecycle work.
+A Starting/Working label or the provider's nominal capability is insufficient:
+the owned journal must have a readable current file and a supported work event
+with matching session and turn identity. Grok and Codex can supply that evidence;
+Claude Code, Devin, Cursor and Kimi currently cannot. Missing or lost journal
+observation, interruption, disconnection, failure, process exit, all-idle tabs or
+turning alerts off release the work request. A connected phone independently
+keeps the same single request, including while its tabs are idle.
+
+For away work, each tab has a two-hour window from its last newly validated
+lifecycle progress, measured with a continuous monotonic clock that includes
+time asleep. Quiet reads, terminal output, alert-token refresh and ordinary
+relay reconnects do not renew it. The timer releases the power request when all
+eligible windows expire; it does not change Working to Idle, mark anything
+finished or send a completion alert. A quiet task can still be working after the
+request expires. A later validated progress event can renew the request.
+
+Only this instance's successful assertion ID is released. Other Sigil copies and
+other apps keep their own requests. Failed creation is retried after 30 seconds;
+a failed release retains ownership and live watches retry the same ID, preventing
+a duplicate assertion. App termination explicitly releases its request; macOS
+also owns process-exit cleanup. No Battery/Energy settings are changed.
+
+The request leaves the display free to sleep. Closing the lid, choosing Sleep,
+low battery and thermal sleep remain controlled by macOS; phone alerts cannot
+promise delivery through those conditions. See [Apple's sleep guidance](https://developer.apple.com/library/archive/qa/qa1340/_index.html).
+The Phone Settings footer explains the work limit and explicit sleep/lid behavior.
+
+
 The companion can list and select open tabs, read bounded terminal text, send
 text, keys, and phone photos/files, and create a session in the current folder.
 Phone files are written into the local drop cache and pasted as paths. It does not
@@ -104,6 +137,55 @@ struct RemoteRequest: Codable, Sendable {
   `APNS_TEAM_ID` and `APNS_TOPIC` (the phone's bundle id). Without all four it
   answers `{type: "push", ok: false, reason: "off"}` and nothing else changes.
   Sixty pushes a minute per room; a `410` from Apple forgets the token.
+
+  The Mac holds only push frames until the current host socket is routed, ready
+  and its applicable token registration has completed. One paced drain checks
+  connection, room, pairing and token generations around writes. Queued events
+  retain their identity, issuance and fixed expiry: alerts 300s, activity
+  updates 60s and ends 900s from original issuance. New push envelopes add only
+  `issuedAt`/`expiresAt` UTC integer seconds, fixed before Mac queue admission.
+  The relay copies these at admission, supplies the original absolute
+  `apns-expiration`, and drops events expired at admission or while waiting.
+  It rejects partial/noninteger/unsafe timing, expiry before or at issuance,
+  overlong lifetimes and issuance more than 30s ahead of relay time, matching
+  the client's existing future-clock allowance. Sealed alert bytes and client
+  freshness checks stay unchanged. Legacy hosts without both fields retain
+  explicit expiration 0; opaque alerts do not acquire an invented lifetime.
+  Both host and relay updates are needed for stored timed pushes; older relays
+  ignore the optional fields and keep their zero-storage behavior.
+  Activity payload timestamps freeze at original issuance (relay admission for
+  legacy frames). Alert collapse IDs are 64-byte SHA256 hashes of the JSON
+  `[roomID, tabID]` tuple, so different Macs/rooms or tabs cannot merge. Activity
+  updates/ends keep FIFO dispatch and have no shared collapse ID that could
+  replace an end; the Mac's existing coalescing/end protection stays intact.
+  The 20-entry queue coalesces activity updates, prioritizes ends and
+  cannot renew an event on reconnect. Twenty active/pending-end registrations
+  reserve capacity; further new activities receive a clear busy reply until a
+  slot is released. An unauthenticated peer cannot clear alerts. Authentication
+  clears ordinary alerts, while activity ends remain until written, explicitly
+  retired by the phone, or expired. Closed-tab retirement acknowledgements are
+  accepted for known pending ends. Stop/revoke clear the queue. A same-owner end
+  can use a newly registered replacement room; other old-room events are dropped.
+  No terminal commands enter this queue. Socket/APNs acceptance remains distinct
+  from actual phone delivery.
+  [Apple's current APNs headers](https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns?changes=_3)
+  define UTC epoch expiry and zero storage. APNs honors expiry on a best-effort
+  basis, may reorder notifications and may deliver after expiry. These bounds
+  do not guarantee storage, ordering or physical delivery.
+  The APNs client retires an unanswered/error connection and permits one fresh
+  attempt only before any response headers/status. Each attempt has an absolute
+  10s timer; the entire send has a 20s monotonic budget, clipped at admission and
+  before each attempt to the original expiry. Payload bytes, activity timestamp,
+  collapse key, bearer and expiry are frozen once. The relay charges one logical
+  send, regardless of that internal retry. Concurrent failures share a current
+  replacement; old close/error/GOAWAY handlers cannot evict it. Accepted streams
+  can finish during GOAWAY retirement; connections with no pending work close
+  after 10 minutes idle. Shutdown destroys owned connections and prevents retry.
+  A missing response still leaves delivery uncertain. The iPhone receipt ledger
+  rejects a duplicate sealed alert ID for actionable handling; the extension may
+  retain a passive local fallback. Repeated transport attempts and delayed ordering
+  remain possible. Retaining original activity timestamps avoids making an old
+  retry look newer. Neither APNs nor this client promises exactly-once delivery.
 - Spec: `docs/phone-companion-2-spec.md`.
 
 ## Verification and boundaries

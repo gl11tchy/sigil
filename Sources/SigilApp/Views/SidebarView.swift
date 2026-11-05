@@ -25,10 +25,11 @@ enum SidebarActivityDot {
 /// VoiceOver value for a folder row. The row combines its children, so the
 /// working dot and the pin glyph are spoken here or not at all.
 enum ProjectRowAccessibility {
-    static func value(countLabel: String, isActive: Bool, isWorking: Bool, isPinned: Bool)
+    static func value(countLabel: String, isActive: Bool, isWorking: Bool, isPinned: Bool, isAvailable: Bool = true)
         -> String
     {
         var value = countLabel
+        if !isAvailable { value += ", folder unavailable" }
         if isActive { value += ", one open" }
         if isWorking { value += ", working" }
         if isPinned { value += ", pinned" }
@@ -344,12 +345,25 @@ struct SidebarView: View {
                 showsPin: true,
                 showsArchive: true,
                 archiveLabel: archiveLabel(for: project),
-                canStart: true,
+                canStart: project.isAvailable,
                 leave: { leaveFolder() },
                 newChat: { model.requestNewSessionInProject(project) },
                 togglePin: { model.togglePin(project) },
                 toggleArchive: { model.archiveOrRemove(project) }
             )
+            if !project.isAvailable {
+                HStack {
+                    Text("Folder unavailable")
+                        .ui(12.5)
+                        .foregroundStyle(palette.ink2)
+                    Spacer(minLength: 4)
+                    Button("Retry") { model.retryProjectAvailability() }
+                        .buttonStyle(.borderless)
+                        .help("Check project folder availability")
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
+            }
         }
     }
 
@@ -705,11 +719,13 @@ struct SidebarView: View {
             isWorking: model.isWorking(project),
             isActive: rows.contains { model.isActive($0) } || model.hasSelectedTab(in: project),
             isKeyboardSelected: project.id == keyboardSelectionID,
+            isAvailable: project.isAvailable,
             open: {
                 keyboardSelectionID = project.id
                 model.openProject(project)
             },
             newChat: { model.requestNewSessionInProject(project) },
+            retry: { model.retryProjectAvailability() },
             togglePin: { model.togglePin(project) },
             archive: { model.archiveOrRemove(project) },
             archiveLabel: archiveLabel(for: project)
@@ -717,6 +733,10 @@ struct SidebarView: View {
         .id(project.id)
         .contextMenu {
             Button("New Session") { model.requestNewSessionInProject(project) }
+                .disabled(!project.isAvailable)
+            if !project.isAvailable {
+                Button("Retry Folder") { model.retryProjectAvailability() }
+            }
             Button(model.isPinned(project) ? "Unpin Project" : "Pin Project") {
                 model.togglePin(project)
             }
@@ -1748,8 +1768,10 @@ private struct ProjectListRow: View {
     let isWorking: Bool
     let isActive: Bool
     let isKeyboardSelected: Bool
+    let isAvailable: Bool
     let open: () -> Void
     let newChat: () -> Void
+    let retry: () -> Void
     let togglePin: () -> Void
     var archive: (() -> Void)? = nil
     var archiveLabel = "Archive Project"
@@ -1760,9 +1782,9 @@ private struct ProjectListRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: isActive ? "folder.fill" : "folder")
+            Image(systemName: isAvailable ? (isActive ? "folder.fill" : "folder") : "exclamationmark.triangle")
                 .font(.system(size: 12.5, weight: .regular))
-                .foregroundStyle(isActive ? palette.ink2 : palette.ink3)
+                .foregroundStyle(isAvailable ? (isActive ? palette.ink2 : palette.ink3) : palette.orange)
                 .frame(width: 16)
             Text(title)
                 .ui(14, isActive ? .medium : .regular)
@@ -1783,8 +1805,18 @@ private struct ProjectListRow: View {
                         help: isPinned ? "Unpin Project" : "Pin Project",
                         action: togglePin
                     )
-                    RowAction(systemImage: "plus", help: "New Session", action: newChat)
+                    if isAvailable {
+                        RowAction(systemImage: "plus", help: "New Session", action: newChat)
+                    } else {
+                        RowAction(systemImage: "arrow.clockwise", help: "Retry Folder", action: retry)
+                    }
                 }
+            } else if !isAvailable {
+                Text("Unavailable")
+                    .ui(11.5)
+                    .foregroundStyle(palette.ink2)
+                    .fixedSize()
+                RowAction(systemImage: "arrow.clockwise", help: "Retry Folder", action: retry)
             } else {
                 if isWorking {
                     PixelLoader(color: palette.accent)
@@ -1815,11 +1847,12 @@ private struct ProjectListRow: View {
                 countLabel: countLabel,
                 isActive: isActive,
                 isWorking: isWorking,
-                isPinned: isPinned
+                isPinned: isPinned,
+                isAvailable: isAvailable
             )
         )
         .accessibilityAction(.default, open)
-        .accessibilityAction(named: "New Session", newChat)
+        .accessibilityAction(named: isAvailable ? "New Session" : "Retry Folder", isAvailable ? newChat : retry)
         .accessibilityAction(named: isPinned ? "Unpin Project" : "Pin Project", togglePin)
         .modifier(ArchiveProjectAction(name: archiveLabel, archive: archive))
     }
@@ -1828,6 +1861,7 @@ private struct ProjectListRow: View {
 
     private var rowHelp: String {
         let path = paths.first { $0.hasPrefix("/") || $0.hasPrefix("~") } ?? title
+        if !isAvailable { return "\(path)\nFolder unavailable. Reconnect the folder or check access, then Retry." }
         if longRelative.isEmpty { return "\(path)\n\(countLabel)" }
         return "\(path)\n\(countLabel) · \(longRelative)"
     }

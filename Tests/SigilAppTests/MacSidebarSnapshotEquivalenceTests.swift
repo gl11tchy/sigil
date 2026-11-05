@@ -131,13 +131,24 @@ private func expectMatchesTheScan(
     var projects = SidebarOrganization.projects(from: sessions, canonicalPath: canonical)
     if !searching, surface != .archived {
         projects = SidebarOrganization.merging(
-            added: model.settings.addedProjects, into: projects, canonicalPath: canonical)
+            added: model.settings.addedProjects, into: projects,
+            isAvailable: AppModel.isProjectDirectoryAvailable, canonicalPath: canonical)
     }
+    func markingAvailability(_ groups: [SidebarProject]) -> [SidebarProject] {
+        groups.map { project in
+            var marked = project
+            if let entry = model.settings.addedProjects.first(where: { canonical($0.path) == project.id }) {
+                marked.isAvailable = AppModel.isProjectDirectoryAvailable(entry.path)
+            }
+            return marked
+        }
+    }
+    if searching || surface == .archived { projects = markingAvailability(projects) }
     let isFolder: (SidebarProject) -> Bool = { $0.id == canonical(path) || samePath($0.cwd, path) }
     let focused =
         surface == .project
         ? projects.first(where: isFolder)
-            ?? SidebarOrganization.projects(from: model.store.sessions, canonicalPath: canonical)
+            ?? markingAvailability(SidebarOrganization.projects(from: model.store.sessions, canonicalPath: canonical))
             .first(where: isFolder)
         : nil
     let folder = kind == .projectChats ? focused : nil

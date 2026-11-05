@@ -8,6 +8,24 @@ enum NewSessionLaunch: Equatable {
         case start(CLIProvider)
     }
 
+    struct WorktreeChoice {
+        private var folder: String?
+        private var explicit: Bool?
+
+        init() {}
+
+        mutating func choose(_ worktree: Bool, for directory: URL) {
+            folder = GrokPaths.canonicalPath(directory.path)
+            explicit = worktree
+        }
+
+        func startsInWorktree(for directory: URL, savedDefault: Bool) -> Bool {
+            guard SigilWorktree.isInRepository(directory) else { return false }
+            if folder == GrokPaths.canonicalPath(directory.path), let explicit { return explicit }
+            return savedDefault && SigilWorktree.shouldDefaultToWorktree(directory)
+        }
+    }
+
     /// The Model, Effort and Fast mode rows for `provider`. Nil for Kimi,
     /// whose model comes from its own config.
     @MainActor
@@ -40,27 +58,29 @@ enum NewSessionLaunch: Equatable {
     @MainActor
     static func start(
         _ provider: CLIProvider, model: AppModel, project: URL, useWorktree: Bool,
-        launch: (model: String, effort: String, fastMode: Bool)
+        launch: (model: String, effort: String, fastMode: Bool), worktreeRoot: URL = SigilWorktree.root
     ) async -> Bool {
         guard model.isShowingNewSessionSheet,
             await model.checkedProviderLaunchProblem(provider) == nil,
             model.isShowingNewSessionSheet, model.canSignIn(provider), AppModel.isUsableDirectory(project)
         else { return false }
-        var folder = project
-        if useWorktree {
-            do {
-                folder = try await SigilWorktree.create(for: project) ?? project
-            } catch {
-                if !Task.isCancelled {
-                    model.showError(title: "Could not create a worktree", message: error.localizedDescription)
-                }
-                return false
-            }
+        let result = await SessionWorktreeStart.start(
+            project: project, useWorktree: useWorktree, root: worktreeRoot,
+            validate: {
+                guard model.isShowingNewSessionSheet else { return "Session options were closed." }
+                return await model.checkedProviderLaunchProblem(provider)
+            },
+            launch: { folder in
+                guard model.isShowingNewSessionSheet else { return false }
+                return model.newTab(
+                    in: folder, model: launch.model, effort: launch.effort, fastMode: launch.fastMode,
+                    provider: provider) != nil
+            })
+        if let message = result.message, !Task.isCancelled || result.needsRecovery {
+            model.showError(title: "Could not start a session", message: message)
         }
-        guard !Task.isCancelled, model.isShowingNewSessionSheet else { return false }
-        return model.newTab(
-            in: folder, model: launch.model, effort: launch.effort, fastMode: launch.fastMode, provider: provider)
-            != nil
+        if case .started = result { return true }
+        return false
     }
 
     /// Left and right arrows walk the row in screen order and stop at its ends.
@@ -85,7 +105,7 @@ struct NewSessionSheet: View {
     @State private var choices: [CLIProvider: ProviderModelMenu.Choice] = [:]
     @State private var grokModels = GrokModelCatalog.fallback
     @State private var menus: [CLIProvider: ProviderModelMenu] = [:]
-    @State private var startsInWorktree: Bool
+    @State private var worktreeChoice = NewSessionLaunch.WorktreeChoice()
     @State private var isStartingSession = false
     @State private var startTask: Task<Void, Never>?
     @FocusState private var focusedProvider: CLIProvider?
@@ -95,7 +115,6 @@ struct NewSessionSheet: View {
         self.model = model
         _provider = State(initialValue: provider ?? model.settings.defaultProvider)
         _hasChosenProvider = State(initialValue: provider != nil || model.settings.hasExplicitDefaultProvider)
-        _startsInWorktree = State(initialValue: model.settings.startsInWorktree)
     }
 
     /// Read once when the sheet opens; it resolves every folder on disk.
@@ -132,6 +151,10 @@ struct NewSessionSheet: View {
     private var directoryIsAvailable: Bool { isDirectory(directory) }
 
     private var isRepository: Bool { SigilWorktree.isInRepository(directory) }
+
+    private var useWorktree: Bool {
+        worktreeChoice.startsInWorktree(for: directory, savedDefault: model.settings.startsInWorktree)
+    }
 
     private var canStart: Bool { directoryIsAvailable && !isStartingSession }
 
@@ -172,10 +195,10 @@ struct NewSessionSheet: View {
                         Picker(
                             "Work in",
                             selection: Binding(
-                                get: { startsInWorktree },
+                                get: { useWorktree },
                                 set: {
                                     preserveProviderChoice()
-                                    startsInWorktree = $0
+                                    worktreeChoice.choose($0, for: directory)
                                 })
                         ) {
                             Text("New worktree").tag(true)
@@ -415,7 +438,7 @@ struct NewSessionSheet: View {
         guard canStart else { return }
         let launch = menu(for: provider)?.launch(choice(for: provider)) ?? (model: "", effort: "", fastMode: false)
         let project = directory
-        let useWorktree = startsInWorktree && isRepository
+        let useWorktree = self.useWorktree
         isStartingSession = true
         startTask = Task {
             defer {

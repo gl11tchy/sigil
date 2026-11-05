@@ -42,7 +42,7 @@ async function pair(page, origin, initialOutput, options = {}) {
           ws.send(JSON.stringify({ peer, data: replayData })); return;
         }
         actions.push(request);
-        await options.onRequest?.(request);
+        if (await options.onRequest?.(request) === false) return;
         if (request.action === 'pair') key = await importKey(request.text);
         if (request.action === 'select' && options.rejectAction !== 'select') selected = request.tabID;
         if (request.action === 'new') selected = 'two';
@@ -69,9 +69,10 @@ async function pair(page, origin, initialOutput, options = {}) {
           selectedTabID: selected, terminal: outputs[selected], capabilities: options.restart ? ['restart'] : [] };
         const payload = { challenge, sequence: request.sequence, clientNonce: options.omitNonce ? undefined : request.clientNonce, ok: true, ticket, state, restartedTabID: request.action === 'restart' && options.restart ? 'restarted' : undefined, restartedSession: request.action === 'restart' && options.restart ? { provider: 'grokBuild', sessionID: 'native-one', cwd: '/tmp/one' } : undefined };
         if (projects) payload.projects = projects;
-        if (request.action === 'options' && options.providers) {
-          payload.options = { providers: options.providers, provider: options.providers[0].id, models: [], model: '', efforts: [], effort: '', locations: [] };
+        if (request.action === 'options' && (options.providers || options.sessionOptions)) {
+          payload.options = options.sessionOptions ?? { providers: options.providers, provider: options.providers[0].id, models: [], model: '', efforts: [], effort: '', locations: [] };
         }
+        if (request.action === 'createProject' && options.createProject) payload.project = options.createProject(request);
         if (chats) payload.chats = chats;
         if (earlier !== undefined) payload.earlier = earlier;
         const sealedReply = await seal(payload, key, 'mac');
@@ -272,6 +273,169 @@ test('drafts, history position, and a keyboard-sized viewport stay usable', asyn
     await expect(page.locator('#message')).toHaveValue('Draft for the first session');
   } finally { mac.close(); }
 });
+
+function approvalViewportState(lines = 25) {
+  return {
+    tabs: [{ id: 'one', title: 'Generated layout review', status: 'working', provider: 'claudeCode',
+      processRunning: true, capabilities: { structuredApproval: false } }],
+    selectedTabID: 'one', terminal: Array.from({ length: 40 }, (_, i) => `Output line ${i + 1}: inspect the generated change.`).join('\n'),
+    prompt: { id: 'viewport-prompt', question: 'Do you want to proceed?', verified: false, style: 'menu',
+      operation: Array.from({ length: lines }, (_, i) => `Inspect generated-file-${i + 1}.txt`).join('\n'),
+      choices: [{ label: 'Yes', key: '1' }, { label: 'Yes, always', key: '2' },
+        { label: 'No, and tell the agent what to do differently', key: '3' }] },
+  };
+}
+
+async function resizeVisualViewport(page, height) {
+  // Emulate the visualViewport event the keyboard sends, preserving the full
+  // layout viewport. This is browser emulation, not a physical Safari keyboard.
+  await page.evaluate(height => {
+    Object.defineProperty(window.visualViewport, 'height', { configurable: true, value: height });
+    window.visualViewport.dispatchEvent(new Event('resize'));
+  }, height);
+  await expect(page.locator('body')).toHaveAttribute('data-compact', String(height < 600));
+  await expect.poll(() => page.evaluate(() => parseFloat(document.documentElement.style.getPropertyValue('--viewport-height')))).toBe(height);
+}
+
+async function approvalViewportGeometry(page) {
+  return page.evaluate(() => {
+    const box = selector => document.querySelector(selector).getBoundingClientRect().toJSON();
+    return { layoutHeight: innerHeight, visualHeight: visualViewport.height, body: box('body'), header: box('header'),
+      controls: box('#controls'), output: box('.output'), terminal: box('#terminal'), interaction: box('#interaction'),
+      compose: box('#compose'), send: box('#send'), keys: box('#keys') };
+  });
+}
+
+for (const keys of [false, true]) {
+  test(`approval viewport keeps output with terminal keys ${keys ? 'open' : 'closed'}`, async ({ page, baseURL }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    const mac = await pair(page, baseURL, '', { state: approvalViewportState() });
+    try {
+      await expect(page.locator('#interaction-heading')).toHaveText('Terminal controls');
+      if (keys) await page.locator('#keys-toggle').click();
+      await page.locator('#message').focus();
+      await resizeVisualViewport(page, 420);
+      await page.evaluate(() => document.fonts.ready);
+      const geometry = await approvalViewportGeometry(page);
+      await testInfo.attach('approval-viewport-geometry', { body: JSON.stringify(geometry, null, 2), contentType: 'application/json' });
+      console.log(`REA-1192 ${testInfo.project.name} keys=${keys}: ${JSON.stringify(geometry)}`);
+      await page.screenshot({ path: testInfo.outputPath(`approval-viewport-keys-${keys ? 'open' : 'closed'}.png`) });
+      expect.soft(geometry.layoutHeight).toBe(844);
+      expect.soft(geometry.visualHeight).toBe(420);
+      expect.soft(geometry.output.height).toBeGreaterThanOrEqual(100);
+      expect.soft(geometry.output.top).toBeGreaterThanOrEqual(geometry.controls.top - 1);
+      expect.soft(geometry.output.bottom).toBeLessThanOrEqual(geometry.controls.bottom + 1);
+      expect.soft(geometry.terminal.bottom).toBeLessThanOrEqual(geometry.interaction.top + 1);
+      expect.soft(geometry.interaction.height).toBeLessThanOrEqual(420 * .3 + 1);
+      expect.soft(geometry.send.bottom).toBeLessThanOrEqual(420);
+      for (const button of await page.locator('#interaction-choices button').all()) {
+        await button.click({ trial: true });
+        const card = await page.locator('#interaction').boundingBox(), choice = await button.boundingBox();
+        expect(choice.y).toBeGreaterThanOrEqual(card.y);
+        expect(choice.y + choice.height).toBeLessThanOrEqual(card.y + card.height + 1);
+      }
+      expect(mac.actions.some(action => ['answer', 'input', 'key'].includes(action.action))).toBe(false);
+      expect(mac.errors).toEqual([]);
+      expect(errors).toEqual([]);
+    } finally { mac.close(); }
+  });
+}
+
+test('approval viewport caps a long card without stretching a short operation', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const state = approvalViewportState();
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const mac = await pair(page, baseURL, '', { state });
+  try {
+    await expect(page.locator('#interaction')).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    const long = await approvalViewportGeometry(page);
+    console.log(`REA-1192 natural-long ${testInfo.project.name}: ${JSON.stringify(long)}`);
+    expect(long.layoutHeight).toBe(844);
+    expect(long.visualHeight).toBe(844);
+    expect(Math.abs(long.interaction.height - 844 * .3)).toBeLessThan(1);
+    expect(long.output.height).toBeGreaterThanOrEqual(100);
+    expect(long.terminal.bottom).toBeLessThanOrEqual(long.interaction.top + 1);
+    expect(await page.locator('#interaction').evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath('approval-viewport-keyboard-down.png') });
+
+    state.prompt.operation = 'Inspect generated-file-1.txt';
+    await expect(page.locator('#interaction-operation')).toHaveText(state.prompt.operation);
+    const short = await approvalViewportGeometry(page);
+    await testInfo.attach('approval-natural-height-geometry', { body: JSON.stringify({ long, short }, null, 2), contentType: 'application/json' });
+    console.log(`REA-1192 natural ${testInfo.project.name}: ${JSON.stringify({ long, short })}`);
+    await page.screenshot({ path: testInfo.outputPath('approval-viewport-short-operation.png') });
+    expect(short.interaction.height).toBeLessThan(long.interaction.height - 1);
+    expect(await page.locator('#interaction').evaluate(el => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
+    expect(short.terminal.bottom).toBeLessThanOrEqual(short.interaction.top + 1);
+    expect(short.send.bottom).toBeLessThanOrEqual(844);
+    expect(mac.errors).toEqual([]);
+    expect(errors).toEqual([]);
+  } finally { mac.close(); }
+});
+
+for (const size of [{ width: 390, height: 844 }, { width: 844, height: 390 }]) for (const keys of [false, true]) {
+  test(`approval viewport scrolls at tiny heights in ${size.width}x${size.height} with terminal keys ${keys ? 'open' : 'closed'}`, async ({ page, baseURL }, testInfo) => {
+    await page.setViewportSize(size);
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    const mac = await pair(page, baseURL, '', { state: approvalViewportState() });
+    try {
+      await expect(page.locator('#interaction')).toBeVisible();
+      if (keys) await page.locator('#keys-toggle').click();
+      await page.locator('#message').focus();
+      await resizeVisualViewport(page, 200);
+      await page.evaluate(() => document.fonts.ready);
+      const controls = page.locator('#controls'), terminal = page.locator('#terminal');
+      expect(await controls.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+      await page.locator('.output').scrollIntoViewIfNeeded();
+      const output = await approvalViewportGeometry(page);
+      await testInfo.attach('approval-tiny-output-geometry', { body: JSON.stringify(output, null, 2), contentType: 'application/json' });
+      console.log(`REA-1192 tiny-output ${testInfo.project.name} keys=${keys}: ${JSON.stringify({ size, ...output })}`);
+      await page.screenshot({ path: testInfo.outputPath(`approval-viewport-tiny-output-keys-${keys ? 'open' : 'closed'}.png`) });
+      expect(output.layoutHeight).toBe(size.height);
+      expect(output.body.width).toBe(size.width);
+      expect(output.visualHeight).toBe(200);
+      expect(output.terminal.height).toBeGreaterThanOrEqual(100);
+      expect(output.terminal.top).toBeGreaterThanOrEqual(output.controls.top - 1);
+      expect(output.terminal.bottom).toBeLessThanOrEqual(output.controls.bottom + 1);
+      expect(output.terminal.bottom).toBeLessThanOrEqual(output.interaction.top + 1);
+      await terminal.evaluate(el => { el.scrollTop = el.scrollHeight; });
+      expect(await terminal.evaluate(el => el.scrollTop)).toBeGreaterThan(0);
+      await expect(terminal).toContainText('Output line 40');
+
+      for (const button of await page.locator('#interaction-choices button').all()) {
+        await button.click({ trial: true });
+        const card = await page.locator('#interaction').boundingBox(), choice = await button.boundingBox();
+        const viewport = await controls.boundingBox();
+        expect(choice.y).toBeGreaterThanOrEqual(Math.max(card.y, viewport.y) - 1);
+        expect(choice.y + choice.height).toBeLessThanOrEqual(Math.min(card.y + card.height, viewport.y + viewport.height) + 1);
+      }
+      if (keys) {
+        await page.getByRole('button', { name: 'Up arrow', exact: true }).click({ trial: true });
+        await page.locator('#keys button').last().click({ trial: true });
+      }
+      await page.locator('#message').fill('Generated response to the terminal question');
+      await page.locator('#send').click({ trial: true });
+      const input = await approvalViewportGeometry(page), message = await page.locator('#message').boundingBox();
+      const scrollTop = await controls.evaluate(el => el.scrollTop);
+      await testInfo.attach('approval-tiny-viewport-geometry', { body: JSON.stringify({ output, input, scrollTop }, null, 2), contentType: 'application/json' });
+      console.log(`REA-1192 tiny ${testInfo.project.name} keys=${keys}: ${JSON.stringify({ size, output, input, scrollTop })}`);
+      await page.screenshot({ path: testInfo.outputPath(`approval-viewport-tiny-keys-${keys ? 'open' : 'closed'}.png`) });
+      expect(message.y).toBeGreaterThanOrEqual(input.controls.top - 1);
+      expect(message.y + message.height).toBeLessThanOrEqual(input.controls.bottom + 1);
+      expect(input.send.top).toBeGreaterThanOrEqual(input.controls.top - 1);
+      expect(input.send.bottom).toBeLessThanOrEqual(Math.min(200, input.controls.bottom) + 1);
+      expect(scrollTop).toBeGreaterThan(0);
+      expect(mac.actions.some(action => ['answer', 'input', 'key'].includes(action.action))).toBe(false);
+      expect(mac.errors).toEqual([]);
+      expect(errors).toEqual([]);
+    } finally { mac.close(); }
+  });
+}
 
 test('loading earlier output keeps the text the reader was on in place', async ({ page, baseURL }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -1248,4 +1412,333 @@ test('an old Mac without the authenticated client nonce gets a clear upgrade err
     await expect(page.locator('#error')).toContainText('Update Sigil on your Mac');
     await expect(page.locator('#controls')).toBeHidden();
   } finally { mac.close(); }
+});
+
+const webNewOptions = {
+  providers: [{ id: 'grokBuild', name: 'Grok Build', takesModel: true }, { id: 'claudeCode', name: 'Claude Code', takesModel: false },
+    { id: 'kimi', name: 'Kimi Code', takesModel: false, problem: 'Set up Kimi Code sign-in in Sigil on your Mac, then try again.' }],
+  provider: 'grokBuild', models: ['grok-4.6', 'grok-fast'], model: 'grok-4.6',
+  efforts: [{ id: '', name: 'CLI default' }, { id: 'high', name: 'High' }], effort: 'high',
+  locations: [{ name: '~/Code', folder: '/tmp/code' }], startsInWorktree: true,
+};
+const webNewProjects = [
+  { name: 'Sigil', folder: '/tmp/code/sigil', repository: true, worktreeDefault: true },
+  { name: 'Home repository', folder: '/tmp/home', repository: true, worktreeDefault: false },
+  { name: 'Notes', folder: '/tmp/notes', repository: false },
+];
+function webNewState() {
+  return { tabs: [{ id: 'one', title: 'Synthetic task', status: 'idle', provider: 'grokBuild', sessionID: 'fixture-session', cwd: '/tmp/code/sigil' }],
+    selectedTabID: 'one', terminal: 'Synthetic output', capabilities: ['sessionOps'] };
+}
+
+test('REA-1206 New sheet sends advertised choices and shows repository defaults at phone size', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  const mac = await pair(page, baseURL, undefined, { state: webNewState(), sessionOptions: webNewOptions, projects: webNewProjects });
+  try {
+    await page.getByRole('button', { name: 'New session', exact: true }).click();
+    const dialog = page.locator('#project-dialog'); await expect(dialog).toBeVisible();
+    await expect(page.getByLabel('Model', { exact: true })).toHaveValue('grok-4.6');
+    for (const label of ['Model', 'Effort']) expect((await page.getByLabel(label, { exact: true }).boundingBox()).height).toBeGreaterThanOrEqual(44);
+    expect((await page.locator('#worktree-field').boundingBox()).height).toBeGreaterThanOrEqual(44);
+    const worktree = page.getByRole('switch', { name: 'Start in a new worktree' });
+    await expect(worktree).toBeChecked();
+    await page.screenshot({ path: testInfo.outputPath('rea-1206-new-session.png'), animations: 'disabled' });
+    await testInfo.attach('New session · 390×844', { path: testInfo.outputPath('rea-1206-new-session.png'), contentType: 'image/png' });
+    await page.getByRole('button', { name: 'Home repository /tmp/home' }).click();
+    await expect(worktree).not.toBeChecked();
+    await worktree.check();
+    await page.getByLabel('Model', { exact: true }).selectOption('grok-fast');
+    await page.getByLabel('Effort', { exact: true }).selectOption('');
+    await page.getByRole('button', { name: 'Start session', exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    expect(mac.actions.filter(request => request.action === 'new')).toMatchObject([
+      { text: '/tmp/home', provider: 'grokBuild', model: 'grok-fast', effort: '', worktree: true },
+    ]);
+    await page.getByRole('button', { name: 'New session', exact: true }).click();
+    await page.getByLabel('CLI', { exact: true }).selectOption('kimi');
+    await expect(page.getByRole('button', { name: 'Start session', exact: true })).toBeDisabled();
+    await expect(page.locator('#provider-problem')).toContainText('Set up Kimi Code');
+    await page.getByLabel('CLI', { exact: true }).selectOption('claudeCode');
+    await expect(page.getByLabel('Model', { exact: true })).not.toBeVisible();
+    await page.getByRole('button', { name: 'Notes /tmp/notes' }).click();
+    await expect(worktree).not.toBeVisible();
+    await page.getByRole('button', { name: 'Start session', exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    const last = mac.actions.filter(request => request.action === 'new').at(-1);
+    expect(last.provider).toBe('claudeCode'); expect(last.model).toBeUndefined(); expect(last.effort).toBeUndefined(); expect(last.worktree).toBeUndefined();
+    expect(errors).toEqual([]);
+  } finally { mac.close(); }
+});
+
+test('REA-1206 New project validates, adopts an existing folder and selects without starting', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const existing = { name: 'existing', folder: '/tmp/code/existing', repository: true, worktreeDefault: false };
+  const options = { state: webNewState(), sessionOptions: webNewOptions, projects: webNewProjects, createProject() { options.projects = [existing, ...webNewProjects]; return existing; } };
+  const mac = await pair(page, baseURL, undefined, options);
+  try {
+    await page.getByRole('button', { name: 'New session', exact: true }).click();
+    await page.getByRole('button', { name: 'New project', exact: true }).click();
+    await page.getByLabel('Folder name').fill('../escape');
+    await expect(page.getByRole('button', { name: 'Create project', exact: true })).toBeDisabled();
+    await page.getByLabel('Folder name').fill('existing');
+    await expect(page.getByLabel('Location', { exact: true })).toHaveValue('/tmp/code');
+    expect((await page.getByLabel('Location', { exact: true }).boundingBox()).height).toBeGreaterThanOrEqual(44);
+    await page.screenshot({ path: testInfo.outputPath('rea-1206-new-project.png'), animations: 'disabled' });
+    await testInfo.attach('New project · 390×844', { path: testInfo.outputPath('rea-1206-new-project.png'), contentType: 'image/png' });
+    await page.getByRole('button', { name: 'Back', exact: true }).click();
+    expect(mac.actions.filter(request => request.action === 'createProject')).toHaveLength(0);
+    await page.getByRole('button', { name: 'New project', exact: true }).click();
+    await page.getByLabel('Folder name').fill(' existing ');
+    await page.getByRole('button', { name: 'Create project', exact: true }).click();
+    await expect(page.locator('#new-project-form')).not.toBeVisible();
+    await expect(page.locator('#project-list button').first()).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('switch')).not.toBeChecked();
+    expect(mac.actions.filter(request => request.action === 'createProject')).toMatchObject([{ text: '/tmp/code', name: 'existing' }]);
+    expect(mac.actions.filter(request => request.action === 'new')).toHaveLength(0);
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    expect(mac.actions.filter(request => request.action === 'new')).toHaveLength(0);
+  } finally { mac.close(); }
+});
+
+test('REA-1206 a lost start stays blocked after reconnect and reload without matching by folder or title', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  let hold = true;
+  const mac = await pair(page, baseURL, undefined, { state: webNewState(), sessionOptions: webNewOptions, projects: webNewProjects,
+    onRequest(request) { if (hold && request.action === 'new') return false; } });
+  try {
+    await page.getByRole('button', { name: 'New session', exact: true }).click();
+    await page.getByRole('button', { name: 'Start session', exact: true }).click();
+    await expect(page.locator('#new-outcome')).toContainText('Waiting for the Mac');
+    await expect.poll(() => mac.actions.filter(request => request.action === 'new').length).toBe(1);
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.reload(); hold = false;
+    await expect(page.locator('#status')).toHaveText('Connected');
+    await page.getByRole('button', { name: 'New session', exact: true }).click();
+    await expect(page.locator('#new-outcome')).toContainText('session start result is unknown');
+    await expect(page.getByRole('button', { name: 'Start session', exact: true })).toBeDisabled();
+    await expect(page.getByLabel('CLI', { exact: true })).toBeDisabled();
+    await page.screenshot({ path: testInfo.outputPath('rea-1206-unknown-start.png'), animations: 'disabled' });
+    await testInfo.attach('Unknown start · 390×844', { path: testInfo.outputPath('rea-1206-unknown-start.png'), contentType: 'image/png' });
+    expect(mac.actions.filter(request => request.action === 'new')).toHaveLength(1);
+  } finally { mac.close(); }
+});
+
+test('REA-1206 a lost project result uses exact authoritative project pages without another create', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  let hold = true;
+  const created = { name: 'fresh', folder: '/tmp/code/fresh', repository: false };
+  const options = { state: webNewState(), sessionOptions: webNewOptions, projects: webNewProjects,
+    onRequest(request) { if (hold && request.action === 'createProject') return false; } };
+  const mac = await pair(page, baseURL, undefined, options);
+  try {
+    await page.getByRole('button', { name: 'New session', exact: true }).click();
+    await page.getByRole('button', { name: 'New project', exact: true }).click();
+    await page.getByLabel('Folder name').fill('fresh');
+    await page.getByRole('button', { name: 'Create project', exact: true }).click();
+    await expect(page.locator('#new-outcome')).toContainText('Waiting for the Mac');
+    await expect.poll(() => mac.actions.filter(request => request.action === 'createProject').length).toBe(1);
+    await page.reload(); hold = false;
+    await expect(page.locator('#status')).toHaveText('Connected');
+    await page.getByRole('button', { name: 'New session', exact: true }).click();
+    options.projects = [{ ...created, folder: '/other/fresh' }];
+    await page.getByRole('button', { name: 'Check projects', exact: true }).click();
+    await expect(page.locator('#project-error')).toContainText('exact folder is not');
+    await expect(page.getByRole('button', { name: 'Start session', exact: true })).toBeDisabled();
+    options.projects = [created];
+    await page.getByRole('button', { name: 'Check projects', exact: true }).click();
+    await expect(page.locator('#new-outcome')).not.toBeVisible();
+    await expect(page.getByRole('button', { name: 'Start session', exact: true })).toBeEnabled();
+    expect(mac.actions.filter(request => request.action === 'createProject')).toHaveLength(1);
+  } finally { mac.close(); }
+});
+
+test('REA-1206 Cancel during creation does not cancel dispatch or reopen the sheet on a late reply', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const created = { name: 'fresh', folder: '/tmp/code/fresh', repository: false };
+  const options = { state: webNewState(), sessionOptions: webNewOptions, projects: webNewProjects,
+    async onRequest(request) { if (request.action === 'createProject') await gate; },
+    createProject() { options.projects = [created]; return created; } };
+  const mac = await pair(page, baseURL, undefined, options);
+  try {
+    await page.getByRole('button', { name: 'New session', exact: true }).click();
+    await page.getByRole('button', { name: 'New project', exact: true }).click();
+    await page.getByLabel('Folder name').fill('fresh');
+    await page.getByRole('button', { name: 'Create project', exact: true }).click();
+    await expect(page.locator('#new-outcome')).toContainText('Waiting for the Mac');
+    await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeDisabled();
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    release();
+    await expect(page.getByRole('button', { name: 'New session', exact: true })).toBeEnabled();
+    await expect(page.locator('#project-dialog')).not.toBeVisible();
+    expect(mac.actions.filter(request => request.action === 'createProject')).toHaveLength(1);
+    expect(mac.actions.filter(request => request.action === 'projects')).toHaveLength(1);
+    expect(mac.actions.filter(request => request.action === 'new')).toHaveLength(0);
+  } finally { release(); mac.close(); }
+});
+
+test('REA-1206 a pre-existing second tab cannot repeat a start after taking the connection', async ({ page, baseURL }) => {
+  const frozen = new Date('2026-10-14T00:00:00Z'), paused = new Date('2026-10-14T00:01:00Z');
+  await page.clock.install({ time: frozen }); await page.clock.pauseAt(paused);
+  const mac = await pair(page, baseURL, undefined, { state: webNewState(), sessionOptions: { ...webNewOptions, model: '' }, projects: webNewProjects,
+    onRequest(request) { if (request.action === 'new') return false; } });
+  const second = await page.context().newPage();
+  try {
+    // Playwright's clock is shared by pages in this isolated browser context.
+    await second.goto(baseURL); await expect(second.locator('#status')).toHaveText('Connected');
+    await expect(page.getByRole('button', { name: 'New session', exact: true })).toBeDisabled();
+    await page.clock.runFor(500); await expect(page.locator('#status')).toHaveText('Connected');
+    await expect(second.getByRole('button', { name: 'New session', exact: true })).toBeDisabled();
+    await page.getByRole('button', { name: 'New session', exact: true }).click();
+    await expect(page.getByLabel('Model', { exact: true })).toHaveValue('');
+    await page.getByRole('button', { name: 'Start session', exact: true }).click();
+    await expect.poll(() => mac.actions.filter(request => request.action === 'new').length).toBe(1);
+    await second.clock.runFor(500); await expect(second.locator('#status')).toHaveText('Connected');
+    await second.getByRole('button', { name: 'New session', exact: true }).click();
+    await expect(second.locator('#new-outcome')).toContainText('session start result is unknown');
+    await expect(second.getByRole('button', { name: 'Start session', exact: true })).toBeDisabled();
+    expect(mac.actions.filter(request => request.action === 'new')).toHaveLength(1);
+    expect(mac.actions.find(request => request.action === 'new').model).toBe('');
+  } finally { await second.close(); mac.close(); }
+});
+
+test('REA-1205 session metadata and guarded actions at 390x844', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const state = { tabs: [
+    { id: 'one', title: 'Review session actions', status: 'working', provider: 'grokBuild', providerName: 'Grok Build', folder: 'sigil', cwd: '/tmp/sigil', sessionID: 'native-one', canArchive: true, capabilities: { rename: true, archive: true } },
+    { id: 'two', title: 'Check reconnect behavior', status: 'unknown', provider: 'claudeCode', providerName: 'Claude Code', folder: 'companion', cwd: '/tmp/companion', sessionID: 'native-two', canArchive: true, capabilities: { rename: true, archive: true } },
+    { id: 'three', title: 'Read the release notes', status: 'idle', providerName: 'Kimi Code', folder: 'docs', canArchive: false, capabilities: { rename: false, archive: false } },
+  ], selectedTabID: 'two', terminal: 'Synthetic session output. No provider CLI is running.', mac: 'Fixture Mac', capabilities: ['sessionOps'] };
+  const mac = await pair(page, baseURL, undefined, { state, onRequest(request) {
+    if (request.action === 'rename') state.tabs.find(tab => tab.id === request.tabID).title = request.name || 'Review session actions';
+    if (['close', 'archive'].includes(request.action)) {
+      state.tabs = state.tabs.filter(tab => tab.id !== request.tabID);
+      if (state.selectedTabID === request.tabID) state.selectedTabID = state.tabs[0]?.id;
+    }
+  } });
+  const capture = async name => {
+    const path = testInfo.outputPath(`session-actions-${name}-390x844.png`);
+    await page.screenshot({ path, animations: 'disabled' }); await testInfo.attach(name, { path, contentType: 'image/png' });
+  };
+  const more = title => page.getByRole('button', { name: `More actions for ${title}`, exact: true });
+  try {
+    await page.getByRole('button', { name: 'Browse open and saved chats' }).click();
+    await expect(page.locator('.session-metadata')).toHaveText(['Grok Build · sigil', 'Claude Code · companion', 'Kimi Code · docs']);
+    for (const button of await page.locator('[data-session-more]').all()) {
+      const box = await button.boundingBox(); expect(box.width).toBeGreaterThanOrEqual(44); expect(box.height).toBeGreaterThanOrEqual(44);
+    }
+    await capture('list');
+    // An unchanged state poll must not detach the row's action handler.
+    await expect.poll(() => mac.actions.filter(r => r.action === 'state').length).toBeGreaterThanOrEqual(1);
+    await more('Review session actions').click(); await capture('menu');
+    await page.locator('#session-rename').click();
+    await page.locator('#session-name').fill('😀'.repeat(21));
+    await expect(page.locator('#session-action-accept')).toBeDisabled();
+    await page.locator('#session-name').fill('Verify remote session actions'); await capture('rename');
+    await page.locator('#session-action-accept').click();
+    await expect(more('Verify remote session actions')).toBeVisible();
+    await expect(page.locator('#sessions-error')).toBeHidden();
+    await expect(page.locator('#session-action-dialog')).toBeHidden();
+    expect(mac.actions.filter(r => r.action === 'rename').map(r => [r.tabID, r.name])).toEqual([['one', 'Verify remote session actions']]);
+    await more('Read the release notes').click();
+    await expect(page.locator('#session-archive')).toBeHidden(); await expect(page.locator('#session-rename')).toBeDisabled();
+    await page.locator('#session-action-cancel').click();
+    await more('Check reconnect behavior').click(); await page.locator('#session-archive').click();
+    await expect(page.locator('#session-action-detail')).toContainText('stops all its open tabs on your Mac, including any that are working or whose status is unknown.');
+    expect(mac.actions.filter(r => r.action === 'archive')).toHaveLength(0);
+    await page.locator('#session-action-accept').click();
+    await expect(more('Check reconnect behavior')).toHaveCount(0);
+    await expect(page.locator('#tabs')).toHaveValue('one');
+    await more('Verify remote session actions').click(); await page.locator('#session-close-action').click();
+    await expect(page.locator('#session-action-detail')).toHaveText('It is still working. Closing stops it.');
+    await capture('close'); await page.locator('#session-action-cancel').click();
+    expect(mac.actions.filter(r => r.action === 'close')).toHaveLength(0);
+    await more('Verify remote session actions').click(); await page.locator('#session-close-action').click();
+    await page.locator('#session-action-accept').click();
+    await expect(page.locator('#tabs')).toHaveValue('three');
+    expect(mac.actions.filter(r => ['archive', 'close'].includes(r.action)).map(r => [r.action, r.tabID])).toEqual([['archive', 'two'], ['close', 'one']]);
+    state.capabilities = [];
+    await expect(page.locator('[data-session-more]')).toHaveCount(0);
+    expect(mac.errors).toEqual([]);
+  } finally { mac.close(); }
+});
+
+test('REA-1205 rejected rename retains edits and cannot overwrite a newer host name', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const state = { tabs: [{ id: 'one', title: 'Original title', status: 'idle', providerName: 'Codex', folder: 'sigil', capabilities: { rename: true } }],
+    selectedTabID: 'one', terminal: 'Synthetic output.', mac: 'Fixture Mac', capabilities: ['sessionOps'] };
+  const mac = await pair(page, baseURL, undefined, { state, rejectAction: 'rename', onRequest(request) {
+    if (request.action === 'rename') state.tabs[0].title = 'Newer host name';
+  } });
+  try {
+    await page.getByRole('button', { name: 'Browse open and saved chats' }).click();
+    await page.getByRole('button', { name: 'More actions for Original title' }).click();
+    await page.locator('#session-rename').click(); await page.locator('#session-name').fill('My retained edit');
+    await page.locator('#session-action-accept').click();
+    await expect(page.locator('#session-name')).toHaveValue('My retained edit');
+    await expect(page.locator('#session-action-error')).toContainText('This session changed');
+    await expect(page.locator('#session-action-accept')).toBeDisabled();
+    expect(mac.actions.filter(r => r.action === 'rename')).toHaveLength(1);
+    expect(mac.errors).toEqual([]);
+  } finally { mac.close(); }
+});
+
+test('REA-1205 review safeguards remain truthful through dispatch and live state changes', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const shared = { provider: 'grokBuild', providerName: 'Grok Build', folder: 'sigil', cwd: '/tmp/sigil', sessionID: 'shared-native', canArchive: true, capabilities: { rename: true, archive: true } };
+  const state = { tabs: [
+    { ...shared, id: 'one', title: 'Idle copy', status: 'idle' },
+    { ...shared, id: 'two', title: 'Working copy', status: 'working' },
+    { id: 'three', title: 'Reference task', status: 'idle', providerName: 'Claude Code', folder: 'docs', capabilities: { rename: true } },
+  ], selectedTabID: 'one', terminal: 'Generated review fixture.', mac: 'Fixture Mac', capabilities: ['sessionOps'] };
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const mac = await pair(page, baseURL, undefined, { state, async onRequest(request) {
+    if (request.action === 'archive') {
+      await held;
+      state.tabs = state.tabs.filter(tab => tab.sessionID !== 'shared-native');
+      state.selectedTabID = 'three';
+    }
+  } });
+  const capture = async name => {
+    const path = testInfo.outputPath(`session-actions-${name}-390x844.png`);
+    await page.screenshot({ path, animations: 'disabled' }); await testInfo.attach(name, { path, contentType: 'image/png' });
+  };
+  const more = title => page.getByRole('button', { name: `More actions for ${title}`, exact: true });
+  try {
+    await page.getByRole('button', { name: 'Browse open and saved chats' }).click();
+    await more('Idle copy').click(); await page.locator('#session-archive').click();
+    await expect(page.locator('#session-action-detail')).toContainText('stops all its open tabs');
+    await expect(page.locator('#session-action-detail')).toContainText('working or whose status is unknown');
+    expect(mac.actions.filter(r => r.action === 'archive')).toHaveLength(0);
+    await capture('archive'); await page.locator('#session-action-accept').click();
+    await expect.poll(() => mac.actions.filter(r => r.action === 'archive').length).toBe(1);
+    await expect(page.locator('#session-action-cancel')).toBeDisabled();
+    await expect(page.locator('#session-action-accept')).toHaveText('Archiving…');
+    await page.keyboard.press('Escape'); await expect(page.locator('#session-action-dialog')).toBeVisible();
+    await capture('pending'); release();
+    await expect(page.locator('#session-action-dialog')).toBeHidden();
+    await expect(more('Idle copy')).toHaveCount(0); await expect(more('Working copy')).toHaveCount(0);
+    await expect(page.locator('#tabs')).toHaveValue('three');
+    await more('Reference task').click(); await page.locator('#session-rename').click();
+    await page.locator('#session-name').fill('Retained review edit');
+    state.tabs[0].capabilities.rename = false;
+    await expect(page.locator('#session-action-error')).toContainText('Renaming is no longer available');
+    await expect(page.locator('#session-action-accept')).toBeDisabled();
+    await expect(page.locator('#session-name')).toHaveValue('Retained review edit');
+    state.tabs[0].capabilities.rename = true;
+    await expect(page.locator('#session-rename')).toBeEnabled();
+    await expect(page.locator('#session-action-accept')).toBeDisabled();
+    await page.locator('#session-action-cancel').click();
+    await more('Reference task').click(); await page.locator('#session-close-action').click();
+    state.tabs[0].status = 'working';
+    await expect(page.locator('#session-action-error')).toContainText('activity changed');
+    state.tabs[0].status = 'idle';
+    await expect(page.locator('#session-list button').filter({ hasText: 'Reference task' })).toContainText('Ready');
+    await expect(page.locator('#session-action-accept')).toBeDisabled();
+    expect(mac.actions.filter(r => r.action === 'close' || r.action === 'rename')).toHaveLength(0);
+    expect(mac.errors).toEqual([]);
+  } finally { release(); mac.close(); }
 });

@@ -119,4 +119,104 @@ struct TerminalClipboardTests {
 
         #expect(await TerminalTestSupport.waitUntil { title == "Working" })
     }
+
+    @Test(arguments: [false, true], ["copy-folder", "drop-folder", "drop-mixed"])
+    func finderFolderAndMixedPathsStayLiteral(bracketedPaste: Bool, action: String) async throws {
+        let controller = TerminalController()
+        let capture = try await TerminalTestSupport.startInputCapture(
+            in: controller, bracketedPaste: bracketedPaste)
+        defer { controller.terminateAndWait() }
+        let view = try #require(controller.view as? GrokProcessTerminalView)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "sigil-paste-folder-\(UUID().uuidString)", isDirectory: true
+        ).standardizedFileURL
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let folder = root.appendingPathComponent("-owner's album;$(touch marker)", isDirectory: true)
+        let photo = root.appendingPathComponent("my photo.png")
+        let notes = root.appendingPathComponent("notes.txt")
+        let link = root.appendingPathComponent("folder link", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: photo)
+        try Data("hi".utf8).write(to: notes)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: folder)
+        // Finder's text rendition is the item name, not a usable absolute path.
+        let items = action == "drop-mixed" ? [folder, photo, link, notes] : [folder]
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        #expect(pasteboard.writeObjects(items.map { $0 as NSURL }))
+        pasteboard.setString(items.map(\.lastPathComponent).joined(separator: " "), forType: .string)
+
+        let drag = FinderFolderDrag(pasteboard: pasteboard)
+        #expect(view.draggingEntered(drag) == .copy)
+        #expect(view.draggingUpdated(drag) == .copy)
+        #expect(view.prepareForDragOperation(drag))
+        if action != "copy-folder" {
+            #expect(view.performDragOperation(drag))
+        } else {
+            view.paste(from: pasteboard)
+        }
+
+        let input = await TerminalTestSupport.capturedInput(capture, from: controller)
+        let text = TerminalDrop.pasteText(for: items.map(\.path))
+        let expected = bracketedPaste ? "\u{1b}[200~" + text + "\u{1b}[201~" : text
+        #expect(input == Array(expected.utf8))
+        #expect(!input.contains(0x0A) && !input.contains(0x0D))
+    }
+
+    @Test func unsafeFinderFolderDoesNotFallBackToItsTextName() async throws {
+        let controller = TerminalController()
+        let capture = try await TerminalTestSupport.startInputCapture(in: controller, bracketedPaste: true)
+        defer { controller.terminateAndWait() }
+        let view = try #require(controller.view as? GrokProcessTerminalView)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "sigil-paste-unsafe-folder-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let folder = root.appendingPathComponent("album\n\u{1b}[201~\r", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        #expect(pasteboard.writeObjects([folder as NSURL]))
+        pasteboard.setString(folder.lastPathComponent, forType: .string)
+
+        let drag = FinderFolderDrag(pasteboard: pasteboard)
+        #expect(view.draggingEntered(drag).isEmpty)
+        #expect(!view.prepareForDragOperation(drag))
+        #expect(!view.performDragOperation(drag))
+        view.paste(from: pasteboard)
+
+        #expect(await TerminalTestSupport.capturedInput(capture, from: controller).isEmpty)
+    }
+}
+
+/// Exercises the real drop handlers with a named pasteboard, without a window or mouse input.
+@MainActor
+private final class FinderFolderDrag: NSObject, NSDraggingInfo {
+    let draggingPasteboard: NSPasteboard
+    var draggingDestinationWindow: NSWindow? { nil }
+    var draggingSourceOperationMask: NSDragOperation { .copy }
+    var draggingLocation: NSPoint { .zero }
+    var draggedImageLocation: NSPoint { .zero }
+    nonisolated var draggedImage: NSImage? { nil }
+    var draggingSource: Any? { nil }
+    var draggingSequenceNumber: Int { 1 }
+    var draggingFormation: NSDraggingFormation = .none
+    var animatesToDestination = false
+    var numberOfValidItemsForDrop = 0
+    var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+
+    init(pasteboard: NSPasteboard) {
+        draggingPasteboard = pasteboard
+    }
+
+    func slideDraggedImage(to screenPoint: NSPoint) {}
+    nonisolated override func namesOfPromisedFilesDropped(atDestination dropDestination: URL) -> [String]? { nil }
+    func resetSpringLoading() {}
+    func enumerateDraggingItems(
+        options: NSDraggingItemEnumerationOptions, for view: NSView?, classes classArray: [AnyClass],
+        searchOptions: [NSPasteboard.ReadingOptionKey: Any],
+        using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void
+    ) {}
 }

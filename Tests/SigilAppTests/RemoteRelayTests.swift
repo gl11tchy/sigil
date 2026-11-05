@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import SigilKit
 import Testing
@@ -6,6 +7,41 @@ import Testing
 
 @Suite(.serialized)
 struct RemoteRelayTests {
+    @Test(arguments: [false, true])
+    @MainActor func allocation429ShowsBusyAndRecoversWithoutLosingPairing(paired: Bool) async throws {
+        let relay = try await RelayFixture(allocationStatus: 429)
+        defer { relay.stop() }
+        let model = AppModel()
+        let store = InMemoryRemotePairingStore()
+        let device = RemoteCrypto.randomKey()
+        if paired {
+            store.save(RemotePairing(origin: relay.origin, deviceKey: device, ticket: RemoteCrypto.randomKey()))
+        }
+        let remote = RemoteControl(store: store)
+        defer { remote.stop() }
+        remote.start(urlText: relay.origin, model: model)
+        let busy = "The relay is busy. Retrying."
+        try await waitUntil { remote.status == busy && remote.error == busy }
+        try #require(remote.status == busy && remote.error == busy)
+        #expect(remote.isEnabled && remote.isPaired == paired && remote.pairingURL == nil)
+        if paired {
+            #expect(store.load()?.deviceKey == device)
+        }
+
+        try relay.setAllocationStatus(503)
+        try await waitUntil(for: .seconds(12)) { remote.status == "Reconnecting…" && remote.error != busy }
+        try #require(remote.status == "Reconnecting…" && remote.error != busy)
+        try relay.setAllocationStatus(201)
+        let ready = paired ? "Phone disconnected" : "Scan to connect"
+        try await waitUntil(for: .seconds(12)) { remote.status == ready }
+        #expect(remote.status == ready && remote.error == nil && remote.isPaired == paired)
+        if paired {
+            #expect(store.load()?.deviceKey == device)
+        } else {
+            #expect(remote.pairingURL != nil)
+        }
+    }
+
     @Test @MainActor func disconnectTellsTheConnectedPhoneItsPairingIsRevoked() async throws {
         let relay = try await RelayFixture()
         defer { relay.stop() }
@@ -18,6 +54,52 @@ struct RemoteRelayTests {
         remote.stop(revoke: true)
         let frame = try await paired.phone.receive()
         #expect(frame["error"] == "unauthorized")
+    }
+
+    @Test @MainActor func disconnectWithNoPhoneClearsLocallyAndSendsTheRelayRevoke() async throws {
+        let relay = try await RelayFixture(captureHostClose: true)
+        defer { relay.stop() }
+        let store = InMemoryRemotePairingStore()
+        let ticket = RemoteCrypto.randomKey()
+        store.save(RemotePairing(origin: relay.origin, deviceKey: RemoteCrypto.randomKey(), ticket: ticket))
+        let remote = RemoteControl(store: store)
+        defer { remote.stop() }
+        remote.resumeIfPaired(model: AppModel())
+        try await waitUntil { remote.status == "Phone disconnected" }
+        let closedBefore = relay.hostCloseCount
+
+        remote.stop(revoke: true)
+        // The relay sends no acknowledgement. These are immediate local facts.
+        #expect(store.load() == nil)
+        #expect(!remote.isEnabled && !remote.isPaired && remote.status == "Off")
+        try await waitUntil { relay.hostCloseCount > closedBefore }
+
+        let phone = try RelayPhone(relay: relay)
+        defer { phone.close() }
+        let welcome = try await phone.receive()
+        let routeKey = try #require(welcome["route"])
+        let envelope = try RemoteCrypto.seal(["ticket": ticket], key: routeKey, direction: "relay-phone")
+        try await phone.send(["route": envelope])
+        let refusal = try await phone.receive()
+        #expect(refusal["error"] == "unauthorized")
+    }
+
+    @Test @MainActor func revokeWireOrderKeepsTheLegacyConnectedPhoneRefusal() throws {
+        let frames = RemoteControl.revocationFrames(peer: "generated-peer")
+        #expect(frames.count == 2)
+        let encoded = try frames.map { try JSONEncoder().encode($0) }
+        let legacyData = try #require(encoded.first)
+        let hintData = try #require(encoded.last)
+        let legacyObject = try JSONSerialization.jsonObject(with: legacyData)
+        let legacy = try #require(legacyObject as? [String: String])
+        #expect(legacy == ["peer": "generated-peer", "error": "unauthorized"])
+        let hintObject = try JSONSerialization.jsonObject(with: hintData)
+        let hint = try #require(hintObject as? [String: Bool])
+        #expect(hint == ["revoke": true])
+        let offline = RemoteControl.revocationFrames(peer: nil)
+        #expect(offline.count == 1)
+        let offlineFrame = try #require(offline.first)
+        #expect(try JSONEncoder().encode(offlineFrame) == hintData)
     }
 
     @Test @MainActor func pairingThatCannotBeSavedIsReported() async throws {
@@ -163,16 +245,39 @@ final class RelayFixture {
 
     /// Pushes the relay would send to Apple, one JSON line each, when the fixture captures them.
     var apnsCapture: URL { root.appendingPathComponent("apns.jsonl") }
+    var roomCapture: URL { root.appendingPathComponent("rooms.txt") }
+    var hostCloseCount: Int {
+        let text = (try? String(contentsOf: root.appendingPathComponent("host-closed.txt"), encoding: .utf8)) ?? ""
+        return text.split(separator: "\n").count
+    }
 
-    init(captureAPNs: Bool = false) async throws {
+    init(captureAPNs: Bool = false, allocationStatus: Int? = nil, captureHostClose: Bool = false) async throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let portFile = root.appendingPathComponent("port")
+        var environment: [String: String] =
+            captureAPNs
+            ? [
+                "SIGIL_TEST_APNS_CAPTURE": root.appendingPathComponent("apns.jsonl").path,
+                "SIGIL_TEST_ROOM_CAPTURE": root.appendingPathComponent("rooms.txt").path,
+            ] : [:]
+        if captureHostClose {
+            environment["SIGIL_TEST_HOST_CLOSE_CAPTURE"] = root.appendingPathComponent("host-closed.txt").path
+        }
+        if let allocationStatus {
+            try Data(String(allocationStatus).utf8).write(
+                to: root.appendingPathComponent("allocation-status"), options: .atomic)
+            environment["SIGIL_TEST_ALLOCATION_STATUS"] = root.appendingPathComponent("allocation-status").path
+        }
         process = try await Self.launch(
             [repo.appendingPathComponent("Sidereal/test/relay-fixture.mjs").path], portFile: portFile,
-            environment: captureAPNs ? ["SIGIL_TEST_APNS_CAPTURE": root.appendingPathComponent("apns.jsonl").path] : [:]
+            environment: environment
         )
         origin = "http://127.0.0.1:\(try String(contentsOf: portFile, encoding: .utf8))"
+    }
+
+    func setAllocationStatus(_ status: Int) throws {
+        try Data(String(status).utf8).write(to: root.appendingPathComponent("allocation-status"), options: .atomic)
     }
 
     /// Replaces the relay on the same port. Every room is gone and the host is
@@ -260,13 +365,17 @@ final class RelayPhone {
     private let socket: URLSessionWebSocketTask
     private let timeout: Task<Void, Never>
 
-    init(relay: RelayFixture) throws {
-        var endpoint = try #require(URLComponents(string: relay.origin))
+    convenience init(relay: RelayFixture) throws {
+        try self.init(origin: relay.origin, phoneOrigin: relay.phoneOrigin)
+    }
+
+    init(origin: String, phoneOrigin: String = "http://localhost:3099") throws {
+        var endpoint = try #require(URLComponents(string: origin))
         endpoint.scheme = "ws"
         endpoint.path = "/connect"
         endpoint.queryItems = [URLQueryItem(name: "role", value: "phone")]
         var request = URLRequest(url: try #require(endpoint.url))
-        request.setValue(relay.phoneOrigin, forHTTPHeaderField: "Origin")
+        request.setValue(phoneOrigin, forHTTPHeaderField: "Origin")
         let socket = network.webSocketTask(with: request)
         self.socket = socket
         socket.resume()
@@ -427,6 +536,9 @@ struct RemoteAlertDeliveryTests {
             RemoteRequest(challenge: paired.challenge, sequence: 4, action: "activity", tabID: id, text: activityToken),
             key: paired.device)
         #expect(activity.ok)
+        // Observe READY after the consumers become eligible, before the
+        // generated prompt. Disabled output no longer supplies their baseline.
+        remote.noteTab(tab, model: fixture.model, suppressAlerts: true)
         // The phone leaves; from now on the Mac has to push.
         paired.phone.close()
         for _ in 0..<100 {
@@ -464,9 +576,15 @@ struct RemoteAlertDeliveryTests {
             let payload: Payload
         }
         let captured = try lines.map { try JSONDecoder().decode(Captured.self, from: Data($0.utf8)) }
+        // Pairing retires the QR room. Use the fixture's actual replacement
+        // allocation, keeping an exact assertion on the room/tab namespace.
+        let rooms = try String(contentsOf: relay.roomCapture, encoding: .utf8).split(separator: "\n")
+        let room = try #require(rooms.last)
+        let namespace = try JSONEncoder().encode([String(room), id])
+        let collapseID = SHA256.hash(data: namespace).map { String(format: "%02x", $0) }.joined()
         var alerts: [RemoteAlert] = []
         for entry in captured where entry.pushType == "alert" {
-            #expect(entry.token == token && entry.environment == "development" && entry.collapseId == id)
+            #expect(entry.token == token && entry.environment == "development" && entry.collapseId == collapseID)
             alerts.append(
                 try RemoteCrypto.open(
                     try #require(entry.payload.sigil?.data), key: paired.device, direction: RemoteAlert.direction))

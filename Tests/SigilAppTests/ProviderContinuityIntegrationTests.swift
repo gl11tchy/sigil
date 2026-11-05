@@ -8,6 +8,26 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct ProviderContinuityIntegrationTests {
+    @Test func aValidatedLateCodexLinkAttachesLifecycleAndReportsItToThePhone() async throws {
+        let fixture = try CodexBindingFixture()
+        defer { fixture.cleanup() }
+        defer { fixture.store.stop() }
+        let tab = try await fixture.newTab()
+        tab.noteTurnStarted()
+        let native = UUID().uuidString.lowercased()
+        try fixture.data(native).write(to: fixture.file(native))
+        await fixture.store.reload()
+        let session = try #require(fixture.store.sessions.first { $0.nativeSessionID == native })
+        // The existing explicit user-link action validates this generated file;
+        // no process inventory or cwd/time guess supplies identity.
+        #expect(await fixture.model.linkCodexSession(session, to: tab.id))
+        #expect(tab.nativeSessionID == native)
+        #expect(tab.capabilities.lifecycle)
+        #expect(tab.isWatchingForCompletion)
+        let phone = RemoteCommands.snapshot(fixture.model).tabs.first { $0.id == tab.id.uuidString }
+        #expect(phone?.capabilities?.lifecycle == true)
+    }
+
     @Test(arguments: [CLIProvider.claudeCode, .codex])
     func nativeConversationReopensRestoresAndKeepsItsProviderData(provider: CLIProvider) async throws {
         let fixture = try ContinuityFixture(provider: provider)

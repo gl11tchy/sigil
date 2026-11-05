@@ -24,12 +24,27 @@ queued. Reconnect does not retry commands. A lost acknowledgement means the user
 must inspect the terminal before sending again. A successful reply confirms
 input dispatch, not provider acceptance or completion.
 
+Send reserves a finite background task before uploading. If the app goes to the
+background during that send, it keeps the same connection until the send settles.
+With no send, it closes immediately. Returning before completion keeps that send
+and connection. If iOS refuses or expires the allowance, or a reply is lost, the
+app retains unsent work and says the send may be incomplete. Inspect the terminal
+before sending again: input and Enter are never automatically replayed.
+Background execution time is controlled by iOS and is not guaranteed.
+
 More than one Mac can be paired. Pairings, cached screens, drafts, and attachments
 stay separate. A notification names its Mac; a forgotten Mac cannot redirect a
 notification into the current Mac's session. Restored drafts move to a new tab only
 when provider, native conversation ID, and canonical project all match.
 
 ## Terminal controls and alerts
+
+The eight terminal keys are unavailable while a request is busy. Stop stays
+available during a send, even before the provider starts working. Stop cancels
+remaining upload/input/Enter stages; an already transmitted request still needs
+its receipt or deadline. The incomplete-send warning and draft remain. Confirmed
+full-file receipts remove only those attachments, while partial uploads and newer
+work remain. Inspect the terminal before sending again; nothing is replayed.
 
 Sigil has no verified approval response broker connected to the owned terminal session.
 Parsed menus appear as **Terminal controls**, with the available operation and
@@ -87,6 +102,9 @@ create and remove their own simulator. They never use a personal pairing or paid
 provider session. The native gate verifies `Sigil.app`, `SigilNotifications.appex`,
 and `SigilWidgets.appex`, then runs the real app's networking and store against a
 real relay with a deterministic Mac fixture. The separate TextKit harness preserves native output, Find, scrolling, and cover tests.
+Native flow cases run serially and pin one of eight fresh loopback relay instances.
+This keeps the expanded suite below the relay's unchanged per-source room budget
+and reconnect grace; it does not relax production rate or socket limits.
 Result bundles contain test evidence
 and a synthetic accessibility-size composer screenshot.
 

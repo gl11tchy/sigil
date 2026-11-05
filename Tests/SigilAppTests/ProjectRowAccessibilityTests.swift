@@ -18,4 +18,11 @@ struct ProjectRowAccessibilityTests {
                 countLabel: "3 chats", isActive: true, isWorking: true, isPinned: true)
                 == "3 chats, one open, working, pinned")
     }
+
+    @Test func unavailableFolderSaysSoWithoutRelyingOnItsIcon() {
+        #expect(
+            ProjectRowAccessibility.value(
+                countLabel: "0 chats", isActive: false, isWorking: false, isPinned: true, isAvailable: false)
+                == "0 chats, folder unavailable, pinned")
+    }
 }

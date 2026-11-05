@@ -27,6 +27,7 @@ enum TestMain {
         run("emphasis steps up for bold text") { try ThemeTests.emphasisStepsUp() }
 
         run("alert receipts reject duplicates and stay bounded") { try ProtocolTests.alertReceiptsRejectDuplicatesAndStayBounded() }
+        run("a retried sealed alert keeps one actionable receipt") { try ProtocolTests.aRetriedSealedAlertKeepsIdentityAndOnlyOneActionableReceipt() }
         run("alerts reject expired and legacy payloads") { try ProtocolTests.alertsRejectExpiredAndLegacyPayloads() }
         run("selection menu has no invented approval") { try ProtocolTests.selectionMenuHasNoInventedApproval() }
         run("crypto round trip") { try ProtocolTests.cryptoRoundTrip() }
@@ -81,6 +82,7 @@ enum TestMain {
         run("decodes an event with a screen") { try ScreenTests.decodesAnEventWithAScreen() }
         run("rejects a malformed screen") { try ScreenTests.rejectsAMalformedScreen() }
         run("request carries worktree") { try ScreenTests.requestCarriesWorktree() }
+        run("project worktree default preserves legacy and explicit choices") { try ScreenTests.projectWorktreeDefaultKeepsLegacyAndExplicitChoices() }
         run("decodes a prompt") { try ScreenTests.decodesAPrompt() }
         run("alert opens with the right key only") { try ScreenTests.alertOpensWithTheRightKeyOnly() }
         run("pairing list rules") { try ScreenTests.pairingListRules() }
@@ -114,6 +116,7 @@ enum TestMain {
 
         if let port = ProcessInfo.processInfo.environment["SIGIL_RELAY_PORT"] {
             for (name, test) in [
+                ("offline revocation stops reconnect", RelayTests.revokedWhilePhoneIsAwayStopsReconnect),
                 ("old hello and state cannot authorize reconnect", RelayTests.oldHelloAndOldStateCannotAuthorizeReconnect),
                 ("old authorization cannot connect new epoch", RelayTests.oldAuthorizationCannotConnectNewEpoch),
                 ("old send failure cannot consume fresh handshake", RelayTests.oldSendFailureCannotConsumeNewHandshake),

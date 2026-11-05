@@ -52,6 +52,36 @@ enum RelayTests {
         mac.stop()
     }
 
+    static func revokedWhilePhoneIsAwayStopsReconnect(port: String) async throws {
+        let mac = FakeMac(origin: URL(string: "http://localhost:\(port)")!)
+        let room = try await mac.register()
+        guard
+            case .success(let link) = PairingLink.parse("http://localhost:\(port)/#room=\(room)&key=\(mac.pairingKey)")
+        else { throw TestFailure("link did not parse") }
+        let phone = RemoteConnection()
+        let watcher = Watcher()
+        phone.delegate = watcher
+        defer {
+            phone.stop(forget: true)
+            mac.stop()
+        }
+        phone.pair(link)
+        try await until("paired before leaving") { watcher.saved?.ticket == mac.ticket && phone.phase == .connected }
+        phone.stop()
+        try await mac.revokeRoutingTicket()
+
+        watcher.phases.removeAll()
+        phone.reconnect()
+        try await until("offline revocation delivered") { phone.phase == .revoked }
+        try Expect.equal(
+            watcher.failure, "Pairing expired or was disconnected. Scan a new code in Sigil.", "revocation message")
+        let phases = watcher.phases
+        // Longer than the first reconnect backoff: a close must not hide the refusal.
+        try await Task.sleep(for: .seconds(2))
+        try Expect.equal(phone.phase, .revoked, "does not return to connecting")
+        try Expect.equal(watcher.phases, phases, "no reconnect phase after the refusal")
+    }
+
     /// The Mac accepts the phone and retires the QR room, but the reply with the ticket is lost.
     static func lostPairingReplyAsksForANewCode(port: String) async throws {
         let mac = FakeMac(origin: URL(string: "http://localhost:\(port)")!)
@@ -270,7 +300,8 @@ enum RelayTests {
         var lastState: RemoteState?
         var events: [RemoteReply] = []
         var failure: String?
-        func connection(_ connection: RemoteConnection, didChange phase: RemoteConnection.Phase) {}
+        var phases: [RemoteConnection.Phase] = []
+        func connection(_ connection: RemoteConnection, didChange phase: RemoteConnection.Phase) { phases.append(phase) }
         func connection(_ connection: RemoteConnection, didReceive reply: RemoteReply, for action: String, tabID: String?) {
             lastState = reply.state
         }
@@ -296,6 +327,9 @@ final class FakeMac {
         let text: String?
         let name: String?
         let clientNonce: String?
+        let index: Int?
+        let count: Int?
+        let transfer: String?
     }
 
     struct Reply: Encodable {
@@ -346,6 +380,7 @@ final class FakeMac {
         var clientNonce: String?
         var restartedTabID: String?
         var restartedSession: ProviderSessionReference?
+        var earlier: String?
     }
 
     let origin: URL
@@ -356,6 +391,9 @@ final class FakeMac {
     var presentTerminalMenu = false
     var orderedEvents = true
     var pauseInput = false
+    var pauseFile = false
+    var pauseEnter = false
+    var optionsError = "Unknown action."
     var rotateAfterInput = false
     var pauseState = false
     var rotateAfterState = false
@@ -363,6 +401,8 @@ final class FakeMac {
     var truncatedTabs = false
     private var delayedRestart: Request?
     private var delayedState: Request?
+    private var delayedInput: Request?
+    private var delayedFile: Request?
     private(set) var requests: [Request] = []
     var firstTab = Reply.Tab(id: "T1", title: "Test", status: "idle") {
         didSet { if selected == oldValue.id { selected = firstTab.id } }
@@ -379,14 +419,16 @@ final class FakeMac {
     private var challenge = RemoteCrypto.randomKey()
     private var lastSequence = 0
     private var revoked = false
+    private var closedHostSockets = 0
     private let session = URLSession(configuration: .ephemeral)
 
     init(origin: URL) { self.origin = origin }
 
     func register() async throws -> String {
-        // This expanded fixture suite can legitimately allocate more than the
-        // production relay's 20 rooms/minute. Retry refused setup only; never a
-        // command or a transport failure, and keep workflow deadlines unchanged.
+        // The real relay has a five-token burst/refill and a 20-room active cap.
+        // Native cases rotate over a fresh relay pool so room grace does not
+        // exhaust one suite-wide budget. Retry refused setup only, never
+        // a command or transport failure; keep workflow deadlines unchanged.
         let deadline = Date().addingTimeInterval(75)
         while true {
             let remaining = deadline.timeIntervalSinceNow
@@ -428,6 +470,15 @@ final class FakeMac {
         Task { try? await send(["peer": peer, "error": "unauthorized"], on: socket) }
     }
 
+    /// Test barrier only: the production Mac never waits for relay confirmation.
+    func revokeRoutingTicket() async throws {
+        guard let socket else { throw TestFailure("no registered host") }
+        let closedBefore = closedHostSockets
+        revoked = true
+        try await socket.send(.string(#"{"revoke":true}"#))
+        try await RelayTests.until("relay processed revoke and closed host") { self.closedHostSockets > closedBefore }
+    }
+
     func stop() {
         socket?.cancel(with: .goingAway, reason: nil)
     }
@@ -444,12 +495,43 @@ final class FakeMac {
         try await send(["peer": peer, "data": sealed], on: socket)
     }
 
+    func selectOnMac(_ tabID: String, eventSequence: Int) async throws {
+        guard tabID == firstTab.id || tabID == "T2" else { throw TestFailure("unknown fixture tab") }
+        selected = tabID
+        try await pushEvent(rows: ["selected: \(tabID)"], eventSequence: eventSequence)
+    }
+
     func releaseState() async throws {
         guard let request = delayedState, let socket, let peer, let deviceKey else { throw TestFailure("no delayed state") }
         delayedState = nil
         pauseState = false
         let reply = Reply(challenge: request.challenge, sequence: request.sequence,
                           state: state("ready"), ticket: ticket, clientNonce: request.clientNonce)
+        let sealed = try RemoteCrypto.seal(reply, key: deviceKey, direction: "mac")
+        try await send(["peer": peer, "data": sealed], on: socket)
+    }
+
+    func releaseInput(error: String? = nil) async throws {
+        guard let request = delayedInput, let socket, let peer, let deviceKey else { throw TestFailure("no delayed input") }
+        delayedInput = nil
+        pauseInput = false
+        var reply = Reply(challenge: request.challenge, sequence: request.sequence,
+                          state: state("echo: \(request.text ?? "")"), ticket: ticket, clientNonce: request.clientNonce)
+        if let error {
+            reply.ok = false
+            reply.error = error
+            reply.state = nil
+        }
+        let sealed = try RemoteCrypto.seal(reply, key: deviceKey, direction: "mac")
+        try await send(["peer": peer, "data": sealed], on: socket)
+    }
+
+    func releaseFile() async throws {
+        guard let request = delayedFile, let socket, let peer, let deviceKey else { throw TestFailure("no delayed file") }
+        delayedFile = nil
+        pauseFile = false
+        let reply = Reply(challenge: request.challenge, sequence: request.sequence,
+                          state: state("file: \(request.name ?? "")"), ticket: ticket, clientNonce: request.clientNonce)
         let sealed = try RemoteCrypto.seal(reply, key: deviceKey, direction: "mac")
         try await send(["peer": peer, "data": sealed], on: socket)
     }
@@ -517,6 +599,7 @@ final class FakeMac {
                     try await handle(data, peer: id, on: ws)
                 }
             }
+            closedHostSockets += 1
         }
     }
 
@@ -541,7 +624,9 @@ final class FakeMac {
         if request.action == "pair", dropPairReply { return }
         var reply = Reply(challenge: request.challenge, sequence: request.sequence, ticket: ticket, clientNonce: request.clientNonce)
         requests.append(request)
-        if pauseInput, request.action == "input" { return }
+        if pauseInput, request.action == "input" { delayedInput = request; return }
+        if pauseFile, request.action == "file" { delayedFile = request; return }
+        if pauseEnter, request.action == "key", request.text == "enter" { return }
         if pauseState, request.action == "state" { delayedState = request; return }
         if pauseRestart, request.action == "restart" {
             delayedRestart = request
@@ -560,6 +645,18 @@ final class FakeMac {
             reply.state = state("selected: \(selected)")
         case "input":
             reply.state = state("echo: \(request.text ?? "")")
+        case "file":
+            // Synthetic attachment acknowledgement; no file is written or opened.
+            reply.state = state("file: \(request.name ?? "")")
+        case "options":
+            // This fixture models the supported legacy options fallback.
+            reply.ok = false
+            reply.error = optionsError
+        case "earlier":
+            // A short synthetic terminal has no earlier page. Rendering it
+            // must not invent a closed-tab error for a normal history read.
+            reply.earlier = ""
+            reply.state = state("ready")
         case "key" where request.tabID == selected:
             reply.state = state("key: \(request.text ?? "")")
         default:

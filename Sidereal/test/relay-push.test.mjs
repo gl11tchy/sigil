@@ -2,8 +2,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import http2 from 'node:http2';
+import { generateKeyPairSync } from 'node:crypto';
 import WebSocket from 'ws';
 import { createRelay } from '../server.mjs';
+import { createAPNs } from '../apns.mjs';
 import { importKey, seal } from '../public/crypto.mjs';
 
 const origin = 'http://localhost:3099';
@@ -42,6 +45,48 @@ const settle = () => new Promise(resolve => setTimeout(resolve, 50));
 const pushes = ws => ws.frames.filter(frame => frame.type === 'push');
 const alert = data => JSON.stringify({ push: { data, thread: 'tab-1' } });
 const activity = (event, status) => JSON.stringify({ push: { activity: activityToken, event, state: { status } } });
+
+test('REA-1212 fresh HTTP2 recovery counts once against the relay room budget', async t => {
+  const connections = [], received = [];
+  const server = http2.createServer();
+  server.on('session', session => { connections.push(session); session.on('error', () => {}); });
+  server.on('stream', (stream, headers) => {
+    stream.on('error', () => {});
+    let body = '';
+    stream.setEncoding('utf8');
+    stream.on('data', chunk => { body += chunk; });
+    stream.on('end', () => {
+      received.push({ headers, body });
+      if (stream.session !== connections[0]) { stream.respond({ ':status': 200 }); stream.end(); }
+    });
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const endpoint = `http://127.0.0.1:${server.address().port}`;
+  const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const apns = createAPNs({ key: privateKey.export({ type: 'pkcs8', format: 'pem' }), keyId: 'K', teamId: 'T', topic: 'test',
+    hosts: { development: endpoint }, requestTimeoutMs: 120 });
+  const { base, room, hostToken } = await setup(t, { apns });
+  t.after(() => { apns.close(); connections.forEach(session => session.destroy()); server.close(); });
+  const mac = host(base, room, hostToken);
+  await until(() => mac.frames.some(frame => frame.type === 'ready'), 'ready');
+  mac.send(JSON.stringify({ pushToken: alertToken(1), pushEnvironment: 'development' }));
+  for (let index = 0; index < 60; index++) {
+    if (index && index % 25 === 0) await new Promise(resolve => setTimeout(resolve, 1050));
+    mac.send(alert(btoa(String(index))));
+    await until(() => pushes(mac).length === index + 1, 'logical push reply');
+  }
+  assert.equal(pushes(mac).filter(frame => frame.ok).length, 60);
+  assert.equal(received.length, 61); // one retry, charged as one logical event
+  assert.equal(connections.length, 2);
+  assert.equal(received[0].body, received[1].body);
+  assert.equal(received[0].headers['apns-collapse-id'], received[1].headers['apns-collapse-id']);
+  mac.send(alert('AAAA'));
+  await until(() => pushes(mac).length === 61, 'rate refusal');
+  assert.deepEqual(pushes(mac)[60], { type: 'push', ok: false, reason: 'rate' });
+  assert.equal(received.length, 61);
+  mac.close();
+});
 
 // An APNs stand-in that holds every push until the test answers it.
 function heldAPNs() {
@@ -370,5 +415,150 @@ test('a host connection replaced by a new one sends none of its queued pushes to
   ]);
   assert.deepEqual(pushes(mac), [{ type: 'push', ok: true, status: 200 }]);
   assert.equal(apns.held.length, 0);
+  mac.close();
+});
+
+test('REA-1210 retains original alert and activity deadlines while the relay waits', async t => {
+  const issued = 1_800_000_000;
+  let clock = (issued + 20) * 1000;
+  const apns = heldAPNs();
+  const { base, room, hostToken } = await setup(t, { apns, now: () => clock });
+  const mac = host(base, room, hostToken);
+  await until(() => mac.frames.some(frame => frame.type === 'ready'), 'ready');
+  mac.send(JSON.stringify({ pushToken: alertToken(1), pushEnvironment: 'development' }));
+  mac.send(alert('AAAA'));
+  await until(() => apns.sent.length === 1, 'held legacy alert');
+  mac.send(JSON.stringify({ push: { data: 'BBBB', thread: 'tab-1', issuedAt: issued, expiresAt: issued + 300 } }));
+  for (const [event, offset, lifetime] of [['update', 1, 60], ['end', 2, 900]]) {
+    mac.send(JSON.stringify({ push: {
+      activity: activityToken, event, state: { status: event === 'end' ? 'exited' : 'working' },
+      issuedAt: issued + offset, expiresAt: issued + offset + lifetime,
+    } }));
+  }
+  await settle();
+  clock = (issued + 50) * 1000;
+  for (let step = 1; step <= 4; step++) {
+    await until(() => apns.sent.length === step, `push ${step}`);
+    apns.answer(200);
+  }
+  await until(() => pushes(mac).length === 4, 'four answers');
+  assert.deepEqual(apns.sent.slice(1).map(request => request.expiration), [issued + 300, issued + 61, issued + 902]);
+  assert.deepEqual(apns.sent.slice(2).map(request => request.payload.aps.timestamp), [issued + 1, issued + 2]);
+  assert.equal(apns.sent[1].payload.sigil.data, 'BBBB');
+  assert.deepEqual(apns.sent.slice(2).map(request => request.payload.aps.event), ['update', 'end']);
+  mac.close();
+});
+
+test('REA-1210 drops original deadlines at admission and after queue waiting', async t => {
+  const issued = 1_800_000_000;
+  let clock = issued * 1000;
+  const apns = heldAPNs();
+  const { base, room, hostToken } = await setup(t, { apns, now: () => clock });
+  const mac = host(base, room, hostToken);
+  await until(() => mac.frames.some(frame => frame.type === 'ready'), 'ready');
+  mac.send(JSON.stringify({ pushToken: alertToken(1), pushEnvironment: 'development' }));
+  const timed = (data, issue, expires) => JSON.stringify({ push: { data, thread: 'tab-1', issuedAt: issue, expiresAt: expires } });
+  mac.send(timed('AAAA', issued - 300, issued));
+  await until(() => pushes(mac).length === 1, 'expired at admission');
+  assert.deepEqual(pushes(mac), [{ type: 'push', ok: false, reason: 'expired' }]);
+  assert.equal(apns.sent.length, 0);
+  mac.send(alert('BBBB'));
+  await until(() => apns.sent.length === 1, 'held legacy alert');
+  mac.send(timed('CCCC', issued, issued + 30));
+  mac.send(JSON.stringify({ push: {
+    activity: activityToken, event: 'update', state: { status: 'working' }, issuedAt: issued, expiresAt: issued + 60,
+  } }));
+  mac.send(JSON.stringify({ push: {
+    activity: activityToken, event: 'end', state: { status: 'exited' }, issuedAt: issued, expiresAt: issued + 900,
+  } }));
+  await settle();
+  clock += 60_000;
+  apns.answer(200);
+  await until(() => apns.sent.length === 2, 'only the still-valid end');
+  assert.equal(apns.sent[1].expiration, issued + 900);
+  assert.equal(apns.sent[1].payload.aps.timestamp, issued);
+  apns.answer(200);
+  await until(() => pushes(mac).length === 5, 'answers for expired waiting events');
+  assert.deepEqual(pushes(mac).map(frame => frame.reason ?? frame.status), ['expired', 200, 'expired', 'expired', 200]);
+  mac.close();
+});
+
+test('REA-1210 rejects malformed, partial, future and overlong timing using the existing invalid-push policy', async t => {
+  const issued = 1_800_000_000;
+  const apns = { sent: [], async send(request) { this.sent.push(request); return { status: 200 }; }, close() {} };
+  const { base, room, hostToken } = await setup(t, { apns, now: () => issued * 1000 });
+  const valid = { issuedAt: issued, expiresAt: issued + 300 };
+  const bad = [
+    { issuedAt: issued }, { expiresAt: issued + 300 }, { ...valid, issuedAt: null },
+    { ...valid, issuedAt: String(issued) }, { ...valid, issuedAt: false }, { ...valid, issuedAt: [] },
+    { ...valid, issuedAt: issued + 0.5 }, { ...valid, issuedAt: 0 },
+    { ...valid, expiresAt: issued }, { ...valid, expiresAt: issued + 301 },
+    { ...valid, expiresAt: Number.MAX_SAFE_INTEGER + 1 }, { ...valid, expiresAt: issued + 299.5 },
+    { issuedAt: issued + 31, expiresAt: issued + 331 },
+  ];
+  for (const timing of bad) {
+    const mac = host(base, room, hostToken);
+    await until(() => mac.frames.some(frame => frame.type === 'ready'), 'ready');
+    mac.send(JSON.stringify({ pushToken: alertToken(1), pushEnvironment: 'development' }));
+    const closed = once(mac, 'close');
+    mac.send(JSON.stringify({ push: { data: 'AAAA', thread: 'tab-1', ...timing } }));
+    const [code] = await closed;
+    assert.equal(code, 1008);
+  }
+  for (const [event, lifetime] of [['update', 60], ['end', 900]]) {
+    const mac = host(base, room, hostToken);
+    await until(() => mac.frames.some(frame => frame.type === 'ready'), 'ready');
+    const closed = once(mac, 'close');
+    mac.send(JSON.stringify({ push: { activity: activityToken, event, state: { status: 'idle' },
+      issuedAt: issued, expiresAt: issued + lifetime + 1 } }));
+    const [code] = await closed;
+    assert.equal(code, 1008);
+  }
+  assert.equal(apns.sent.length, 0);
+});
+
+test('REA-1210 accepts bounded clock skew and isolates collapse keys by room and tab', async t => {
+  const issued = 1_800_000_000;
+  const apns = { sent: [], async send(request) { this.sent.push(request); return { status: 200 }; }, close() {} };
+  const { base, room, hostToken, newRoom } = await setup(t, { apns, now: () => issued * 1000 });
+  const other = await newRoom();
+  const first = host(base, room, hostToken), second = host(base, other.room, other.hostToken);
+  await until(() => [first, second].every(mac => mac.frames.some(frame => frame.type === 'ready')), 'both ready');
+  for (const mac of [first, second]) mac.send(JSON.stringify({ pushToken: alertToken(1), pushEnvironment: 'development' }));
+  const send = (mac, thread, data) => mac.send(JSON.stringify({ push: { data, thread, issuedAt: issued + 30, expiresAt: issued + 330 } }));
+  send(first, 'tab-1', 'AAAA'); send(first, 'tab-1', 'BBBB'); send(first, 'tab-2', 'CCCC'); send(second, 'tab-1', 'DDDD');
+  await until(() => apns.sent.length === 4, 'four isolated alerts');
+  const key = data => apns.sent.find(request => request.payload.sigil.data === data).collapseId;
+  assert.equal(key('AAAA'), key('BBBB'));
+  assert.notEqual(key('AAAA'), key('CCCC'));
+  assert.notEqual(key('AAAA'), key('DDDD'));
+  for (const request of apns.sent) {
+    assert.match(request.collapseId, /^[a-f0-9]{64}$/);
+    assert.equal(request.expiration, issued + 330);
+    assert.equal(request.payload.aps['thread-id'].startsWith('tab-'), true);
+    assert.deepEqual(Object.keys(request.payload.sigil), ['data']);
+  }
+  first.close(); second.close();
+});
+
+test('REA-1210 legacy pushes retain explicit zero storage and admission-time activity timestamps', async t => {
+  let clock = 1_800_000_000_000;
+  const apns = heldAPNs();
+  const { base, room, hostToken } = await setup(t, { apns, now: () => clock });
+  const mac = host(base, room, hostToken);
+  await until(() => mac.frames.some(frame => frame.type === 'ready'), 'ready');
+  mac.send(JSON.stringify({ pushToken: alertToken(1), pushEnvironment: 'development' }));
+  mac.send(alert('AAAA'));
+  await until(() => apns.sent.length === 1, 'held legacy alert');
+  mac.send(activity('update', 'working'));
+  await settle();
+  clock += 120_000;
+  apns.answer(200);
+  await until(() => apns.sent.length === 2, 'legacy update');
+  apns.answer(200);
+  await until(() => pushes(mac).length === 2, 'legacy replies');
+  assert.deepEqual(apns.sent.map(request => request.expiration), [0, 0]);
+  assert.equal(apns.sent[1].payload.aps.timestamp, 1_800_000_000);
+  assert.equal(apns.sent[1].collapseId, undefined); // an update cannot collapse away an end
   mac.close();
 });

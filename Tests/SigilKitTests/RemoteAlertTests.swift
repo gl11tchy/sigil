@@ -92,4 +92,18 @@ struct RemoteAlertTests {
         #expect(planner.knownTabs == ["B"])
         #expect(planner.plan(tabID: "A", snap("idle")).alert == nil)
     }
+
+    @Test func membershipLookupPreservesExistingTabsAndTheirTransitions() {
+        var planner = RemoteAlertPlanner()
+        #expect(!planner.knows(tabID: "A"))
+        _ = planner.plan(tabID: "A", snap("working"))
+        #expect(planner.knows(tabID: "A"))
+        #expect(!planner.knows(tabID: "B"))
+        _ = planner.plan(tabID: "B", snap("idle"))
+        #expect(planner.knows(tabID: "A") && planner.knows(tabID: "B"))
+        planner.forget(tabID: "B")
+        #expect(planner.knows(tabID: "A") && !planner.knows(tabID: "B"))
+        #expect(planner.plan(tabID: "A", snap("idle")).alert?.kind == .finished)
+        #expect(planner.plan(tabID: "B", snap("working")).alert == nil)
+    }
 }

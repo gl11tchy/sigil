@@ -26,6 +26,8 @@ public final class TerminalController {
     public var onTitleChange: ((String) -> Void)?
     /// Called on every child write, uncoalesced, so a remote stream can send the change at once.
     public var onRemoteOutput: (() -> Void)?
+    /// Find results arrive asynchronously, independently of lifecycle activity.
+    public var onFindChange: (() -> Void)?
     /// Advances before observers see each child write or any terminal input.
     public private(set) var remoteInteractionRevision: UInt64 = 0
     public private(set) var remoteInteractionAfterInput = false
@@ -69,6 +71,7 @@ public final class TerminalController {
             self?.noteActivity()
             self?.onRemoteOutput?()
         }
+        terminal.onContentChange = { [weak self] in self?.findSession?.bufferChanged() }
         terminal.onInput = { [weak self] in
             self?.remoteInteractionRevision &+= 1
             self?.remoteInteractionAfterInput = true
@@ -447,64 +450,62 @@ public final class TerminalController {
 
     // MARK: - Find
 
-    private var search = ScrollbackSearch()
-    /// The rows as Find last read them, kept until the buffer changes.
-    private var findText: ScrollbackSearch.Text?
-    /// Full reads of the buffer rows. Tests use this to prove unchanged output is not read again.
+    private var findSession: TerminalFindSession?
+    /// An internal dependency seam for holding/releasing a scan in CI tests.
+    var findScanOperation: TerminalFindScan.Operation = TerminalFindScan.run
+    var findDiagnostics: TerminalFindSession.Diagnostics { findSession?.diagnostics ?? .init() }
+    /// Explicit full-buffer reads. Find must never invoke one in its input callback.
     private(set) var bufferRowReads = 0
 
     /// Number of hits for the current find query.
-    public var findMatchCount: Int { search.matchCount }
+    public var findMatchCount: Int { findSession?.matchCount ?? 0 }
 
     /// One-based index of the current hit, or `0` when there are none.
-    public var findMatchIndex: Int { search.current.map { $0 + 1 } ?? 0 }
+    public var findMatchIndex: Int { findSession?.matchIndex ?? 0 }
+    public var isFinding: Bool { findSession?.isSearching ?? false }
 
-    /// Sets a plain-text query and selects the newest hit at or above the
-    /// bottom of the viewport, so the view stays on the output being read.
+    /// Coalesces a plain-text query for asynchronous Find. Results and pending
+    /// state arrive through `onFindChange`; the first complete result starts
+    /// at the newest hit on or above the original viewport.
     public func setFindQuery(_ query: String) {
-        guard !query.isEmpty else {
-            clearFind()
-            return
+        if findSession == nil {
+            findSession = TerminalFindSession(
+                state: { [weak self] in self?.findBufferState() },
+                line: { [weak self] index in self?.terminalView.getTerminal().bufferLine(atRow: index) },
+                readRow: { [weak self] index in self?.terminalRow(at: index, preserveWrappedWidth: true) },
+                scan: findScanOperation,
+                select: { [weak self] match, reveal in self?.applyFindSelection(match, reveal: reveal) },
+                changed: { [weak self] in self?.onFindChange?() })
         }
-        let terminal = terminalView.getTerminal()
-        let viewportBottom = terminal.buffer.yDisp + terminal.rows - 1
-        search.setQuery(query, in: currentFindText(), startingAtOrAbove: viewportBottom)
-        applyFindSelection()
+        findSession?.setQuery(query)
     }
 
     /// Drops the query, the hits, and the selection used to show them.
     public func clearFind() {
-        search.clear()
-        findText = nil
+        findSession?.clear()
         terminalView.selectNone()
     }
 
     /// Advances to the next hit, wrapping to the first.
     public func findNext() {
-        refreshFindHits()
-        search.findNext()
-        applyFindSelection()
+        findSession?.navigate(1)
     }
 
     /// Moves to the previous hit, wrapping to the last.
     public func findPrevious() {
-        refreshFindHits()
-        search.findPrevious()
-        applyFindSelection()
+        findSession?.navigate(-1)
     }
 
-    /// Searches again only when output or a resize changed the buffer.
-    private func refreshFindHits() {
-        guard !search.query.isEmpty else { return }
-        search.update(currentFindText())
-    }
-
-    private func currentFindText() -> ScrollbackSearch.Text {
-        let generation = terminalView.contentGeneration
-        if let findText, findText.version == generation { return findText }
-        let text = ScrollbackSearch.Text(findBufferRows(), version: generation)
-        findText = text
-        return text
+    private func findBufferState() -> TerminalFindBufferState {
+        let terminal = terminalView.getTerminal()
+        let first = terminal.bufferLine(atRow: 0)
+        let trimmed = terminal.buffer.totalLinesTrimmed
+        return TerminalFindBufferState(
+            buffer: ObjectIdentifier(terminal.buffer), columns: terminal.cols, rows: terminal.rows,
+            count: terminalRowCount(), trimmed: trimmed, generation: terminalView.contentGeneration,
+            resizeGeneration: terminalView.resizeGeneration, firstLine: first.map(ObjectIdentifier.init),
+            firstLineGeneration: first?.generation,
+            viewportBottom: trimmed + terminal.buffer.yDisp + terminal.rows - 1)
     }
 
     /// One searchable row plus a Character-to-cell map. SwiftTerm stores wide
@@ -710,25 +711,32 @@ public final class TerminalController {
         return String(String.UnicodeScalarView(scalars))
     }
 
-    private func applyFindSelection() {
-        guard let match = search.currentMatch else {
+    private func applyFindSelection(_ match: ScrollbackSearch.Match?, reveal: Bool) {
+        guard let match else {
             terminalView.selectNone()
             return
         }
-        let cols = terminalView.getTerminal().cols
-        let start = Position(col: match.columns.lowerBound, row: match.line)
+        let terminal = terminalView.getTerminal()
+        let cols = terminal.cols
+        let row = match.line - terminal.buffer.totalLinesTrimmed
+        let endRow = match.endLine - terminal.buffer.totalLinesTrimmed
+        guard row >= 0, endRow >= row else {
+            terminalView.selectNone()
+            return
+        }
+        let start = Position(col: match.columns.lowerBound, row: row)
         // `setSelection` clamps `col` to `cols-1`. A hit that ends on the last
         // cell would lose that cell, so park the exclusive end on the next row.
         let end: Position
         if match.endColumn >= cols,
-            terminalView.getTerminal().bufferLine(atRow: match.endLine + 1) != nil
+            terminal.bufferLine(atRow: endRow + 1) != nil
         {
-            end = Position(col: 0, row: match.endLine + 1)
+            end = Position(col: 0, row: endRow + 1)
         } else {
-            end = Position(col: min(match.endColumn, max(cols - 1, 0)), row: match.endLine)
+            end = Position(col: min(match.endColumn, max(cols - 1, 0)), row: endRow)
         }
         terminalView.selection.setSelection(start: start, end: end)
-        revealFindMatch(row: match.line)
+        if reveal { revealFindMatch(row: row) }
     }
 
     /// `scrollTo(row:)` sets `yDisp` (the top of the viewport), not the match.

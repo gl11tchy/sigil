@@ -345,4 +345,17 @@ enum ScreenTests {
         let plain = String(decoding: try JSONEncoder().encode(RemoteRequest(challenge: "c", sequence: 1, action: "new")), as: UTF8.self)
         try Expect.true(!plain.contains("worktree"), "absent when unset")
     }
+
+    static func projectWorktreeDefaultKeepsLegacyAndExplicitChoices() throws {
+        let old = try JSONDecoder().decode(RemoteProject.self, from: Data("{\"name\":\"old\",\"folder\":\"/repo\",\"repository\":true}".utf8))
+        try Expect.true(old.worktreeChoice(savedDefault: true), "legacy Mac keeps saved default")
+        try Expect.true(!old.worktreeChoice(savedDefault: false), "legacy Mac keeps folder preference")
+        let home = try JSONDecoder().decode(RemoteProject.self, from: Data("{\"name\":\"home\",\"folder\":\"/home\",\"repository\":true,\"worktreeDefault\":false}".utf8))
+        try Expect.true(home.repository == true, "home remains recognized")
+        try Expect.true(!home.worktreeChoice(savedDefault: true), "home defaults to folder")
+        try Expect.true(home.worktreeChoice(savedDefault: true, explicit: true), "explicit worktree wins")
+        let project = RemoteProject(name: "repo", folder: "/repo", repository: true, worktreeDefault: true)
+        try Expect.true(project.worktreeChoice(savedDefault: false), "project-specific default wins")
+        try Expect.true(!project.worktreeChoice(savedDefault: true, explicit: false), "explicit folder wins")
+    }
 }

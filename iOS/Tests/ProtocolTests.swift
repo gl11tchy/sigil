@@ -32,6 +32,22 @@ enum ProtocolTests {
         try Expect.true(second.consume(fresh, pairingID: "mac-a", now: now + 331), "expired receipts reclaimed")
     }
 
+    static func aRetriedSealedAlertKeepsIdentityAndOnlyOneActionableReceipt() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let ledger = AlertReceiptStore(directory: folder)
+        let now = Int(Date().timeIntervalSince1970)
+        let event = RemoteAlert(kind: .finished, tabID: "T", title: "Synthetic", body: "", issuedAt: now)
+        let key = RemoteCrypto.randomKey()
+        let sealed = try RemoteCrypto.seal(event, key: key, direction: RemoteAlert.direction)
+        let first: RemoteAlert = try RemoteCrypto.open(sealed, key: key, direction: RemoteAlert.direction)
+        let retried: RemoteAlert = try RemoteCrypto.open(sealed, key: key, direction: RemoteAlert.direction)
+        try Expect.equal(first.id, retried.id, "a transport retry does not create another event")
+        try Expect.equal(first.issuedAt, retried.issuedAt, "original issuance is fixed")
+        try Expect.true(ledger.consume(first, pairingID: "synthetic-mac", now: now), "first actionable receipt")
+        try Expect.true(!ledger.consume(retried, pairingID: "synthetic-mac", now: now), "retried payload is a replay")
+    }
+
     static func alertsRejectExpiredAndLegacyPayloads() throws {
         struct Payload: Encodable {
             let id: String?

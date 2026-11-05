@@ -8,6 +8,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { importKey, open } from './public/crypto.mjs';
 import { loadRevision } from './revision.mjs';
 import { createAPNs } from './apns.mjs';
+import { isIP } from 'node:net';
 
 const revision = await loadRevision(undefined, { required: process.env.SIGIL_REQUIRE_REVISION === '1' });
 
@@ -68,7 +69,126 @@ function publicFiles() {
   };
 }
 
+// Only the transport peer is established here. Forwarding headers and a boolean
+// proxy flag cannot authenticate a source. IPv6 privacy addresses share a /64;
+// IPv4-mapped IPv6 uses the same budget as its ordinary IPv4 spelling.
+export function clientAddress(request) {
+  const value = request.socket?.remoteAddress;
+  if (typeof value !== 'string' || value.length > 128) return null;
+  const version = isIP(value);
+  if (version === 4) return `4:${value}`;
+  if (version !== 6) return null;
+  const halves = value.toLowerCase().split('%')[0].split('::');
+  const words = part => !part ? [] : part.split(':').flatMap(word => {
+    if (!word.includes('.')) return [Number.parseInt(word, 16)];
+    const bytes = word.split('.').map(Number);
+    return [bytes[0] * 256 + bytes[1], bytes[2] * 256 + bytes[3]];
+  });
+  const left = words(halves[0]), right = words(halves[1]);
+  const address = halves.length === 1 ? left : [...left, ...Array(8 - left.length - right.length).fill(0), ...right];
+  if (address.slice(0, 5).every(word => word === 0) && address[5] === 0xffff) {
+    return `4:${address[6] >> 8}.${address[6] & 255}.${address[7] >> 8}.${address[7] & 255}`;
+  }
+  return `6:${address.slice(0, 4).map(word => word.toString(16).padStart(4, '0')).join(':')}`;
+}
+
+export class SourceLimits {
+  #sources = new Map();
+  #now;
+  #maxSources;
+
+  constructor({ now = Date.now, maxSources = 1024 } = {}) {
+    if (!Number.isInteger(maxSources) || maxSources < 1 || maxSources > 1024) throw new RangeError('Invalid source capacity.');
+    this.#now = now;
+    this.#maxSources = maxSources;
+  }
+
+  #entry(source) {
+    if (!source) return null;
+    let entry = this.#sources.get(source);
+    const time = this.#now();
+    if (!entry) {
+      if (this.#sources.size >= this.#maxSources) this.sweep({ reclaim: true });
+      if (this.#sources.size >= this.#maxSources) return null;
+      entry = { tokens: 5, refill: time, touched: time, rooms: 0, sockets: 0 };
+      this.#sources.set(source, entry);
+    }
+    entry.tokens = Math.min(5, entry.tokens + Math.max(0, time - entry.refill) / 12000);
+    entry.refill = Math.max(entry.refill, time);
+    entry.touched = Math.max(entry.touched, time);
+    return entry;
+  }
+
+  allocate(source) {
+    const entry = this.#entry(source);
+    // Room slots include five-minute reconnect grace. Leave room for a NAT's
+    // recoveries while one source can own at most a fifth of global capacity.
+    if (!entry || entry.rooms >= 20 || entry.tokens < 1) return false;
+    entry.tokens -= 1;
+    entry.rooms += 1;
+    return true;
+  }
+
+  releaseRoom(source) {
+    const entry = this.#sources.get(source);
+    if (!entry || entry.rooms === 0) return;
+    entry.rooms -= 1;
+    entry.touched = Math.max(entry.touched, this.#now());
+  }
+
+  reserveConnection(source) {
+    const entry = this.#entry(source);
+    if (!entry || entry.sockets >= 20) return null;
+    entry.sockets += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      entry.sockets -= 1;
+      entry.touched = Math.max(entry.touched, this.#now());
+    };
+  }
+
+  sweep({ reclaim = false } = {}) {
+    const time = this.#now();
+    for (const [source, entry] of this.#sources) {
+      // An idle minute also fully replenishes the five-token bucket. Never
+      // evict occupied entries or let eviction grant an early fresh budget.
+      // Under pressure, closed connection-only entries need no grace period;
+      // fully replenished allocation entries are equally safe to reclaim.
+      const replenished = entry.tokens + Math.max(0, time - entry.refill) / 12000 >= 5;
+      if (!entry.rooms && !entry.sockets &&
+          (time - entry.touched >= 60000 || (reclaim && replenished))) this.#sources.delete(source);
+    }
+  }
+}
+
+// Routing hints only: device authentication remains end to end. Memory is bounded,
+// expires after 30 days, and is deliberately lost when this relay restarts.
+export class RevokedTickets {
+  #tickets = new Map();
+  #now;
+  constructor({ now = Date.now } = {}) { this.#now = now; }
+  add(ticket) {
+    this.sweep();
+    this.#tickets.delete(ticket);
+    this.#tickets.set(ticket, this.#now() + 30 * 86400000);
+    while (this.#tickets.size > 1000) this.#tickets.delete(this.#tickets.keys().next().value);
+  }
+  has(ticket) {
+    const expiry = this.#tickets.get(ticket);
+    if (expiry === undefined) return false;
+    if (expiry <= this.#now()) { this.#tickets.delete(ticket); return false; }
+    return true;
+  }
+  sweep() {
+    const time = this.#now();
+    for (const [ticket, expiry] of this.#tickets) if (expiry <= time) this.#tickets.delete(ticket);
+  }
+}
+
 export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns = null } = {}) {
+  if (!Number.isInteger(maxRooms) || maxRooms < 1 || maxRooms > 100) throw new RangeError('Room capacity must be between 1 and 100.');
   const origin = new URL(publicOrigin);
   if (origin.origin !== publicOrigin || !(origin.protocol === 'https:' ||
       (origin.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(origin.hostname)))) {
@@ -76,7 +196,8 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
   }
   const rooms = new Map();
   const tickets = new Map();
-  let creationWindow = now(), creations = 0;
+  const revokedTickets = new RevokedTickets({ now });
+  const limits = new SourceLimits({ now });
   const wss = new WebSocketServer({ noServer: true, maxPayload: 110000, perMessageDeflate: false });
   const files = publicFiles();
   // No request, header, or frame logging. Proxies must log paths only, never queries.
@@ -97,10 +218,12 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
       if (req.headers.origin || Number(req.headers['content-length'] || 0) > 0 || req.headers['transfer-encoding']) {
         res.writeHead(403).end(); return;
       }
-      if (now() - creationWindow >= 60000) { creationWindow = now(); creations = 0; }
-      if (rooms.size >= maxRooms || ++creations > 20) { res.writeHead(429).end(); return; }
+      const source = clientAddress(req);
+      if (!source) { res.writeHead(403).end(); return; }
+      expireRooms();
+      if (rooms.size >= maxRooms || !limits.allocate(source)) { res.writeHead(429).end(); return; }
       const room = randomBytes(16).toString('hex'), hostToken = token();
-      rooms.set(room, { hostToken, created: now(), disconnectedAt: now(), host: null, phone: null });
+      rooms.set(room, { hostToken, source, created: now(), disconnectedAt: now(), hosted: false, host: null, phone: null });
       res.writeHead(201, { 'Content-Type': 'application/json' }).end(JSON.stringify({ room, hostToken }));
       return;
     }
@@ -147,17 +270,34 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
     if (typeof state.asking === 'boolean') out.asking = state.asking;
     return out.status ? out : null;
   };
+  const pushLifetimes = { alert: 300, update: 60, end: 900 };
+  const pushTiming = (push, lifetime) => {
+    const receivedAt = Math.floor(now() / 1000);
+    // Old hosts cannot reveal their sealed original issuance. Preserve no-store
+    // behavior instead of granting a new lifetime when a queued push is sent.
+    if (!Object.hasOwn(push, 'issuedAt') && !Object.hasOwn(push, 'expiresAt')) {
+      return { issuedAt: receivedAt, expiration: 0, expiresAt: null };
+    }
+    const { issuedAt, expiresAt } = push;
+    if (!Number.isSafeInteger(issuedAt) || !Number.isSafeInteger(expiresAt) || issuedAt <= 0 ||
+        issuedAt > receivedAt + 30 || expiresAt <= issuedAt || expiresAt - issuedAt > lifetime) return null;
+    return { issuedAt, expiration: expiresAt, expiresAt };
+  };
   // Returns what builds the APNs request for a host's push frame from the phone's
   // registration when it goes out, or null when the frame is malformed. It keeps only
   // the checked fields, never the frame.
-  const pushRequest = push => {
+  const pushRequest = (push, roomID) => {
     if (!push || typeof push !== 'object' || Array.isArray(push)) return null;
     if (typeof push.data === 'string') {
       if (push.data.length > 3000 || !/^[A-Za-z0-9+/=]+$/.test(push.data)) return null;
       const thread = typeof push.thread === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(push.thread) ? push.thread : undefined;
       const data = push.data;
-      return registration => ({
-        environment: registration?.environment, token: registration?.token, pushType: 'alert', collapseId: thread,
+      const timing = pushTiming(push, pushLifetimes.alert);
+      if (!timing) return null;
+      const collapseId = thread ? createHash('sha256').update(JSON.stringify([roomID, thread])).digest('hex') : undefined;
+      return { expiresAt: timing.expiresAt, build: registration => ({
+        environment: registration?.environment, token: registration?.token, pushType: 'alert', collapseId,
+        expiration: timing.expiration,
         payload: {
           aps: {
             alert: { title: 'Sigil', body: 'A session needs you.' }, sound: 'default', 'mutable-content': 1,
@@ -165,16 +305,19 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
           },
           sigil: { data },
         },
-      });
+      }) };
     }
     if (hexToken(push.activity) && (push.event === 'update' || push.event === 'end')) {
       const state = activityState(push.state);
       if (!state) return null;
       const { activity, event } = push;
-      return registration => {
-        const seconds = Math.floor(now() / 1000);
+      const timing = pushTiming(push, pushLifetimes[event]);
+      if (!timing) return null;
+      return { expiresAt: timing.expiresAt, build: registration => {
+        const seconds = timing.issuedAt;
         return {
           environment: registration?.environment, token: activity, pushType: 'liveactivity', priority: 10,
+          expiration: timing.expiration,
           payload: {
             aps: {
               timestamp: seconds, event, 'content-state': state,
@@ -182,7 +325,7 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
             },
           },
         };
-      };
+      } };
     }
     return null;
   };
@@ -190,12 +333,16 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
   // time in order, so a reply to the phone never waits behind one. A push keeps the token
   // registered before it; a full queue answers at once instead of holding more.
   const maxQueuedPushes = 60;
-  const queuePush = (ws, room, push) => {
-    const build = pushRequest(push);
-    if (!build) return false;
+  const queuePush = (ws, room, roomID, push) => {
+    const request = pushRequest(push, roomID);
+    if (!request) return false;
+    const { build, expiresAt } = request;
+    if (expiresAt !== null && expiresAt <= Math.floor(now() / 1000)) {
+      send(ws, { type: 'push', ok: false, reason: 'expired' }); return true;
+    }
     const queue = room.pushes ??= [];
     if (queue.length >= maxQueuedPushes) { send(ws, { type: 'push', ok: false, reason: 'busy' }); return true; }
-    queue.push({ ws, build, registration: room.push });
+    queue.push({ ws, build, expiresAt, registration: room.push });
     if (queue.length === 1) deliverPushes(room).catch(() => {});
     return true;
   };
@@ -203,12 +350,13 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
   const deliverPushes = async room => {
     const queue = room.pushes;
     while (queue.length) {
-      const { ws, build, registration } = queue[0];
+      const { ws, build, expiresAt, registration } = queue[0];
       let answer;
       // A host connection that closed or was replaced sends nothing more, and its pushes do not count.
       const live = !room.closed && room.host === ws;
       if (live && now() - (room.pushWindow || 0) >= 60000) { room.pushWindow = now(); room.pushCount = 0; }
       if (!live) answer = { ok: false, reason: 'closed' };
+      else if (expiresAt !== null && expiresAt <= Math.floor(now() / 1000)) answer = { ok: false, reason: 'expired' };
       else if (++room.pushCount > 60) answer = { ok: false, reason: 'rate' };
       else if (!apns || !registration || registration.gone) answer = { ok: false, reason: apns ? 'token' : 'off' };
       else {
@@ -239,6 +387,7 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
     const room = rooms.get(id);
     if (!room) return;
     rooms.delete(id);
+    limits.releaseRoom(room.source);
     clearTimeout(room.dropPhone);
     // Queued pushes not yet with Apple are not sent; the host hears so before its socket goes.
     room.closed = true;
@@ -252,7 +401,10 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
   server.on('upgrade', (req, socket, head) => {
     // Node removes its socket error listener before 'upgrade'; a peer reset would crash the relay.
     socket.on('error', () => socket.destroy());
-    const reject = () => { socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); };
+    const reject = (status = 403) => {
+      socket.once('finish', () => socket.destroy());
+      socket.end(`HTTP/1.1 ${status} ${status === 429 ? 'Too Many Requests' : 'Forbidden'}\r\nConnection: close\r\n\r\n`);
+    };
     const rawURL = req.url;
     req.url = rawURL.split('?')[0]; // Downstream diagnostics must not retain queries.
     let url;
@@ -267,7 +419,12 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
     } else if (role === 'phone') {
       if (req.headers.origin !== publicOrigin) { reject(); return; }
     } else { reject(); return; }
-    wss.handleUpgrade(req, socket, head, ws => {
+    const source = clientAddress(req);
+    if (!source) { reject(); return; }
+    const release = limits.reserveConnection(source);
+    if (!release) { reject(429); return; }
+    socket.once('close', release);
+    try { wss.handleUpgrade(req, socket, head, ws => {
       ws.on('error', () => {});
       ws.alive = true;
       ws.on('pong', () => { ws.alive = true; });
@@ -304,6 +461,11 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
               ws.close(1008); return;
             }
             if (role === 'phone') {
+              if (revokedTickets.has(route.ticket)) {
+                send(ws, { error: 'unauthorized' });
+                ws.close(1008);
+                return;
+              }
               const byTicket = tickets.has(route.ticket);
               id = byTicket ? tickets.get(route.ticket) : route.room;
               room = rooms.get(id);
@@ -314,12 +476,14 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
               else if (room.claimedBy && room.claimedBy === room.ticket) { ws.close(1008); return; }
             } else {
               id = route.room; room = rooms.get(id);
+              if (room && !room.hosted && now() - room.created >= 30000) { deleteRoom(id); room = undefined; }
               if (!room || !equal(req.headers.authorization, `Bearer ${room.hostToken}`)) { ws.close(1008); return; }
             }
             routed = true;
             routingKey = null;
             clearTimeout(routeTimer);
             if (role === 'host') {
+              room.hosted = true;
               take('host');
               clearTimeout(room.dropPhone);
               room.dropPhone = undefined;
@@ -337,8 +501,25 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
             } else { take('phone'); room.peer = peer; send(room.host, { type: 'peer', peer }); }
             return;
           }
+          if ('revoke' in value) {
+            if (role !== 'host' || rooms.get(id) !== room || room.host !== ws || !room.ticket
+              || value.revoke !== true || Object.keys(value).length !== 1) { ws.close(1008); return; }
+            const ticket = room.ticket;
+            revokedTickets.add(ticket);
+            tickets.delete(ticket);
+            // Copies sharing this pairing cannot keep a connected phone alive.
+            for (const [other, candidate] of rooms) {
+              if (candidate.ticket !== ticket) continue;
+              const phone = candidate.phone;
+              candidate.phone = null; // Preserve the queued refusal instead of terminating it below.
+              send(phone, { error: 'unauthorized' });
+              phone?.close(1008);
+              deleteRoom(other);
+            }
+            return;
+          }
           if (role === 'host' && room.host === ws && ('pushToken' in value || 'push' in value)) {
-            if ('pushToken' in value ? !registerPush(room, value) : !queuePush(ws, room, value.push)) ws.close(1008);
+            if ('pushToken' in value ? !registerPush(room, value) : !queuePush(ws, room, id, value.push)) ws.close(1008);
             return;
           }
           const frame = {};
@@ -357,7 +538,7 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
       ws.on('close', () => {
         clearTimeout(routeTimer);
         routingKey = null;
-        if (!routed) return;
+        if (!routed || rooms.get(id) !== room) return;
         if (role === 'host' && room.host === ws) {
           room.host = null; room.disconnectedAt = now();
           const next = room.ticket && tickets.get(room.ticket) === id && liveRoomFor(room.ticket, id);
@@ -375,12 +556,18 @@ export function createRelay({ publicOrigin, maxRooms = 100, now = Date.now, apns
           send(room.host, { type: 'left', peer });
         }
       });
-    });
+    }); } catch { release(); socket.destroy(); }
   });
-  const timer = setInterval(() => {
+  function expireRooms() {
     for (const [id, room] of rooms) {
-      if ((!room.host && now() - room.disconnectedAt > 300000) || now() - room.created > 86400000) deleteRoom(id);
+      if ((!room.hosted && now() - room.created >= 30000) ||
+          (!room.host && now() - room.disconnectedAt > 300000) || now() - room.created > 86400000) deleteRoom(id);
     }
+  }
+  const timer = setInterval(() => {
+    expireRooms();
+    revokedTickets.sweep();
+    limits.sweep();
     for (const ws of wss.clients) {
       if (!ws.alive) ws.terminate();
       else { ws.alive = false; ws.ping(); }

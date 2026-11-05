@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Testing
 
@@ -6,6 +7,218 @@ import Testing
 struct ProviderLifecycleJournalTests {
     let session = "11111111-1111-4111-8111-111111111111"
     let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    @Test(arguments: [CLIProvider.grokBuild, .codex])
+    func powerEvidenceRequiresValidatedWorkAndQuietPollsDoNotInventProgress(provider: CLIProvider) throws {
+        let fixture = try JournalFixture(initial: provider == .codex ? metadata() : Data())
+        defer { fixture.cleanup() }
+        var reader = ProviderLifecycleJournal(url: fixture.file, provider: provider, sessionID: session, notBefore: now)
+        #expect(reader.canObserve && reader.validatedWorkRevision == nil)
+        try fixture.append(Data("not JSON\n".utf8))
+        try fixture.append(try grok(type: "agent_message_chunk", turn: "wrong", nativeID: UUID().uuidString))
+        #expect(reader.poll().isEmpty && reader.validatedWorkRevision == nil)
+        let start =
+            try provider == .codex
+            ? codex(type: "task_started", turn: "one")
+            : grok(type: "agent_message_chunk", turn: "one")
+        try fixture.append(start)
+        #expect(reader.poll() == [.working])
+        let revision = try #require(reader.validatedWorkRevision)
+        #expect(reader.poll().isEmpty && reader.validatedWorkRevision == revision)
+        try fixture.append(start)
+        #expect(reader.poll().isEmpty && reader.validatedWorkRevision == revision)
+        let wrongCompletion =
+            try provider == .codex
+            ? codex(type: "task_complete", turn: "other")
+            : grok(type: "turn_completed", turn: "other")
+        try fixture.append(wrongCompletion)
+        #expect(reader.poll().isEmpty && reader.validatedWorkRevision == revision)
+        let complete =
+            try provider == .codex
+            ? codex(type: "task_complete", turn: "one")
+            : grok(type: "turn_completed", turn: "one")
+        try fixture.append(complete)
+        #expect(reader.poll() == [.idle] && reader.validatedWorkRevision == nil)
+    }
+
+    @Test(arguments: ["missing", "replacement", "truncation"], [CLIProvider.grokBuild, .codex])
+    func powerEvidenceDropsWhenTheCurrentJournalCannotBeValidated(change: String, provider: CLIProvider) throws {
+        let fixture = try JournalFixture(initial: provider == .codex ? metadata() : Data())
+        defer { fixture.cleanup() }
+        var reader = ProviderLifecycleJournal(url: fixture.file, provider: provider, sessionID: session, notBefore: now)
+        let start =
+            try provider == .codex
+            ? codex(type: "task_started", turn: "one")
+            : grok(type: "agent_message_chunk", turn: "one")
+        try fixture.append(start)
+        #expect(reader.poll() == [.working] && reader.validatedWorkRevision != nil)
+        if change == "missing" {
+            try FileManager.default.removeItem(at: fixture.file)
+        } else if change == "replacement" {
+            try Data("replacement\n".utf8).write(to: fixture.file, options: .atomic)
+        } else {
+            try Data().write(to: fixture.file)
+        }
+        _ = reader.poll()
+        #expect(reader.validatedWorkRevision == nil)
+    }
+
+    @Test func aMissingGrokJournalHasNoPowerEvidenceDespiteNominalObservation() throws {
+        let fixture = try JournalFixture()
+        defer { fixture.cleanup() }
+        var reader = ProviderLifecycleJournal(
+            url: fixture.root.appendingPathComponent("missing.jsonl"), provider: .grokBuild,
+            sessionID: session, notBefore: now)
+        #expect(reader.canObserve)
+        #expect(reader.poll().isEmpty && reader.validatedWorkRevision == nil)
+    }
+
+    @Test func powerEvidenceRejectsLostOwnedProcessLease() throws {
+        let fixture = try JournalFixture(initial: metadata() + codex(type: "task_started", turn: "one"))
+        defer { fixture.cleanup() }
+        let (transcript, observations) = try ownedTranscript(fixture)
+        var reader = ProviderLifecycleJournal(transcript: transcript)
+        #expect(reader.poll() == [.working] && reader.validatedWorkRevision != nil)
+        observations.allowReads(0)
+        #expect(reader.poll() == [.unknown] && reader.validatedWorkRevision == nil)
+    }
+
+    @Test(arguments: [false, true])
+    func powerEvidenceUsesOnlyTheFinalCatchUpState(completed: Bool) throws {
+        var initial = try metadata() + codex(type: "task_started", turn: "one")
+        if completed { initial += try codex(type: "task_complete", turn: "one") }
+        let fixture = try JournalFixture(initial: initial)
+        defer { fixture.cleanup() }
+        var reader = ProviderLifecycleJournal(
+            url: fixture.file, provider: .codex, sessionID: session, notBefore: now, readFromBeginning: true)
+        #expect(reader.validatedWorkRevision == nil)
+        #expect(reader.poll() == [completed ? .idle : .working])
+        #expect((reader.validatedWorkRevision != nil) == !completed)
+    }
+
+    @Test func catchUpRestoresTheFirstActiveTurnAndThenTailsItsCompletion() throws {
+        let fixture = try JournalFixture(initial: metadata() + codex(type: "task_started", turn: "first"))
+        defer { fixture.cleanup() }
+        var reader = ProviderLifecycleJournal(
+            url: fixture.file, provider: .codex, sessionID: session, notBefore: now, readFromBeginning: true)
+        #expect(reader.isCatchingUp)
+        #expect(reader.poll() == [.working])
+        #expect(!reader.isCatchingUp)
+        try fixture.append(try codex(type: "task_complete", turn: "other"))
+        #expect(reader.poll().isEmpty)
+        try fixture.append(try codex(type: "task_complete", turn: "first"))
+        #expect(reader.poll() == [.idle])
+    }
+
+    @Test func completedCatchUpPublishesOnlyTheFinalStateAndRejectsPreLaunchEvents() throws {
+        let fixture = try JournalFixture(
+            initial: metadata()
+                + codex(type: "task_started", turn: "old", time: now.addingTimeInterval(-1))
+                + codex(type: "task_complete", turn: "old")
+                + codex(type: "task_started", turn: "first")
+                + codex(type: "task_complete", turn: "first"))
+        defer { fixture.cleanup() }
+        var reader = ProviderLifecycleJournal(
+            url: fixture.file, provider: .codex, sessionID: session, notBefore: now, readFromBeginning: true)
+        #expect(reader.poll() == [.idle])
+        #expect(reader.poll().isEmpty)
+        try fixture.append(try codex(type: "task_complete", turn: "first"))
+        #expect(reader.poll().isEmpty)
+    }
+
+    @Test func catchUpIsBoundedAndKeepsPartialRecordsUntilTheyFinish() throws {
+        let started = try codex(type: "task_started", turn: "first")
+        let complete = try codex(type: "task_complete", turn: "first")
+        let fixture = try JournalFixture(
+            initial: metadata() + line(["type": "fixture", "padding": String(repeating: "x", count: 300_000)])
+                + started + complete.dropLast(3))
+        defer { fixture.cleanup() }
+        var reader = ProviderLifecycleJournal(
+            url: fixture.file, provider: .codex, sessionID: session, notBefore: now, readFromBeginning: true)
+        #expect(reader.poll().isEmpty)
+        #expect(reader.isCatchingUp)
+        #expect(reader.poll() == [.working])
+        #expect(!reader.isCatchingUp)
+        try fixture.append(Data(complete.suffix(3)))
+        #expect(reader.poll() == [.idle])
+    }
+
+    @Test func aSecondMetadataHeaderDuringCatchUpInvalidatesEvenTheSameIdentity() throws {
+        let fixture = try JournalFixture(initial: metadata() + codex(type: "task_started", turn: "first"))
+        defer { fixture.cleanup() }
+        var reader = ProviderLifecycleJournal(
+            url: fixture.file, provider: .codex, sessionID: session, notBefore: now, readFromBeginning: true)
+        try fixture.append(try metadata())
+        #expect(reader.poll() == [.working])
+        #expect(reader.poll() == [.unknown])
+        #expect(!reader.canObserve)
+    }
+
+    @Test(arguments: ["replace", "truncate", "rewrite"])
+    func anOwnedAttachmentRejectsFileChangesBeforeItsFirstRead(change: String) throws {
+        let fixture = try JournalFixture(initial: metadata() + codex(type: "task_started", turn: "first"))
+        defer { fixture.cleanup() }
+        let (transcript, _) = try ownedTranscript(fixture)
+        var reader = ProviderLifecycleJournal(transcript: transcript)
+        #expect(reader.canObserve)
+        if change == "replace" {
+            try (metadata() + codex(type: "task_complete", turn: "first")).write(to: fixture.file, options: .atomic)
+        } else if change == "truncate" {
+            try Data().write(to: fixture.file)
+        } else {
+            let handle = try FileHandle(forWritingTo: fixture.file)
+            defer { try? handle.close() }
+            try handle.write(contentsOf: metadata(version: "1.158.0"))
+        }
+        #expect(reader.poll() == [.unknown])
+        #expect(!reader.canObserve)
+        #expect(reader.poll().isEmpty)
+    }
+
+    @Test(arguments: [false, true])
+    func lostOrChangingOwnershipDiscardsTheWholePoll(afterRead: Bool) throws {
+        let fixture = try JournalFixture(initial: metadata() + codex(type: "task_started", turn: "first"))
+        defer { fixture.cleanup() }
+        let (transcript, observations) = try ownedTranscript(fixture)
+        var reader = ProviderLifecycleJournal(transcript: transcript)
+        observations.allowReads(afterRead ? 1 : 0)
+        #expect(reader.poll() == [.unknown])
+        #expect(!reader.canObserve)
+    }
+
+    @Test func aFreshOwnedReaderAfterInterruptionDoesNotReplayLaunchHistory() throws {
+        let fixture = try JournalFixture(
+            initial: metadata() + codex(type: "task_started", turn: "old") + codex(type: "task_complete", turn: "old"))
+        defer { fixture.cleanup() }
+        let (transcript, _) = try ownedTranscript(fixture)
+        var reader = ProviderLifecycleJournal(transcript: transcript, readFromBeginning: false)
+        #expect(!reader.isCatchingUp)
+        #expect(reader.poll().isEmpty)
+        try fixture.append(try codex(type: "task_started", turn: "new") + codex(type: "task_complete", turn: "new"))
+        #expect(reader.poll() == [.working, .idle])
+    }
+
+    @Test(arguments: ["replace", "truncate", "rewrite"])
+    func aFileMutationAtTheFinalLeaseCannotPublishTheReadBatch(change: String) throws {
+        let initial = try metadata() + codex(type: "task_started", turn: "first")
+        let fixture = try JournalFixture(initial: initial)
+        defer { fixture.cleanup() }
+        let (transcript, observations) = try ownedTranscript(fixture)
+        var reader = ProviderLifecycleJournal(transcript: transcript)
+        observations.mutateAfterRead {
+            if change == "replace" {
+                try? initial.write(to: fixture.file, options: .atomic)
+            } else if change == "truncate" {
+                try? Data().write(to: fixture.file)
+            } else {
+                let rewritten = Data(
+                    String(decoding: initial, as: UTF8.self).replacingOccurrences(of: "0.158.0", with: "1.158.0").utf8)
+                try? rewritten.write(to: fixture.file)
+            }
+        }
+        #expect(reader.poll() == [.unknown])
+        #expect(!reader.canObserve)
+    }
 
     @Test(arguments: [CLIProvider.claudeCode, .devin, .cursor, .kimi])
     func unsupportedProviderCannotObserveEvenWithAJournal(provider: CLIProvider) throws {
@@ -160,6 +373,51 @@ struct ProviderLifecycleJournalTests {
         #expect(reader.poll() == [.idle])
     }
 
+    @Test func continuedCodexReaderKeepsTheActiveTurnAndTracksTheQueuedTurn() throws {
+        let metadata = try line([
+            "type": "session_meta", "payload": ["id": session, "cwd": "/tmp", "cli_version": "0.158.0"],
+        ])
+        let fixture = try JournalFixture(initial: metadata)
+        defer { fixture.cleanup() }
+        var reader = ProviderLifecycleJournal(url: fixture.file, provider: .codex, sessionID: session, notBefore: now)
+        try fixture.append(try codex(type: "task_started", turn: "t1"))
+        #expect(reader.poll() == [.working])
+
+        // A second submission keeps this reader, including its active turn and offset.
+        var continued = reader
+        let complete1 = try codex(type: "task_complete", turn: "t1")
+        try fixture.append(complete1)
+        #expect(continued.poll() == [.idle])
+        try fixture.append(complete1)
+        #expect(continued.poll().isEmpty)
+        let start2 = try codex(type: "task_started", turn: "t2")
+        try fixture.append(start2)
+        #expect(continued.poll() == [.working])
+        try fixture.append(start2 + complete1)
+        #expect(continued.poll().isEmpty)
+        try fixture.append(try codex(type: "task_complete", turn: "t2"))
+        #expect(continued.poll() == [.idle])
+    }
+
+    @Test func endingThePreviousCodexTurnCannotCompleteTheQueuedTurn() throws {
+        let metadata = try line([
+            "type": "session_meta", "payload": ["id": session, "cwd": "/tmp", "cli_version": "0.158.0"],
+        ])
+        let fixture = try JournalFixture(initial: metadata)
+        defer { fixture.cleanup() }
+        var reader = ProviderLifecycleJournal(url: fixture.file, provider: .codex, sessionID: session, notBefore: now)
+        try fixture.append(try codex(type: "task_started", turn: "t1"))
+        #expect(reader.poll() == [.working])
+        try fixture.append(try codex(type: "task_started", turn: "t2"))
+        #expect(reader.poll() == [.working])
+        try fixture.append(try codex(type: "task_complete", turn: "t1"))
+        #expect(reader.poll().isEmpty)
+        try fixture.append(try codex(type: "turn_aborted", turn: "t2"))
+        #expect(reader.poll() == [.interrupted])
+        try fixture.append(try codex(type: "task_complete", turn: "t2"))
+        #expect(reader.poll().isEmpty)
+    }
+
     @Test(arguments: ["1.0.0", "malformed"])
     func unsupportedOrBrokenMetadataCannotValidateLifecycle(version: String) throws {
         let meta = try line([
@@ -234,8 +492,35 @@ struct ProviderLifecycleJournalTests {
             ],
         ])
     }
-    private func codex(type: String, turn: String) throws -> Data {
-        try line(["timestamp": timestamp(now), "type": "event_msg", "payload": ["type": type, "turn_id": turn]])
+    private func codex(type: String, turn: String, time: Date? = nil) throws -> Data {
+        try line([
+            "timestamp": timestamp(time ?? now), "type": "event_msg", "payload": ["type": type, "turn_id": turn],
+        ])
+    }
+    private func metadata(version: String = "0.158.0") throws -> Data {
+        try line(["type": "session_meta", "payload": ["id": session, "cwd": "/tmp", "cli_version": version]])
+    }
+    private func ownedTranscript(_ fixture: JournalFixture) throws -> (CodexSessionBinding.Transcript, JournalOwnership)
+    {
+        var info = stat()
+        #expect(lstat(fixture.file.path, &info) == 0)
+        let file = ProcessOpenFiles.FileIdentity(
+            path: GrokPaths.canonicalPath(fixture.file.path), device: UInt32(bitPattern: info.st_dev),
+            inode: info.st_ino)
+        let process = ChildProcessGeneration(pid: 42, seconds: 1, microseconds: 0)
+        let observations = JournalOwnership(
+            ProcessOpenFiles.Snapshot(
+                nodes: [ProcessOpenFiles.Node(generation: process, parent: getpid())],
+                files: [file: .init(identity: file, writable: true, bornAt: 2)]))
+        let parsed = try #require(
+            NativeSessionScanner.parse(
+                provider: .codex, data: Data(contentsOf: fixture.file), file: fixture.file, modified: now))
+        let resolved = CodexSessionBinding.resolveTranscript(
+            process: process, historyRoot: fixture.root, sessions: [parsed],
+            workingDirectory: URL(fileURLWithPath: "/tmp"),
+            snapshot: { _, _ in observations.read() })
+        let transcript = try #require(resolved)
+        return (transcript, observations)
     }
     private func timestamp(_ date: Date) -> String { ISO8601DateFormatter().string(from: date) }
     private func line(_ value: [String: Any]) throws -> Data {
@@ -243,7 +528,40 @@ struct ProviderLifecycleJournalTests {
     }
 }
 
-private struct JournalFixture {
+/// Entirely synthetic kernel receipts; no process enumeration is needed.
+private final class JournalOwnership: @unchecked Sendable {
+    private let lock = NSLock()
+    private let snapshot: ProcessOpenFiles.Snapshot
+    private var remaining: Int?
+    private var mutate: (@Sendable () -> Void)?
+    private var readsUntilMutation = 0
+    init(_ snapshot: ProcessOpenFiles.Snapshot) { self.snapshot = snapshot }
+    func allowReads(_ count: Int) { lock.withLock { remaining = count } }
+    func mutateAfterRead(_ mutate: @escaping @Sendable () -> Void) {
+        lock.withLock {
+            self.mutate = mutate
+            readsUntilMutation = 2
+        }
+    }
+    func read() -> ProcessOpenFiles.Snapshot? {
+        lock.withLock {
+            if mutate != nil {
+                readsUntilMutation -= 1
+                if readsUntilMutation == 0 {
+                    mutate?()
+                    mutate = nil
+                }
+            }
+            if let count = remaining {
+                guard count > 0 else { return nil }
+                remaining = count - 1
+            }
+            return snapshot
+        }
+    }
+}
+
+private struct JournalFixture: Sendable {
     let root: URL
     let file: URL
     init(initial: Data = Data()) throws {

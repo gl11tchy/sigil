@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
-import { readableOutput } from '../public/output.mjs';
+import { pairingDatabase, pairingIndexedDB } from './support/pairing-idb.mjs';
+import { createReadableOutput, commonPrefixLength } from '../public/output.mjs';
 import { pairingFromText } from '../public/pairing.mjs';
 
 const source = (await readFile(new URL('../public/app.mjs', import.meta.url), 'utf8'))
@@ -18,10 +19,9 @@ async function skipOptions(socket) {
 }
 
 // Run the real handlers; only browser services and encryption are replaced.
-async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { device: true } } } = {}) {
+async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { device: true } }, faults = {}, database = pairingDatabase(saved), clock, initiallyHidden = false } = {}) {
   const elements = new Map(), events = new Map(), timers = new Map(), sockets = [];
   let nextTimer = 0, reloads = 0, randomCounter = 0;
-  let stored = saved;
   const sealed = [];
   const element = id => {
     if (!elements.has(id)) elements.set(id, {
@@ -45,7 +45,7 @@ async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { devic
     reload() { reloads++; },
   };
   const document = {
-    hidden: false, getElementById: element,
+    hidden: initiallyHidden, getElementById: element,
     createDocumentFragment: () => ({ parts: [], append(node) { this.parts.push(node); } }),
     createTextNode: text => ({ textContent: text }),
     createElement: () => ({
@@ -69,42 +69,21 @@ async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { devic
       (value.route ? this.routes : this.sent).push(JSON.parse(value.route || value.data));
     }
     receive(frame) { this.onmessage({ data: JSON.stringify(frame) }); }
-    reply(request = this.sent.at(-1)) {
+    reply(request = this.sent.at(-1), state = { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle', provider: 'grokBuild', sessionID: 'native-fixture', cwd: '/tmp/fixture' }], selectedTabID: 'tab-1', terminal: 'READY' }) {
       this.receive({ data: JSON.stringify({
         challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: true,
-        state: { tabs: [{ id: 'tab-1', title: 'Fixture', status: 'idle', provider: 'grokBuild', sessionID: 'native-fixture', cwd: '/tmp/fixture' }], selectedTabID: 'tab-1', terminal: 'READY' },
+        state,
       }) });
     }
     close() { this.readyState = 3; this.onclose?.(); }
   }
-  const indexedDB = {
-    open() {
-      const request = {};
-      queueMicrotask(() => {
-        request.result = {
-          close() {},
-          transaction() {
-            const transaction = {
-              objectStore: () => ({
-                get: () => ({ result: structuredClone(stored) }),
-                put: value => { stored = structuredClone(value); return {}; },
-                delete: () => { stored = undefined; return {}; },
-              }),
-            };
-            queueMicrotask(() => { transaction.oncomplete?.(); });
-            return transaction;
-          },
-        };
-        request.onsuccess();
-      });
-      return request;
-    },
-  };
+  const indexedDB = pairingIndexedDB(database, faults);
   const app = {
-    readableOutput, pairingFromText, document, location, history: { replaceState() {} }, indexedDB,
+    createReadableOutput, commonPrefixLength, pairingFromText, document, location, history: { replaceState() {} }, indexedDB,
     window: { addEventListener: (name, callback) => events.set(name, callback) },
     navigator: {}, crypto: { subtle: {} }, URL, URLSearchParams, TextEncoder,
     WebSocket: FakeSocket,
+    ...(clock ? { Date: class extends Date { static now() { return clock.now; } } } : {}),
     importKey: async hex => ({ hex }), randomKey: () => ++randomCounter === 1 ? 'e'.repeat(64) : randomCounter.toString(16).padStart(64, '0'),
     seal: async (value, key, direction) => { sealed.push({ value, key, direction }); return JSON.stringify(value); },
     open: async frame => JSON.parse(frame),
@@ -135,8 +114,295 @@ async function browser({ hash = '', saved = { room: 'a'.repeat(32), key: { devic
     element('compose').onsubmit({ preventDefault() { prevented = true; } });
     assert.equal(prevented, true);
   }
-  return { app, element, events, location, sockets, authorize, fireTimer, submit, sealed, timers, stored: () => structuredClone(stored), reloads: () => reloads };
+  return { app, element, events, location, sockets, authorize, fireTimer, submit, sealed, timers, stored: () => structuredClone(database.value), reloads: () => reloads };
 }
+
+test('REA-1202 short return refreshes immediately without claiming fresh output', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  const before = socket.sent.length;
+  page.app.document.hidden = true;
+  page.events.get('visibilitychange')();
+  page.app.document.hidden = false;
+  page.events.get('visibilitychange')();
+  await settle();
+  assert.deepEqual({
+    actions: socket.sent.slice(before).map(request => request.action),
+    label: page.element('status').textContent,
+    connected: page.element('status').dataset.connected,
+  }, { actions: ['state'], label: 'Refreshing…', connected: 'false' });
+  assert.deepEqual(Object.keys(socket.sent.at(-1)).sort(), ['action', 'challenge', 'clientNonce', 'sequence', 'tabID']);
+  assert.equal(socket.sent.at(-1).sequence, socket.sent[0].sequence + 1);
+  assert.equal(page.element('terminal').textContent, 'READY');
+  socket.reply();
+  await settle();
+  assert.equal(page.element('status').textContent, 'Connected');
+  assert.equal([...page.timers.values()].filter(timer => timer.delay === 1000).length, 1);
+});
+
+function hidePage(page) {
+  page.app.document.hidden = true;
+  page.events.get('visibilitychange')();
+}
+function showPage(page) {
+  page.app.document.hidden = false;
+  page.events.get('visibilitychange')();
+}
+const returnState = (id = 'tab-1', terminal = 'FRESH') => ({
+  tabs: ['tab-1', 'tab-2'].map(id => ({ id, title: id, status: 'idle' })), selectedTabID: id, terminal,
+});
+
+for (const duration of [-1, 0, 30_000, 30_001, 31_000]) test(`REA-1202 return after ${duration} ms uses the bounded recovery policy`, async () => {
+  const clock = { now: 0 };
+  const page = await browser({ clock });
+  const original = await page.authorize();
+  hidePage(page); clock.now += duration; showPage(page);
+  await settle();
+  assert.equal(page.element('status').textContent, 'Refreshing…');
+  assert.equal(page.element('status').dataset.connected, 'false');
+  if (duration < 0 || duration > 30_000) {
+    assert.equal(original.readyState, 3);
+    assert.equal(page.sockets.length, 2); // No reconnect-backoff timer has to fire.
+    assert.equal([...page.timers.values()].some(timer => timer.delay === 500), false);
+    const next = await page.authorize();
+    assert.deepEqual(next.sent.map(request => request.action), ['state']);
+  } else {
+    assert.equal(page.sockets.length, 1);
+    assert.deepEqual(original.sent.map(request => request.action), ['state', 'state']);
+    original.reply(); await settle();
+    assert.equal(page.element('status').textContent, 'Connected');
+  }
+});
+
+test('REA-1202 visibility and persisted pageshow coalesce, including duplicate notifications', async () => {
+  const clock = { now: 100_000 };
+  const page = await browser({ clock });
+  const socket = await page.authorize();
+  page.events.get('pageshow')({ persisted: false });
+  hidePage(page); clock.now += 1000;
+  page.events.get('pagehide')({ persisted: true });
+  page.app.document.hidden = false;
+  page.events.get('pageshow')({ persisted: true }); showPage(page);
+  page.events.get('pageshow')({ persisted: true });
+  await settle();
+  assert.deepEqual(socket.sent.map(request => request.action), ['state', 'state']);
+  socket.reply(); await settle();
+  page.events.get('pageshow')({ persisted: true }); showPage(page);
+  await settle();
+  assert.equal(socket.sent.length, 2);
+  assert.equal(page.element('status').textContent, 'Connected');
+});
+
+for (const duration of [0, 31_000]) test(`REA-1202 a page initially loaded hidden refreshes on its first return after ${duration} ms`, async () => {
+  const clock = { now: 0 };
+  const page = await browser({ clock, initiallyHidden: true });
+  const original = await page.authorize();
+  assert.equal([...page.timers.values()].some(timer => timer.delay === 1000), false);
+  clock.now = duration; showPage(page); await settle();
+  assert.equal(page.element('status').textContent, 'Refreshing…');
+  if (duration > 30_000) {
+    assert.equal(original.readyState, 3);
+    assert.equal(page.sockets.length, 2);
+    await page.authorize();
+  } else {
+    assert.deepEqual(original.sent.map(request => request.action), ['state', 'state']);
+    original.reply(); await settle();
+    assert.equal(page.element('status').textContent, 'Connected');
+  }
+});
+
+test('REA-1202 pagehide alone recovers BFCache and cannot shorten the hidden interval', async () => {
+  const clock = { now: 0 };
+  const page = await browser({ clock });
+  const original = await page.authorize();
+  page.events.get('pagehide')({ persisted: true });
+  clock.now = 20_000; hidePage(page);
+  clock.now = 31_000; page.app.document.hidden = false;
+  page.events.get('pageshow')({ persisted: true }); showPage(page);
+  assert.equal(original.readyState, 3);
+  assert.equal(page.sockets.length, 2);
+});
+
+test('REA-1202 a second hide supersedes an outstanding refresh without accumulating requests', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  hidePage(page); showPage(page); await settle();
+  const old = socket.sent.at(-1);
+  hidePage(page); showPage(page); await settle();
+  assert.equal(socket.sent.length, 2);
+  socket.reply(old, returnState('tab-1', 'OLD HIDDEN SNAPSHOT')); await settle();
+  assert.equal(page.element('terminal').textContent, 'READY');
+  assert.equal(page.element('status').textContent, 'Refreshing…');
+  assert.equal(socket.sent.length, 3);
+  socket.reply(undefined, returnState()); await settle();
+  assert.equal(page.element('terminal').textContent, 'READYFRESH');
+  assert.equal(page.element('status').textContent, 'Connected');
+});
+
+test('REA-1202 a pre-hide poll cannot claim freshness for the return', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  await page.fireTimer(1000);
+  const old = socket.sent.at(-1);
+  hidePage(page); showPage(page); await settle();
+  assert.equal(socket.sent.length, 2);
+  socket.reply(old, returnState('tab-1', 'PRE-HIDE')); await settle();
+  assert.equal(page.element('status').textContent, 'Refreshing…');
+  assert.equal(socket.sent.length, 3);
+  socket.reply(undefined, returnState()); await settle();
+  assert.equal(page.element('terminal').textContent, 'READYPRE-HIDEFRESH');
+  assert.equal(page.element('status').textContent, 'Connected');
+});
+
+test('REA-1202 a selection change during ticket persistence fences the old refresh snapshot', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const originalStorage = page.app.storage;
+  page.app.storage = async (mode, value) => { if (mode === 'put') await held; return originalStorage(mode, value); };
+  hidePage(page); showPage(page); await settle();
+  const request = socket.sent.at(-1);
+  socket.receive({ data: JSON.stringify({ challenge: request.challenge, clientNonce: request.clientNonce,
+    sequence: request.sequence, ok: true, ticket: 'f'.repeat(64), state: returnState('tab-1', 'WRONG TAB') }) });
+  await settle();
+  page.app.render(returnState('tab-2', 'CURRENT TAB'));
+  release(); await settle();
+  assert.equal(page.element('tabs').value, 'tab-2');
+  assert.equal(page.element('terminal').textContent, 'CURRENT TAB');
+  assert.equal(page.element('status').textContent, 'Refreshing…');
+  assert.equal(socket.sent.at(-1).tabID, 'tab-2');
+  socket.reply(undefined, returnState('tab-2', 'CURRENT TAB FRESH')); await settle();
+  assert.equal(page.element('status').textContent, 'Connected');
+});
+
+test('REA-1202 an authoritative fresh snapshot may select a different validated tab', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  hidePage(page); showPage(page); await settle();
+  socket.reply(undefined, returnState('tab-2', 'CURRENT TAB')); await settle();
+  assert.equal(page.element('tabs').value, 'tab-2');
+  assert.equal(page.element('terminal').textContent, 'CURRENT TAB');
+  assert.equal(page.element('status').textContent, 'Connected');
+  assert.equal(socket.sent.length, 2);
+});
+
+test('REA-1202 an authoritative empty state completes freshness without inventing a target', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  hidePage(page); showPage(page); await settle();
+  socket.reply(undefined, { tabs: [], selectedTabID: null, terminal: '' }); await settle();
+  assert.equal(page.element('status').textContent, 'Connected');
+  assert.equal(page.element('tabs').value, '');
+  assert.equal(page.element('send').disabled, true);
+  assert.equal(page.element('new').disabled, false);
+  assert.equal(socket.sent.length, 2);
+});
+
+test('REA-1202 a long return never replays an unacknowledged send or its Enter', async () => {
+  const clock = { now: 0 };
+  const page = await browser({ clock });
+  const original = await page.authorize();
+  page.submit(); await settle();
+  const lost = original.sent.at(-1);
+  assert.equal(lost.action, 'input');
+  hidePage(page); clock.now = 31_000; showPage(page); await settle();
+  const next = await page.authorize();
+  original.reply(lost, returnState('tab-1', 'LATE COMMAND')); await settle();
+  assert.deepEqual(original.sent.map(request => request.action), ['state', 'input']);
+  assert.deepEqual(next.sent.map(request => request.action), ['state']);
+  assert.equal(page.element('message').value, 'fixture input');
+  assert.equal(page.element('terminal').textContent, 'READY');
+  assert.match(page.element('error').textContent || '', /Connection lost|^$/);
+});
+
+test('REA-1202 a short return waits for an in-flight send and Enter before its fresh read', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.submit(); await settle();
+  hidePage(page); showPage(page); await settle();
+  page.element('message').value = 'Next draft';
+  assert.equal(page.element('status').textContent, 'Refreshing…');
+  assert.deepEqual(socket.sent.map(request => request.action), ['state', 'input']);
+  socket.reply(); await settle(); await page.fireTimer(100);
+  assert.deepEqual(socket.sent.map(request => request.action), ['state', 'input', 'key']);
+  socket.reply(); await settle();
+  assert.deepEqual(socket.sent.map(request => request.action), ['state', 'input', 'key', 'state']);
+  socket.reply(); await settle();
+  assert.equal(page.element('message').value, 'Next draft');
+  assert.equal(page.element('status').textContent, 'Connected');
+});
+
+test('REA-1202 refreshing disables new remote actions while keeping the draft editable', async () => {
+  const page = await browser();
+  const socket = await page.authorize();
+  page.element('message').value = 'Draft';
+  hidePage(page); showPage(page); await settle();
+  for (const id of ['send', 'new', 'tabs', 'paste', 'stop', 'interrupt']) assert.equal(page.element(id).disabled, true, id);
+  assert.equal(page.element('message').disabled, false);
+  assert.equal(page.element('message').readOnly, false);
+  page.element('compose').onsubmit({ preventDefault() {} });
+  page.element('stop').onclick(); page.element('new').onclick();
+  await settle();
+  assert.equal(socket.sent.length, 2);
+  socket.reply(); await settle();
+  assert.equal(page.element('send').disabled, false);
+});
+
+for (const end of ['revoked', 'forgotten', 'legacy']) test(`REA-1202 return cannot reconnect a ${end} pairing`, async () => {
+  const clock = { now: 0 };
+  const page = await browser({ clock });
+  const socket = await page.authorize();
+  if (end === 'legacy') await page.fireTimer(1000);
+  hidePage(page);
+  if (end === 'revoked') socket.receive({ error: 'unauthorized' });
+  else if (end === 'forgotten') await page.app.forget();
+  else {
+    const request = socket.sent.at(-1);
+    socket.receive({ data: JSON.stringify({ challenge: request.challenge, sequence: request.sequence, ok: true }) });
+  }
+  await settle(); clock.now = 31_000; showPage(page);
+  page.events.get('pageshow')({ persisted: true }); await settle();
+  assert.equal(page.sockets.length, 1);
+  assert.equal(page.element('status').textContent, 'Disconnected');
+  assert.equal(page.timers.size, 0);
+});
+
+test('REA-1202 a stale decrypt completion cannot repaint or complete a newer connection refresh', async () => {
+  const page = await browser();
+  const original = await page.authorize();
+  hidePage(page); showPage(page); await settle();
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const originalOpen = page.app.open;
+  page.app.open = async frame => { await held; return originalOpen(frame); };
+  original.reply(undefined, returnState('tab-1', 'STALE SOCKET')); await settle();
+  page.app.open = originalOpen;
+  page.app.connect(true);
+  await page.authorize();
+  release(); await settle();
+  assert.equal(page.element('terminal').textContent, 'READY');
+  assert.equal(page.element('status').textContent, 'Connected');
+});
+
+test('REA-1202 missing state never turns a refresh or reconnect green', async () => {
+  const page = await browser();
+  const original = await page.authorize();
+  const noState = socket => {
+    const request = socket.sent.at(-1);
+    socket.receive({ data: JSON.stringify({ challenge: request.challenge, clientNonce: request.clientNonce,
+      sequence: request.sequence, ok: true }) });
+  };
+  hidePage(page); showPage(page); await settle(); noState(original); await settle();
+  assert.equal(page.sockets.length, 2);
+  const next = page.sockets.at(-1);
+  next.receive({ hello: 'c'.repeat(64) }); await settle(); noState(next); await settle();
+  assert.notEqual(page.element('status').textContent, 'Connected');
+  assert.equal(page.element('status').dataset.connected, 'false');
+  assert.match(page.element('error').textContent, /fresh state/);
+  assert.equal(next.readyState, 3);
+  assert.equal([...page.timers.values()].some(timer => timer.delay === 500), true);
+});
 
 test('attached file names keep their extension and non-Latin letters', async () => {
   const { app } = await browser();
@@ -540,14 +806,22 @@ async function selectionFixture(entry = 'picker') {
   page.element('message').value = 'First draft';
   page.app.render(state('tab-2')); page.element('message').value = 'Second draft';
   page.app.render(state('tab-1'));
+  if (entry === 'saved') {
+    page.element('sessions-dialog').open = true; page.element('session-search').value = 'Two';
+    page.app.searchSaved(); await settle();
+    const request = socket.sent.at(-1);
+    socket.receive({ data: JSON.stringify({
+      challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: true,
+      chats: [{ id: 'native-two', title: 'Two', folder: '/tmp/two' }], state: state('tab-1'),
+    }) });
+    await settle();
+  }
   const select = () => {
     if (entry === 'picker') { page.element('tabs').value = 'tab-2'; page.element('tabs').onchange(); }
     else if (entry === 'browse') {
       page.element('sessions-dialog').open = true; page.app.renderSessionList();
       page.element('session-list').children[1].onclick();
     } else {
-      page.element('sessions-dialog').open = true; page.element('session-search').value = 'Two';
-      page.app.renderSaved([{ id: 'native-two', title: 'Two', folder: '/tmp/two' }]);
       page.element('saved-list').children[0].onclick();
     }
   };
@@ -938,7 +1212,7 @@ test('New offers the Mac\'s CLIs and starts the chosen one', async () => {
     assert.equal(options.action, 'options');
     socket.receive({ data: JSON.stringify({
       challenge: options.challenge, clientNonce: options.clientNonce, sequence: options.sequence, ok: true,
-      options: { providers, provider: 'grokBuild', models: [], model: '', efforts: [], effort: '', locations: [] },
+      options: { providers, provider: 'grokBuild', models: ['grok-4.6'], model: 'grok-4.6', efforts: [{ id: 'high', name: 'High' }], effort: 'high', locations: [] },
     }) });
     await settle();
     assert.equal(page.element('project-dialog').open, true);
@@ -964,6 +1238,8 @@ test('New offers the Mac\'s CLIs and starts the chosen one', async () => {
   assert.equal(page.element('provider-problem').hidden, true);
   assert.equal(page.element('project-list').children[0].disabled, false);
   page.element('project-list').children[0].onclick();
+  await settle();
+  page.element('project-start').onclick();
   await settle();
   const created = socket.sent.at(-1);
   assert.equal(created.action, 'new');
@@ -1350,4 +1626,309 @@ test('delayed ticket persistence cannot apply an old connection snapshot', async
   release(); await settle();
   assert.equal(page.element('terminal').textContent, 'READY');
   assert.equal(page.element('tabs').value, 'tab-1');
+});
+
+const newSessionOptions = {
+  providers: [{ id: 'grokBuild', name: 'Grok Build', takesModel: true }, { id: 'claudeCode', name: 'Claude Code', takesModel: false }],
+  provider: 'grokBuild', models: ['grok-4.6', 'grok-fast'], model: 'grok-4.6',
+  efforts: [{ id: '', name: 'CLI default' }, { id: 'high', name: 'High' }], effort: 'high',
+  locations: [{ name: 'Code', folder: '/tmp/code' }], startsInWorktree: true,
+};
+const newSessionProjects = [
+  { name: 'Repository', folder: '/tmp/code/repo', repository: true, worktreeDefault: true },
+  { name: 'Home repository', folder: '/tmp/home', repository: true, worktreeDefault: false },
+  { name: 'Plain', folder: '/tmp/plain', repository: false },
+];
+async function newReply(socket, fields = {}) {
+  const request = socket.sent.at(-1);
+  socket.receive({ data: JSON.stringify({ challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: true, ...fields }) });
+  await settle();
+}
+async function openNewSheet(page, socket, { options = newSessionOptions, projects = newSessionProjects, sessionOps = true } = {}) {
+  page.app.render({ tabs: [], selectedTabID: null, terminal: '', capabilities: sessionOps ? ['sessionOps'] : [] });
+  page.element('new').onclick(); await settle();
+  await newReply(socket, { projects });
+  assert.equal(socket.sent.at(-1).action, 'options');
+  await newReply(socket, options === null ? { ok: false, error: 'Unknown action.' } : { options });
+}
+function creationForm(page, name = 'fresh') {
+  page.element('project-add').onclick();
+  page.element('project-name').value = name;
+  page.element('project-name').oninput();
+}
+function submitProject(page) { page.element('new-project-form').onsubmit({ preventDefault() {} }); }
+
+test('REA-1206 sends advertised model/effort and explicit repository choices, with per-project defaults', async () => {
+  const page = await browser(), socket = await page.authorize();
+  await openNewSheet(page, socket);
+  assert.equal(page.element('new-worktree').checked, true);
+  assert.equal(page.element('worktree-field').hidden, false);
+  page.element('project-list').children[1].onclick();
+  assert.equal(page.element('new-worktree').checked, false); // Home default wins over the global preference.
+  page.element('new-worktree').checked = true; page.element('new-worktree').onchange();
+  page.element('new-model').value = 'grok-fast'; page.element('new-model').onchange();
+  page.element('new-effort').value = ''; page.element('new-effort').onchange();
+  page.element('project-start').onclick(); page.element('project-start').onclick(); await settle();
+  const request = socket.sent.at(-1);
+  assert.equal(request.action, 'new'); assert.equal(request.text, '/tmp/home');
+  assert.equal(request.worktree, true); assert.equal(request.model, 'grok-fast'); assert.equal(request.effort, '');
+  assert.equal(socket.sent.filter(item => item.action === 'new').length, 1);
+  assert.equal(page.stored().pendingNew.action, 'new');
+  await newReply(socket);
+  assert.equal(page.stored().pendingNew, undefined);
+  await openNewSheet(page, socket);
+  page.element('new-worktree').checked = false; page.element('new-worktree').onchange();
+  page.element('project-start').onclick(); await settle();
+  assert.equal(socket.sent.at(-1).worktree, false);
+  await newReply(socket);
+});
+
+test('REA-1206 changing project resets its explicit choice and non-model providers omit model/effort', async () => {
+  const page = await browser(), socket = await page.authorize();
+  await openNewSheet(page, socket);
+  page.element('new-worktree').checked = false; page.element('new-worktree').onchange();
+  page.element('project-list').children[1].onclick();
+  page.element('project-list').children[0].onclick();
+  assert.equal(page.element('new-worktree').checked, true);
+  page.element('project-list').children[2].onclick();
+  assert.equal(page.element('worktree-field').hidden, true);
+  page.element('provider').value = 'claudeCode'; page.element('provider').onchange();
+  assert.equal(page.element('model-field').hidden, true);
+  page.element('project-start').onclick(); await settle();
+  const request = socket.sent.at(-1);
+  assert.equal(request.provider, 'claudeCode'); assert.equal(request.worktree, undefined);
+  assert.equal(request.model, undefined); assert.equal(request.effort, undefined);
+  await newReply(socket);
+});
+
+test('REA-1206 unsupported sessionOps hides worktree and project creation and leaves the Mac default authoritative', async () => {
+  const page = await browser(), socket = await page.authorize();
+  await openNewSheet(page, socket, { sessionOps: false });
+  assert.equal(page.element('worktree-field').hidden, true); assert.equal(page.element('project-add').hidden, true);
+  assert.match(page.element('worktree-detail').textContent, /Mac applies its worktree default/);
+  creationForm(page); submitProject(page); await settle();
+  assert.equal(socket.sent.filter(item => item.action === 'createProject').length, 0);
+  page.element('project-start').onclick(); await settle();
+  assert.equal(socket.sent.at(-1).worktree, undefined);
+  await newReply(socket);
+});
+
+for (const field of ['provider', 'new-model', 'new-effort']) {
+  test(`REA-1206 rejects a forged ${field} selection before dispatch`, async () => {
+    const page = await browser(), socket = await page.authorize();
+    await openNewSheet(page, socket);
+    page.element(field).value = 'not-advertised'; page.element(field).onchange();
+    assert.equal(page.element('project-start').disabled, true);
+    page.element('project-start').onclick(); await settle();
+    assert.equal(socket.sent.filter(item => item.action === 'new').length, 0);
+  });
+}
+
+test('REA-1206 bounds malformed options and never fabricates a missing model/effort', async () => {
+  const page = await browser(), socket = await page.authorize();
+  await openNewSheet(page, socket, { options: { ...newSessionOptions,
+    models: ['--flag', 'two words', 'x'.repeat(65), null], efforts: [{ id: '-- flag', name: 'Bad' }],
+    locations: [{ name: 'Escape', folder: '../outside' }], startsInWorktree: 'yes' } });
+  assert.equal(page.element('new-model').children.length, 0);
+  assert.equal(page.element('new-effort').children.length, 0);
+  assert.equal(page.element('project-add').hidden, true);
+  assert.equal(page.element('project-start').disabled, true);
+  page.element('project-start').onclick(); await settle();
+  assert.equal(socket.sent.filter(item => item.action === 'new').length, 0);
+});
+
+test('REA-1206 validates UTF-8 folder names and advertised destinations; Back and Cancel dispatch nothing', async () => {
+  const page = await browser(), socket = await page.authorize();
+  await openNewSheet(page, socket);
+  for (const name of ['', '.hidden', '../escape', 'a/b', 'a:b', 'x\u0000', 'x\u0085', 'x\u200B', '界'.repeat(27)]) {
+    creationForm(page, name); submitProject(page); await settle();
+    assert.equal(page.element('project-create').disabled, true, name);
+  }
+  creationForm(page, ' valid ');
+  page.element('project-location').value = '/not-advertised'; page.element('project-location').onchange();
+  submitProject(page); await settle();
+  assert.equal(socket.sent.filter(item => item.action === 'createProject').length, 0);
+  page.element('project-back').onclick(); assert.equal(page.element('new-project-form').hidden, true);
+  page.element('project-cancel').onclick();
+  assert.equal(socket.sent.filter(item => item.action === 'new').length, 0);
+});
+
+test('REA-1206 creates or adopts exactly one project, refreshes its metadata and selects it without starting', async () => {
+  const page = await browser(), socket = await page.authorize();
+  await openNewSheet(page, socket); creationForm(page, ' fresh ');
+  submitProject(page); submitProject(page); await settle();
+  const request = socket.sent.at(-1);
+  assert.equal(request.action, 'createProject'); assert.equal(request.text, '/tmp/code'); assert.equal(request.name, 'fresh');
+  assert.equal(socket.sent.filter(item => item.action === 'createProject').length, 1);
+  const created = { name: 'fresh', folder: '/tmp/code/fresh', repository: true, worktreeDefault: false };
+  await newReply(socket, { project: { name: created.name, folder: created.folder } });
+  assert.equal(socket.sent.at(-1).action, 'projects');
+  await newReply(socket, { projects: [created] });
+  assert.equal(page.element('new-project-form').hidden, true);
+  assert.equal(page.element('new-worktree').checked, false);
+  assert.equal(socket.sent.filter(item => item.action === 'new').length, 0);
+  page.element('project-start').onclick(); await settle();
+  assert.equal(socket.sent.at(-1).text, created.folder);
+  await newReply(socket);
+});
+
+for (const end of ['disconnect', 'timeout']) {
+  test(`REA-1206 ${end} leaves a start blocked across reconnect, reload and changed selections; late replies do not settle it`, async () => {
+    const page = await browser(), socket = await page.authorize();
+    await openNewSheet(page, socket); page.element('project-start').onclick(); await settle();
+    const request = socket.sent.at(-1);
+    if (end === 'timeout') await page.fireTimer(10000); else socket.close();
+    await settle();
+    socket.reply(request); await settle();
+    assert.equal(page.stored().pendingNew.action, 'new');
+    await page.fireTimer(500); const next = await page.authorize();
+    await openNewSheet(page, next);
+    page.element('provider').value = 'claudeCode'; page.element('provider').onchange();
+    page.element('project-list').children[1].onclick(); page.element('project-start').onclick(); await settle();
+    assert.equal(next.sent.filter(item => item.action === 'new').length, 0);
+    assert.match(page.element('new-outcome').textContent, /inspect its tabs and worktrees/);
+    const restored = await browser({ saved: page.stored() }), restoredSocket = await restored.authorize();
+    await openNewSheet(restored, restoredSocket);
+    assert.equal(restored.element('project-start').disabled, true);
+  });
+}
+
+test('REA-1206 lost project reply reconciles only an exact authoritative path, without recreating it', async () => {
+  const page = await browser(), socket = await page.authorize();
+  await openNewSheet(page, socket); creationForm(page); submitProject(page); await settle();
+  socket.close(); await settle(); await page.fireTimer(500); const next = await page.authorize();
+  await openNewSheet(page, next);
+  page.element('project-check').onclick(); await settle();
+  await newReply(next, { projects: [{ name: 'fresh', folder: '/elsewhere/fresh' }] });
+  assert.equal(page.stored().pendingNew.action, 'createProject');
+  page.element('project-check').onclick(); await settle();
+  await newReply(next, { projects: [{ name: 'fresh', folder: '/tmp/code/fresh', repository: false }] });
+  assert.equal(page.stored().pendingNew, undefined);
+  assert.equal(next.sent.filter(item => item.action === 'createProject').length, 0);
+  assert.equal(page.element('project-list').children[0].dataset.folder, '/tmp/code/fresh');
+});
+
+test('REA-1206 mismatched creation reply stays unresolved; verified rejection can be retried', async () => {
+  const page = await browser(), socket = await page.authorize();
+  await openNewSheet(page, socket); creationForm(page); submitProject(page); await settle();
+  await newReply(socket, { ok: false, error: 'A file with that name is already there.' });
+  assert.equal(page.stored().pendingNew, undefined);
+  submitProject(page); await settle();
+  await newReply(socket, { project: { name: 'fresh', folder: '/elsewhere/fresh' } });
+  assert.equal(page.stored().pendingNew.action, 'createProject');
+  submitProject(page); await settle();
+  assert.equal(socket.sent.filter(item => item.action === 'createProject').length, 2);
+});
+
+test('REA-1206 storage failure prevents dispatch; corrupt saved markers fail closed', async () => {
+  const faults = {}, page = await browser({ faults }), socket = await page.authorize();
+  await openNewSheet(page, socket); faults.storage = true;
+  page.element('project-start').onclick(); await settle();
+  assert.equal(socket.sent.filter(item => item.action === 'new').length, 0);
+  const restored = await browser({ saved: { room: 'a'.repeat(32), key: { device: true }, pendingNew: { action: 'invalid' } } });
+  const next = await restored.authorize(); await openNewSheet(restored, next);
+  assert.equal(restored.element('project-start').disabled, true);
+});
+
+test('REA-1206 bounded reconciliation scans authoritative pages and keeps unresolved results blocked', async () => {
+  const page = await browser({ saved: { room: 'a'.repeat(32), key: { device: true }, pendingNew: { action: 'createProject', folder: '/tmp/code/fresh' } } });
+  const socket = await page.authorize(); await openNewSheet(page, socket);
+  page.element('project-check').onclick(); await settle();
+  for (let index = 0; index < 400; index += 40) {
+    assert.equal(socket.sent.at(-1).index, index);
+    await newReply(socket, { projects: [{ name: 'Other', folder: `/tmp/other/${index}` }], projectsTruncated: true });
+  }
+  assert.equal(page.stored().pendingNew.folder, '/tmp/code/fresh');
+  assert.equal(page.element('project-start').disabled, true);
+  assert.match(page.element('project-error').textContent, /result stays unknown/);
+});
+
+test('REA-1206 connection replacement cannot settle an old project attempt or replay it', async () => {
+  const page = await browser({ saved: { room: 'a'.repeat(32), key: { device: true }, pendingNew: { action: 'createProject', folder: '/tmp/code/fresh' } } });
+  const socket = await page.authorize(); await openNewSheet(page, socket);
+  page.element('project-check').onclick(); await settle();
+  const old = socket.sent.at(-1); socket.close(); await settle();
+  await page.fireTimer(500); const next = await page.authorize();
+  socket.receive({ data: JSON.stringify({ challenge: old.challenge, clientNonce: old.clientNonce, sequence: old.sequence, ok: true,
+    projects: [{ name: 'fresh', folder: '/tmp/code/fresh' }] }) });
+  await settle();
+  assert.equal(page.stored().pendingNew.action, 'createProject');
+  assert.equal(next.sent.filter(item => ['new', 'createProject'].includes(item.action)).length, 0);
+});
+
+test('REA-1206 a failed result write cannot attach the old Mac attempt to a replacement pairing', async () => {
+  const faults = { pending: [] }, page = await browser({ faults }), socket = await page.authorize();
+  await openNewSheet(page, socket); page.element('project-start').onclick(); await settle();
+  faults.holdCompletion = true;
+  await newReply(socket);
+  assert.equal(faults.pending.length, 1);
+  faults.holdCompletion = false;
+  await page.app.beginPair({ room: 'd'.repeat(32), key: 'f'.repeat(64) });
+  const write = faults.pending[0]; write.error = new Error('Write failed'); write.onabort();
+  await settle();
+  assert.equal(page.app.pendingNew(), null);
+});
+
+test('REA-1206 preparation is not described as a sent request while persistence is pending', async () => {
+  const faults = { pending: [] }, page = await browser({ faults }), socket = await page.authorize();
+  await openNewSheet(page, socket); faults.holdCompletion = true;
+  page.element('project-start').onclick(); await settle();
+  assert.match(page.element('new-outcome').textContent, /Preparing/);
+  assert.equal(socket.sent.filter(request => request.action === 'new').length, 0);
+  faults.holdCompletion = false; faults.pending[0].oncomplete(); await settle();
+  assert.match(page.element('new-outcome').textContent, /Waiting for the Mac/);
+  assert.equal(socket.sent.filter(request => request.action === 'new').length, 1);
+  await newReply(socket);
+});
+
+test('REA-1206 preserves the Mac-advertised CLI-default model outside the named list', async () => {
+  const page = await browser(), socket = await page.authorize();
+  await openNewSheet(page, socket, { options: { ...newSessionOptions, model: '' } });
+  assert.equal(page.element('new-model').value, '');
+  assert.equal(page.element('new-model').children[0].textContent, 'CLI default');
+  page.element('project-start').onclick(); await settle();
+  assert.equal(socket.sent.at(-1).model, ''); await newReply(socket);
+});
+
+test('REA-1206 initial persistence failure leaves no unknown marker and can retry after storage recovers', async () => {
+  const faults = {}, page = await browser({ faults }), socket = await page.authorize();
+  await openNewSheet(page, socket); faults.storage = true;
+  page.element('project-start').onclick(); await settle();
+  assert.equal(page.app.pendingNew(), null);
+  assert.match(page.element('project-error').textContent, /Nothing was sent/);
+  assert.equal(page.stored().pendingNew, undefined);
+  assert.equal(socket.sent.filter(item => item.action === 'new').length, 0);
+  faults.storage = false; page.element('project-start').onclick(); await settle();
+  assert.equal(socket.sent.filter(item => item.action === 'new').length, 1); await newReply(socket);
+});
+
+test('REA-1206 two pre-existing contexts atomically claim one start and stale ticket writes preserve it', async () => {
+  const database = pairingDatabase({ room: 'a'.repeat(32), key: { device: true } });
+  const first = await browser({ database }), second = await browser({ database });
+  const a = await first.authorize(), b = await second.authorize();
+  await openNewSheet(first, a); await openNewSheet(second, b);
+  second.app.randomKey = () => '9'.repeat(64);
+  first.element('project-start').onclick(); second.element('project-start').onclick(); await settle();
+  assert.equal(a.sent.filter(item => item.action === 'new').length + b.sent.filter(item => item.action === 'new').length, 1);
+  const pending = structuredClone(database.value.pendingNew);
+  await second.app.storage('put', { room: 'a'.repeat(32), key: { device: true }, ticket: 'f'.repeat(64) });
+  assert.deepEqual(database.value.pendingNew, pending);
+  await second.app.storage('settle', { room: 'a'.repeat(32), pendingNew: { ...pending, id: '0'.repeat(64) } });
+  assert.deepEqual(database.value.pendingNew, pending);
+  a.close(); await settle();
+  second.element('project-start').onclick(); await settle();
+  assert.equal(b.sent.filter(item => item.action === 'new').length, 0);
+  const restored = await browser({ database }), c = await restored.authorize();
+  await openNewSheet(restored, c);
+  assert.equal(restored.element('project-start').disabled, true);
+});
+
+test('REA-1206 a late project success skips metadata refresh when its sheet is already closed', async () => {
+  const page = await browser(), socket = await page.authorize();
+  await openNewSheet(page, socket); creationForm(page); submitProject(page); await settle();
+  const before = socket.sent.filter(item => item.action === 'projects').length;
+  page.element('project-dialog').open = false;
+  await newReply(socket, { project: { name: 'fresh', folder: '/tmp/code/fresh' } });
+  assert.equal(socket.sent.filter(item => item.action === 'projects').length, before);
+  assert.equal(page.stored().pendingNew, undefined);
 });

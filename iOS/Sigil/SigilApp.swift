@@ -32,7 +32,7 @@ struct SigilApp: App {
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active: store.enterForeground()
-            case .background: store.enterBackground()
+            case .background: store.enterBackground(finishingSend: true)
             default: break
             }
         }

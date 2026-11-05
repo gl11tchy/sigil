@@ -342,12 +342,18 @@ struct RemoteProject: Decodable, Equatable, Identifiable {
     let folder: String
     /// True when a new session there can start in a worktree. Absent from older Macs.
     let repository: Bool?
+    let worktreeDefault: Bool?
     var id: String { folder }
 
-    init(name: String, folder: String, repository: Bool? = nil) {
+    init(name: String, folder: String, repository: Bool? = nil, worktreeDefault: Bool? = nil) {
         self.name = name
         self.folder = folder
         self.repository = repository
+        self.worktreeDefault = worktreeDefault
+    }
+
+    func worktreeChoice(savedDefault: Bool, explicit: Bool? = nil) -> Bool {
+        explicit ?? worktreeDefault ?? savedDefault
     }
 }
 
