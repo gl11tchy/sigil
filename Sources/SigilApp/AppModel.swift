@@ -130,6 +130,14 @@ final class AppModel {
     /// Older snapshots saved only an ID. Keep it until the first matching tab
     /// can be restored or the user makes a new selection.
     private var deferredLegacySelectedSessionID: String?
+    private struct ClosedTab {
+        let token = UUID()
+        let entry: OpenTabsSnapshot.Entry
+        let index: Int
+    }
+    /// User closes only; archive, delete and quit must never populate this list.
+    private var closedTabs: [ClosedTab] = []
+    private var isReopeningClosedTab = false
     private let trashConversation: TrashConversation
     private let presentError: ErrorPresenter
     /// Shown before a close, archive or shell restart stops work still running.
@@ -613,6 +621,7 @@ final class AppModel {
                 removeTab(at: index)
             }
             dropDeferred(matching: session)
+            closedTabs.removeAll { entryMatches($0.entry, sessionID: session.id, cwd: session.cwd) }
         }
         refreshDockIndicator()
         persistOpenTabs()
@@ -783,6 +792,7 @@ final class AppModel {
             if let index = tabs.firstIndex(where: { $0.id == tab.id }) { removeTab(at: index) }
         }
         dropDeferred(inProjectPath: project.cwd)
+        closedTabs.removeAll { inProject($0.entry.cwd, project.cwd) }
         refreshDockIndicator()
         persistOpenTabs()
         if focusedProject.map({ samePath($0.cwd, project.cwd) }) == true {
@@ -2709,9 +2719,129 @@ final class AppModel {
 
     func closeTab(_ id: TerminalTab.ID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let entry = tabs[index].capabilities.resume ? openTabEntry(for: tabs[index]) : nil
         removeTab(at: index)
+        if let entry, canReopen(entry) {
+            closedTabs.removeAll { sameEntry($0.entry, entry) }
+            closedTabs.append(ClosedTab(entry: entry, index: index))
+            if closedTabs.count > 10 { closedTabs.removeFirst(closedTabs.count - 10) }
+        }
         refreshDockIndicator()
         persistOpenTabs()
+    }
+
+    var canReopenClosedTab: Bool {
+        !isStartingNewSession && !isReopeningClosedTab && closedTabs.contains { canReopen($0.entry) }
+    }
+
+    private func canReopen(_ entry: OpenTabsSnapshot.Entry) -> Bool {
+        entry.provider.capabilities.resume && !entry.sessionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !settings.archivedConversations.contains {
+                $0.sessionID == sidebarID(entry) && samePath($0.cwd, entry.cwd)
+            }
+    }
+
+    /// An unavailable folder/provider keeps the entry for another deliberate try.
+    /// A history refresh never grants a different provider, identity or workspace.
+    func reopenClosedTab() async {
+        guard canReopenClosedTab else { return }
+        isReopeningClosedTab = true
+        defer { isReopeningClosedTab = false }
+        settings.reloadSharedLists()
+        canonicalPathCache.removeAll(keepingCapacity: true)
+        var refreshedHistory = false
+        var discardedMissingHistory = false
+        while !Task.isCancelled, !isStartingNewSession {
+            closedTabs.removeAll { !canReopen($0.entry) }
+            guard let closed = closedTabs.last else {
+                if discardedMissingHistory { showHistoryValidationError() }
+                return
+            }
+            let entry = closed.entry
+            if let existing = tabs.first(where: {
+                $0.spec.provider == entry.provider && tabMatches($0, sessionID: sidebarID(entry), cwd: entry.cwd)
+            }) {
+                closedTabs.removeLast()
+                select(existing.id)
+                return
+            }
+            guard canLaunchProvider(entry.provider) else { return }
+            let workingDirectory = URL(fileURLWithPath: entry.cwd)
+            guard Self.isUsableDirectory(workingDirectory) else {
+                showError(title: "Folder is unavailable", message: "Restore the folder, then try again.")
+                return
+            }
+            if !refreshedHistory {
+                let previousSelection = selectedTabID
+                let previousNewSessionFocus = newSessionFocusToken
+                let previousAppliedScan = store.appliedScanSequence
+                await store.reload()
+                canonicalPathCache.removeAll(keepingCapacity: true)
+                // Another close becomes the newest intent; delete/archive/quit can
+                // remove this one while the scan waits. Do not consume either.
+                guard !Task.isCancelled, closedTabs.last?.token == closed.token else { return }
+                guard newSessionFocusToken == previousNewSessionFocus,
+                    selectedTabID == previousSelection
+                        || tabs.contains(where: {
+                            $0.id == selectedTabID && $0.spec.provider == entry.provider
+                                && tabMatches($0, sessionID: sidebarID(entry), cwd: entry.cwd)
+                        })
+                else { return }
+                // A newer forced scan can supersede this reload without
+                // publishing yet. Its older visible rows are not fresh proof.
+                guard !store.isLoading, store.appliedScanSequence > previousAppliedScan else {
+                    showHistoryValidationError()
+                    return
+                }
+                refreshedHistory = true
+                settings.reloadSharedLists()
+                continue
+            }
+            guard
+                let session = store.sessions.first(where: {
+                    $0.provider == entry.provider && $0.nativeSessionID == entry.sessionID
+                        && samePath($0.cwd, entry.cwd)
+                })
+            else {
+                if store.canPruneMissingProjects {
+                    closedTabs.removeLast()
+                    discardedMissingHistory = true
+                    continue
+                }
+                showHistoryValidationError()
+                return
+            }
+            guard session.isHistoryValidated,
+                entry.provider != .grokBuild
+                    || !store.isGrokHistoryUncertain(for: session)
+            else {
+                showHistoryValidationError()
+                return
+            }
+            switch Self.restorationPathStatus(session.directory, directory: entry.provider == .grokBuild) {
+            case .present: break
+            case .missing:
+                if store.canPruneMissingProjects {
+                    closedTabs.removeLast()
+                    discardedMissingHistory = true
+                    continue
+                }
+                showHistoryValidationError()
+                return
+            case .unavailable(let message):
+                showError(title: "Conversation is unavailable", message: message)
+                return
+            }
+            guard let tab = add(resumeSpec(for: entry, sessionFile: session.directory), taskID: entry.taskID) else {
+                return
+            }
+            closedTabs.removeLast()
+            tabs.removeLast()
+            tabs.insert(tab, at: min(closed.index, tabs.count))
+            tab.sessionTitle = title(for: session)
+            select(tab.id)
+            return
+        }
     }
 
     /// Everything closing a tab does except writing the open-tab list.
@@ -2837,6 +2967,7 @@ final class AppModel {
         stopAndWait(tabs)
         tabs.removeAll()
         tabTaskIDs.removeAll()
+        closedTabs.removeAll()
         selectedTabID = nil
         refreshDockIndicator()
     }
@@ -3409,6 +3540,7 @@ final class AppModel {
         }
         do {
             try trashConversation(session.directory)
+            closedTabs.removeAll { entryMatches($0.entry, sessionID: session.id, cwd: session.cwd) }
             unpin(session)
             unarchive(session)
             resetName(session)
@@ -4135,19 +4267,7 @@ final class AppModel {
                 deferredOpenTabs.append(entry)
                 continue
             }
-            let spec = GrokLaunchSpec(
-                executable: entry.provider == .grokBuild ? grokExecutableURL : nil,
-                workingDirectory: workingDirectory,
-                mode: .resume(sessionID: entry.sessionID),
-                model: entry.model.map(\.nilIfEmpty)
-                    ?? (entry.provider == .grokBuild ? settings.model.nilIfEmpty : nil),
-                reasoningEffort: entry.effort.map(\.nilIfEmpty)
-                    ?? (entry.provider == .grokBuild ? settings.effort.nilIfEmpty : nil),
-                themeName: settings.theme.grokThemeName,
-                themeVariables: settings.theme.grokThemeEnvironment,
-                provider: entry.provider, sessionFile: entry.provider == .grokBuild ? nil : directory
-            )
-            guard let tab = add(spec, taskID: entry.taskID) else {
+            guard let tab = add(resumeSpec(for: entry, sessionFile: directory), taskID: entry.taskID) else {
                 unrestoredReasons[entryKey(entry)] = .taskLedgerUnavailable(
                     taskLedgerProblem ?? "The task could not be saved.")
                 deferredOpenTabs.append(entry)
@@ -4183,15 +4303,32 @@ final class AppModel {
         }
     }
 
+    private func resumeSpec(for entry: OpenTabsSnapshot.Entry, sessionFile: URL?) -> GrokLaunchSpec {
+        GrokLaunchSpec(
+            executable: entry.provider == .grokBuild ? grokExecutableURL : nil,
+            workingDirectory: URL(fileURLWithPath: entry.cwd),
+            mode: .resume(sessionID: entry.sessionID),
+            model: entry.model.map(\.nilIfEmpty)
+                ?? (entry.provider == .grokBuild ? settings.model.nilIfEmpty : nil),
+            reasoningEffort: entry.effort.map(\.nilIfEmpty)
+                ?? (entry.provider == .grokBuild ? settings.effort.nilIfEmpty : nil),
+            themeName: settings.theme.grokThemeName,
+            themeVariables: settings.theme.grokThemeEnvironment,
+            provider: entry.provider, sessionFile: entry.provider == .grokBuild ? nil : sessionFile
+        )
+    }
+
+    private func openTabEntry(for tab: TerminalTab) -> OpenTabsSnapshot.Entry? {
+        guard let sessionID = tab.nativeSessionID else { return nil }
+        return OpenTabsSnapshot.Entry(
+            sessionID: sessionID, cwd: tab.workingDirectory.path,
+            model: tab.spec.model ?? "", effort: tab.spec.reasoningEffort ?? "", provider: tab.spec.provider,
+            taskID: tabTaskIDs[tab.id])
+    }
+
     private func persistOpenTabs() {
         guard !isRestoringTabs else { return }
-        var entries = tabs.compactMap { tab -> OpenTabsSnapshot.Entry? in
-            guard let sessionID = tab.nativeSessionID else { return nil }
-            return OpenTabsSnapshot.Entry(
-                sessionID: sessionID, cwd: tab.workingDirectory.path,
-                model: tab.spec.model ?? "", effort: tab.spec.reasoningEffort ?? "", provider: tab.spec.provider,
-                taskID: tabTaskIDs[tab.id])
-        }
+        var entries = tabs.compactMap { openTabEntry(for: $0) }
         let liveKeys = Set(entries.map { entryKey($0) })
         // Keep deferred references in their saved positions without sorting
         // live tabs the user may have moved. Recovery after exhaustion can then

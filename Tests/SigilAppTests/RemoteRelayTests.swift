@@ -56,6 +56,52 @@ struct RemoteRelayTests {
         #expect(frame["error"] == "unauthorized")
     }
 
+    @Test @MainActor func disconnectWithNoPhoneClearsLocallyAndSendsTheRelayRevoke() async throws {
+        let relay = try await RelayFixture(captureHostClose: true)
+        defer { relay.stop() }
+        let store = InMemoryRemotePairingStore()
+        let ticket = RemoteCrypto.randomKey()
+        store.save(RemotePairing(origin: relay.origin, deviceKey: RemoteCrypto.randomKey(), ticket: ticket))
+        let remote = RemoteControl(store: store)
+        defer { remote.stop() }
+        remote.resumeIfPaired(model: AppModel())
+        try await waitUntil { remote.status == "Phone disconnected" }
+        let closedBefore = relay.hostCloseCount
+
+        remote.stop(revoke: true)
+        // The relay sends no acknowledgement. These are immediate local facts.
+        #expect(store.load() == nil)
+        #expect(!remote.isEnabled && !remote.isPaired && remote.status == "Off")
+        try await waitUntil { relay.hostCloseCount > closedBefore }
+
+        let phone = try RelayPhone(relay: relay)
+        defer { phone.close() }
+        let welcome = try await phone.receive()
+        let routeKey = try #require(welcome["route"])
+        let envelope = try RemoteCrypto.seal(["ticket": ticket], key: routeKey, direction: "relay-phone")
+        try await phone.send(["route": envelope])
+        let refusal = try await phone.receive()
+        #expect(refusal["error"] == "unauthorized")
+    }
+
+    @Test @MainActor func revokeWireOrderKeepsTheLegacyConnectedPhoneRefusal() throws {
+        let frames = RemoteControl.revocationFrames(peer: "generated-peer")
+        #expect(frames.count == 2)
+        let encoded = try frames.map { try JSONEncoder().encode($0) }
+        let legacyData = try #require(encoded.first)
+        let hintData = try #require(encoded.last)
+        let legacyObject = try JSONSerialization.jsonObject(with: legacyData)
+        let legacy = try #require(legacyObject as? [String: String])
+        #expect(legacy == ["peer": "generated-peer", "error": "unauthorized"])
+        let hintObject = try JSONSerialization.jsonObject(with: hintData)
+        let hint = try #require(hintObject as? [String: Bool])
+        #expect(hint == ["revoke": true])
+        let offline = RemoteControl.revocationFrames(peer: nil)
+        #expect(offline.count == 1)
+        let offlineFrame = try #require(offline.first)
+        #expect(try JSONEncoder().encode(offlineFrame) == hintData)
+    }
+
     @Test @MainActor func pairingThatCannotBeSavedIsReported() async throws {
         let relay = try await RelayFixture()
         defer { relay.stop() }
@@ -200,8 +246,12 @@ final class RelayFixture {
     /// Pushes the relay would send to Apple, one JSON line each, when the fixture captures them.
     var apnsCapture: URL { root.appendingPathComponent("apns.jsonl") }
     var roomCapture: URL { root.appendingPathComponent("rooms.txt") }
+    var hostCloseCount: Int {
+        let text = (try? String(contentsOf: root.appendingPathComponent("host-closed.txt"), encoding: .utf8)) ?? ""
+        return text.split(separator: "\n").count
+    }
 
-    init(captureAPNs: Bool = false, allocationStatus: Int? = nil) async throws {
+    init(captureAPNs: Bool = false, allocationStatus: Int? = nil, captureHostClose: Bool = false) async throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let portFile = root.appendingPathComponent("port")
@@ -211,6 +261,9 @@ final class RelayFixture {
                 "SIGIL_TEST_APNS_CAPTURE": root.appendingPathComponent("apns.jsonl").path,
                 "SIGIL_TEST_ROOM_CAPTURE": root.appendingPathComponent("rooms.txt").path,
             ] : [:]
+        if captureHostClose {
+            environment["SIGIL_TEST_HOST_CLOSE_CAPTURE"] = root.appendingPathComponent("host-closed.txt").path
+        }
         if let allocationStatus {
             try Data(String(allocationStatus).utf8).write(
                 to: root.appendingPathComponent("allocation-status"), options: .atomic)

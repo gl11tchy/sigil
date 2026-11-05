@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import net from 'node:net';
 import { createHash } from 'node:crypto';
 import WebSocket from 'ws';
-import { createRelay } from '../server.mjs';
+import { createRelay, RevokedTickets } from '../server.mjs';
 import { importKey, seal } from '../public/crypto.mjs';
 
 async function setup(t, options = {}) {
@@ -41,6 +41,15 @@ function message(ws) {
     }
     ws.on('message', onMessage);
   });
+}
+async function refusal(base, routingTicket) {
+  const phone = connect(base, undefined, 'phone', { ticket: routingTicket, origin: 'http://localhost:3099' });
+  const frames = [];
+  phone.on('message', bytes => {
+    const frame = JSON.parse(bytes);
+    if (!frame.route) frames.push(frame);
+  });
+  return { code: (await once(phone, 'close'))[0], frames };
 }
 
 test('host is authenticated and ciphertext routes only to its paired room', async t => {
@@ -149,6 +158,174 @@ test('a host that rejects a phone and closes at once still reaches the phone', {
   host.close();
   host._socket.uncork();
   assert.equal((await rejected).error, 'unauthorized');
+});
+
+test('REA-1220 revoked ticket tells an offline phone before closing', { timeout: 5000 }, async t => {
+  const { base, room, hostToken } = await setup(t);
+  const host = connect(base, room, 'host', {
+    ticket: ticket(), headers: { Authorization: `Bearer ${hostToken}` },
+  });
+  await message(host);
+  const hostClosed = once(host, 'close');
+  host.send(JSON.stringify({ revoke: true }));
+  await hostClosed;
+
+  assert.deepEqual(await refusal(base, ticket()), { code: 1008, frames: [{ error: 'unauthorized' }] });
+});
+
+test('REA-1220 revoke and close in one write retains the offline hint', { timeout: 5000 }, async t => {
+  const { base, room, hostToken } = await setup(t);
+  const host = connect(base, room, 'host', {
+    ticket: ticket(), headers: { Authorization: `Bearer ${hostToken}` },
+  });
+  await message(host);
+  const closed = once(host, 'close');
+  const transport = host._socket;
+  transport.cork();
+  host.send(JSON.stringify({ revoke: true }));
+  host.close();
+  transport.uncork();
+  await closed;
+  assert.deepEqual(await refusal(base, ticket()), { code: 1008, frames: [{ error: 'unauthorized' }] });
+});
+
+test('REA-1220 a phone cannot revoke the host pairing', { timeout: 5000 }, async t => {
+  const { base, room, hostToken } = await setup(t);
+  const host = connect(base, room, 'host', {
+    ticket: ticket(), headers: { Authorization: `Bearer ${hostToken}` },
+  });
+  await message(host);
+  const notice = message(host);
+  const phone = connect(base, undefined, 'phone', { ticket: ticket(), origin: 'http://localhost:3099' });
+  await notice;
+  const closed = once(phone, 'close');
+  const left = message(host);
+  phone.send(JSON.stringify({ revoke: true }));
+  assert.equal((await closed)[0], 1008);
+  assert.equal((await left).type, 'left');
+  const nextNotice = message(host);
+  const next = connect(base, undefined, 'phone', { ticket: ticket(), origin: 'http://localhost:3099' });
+  const { peer } = await nextNotice;
+  const received = message(next);
+  host.send(JSON.stringify({ peer, hello: 'still-paired' }));
+  assert.deepEqual(await received, { hello: 'still-paired' });
+});
+
+test('REA-1220 a host cannot name another room ticket to revoke', { timeout: 5000 }, async t => {
+  const { base, room, hostToken } = await setup(t);
+  const own = connect(base, room, 'host', {
+    ticket: ticket(), headers: { Authorization: `Bearer ${hostToken}` },
+  });
+  await message(own);
+  const other = await (await fetch(`${base}/rooms`, { method: 'POST' })).json();
+  const otherTicket = 'cd'.repeat(32);
+  const host = connect(base, other.room, 'host', {
+    ticket: otherTicket, headers: { Authorization: `Bearer ${other.hostToken}` },
+  });
+  await message(host);
+  const closed = once(own, 'close');
+  own.send(JSON.stringify({ revoke: true, ticket: otherTicket }));
+  assert.equal((await closed)[0], 1008);
+  assert.deepEqual(await refusal(base, ticket()), { code: 1008, frames: [] });
+  const notice = message(host);
+  const phone = connect(base, undefined, 'phone', { ticket: otherTicket, origin: 'http://localhost:3099' });
+  const { peer } = await notice;
+  const received = message(phone);
+  host.send(JSON.stringify({ peer, hello: 'other-pairing' }));
+  assert.deepEqual(await received, { hello: 'other-pairing' });
+});
+
+test('REA-1220 a host without a registered ticket cannot create a hint', { timeout: 5000 }, async t => {
+  const { base, room, hostToken } = await setup(t);
+  const host = connect(base, room, 'host', { headers: { Authorization: `Bearer ${hostToken}` } });
+  await message(host);
+  const closed = once(host, 'close');
+  host.send(JSON.stringify({ revoke: true }));
+  assert.equal((await closed)[0], 1008);
+  assert.deepEqual(await refusal(base, ticket()), { code: 1008, frames: [] });
+});
+
+test('REA-1220 a replaced host socket cannot revoke the new pairing', { timeout: 5000 }, async t => {
+  const { base, room, hostToken } = await setup(t);
+  const headers = { Authorization: `Bearer ${hostToken}` };
+  const old = connect(base, room, 'host', { ticket: ticket(), headers });
+  await message(old);
+  const closed = once(old, 'close');
+  const transport = old._socket;
+  transport.cork();
+  old.send(JSON.stringify({ revoke: true }));
+  const freshTicket = 'ef'.repeat(32);
+  const current = connect(base, room, 'host', { ticket: freshTicket, headers });
+  await message(current);
+  transport.uncork();
+  await closed;
+  const notice = message(current);
+  const phone = connect(base, undefined, 'phone', { ticket: freshTicket, origin: 'http://localhost:3099' });
+  const { peer } = await notice;
+  const received = message(phone);
+  current.send(JSON.stringify({ peer, hello: 'new-generation' }));
+  assert.deepEqual(await received, { hello: 'new-generation' });
+});
+
+test('REA-1220 shared-ticket copies cannot resurrect a revoked pairing', { timeout: 5000 }, async t => {
+  const { base, room, hostToken } = await setup(t);
+  const first = connect(base, room, 'host', {
+    ticket: ticket(), headers: { Authorization: `Bearer ${hostToken}` },
+  });
+  await message(first);
+  const other = await (await fetch(`${base}/rooms`, { method: 'POST' })).json();
+  const second = connect(base, other.room, 'host', {
+    ticket: ticket(), headers: { Authorization: `Bearer ${other.hostToken}` },
+  });
+  await message(second);
+  const notice = message(first);
+  const phone = connect(base, undefined, 'phone', { ticket: ticket(), origin: 'http://localhost:3099' });
+  await notice;
+  const received = message(phone);
+  const phoneClosed = once(phone, 'close');
+  const firstClosed = once(first, 'close');
+  const secondClosed = once(second, 'close');
+  second.send(JSON.stringify({ revoke: true }));
+  assert.deepEqual(await received, { error: 'unauthorized' });
+  assert.equal((await phoneClosed)[0], 1008);
+  await Promise.all([firstClosed, secondClosed]);
+  assert.deepEqual(await refusal(base, ticket()), { code: 1008, frames: [{ error: 'unauthorized' }] });
+});
+
+test('REA-1220 hints expire after thirty days and do not survive a relay restart', { timeout: 5000 }, async t => {
+  let clock = 0;
+  const { base, room, hostToken } = await setup(t, { now: () => clock });
+  const host = connect(base, room, 'host', {
+    ticket: ticket(), headers: { Authorization: `Bearer ${hostToken}` },
+  });
+  await message(host);
+  const closed = once(host, 'close');
+  host.send(JSON.stringify({ revoke: true }));
+  await closed;
+  assert.deepEqual(await refusal(base, ticket()), { code: 1008, frames: [{ error: 'unauthorized' }] });
+  const restarted = await setup(t);
+  assert.deepEqual(await refusal(restarted.base, ticket()), { code: 1008, frames: [] });
+  clock = 30 * 86400000;
+  assert.deepEqual(await refusal(base, ticket()), { code: 1008, frames: [] });
+});
+
+test('REA-1220 hints cap at one thousand and refresh without growing', () => {
+  let clock = 0;
+  const hints = new RevokedTickets({ now: () => clock });
+  const key = i => i.toString(16).padStart(64, '0');
+  for (let i = 0; i <= 1000; i++) hints.add(key(i));
+  assert.equal(hints.has(key(0)), false);
+  assert.equal(hints.has(key(1)), true);
+  assert.equal(hints.has(key(1000)), true);
+  clock = 100;
+  hints.add(key(1));
+  assert.equal(hints.has(key(2)), true);
+  clock = 30 * 86400000;
+  hints.sweep();
+  assert.equal(hints.has(key(1000)), false);
+  assert.equal(hints.has(key(1)), true);
+  clock += 100;
+  assert.equal(hints.has(key(1)), false);
 });
 
 test('a client that resets a rejected upgrade does not crash the relay', { timeout: 5000 }, async t => {

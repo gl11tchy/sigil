@@ -234,7 +234,9 @@ public final class TaskLedgerStore: @unchecked Sendable {
         let parent = try openParent(url)
         defer { close(parent) }
         let lockName = url.lastPathComponent + ".lock"
-        let fd = openat(parent, lockName, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK, 0o600)
+        let flags = O_RDWR | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK
+        var fd = openat(parent, lockName, flags | O_CREAT | O_EXCL, 0o600)
+        if fd < 0 && errno == EEXIST { fd = openat(parent, lockName, flags) }
         guard fd >= 0 else { throw posix("open lock", lockName) }
         defer { close(fd) }
         let info = try privateFile(fd)

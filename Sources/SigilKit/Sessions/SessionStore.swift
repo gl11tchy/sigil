@@ -358,6 +358,15 @@ public final class SessionStore {
         return coverage.unrecognizedGrokDirectories.contains(directory)
     }
 
+    /// Cached rows can remain visible after a failed Grok read or unsupported
+    /// summary. Their retained fields alone cannot authorize a new resume.
+    /// An unrelated native root's failure is not a Grok source failure.
+    public func isGrokHistoryUncertain(for session: GrokSession) -> Bool {
+        session.provider != .grokBuild || !session.isHistoryValidated || appliedScanSequence == 0 || isLoading
+            || coverage.uncertainRoots.contains(root.standardizedFileURL.path)
+            || coverage.unrecognizedGrokDirectories.contains(session.directory.standardizedFileURL.path)
+    }
+
     /// Sessions whose title, project name, `~` path, or cwd match `query`.
     /// Closest title first, then higher `boost`, then newer activity. An empty or whitespace-only
     /// query returns every session, newest first, without evaluating
