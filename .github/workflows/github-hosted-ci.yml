@@ -1,0 +1,247 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Build, test, and smoke check
+    # Public fork PRs use this fresh hosted runner with the same read-only token.
+    # Standard GitHub-hosted ARM64 image; no local/VPS runner or nested VM.
+    runs-on: macos-26
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    # Hosted verification reached TextKit after ~42m; retain its unchanged 15m
+    # watchdog and budget for the remaining universal build/smoke/ZIP gates.
+    timeout-minutes: 90
+    outputs:
+      artifact_id: ${{ steps.app_artifact.outputs.artifact-id }}
+      zip_sha256: ${{ steps.release_metadata.outputs.zip_sha256 }}
+      zip_bytes: ${{ steps.release_metadata.outputs.zip_bytes }}
+      verify_attempt: ${{ steps.release_metadata.outputs.verify_attempt }}
+    steps:
+      - name: Require GitHub-hosted execution
+        env:
+          SIGIL_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          if [[ "$SIGIL_RUNNER_ENVIRONMENT" != github-hosted ]]; then
+            echo "::error::Sigil CI requires a standard GitHub-hosted runner"
+            exit 1
+          fi
+          printf 'Runner: %s / %s; image: %s / %s\n' "$RUNNER_OS" "$RUNNER_ARCH" "${ImageOS:-unknown}" "${ImageVersion:-unknown}"
+
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check verification checkout credentials
+        run: |
+          if git config --local --get-regexp 'http\..*\.extraheader' >/dev/null; then
+            echo "::error::Checkout retained a credential header"
+            exit 1
+          fi
+
+      - name: Set up Node for Sidereal
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            Sidereal/package-lock.json
+            Site/package-lock.json
+
+      - name: Show Xcode and Swift toolchain
+        id: toolchain
+        run: |
+          [[ "$(xcodebuild -version | head -n 1)" == "Xcode 26.6" ]] || { echo "::error::Expected Xcode 26.6"; exit 1; }
+          toolchain="$(xcodebuild -version && swift --version)"
+          printf '%s\n' "$toolchain"
+          printf 'cache-key=%s\n' "$(printf '%s\n' "$toolchain" | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Swift build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Caches/org.swift.swiftpm
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ hashFiles('Package.resolved') }}-${{ hashFiles('Package.swift') }}
+          restore-keys: |
+            swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ hashFiles('Package.resolved') }}-
+
+      - name: Clear restored native verification evidence
+        if: always()
+        run: rm -rf .build/native-verification
+
+      - name: Install shellcheck
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: brew install shellcheck
+
+      - name: Check Metal toolchain
+        run: xcrun --sdk macosx metal --version
+
+      - name: Verify
+        env:
+          SIGIL_SIDEBAR_ARTIFACTS: ${{ runner.temp }}/sigil-sidebar-${{ github.run_id }}-${{ github.run_attempt }}
+          SIGIL_SEARCH_WORKBENCH: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 183 && format('{0}/sigil-rea-1258-{1}-{2}', runner.temp, github.run_id, github.run_attempt) || '' }}
+          SIGIL_SEARCH_PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          SIGIL_SWIFT_DIAGNOSTICS: ${{ github.event_name == 'pull_request' && (github.event.pull_request.number == 142 || github.event.pull_request.number == 145) && '1' || '' }}
+        run: |
+          if [[ "$SIGIL_SWIFT_DIAGNOSTICS" == "1" ]]; then
+            python3 Scripts/ci-swift-test-diagnostics.py
+          else
+            Scripts/verify.sh
+          fi
+
+      - name: Upload Sidereal browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidereal-browser-screenshots
+          retention-days: 7
+          path: |
+            Sidereal/test-results/**/*.png
+            Sidereal/test-results/**/short-return-identities.json
+          if-no-files-found: warn
+
+      - name: Upload scoped Swift verification diagnostics
+        if: always() && github.event_name == 'pull_request' && (github.event.pull_request.number == 142 || github.event.pull_request.number == 145)
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: PR${{ github.event.pull_request.number }}-Swift-stall-diagnostics
+          retention-days: 7
+          path: ${{ runner.temp }}/sigil-swift-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}/*
+          if-no-files-found: warn
+
+      - name: Upload sidebar app-hosted verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidebar-app-hosted-verification
+          retention-days: 7
+          path: ${{ runner.temp }}/sigil-sidebar-${{ github.run_id }}-${{ github.run_attempt }}/*.xcresult
+          if-no-files-found: warn
+
+      - name: Upload isolated search workbench
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.number == 183
+        uses: actions/upload-artifact@v4
+        with:
+          name: REA-1258-isolated-debug-workbench
+          retention-days: 7
+          path: ${{ runner.temp }}/sigil-rea-1258-${{ github.run_id }}-${{ github.run_attempt }}/*
+          if-no-files-found: warn
+
+      - name: iPhone app, shipping extensions, and native relay tests
+        id: native_verification
+        env:
+          SIGIL_NATIVE_ARTIFACTS: ${{ runner.temp }}/sigil-native-${{ github.run_id }}-${{ github.run_attempt }}
+        run: iOS/scripts/ci.sh
+
+      - name: Upload native verification evidence
+        if: always() && steps.native_verification.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: iPhone-native-verification
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/sigil-native-${{ github.run_id }}-${{ github.run_attempt }}/*.xcresult
+            ${{ runner.temp }}/sigil-native-${{ github.run_id }}-${{ github.run_attempt }}/textkit-stdout.log
+            ${{ runner.temp }}/sigil-native-${{ github.run_id }}-${{ github.run_attempt }}/textkit-stderr.log
+            ${{ runner.temp }}/sigil-native-${{ github.run_id }}-${{ github.run_attempt }}/textkit-phases.log
+          if-no-files-found: error
+
+      - name: Build release bundle
+        # Verify both architectures before merge; publishing remains main-only.
+        run: |
+          Scripts/build-app.sh
+          for binary in Sigil sigil-mcp; do
+            echo "==> lipo dist/Sigil.app/Contents/MacOS/$binary -verify_arch arm64 x86_64"
+            lipo "dist/Sigil.app/Contents/MacOS/$binary" -verify_arch arm64 x86_64
+          done
+
+      - name: Smoke-launch release bundle
+        run: Scripts/smoke-launch.sh dist/Sigil.app
+
+      - name: Zip the app
+        id: zip_app
+        run: ditto -c -k --keepParent dist/Sigil.app dist/Sigil.zip
+
+      - name: Record verified release artifact
+        id: release_metadata
+        run: python3 Scripts/ci-release.py record dist
+
+      - name: Upload app zip
+        id: app_artifact
+        if: ${{ !cancelled() && steps.zip_app.outcome == 'success' && steps.release_metadata.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sigil.app-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          path: |
+            dist/Sigil.zip
+            dist/release.json
+          if-no-files-found: error
+
+  release:
+    name: Publish verified release
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Require GitHub-hosted execution
+        env:
+          SIGIL_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          if [[ "$SIGIL_RUNNER_ENVIRONMENT" != github-hosted ]]; then
+            echo "::error::Sigil CI requires a standard GitHub-hosted runner"
+            exit 1
+          fi
+          printf 'Runner: %s / %s; image: %s / %s\n' "$RUNNER_OS" "$RUNNER_ARCH" "${ImageOS:-unknown}" "${ImageVersion:-unknown}"
+
+      - name: Check out verified release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Check release checkout credentials
+        run: |
+          if git config --local --get-regexp 'http\..*\.extraheader' >/dev/null; then
+            echo "::error::Checkout retained a credential header"
+            exit 1
+          fi
+
+      - name: Download the verified app artifact
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.verify.outputs.artifact_id }}
+          merge-multiple: true
+          path: release
+
+      - name: Publish latest GitHub Release
+        id: publish_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EXPECTED_ARTIFACT_ID: ${{ needs.verify.outputs.artifact_id }}
+          EXPECTED_ZIP_SHA256: ${{ needs.verify.outputs.zip_sha256 }}
+          EXPECTED_ZIP_BYTES: ${{ needs.verify.outputs.zip_bytes }}
+          EXPECTED_VERIFY_ATTEMPT: ${{ needs.verify.outputs.verify_attempt }}
+        run: python3 Scripts/ci-release.py publish release

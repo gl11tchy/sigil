@@ -621,10 +621,14 @@ struct RemoteAlertDeliveryTests {
         let before = try String(contentsOf: relay.apnsCapture, encoding: .utf8).split(separator: "\n").count
         fixture.model.closeTab(other.id)
         for _ in 0..<100 {
-            if let text = try? String(contentsOf: relay.apnsCapture, encoding: .utf8),
-                text.split(separator: "\n").count > before
-            {
-                break
+            if let text = try? String(contentsOf: relay.apnsCapture, encoding: .utf8) {
+                let arrived = try text.split(separator: "\n").dropFirst(before)
+                    .map { try JSONDecoder().decode(Captured.self, from: Data($0.utf8)) }
+                // An in-flight update can arrive before this tab's queued end.
+                // Wait for the exact event asserted below, within the same bound.
+                if arrived.contains(where: { $0.token == otherToken && $0.payload.aps.event == "end" }) {
+                    break
+                }
             }
             try await Task.sleep(for: .milliseconds(50))
         }

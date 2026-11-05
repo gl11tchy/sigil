@@ -126,6 +126,10 @@ plutil -lint "$APP/Contents/Info.plist" >/dev/null || fail "Info.plist"
 codesign --verify --deep --strict "$APP" || fail "bundle signature"
 
 "$SCRIPT_DIR/smoke-launch.sh" "$APP" || fail "launch smoke check"
+if [[ -n "${SIGIL_SEARCH_WORKBENCH:-}" ]]; then
+  python3 "$SCRIPT_DIR/export-search-workbench.py" "$APP" "$SIGIL_SEARCH_WORKBENCH" \
+    || fail "isolated search workbench artifact"
+fi
 rm -rf "$BUILD_ROOT"
 BUILD_ROOT=""
 
