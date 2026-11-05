@@ -36,6 +36,8 @@ struct SigilWorktreeTests {
         #expect(SigilWorktree.projectPath(of: made.path, root: root) == GrokPaths.canonicalPath(sub.path))
         let branch = try git(["rev-parse", "--abbrev-ref", "HEAD"], in: made)
         #expect(branch == "sigil/abc")
+        #expect(SigilWorktree.branch(at: made, root: root) == branch)
+        #expect(SigilWorktree.branch(at: repo, root: root) == nil)
         #expect(SigilWorktree.isInRepository(sub))
     }
 

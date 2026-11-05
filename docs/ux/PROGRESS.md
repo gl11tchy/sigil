@@ -1621,6 +1621,108 @@ before admission; gates remain strictly serial. Static format/lint/whitespace
 checks pass after the correction. Required implementation CI/review still pending.
 
 
+### REA-1176 — durable task ledger implementation, CI pending · 2026-10-25
+
+Sole serial worker, isolated `feat/rea-1176-task-ledger` from reviewed merged main
+`55dff7f870c664be0778b9668db8ea7bbc99abc3`. Prior REA-1240/PR189 is Done after
+parent source review and exact-head CI667; main CI668 passed. Official build668.1
+was separately installed/read back as1.0.0(413), preserving build406 backups;
+no running-process/manual UX claim. PR162/183 holds and other work remain intact.
+
+Normal PR191 baseline `d65c2fcd5fdae9f010a1ceb6b05cd59c4495c133` failed CI669
+(40153842882,8m16s) as intended: `TaskLedgerTests.swift:11 cannot find TaskLedger
+in scope`, plus cascading type errors. Actual checkout09ff5e92, based onmain55dff7.
+Browser260 passed/two existing skips; native runtime/later gates did not execute.
+This is missing-feature compile-time evidence, not runtime customer data-loss proof.
+
+Local implementation adds the versioned pure ledger and atomic private JSON store,
+qualified identity/idempotent retained-source migration, bounded cross-copy locking,
+commit receipt/backup and explicit validated recovery preserving original bytes.
+AppModel registers durably before child start, retains taskID through replacements
+and saved snapshots, annotates only existing validated native proof, and exposes
+storage failures/read-only restoration reasons. Grok ID is immediately known;
+Claude awaits exact validated history; Codex binding rules are unchanged. Verified
+new conversations retain old tasks; restarts alone never invent one. Metadata
+updates merge changed fields, retaining existing conversation-keyed preferences.
+No consuming workbench view or phone protocol/capability change.
+
+Generated focused tests cover serialization/pre-output IDs, duplicate/provider/cwd
+identity, unknown legacy IDs, repeated/interrupted migration, each commit boundary,
+failed writes, independent/concurrent stores, two app models/processes sharing a
+task, native link/history proof, restart/restoration, corrupt/future/unsafe files
+and explicit recovery preserving post-migration tasks. Worktree branch inspection
+uses bounded read-only Git metadata. One existing snapshot assertion adds the
+actual task ID while preserving all earlier native/path/model/effort assertions.
+
+Static swift-format/strict lint/whitespace checks pass. Compilation/runtime and
+integrated required CI remain pending, CI-only. PR191 remains DO NOT MERGE until
+passing exact-head CI and Tediore's final source/comments review. No local native
+build/test, process enumeration, paid/personal provider data, extra worker,
+workflow/protection/security/access change or overlapping gate. Original ledger
+bytes are preserved as an exact prefix; no manual runtime or power-loss claim.
+
+
+REA-1176 pre-final source correction: qualified native-reference reuse now stores
+the newly observed branch while retaining taskID/createdAt; a focused regression
+covers reopening after a branch rename. An incomplete legacy source remains an
+exposed migration warning, without presenting the blocking storage-unavailable
+alert at startup. Actual store failures still prevent dispatch and offer only
+safe recovery. Static formatting/strict lint/whitespace pass.
+
+CI670 at31af4df was superseded during Verify and cancellation requested before
+pushing this correction. Cancellation is not yet confirmed; no runtime result is
+claimed and no replacement CI will be admitted until active/queued lists are empty.
+This is a bounded source-review correction, not a skipped check or protection change.
+
+
+REA-1176 CI671 at a08e5ee completed failure (8m16s): browser260 passed/two
+existing skips; production Sigil compiled and linked. New OpenTabsSnapshotTests
+line48 nested #require expansion failed in the CI compiler; native runtime and
+later gates did not run. Repair1 splits encoding/decoding into separate required
+unwraps, retaining both checks and every task/native/provider assertion. Searched
+focused fixtures for other nested Testing macros; none remain. Static formatting,
+strict lint and whitespace pass. Corrected exact-head CI remains prerequisite;
+no local native execution, skip/workflow change or merge approval.
+
+
+REA-1176 CI672 at faba454 completed failure (8m44s). Macro repair compiled;
+separate XCTest37 passed, and Swift Testing began running. All six provider-launch
+cases returned nil; AppModel's copied-session test then indexed empty tabs and
+crashed. No complete Swift Testing summary or ledger-suite runtime result; later
+gates did not execute. This is concrete execution progress beyond CI671, not a pass.
+
+Repair2 source diagnosis: storedPath compared POSIX canonical /private paths with
+Foundation standardizedFileURL spelling. Apple's path documentation demonstrates
+/private removal by standardization; this is a source-based diagnosis without a
+local native probe. Replace that comparison with lexical validation retaining
+absolute/private-alias/dot-component checks. Add a generated existing temporary
+workspace/store/serialization regression. Preserve the copied-session count/path/
+identity assertions and require its first element before indexing; add diagnostic
+ledger problem text to the initial open assertion. No test skipped or weakened.
+Static formatting/strict lint/whitespace pass; corrected CI must confirm the fix.
+Repository two-round-without-progress limit remains active; no local native run.
+Reference: https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/Strings/Articles/ManipulatingPaths.html
+
+
+REA-1176 CI673 at1e3318e completed failure (14m23s), with concrete progress:
+AppModelTests, TaskLedgerIntegrationTests and TaskLedgerTests passed, including
+all-provider launch/restoration/native-link/path regressions. Full Swift Testing
+completed1397 tests/117 suites with one issue; XCTest37 passed; browser260 passed/
+two existing skips. Prior nil-tab failure/crash is resolved. The sole remaining
+issue is simultaneousIndependentInstancesKeepEveryTask, caught NSPOSIXErrorDomain
+code2 (No such file or directory). All other store cases passed, including four
+commit phases, migration, corruption recovery, stale/future/symlink and append-only
+checks. App-hosted/debug-smoke/shipping gates did not run after Verify failed.
+
+The exact failing filesystem operation is unresolved. Add operation-level context
+while preserving NSError domain/code and capturing errno before Foundation error
+construction. Strengthen the concurrency fixture with an async two-writer start
+barrier and eight bounded fresh-ledger rounds; retain both successful-write and
+exact-row assertions. No error retry, swallowed failure, semantic locking change
+or claim that the race is fixed. This is one bounded diagnostic iteration after
+two repairs that each advanced execution; the two-round-without-progress limit
+remains active. Static formatting/strict lint/whitespace pass. PR191 remains held
+until concurrency is explained/resolved, exact-head CI passes and parent reviews.
 ## REA-1220 — offline phone revocation routing hint · 2026-10-25
 
 Same sole worker selected this existing audited, dependency-free ticket on
@@ -1793,3 +1895,19 @@ Parent final source/current-comment review remains before merge.
 - Source diagnosis: SessionScanner deliberately retains a cached Grok row on failed/unrecognized summary reads; its prior isHistoryValidated flag can remain true for display. Existing coverage separately marks uncertain Grok roots and exact unrecognized directories. The new caller had not consulted that evidence. No assertion or timeout was weakened.
 - Repair 3 adds one read-only SessionStore projection of those existing Grok uncertainty facts and checks it before reopening. It uses the retained row's exact source directory, keeps retry intent, and changes no scanner/cache or other launch semantics. Tests retain the original malformed-source refusal, add source-repair retry and injected read-failure checks, and prove unrelated malformed/native-root errors do not globally block a valid Grok resume. No filesystem permissions are changed.
 - Formatter/whitespace checks pass locally; replacement exact-head CI is pending. This is a distinct diagnosed failure after demonstrated runtime progress of the earlier concurrency correction, so the two-round no-progress stop condition is not met. If this repair does not advance the failing path, diagnose and apply the stop rule rather than retrying unchanged. Source now spans AppModel, the File menu and this small SessionStore projection, generated tests and evidence docs. No local native execution, new permissions, real data, app disruption, extra worker or merge. Installed 429/four holds remain untouched.
+
+
+## 2026-10-27 — REA-1224 CI permission boundary
+
+- Owner explicitly approved this ticket's CI-permission hardening. Sole worker/ticket, isolated branch at current main4a7a10a8; current Linear scope/dependencies/comments, main/open PRs/recent terminal CI, active task and worktree metadata checked. Installed434 and held162/183/191/192 unchanged. Current repository is private; no compromise or live public-fork exposure is alleged.
+- Test-only baseline:8 existing generated smoke/artifact checks passed;2 new permission/job-boundary assertions failed on global contents:write and absent release-job transfer. First new publisher fixture failed before its helper existed. No production source changed before those observations.
+- Candidate makes verification repository-contents read-only with same-repo PR admission and non-persisted checkout credentials. Existing test/diagnostic/universal/smoke/zip gates remain. Only a main-push release job has contents:write; it uses the exact producing artifact ID and independent ZIP hash/size plus source/run/attempt metadata. It checks out the run SHA and never executes artifact code. Manual dispatch retains downloadable artifacts without publishing. Visibility/runner access unchanged.
+- Producing-attempt tags keep release-only reruns stable. Existing complete publications require matching notes/tag/source/asset bytes; partial or conflicting state is preserved and rejected. Uncertain creation gets read-only confirmation, never a blind second create. Existing old-build pruning follows proven publication. API/file/time bounds remain explicit.
+- Focused45/45 passed,0 skips: workflow event/admission truth tables; smoke/universal shell fakes; publisher invalid-source/artifact, metadata, rerun, collision/read-error/uncertain-result cases; real gh adapter with a strict offline fake. One local stale inline-publish assertion was updated to the job-level boundary after its diagnosed failure. Assertions/timeouts were not relaxed. Actionlint passes with the existing custom sigil-vm label declared in a temporary lint config; Python syntax and whitespace pass. No CI repair rounds yet.
+- Exact-head PR CI and actual main-only transfer/publication remain pending. No main acceptance or live-fork proof is claimed from offline fixtures. See docs/qa/rea-1224.md. Ticket must remain incomplete until reviewed merge/main artifact acceptance. No local native build/test, process/listener/UI route, real credentials/provider data, app interaction, extra worker or unrelated security change. Stop at a normal PR for parent's personal final-code/current-comment review and required exact-head CI; do not merge here. Parent queued PR191 for later bounded diagnosis after1224 completes; no191 work has started.
+
+### REA-1224 parent review correction — 2026-10-27
+
+Parent review identified a same-SHA stale producer edge: replaying attempt 1 after attempt 2 publication recreated the old tag and pruned the newer release. A generated offline fixture reproduced both writes at the original head. The publisher now rejects any numerically newer build release before mutation and only prunes strictly older build tuples. Five regressions preserve complete older/newer state, cover numeric ordering and protect a newer release encountered during cleanup. Historical-job output selection on GitHub was not live-tested; no unreachable-state assumption is required.
+
+Focused checks after correction: **50 passed, zero failures/skips**; Python syntax and whitespace passed. Initial CI698 passed on 6ebb828 (360 Node, 58 Site, 274 browser passes/2 existing skips, 1391 Swift, 37 XCTest; sidebar 2 passes/4 existing event-posting skips; native app/extensions and 7 TextKit cases; universal release build/smoke/ZIP metadata/upload). Logs confirm read-only repository contents and credential cleanup. Exact downloaded artifact 12708469578 and its run/SHA/attempt manifest/ZIP digest matched; no app was installed or executed. CI698 does not cover this subsequent correction. Final corrected-head CI, parent review, merge and actual main publication/artifact/install acceptance remain separate pending states. See docs/qa/rea-1224.md and PR199. No manual review trigger, duplicate run, local native test/build or active-session disruption.

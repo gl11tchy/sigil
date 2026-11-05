@@ -13,25 +13,30 @@ public struct OpenTabsSnapshot: Codable, Equatable, Sendable {
         /// Nil only in older snapshots; restore then uses Settings.
         public var model: String?
         public var effort: String?
+        /// Sigil task identity, separate from the provider's resume reference.
+        /// Nil in legacy snapshots; does not make an unknown native ID resumable.
+        public var taskID: String?
 
         public init(
             sessionID: String, cwd: String, model: String? = nil, effort: String? = nil,
-            provider: CLIProvider = .grokBuild
+            provider: CLIProvider = .grokBuild, taskID: String? = nil
         ) {
             self.sessionID = sessionID
             self.provider = provider
             self.cwd = cwd
             self.model = model
             self.effort = effort
+            self.taskID = taskID
         }
 
-        private enum CodingKeys: String, CodingKey { case sessionID, cwd, model, effort, provider }
+        private enum CodingKeys: String, CodingKey { case sessionID, cwd, model, effort, provider, taskID }
         public init(from decoder: any Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
             sessionID = try values.decode(String.self, forKey: .sessionID)
             cwd = try values.decode(String.self, forKey: .cwd)
             model = try values.decodeIfPresent(String.self, forKey: .model)
             effort = try values.decodeIfPresent(String.self, forKey: .effort)
+            taskID = try values.decodeIfPresent(String.self, forKey: .taskID)
             provider = try values.decodeIfPresent(CLIProvider.self, forKey: .provider) ?? .grokBuild
         }
     }
