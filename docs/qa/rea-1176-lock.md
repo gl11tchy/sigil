@@ -26,3 +26,8 @@ checks in four suites. These cover first-writer concurrency, interrupted writes,
 recovery, identity binding, migration and the merged reopen path. The fixtures
 use generated homes and fake provider executables. No model API was called.
 Full runner verification remains required before merge.
+
+The original Swift store was then restored in the disposable checkout for the
+single existing concurrent-writer test. That test failed at `round-0.json.lock`
+with `ENOENT`. Restoring the repaired store made the same unchanged test pass.
+This verifies the application-level failure and repair as well as the C probe.
