@@ -52,6 +52,36 @@ enum RelayTests {
         mac.stop()
     }
 
+    static func revokedWhilePhoneIsAwayStopsReconnect(port: String) async throws {
+        let mac = FakeMac(origin: URL(string: "http://localhost:\(port)")!)
+        let room = try await mac.register()
+        guard
+            case .success(let link) = PairingLink.parse("http://localhost:\(port)/#room=\(room)&key=\(mac.pairingKey)")
+        else { throw TestFailure("link did not parse") }
+        let phone = RemoteConnection()
+        let watcher = Watcher()
+        phone.delegate = watcher
+        defer {
+            phone.stop(forget: true)
+            mac.stop()
+        }
+        phone.pair(link)
+        try await until("paired before leaving") { watcher.saved?.ticket == mac.ticket && phone.phase == .connected }
+        phone.stop()
+        try await mac.revokeRoutingTicket()
+
+        watcher.phases.removeAll()
+        phone.reconnect()
+        try await until("offline revocation delivered") { phone.phase == .revoked }
+        try Expect.equal(
+            watcher.failure, "Pairing expired or was disconnected. Scan a new code in Sigil.", "revocation message")
+        let phases = watcher.phases
+        // Longer than the first reconnect backoff: a close must not hide the refusal.
+        try await Task.sleep(for: .seconds(2))
+        try Expect.equal(phone.phase, .revoked, "does not return to connecting")
+        try Expect.equal(watcher.phases, phases, "no reconnect phase after the refusal")
+    }
+
     /// The Mac accepts the phone and retires the QR room, but the reply with the ticket is lost.
     static func lostPairingReplyAsksForANewCode(port: String) async throws {
         let mac = FakeMac(origin: URL(string: "http://localhost:\(port)")!)
@@ -270,7 +300,8 @@ enum RelayTests {
         var lastState: RemoteState?
         var events: [RemoteReply] = []
         var failure: String?
-        func connection(_ connection: RemoteConnection, didChange phase: RemoteConnection.Phase) {}
+        var phases: [RemoteConnection.Phase] = []
+        func connection(_ connection: RemoteConnection, didChange phase: RemoteConnection.Phase) { phases.append(phase) }
         func connection(_ connection: RemoteConnection, didReceive reply: RemoteReply, for action: String, tabID: String?) {
             lastState = reply.state
         }
@@ -388,6 +419,7 @@ final class FakeMac {
     private var challenge = RemoteCrypto.randomKey()
     private var lastSequence = 0
     private var revoked = false
+    private var closedHostSockets = 0
     private let session = URLSession(configuration: .ephemeral)
 
     init(origin: URL) { self.origin = origin }
@@ -438,6 +470,15 @@ final class FakeMac {
         Task { try? await send(["peer": peer, "error": "unauthorized"], on: socket) }
     }
 
+    /// Test barrier only: the production Mac never waits for relay confirmation.
+    func revokeRoutingTicket() async throws {
+        guard let socket else { throw TestFailure("no registered host") }
+        let closedBefore = closedHostSockets
+        revoked = true
+        try await socket.send(.string(#"{"revoke":true}"#))
+        try await RelayTests.until("relay processed revoke and closed host") { self.closedHostSockets > closedBefore }
+    }
+
     func stop() {
         socket?.cancel(with: .goingAway, reason: nil)
     }
@@ -470,12 +511,17 @@ final class FakeMac {
         try await send(["peer": peer, "data": sealed], on: socket)
     }
 
-    func releaseInput() async throws {
+    func releaseInput(error: String? = nil) async throws {
         guard let request = delayedInput, let socket, let peer, let deviceKey else { throw TestFailure("no delayed input") }
         delayedInput = nil
         pauseInput = false
-        let reply = Reply(challenge: request.challenge, sequence: request.sequence,
+        var reply = Reply(challenge: request.challenge, sequence: request.sequence,
                           state: state("echo: \(request.text ?? "")"), ticket: ticket, clientNonce: request.clientNonce)
+        if let error {
+            reply.ok = false
+            reply.error = error
+            reply.state = nil
+        }
         let sealed = try RemoteCrypto.seal(reply, key: deviceKey, direction: "mac")
         try await send(["peer": peer, "data": sealed], on: socket)
     }
@@ -553,6 +599,7 @@ final class FakeMac {
                     try await handle(data, peer: id, on: ws)
                 }
             }
+            closedHostSockets += 1
         }
     }
 

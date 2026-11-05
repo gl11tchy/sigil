@@ -1674,3 +1674,175 @@ no pass or parent approval is inferred. No local native test/build or rerun of
 the unchanged failure. The repository two-round-without-progress limit remains
 active. Real-app AX/window-ID acceptance stays unverified; PR162/183/191 holds
 and installed main build413 remain untouched.
+## REA-1220 — offline phone revocation routing hint · 2026-10-25
+
+Same sole worker selected this existing audited, dependency-free ticket on
+verified main `55dff7f870c664be0778b9668db8ea7bbc99abc3`. Fresh task/CI/PR/Linear
+checks found no competing worker or active/queued run. PR192 remains held at
+`2a0344606bb3197ed2073ad799b83a135daf2f7e`: green CI676 and parent source review
+found no implementation defect, but the real-app criterion is unverified. One
+read-only assessment found no supported exact-head app/non-held isolated route;
+this was recorded/read back on REA-1262. The xcresulttool exit64 is a cache-write
+failure, not broad security or current AX-denial evidence. PR162/183/191 holds
+and installed official main build413 remain unchanged.
+
+A generated real-WebSocket test against unchanged production main reproduced
+the bug: after a host revokes while no phone is present, a returning phone gets
+close1008 with no unauthorized frame. One test failed on that exact missing
+frame; no product/customer-impact or native runtime baseline is inferred.
+
+The relay now accepts only the current authenticated room host's exact revoke
+control shape for its registered ticket. It closes rooms sharing that pairing
+and returns the existing unauthorized frame before closing future ticket
+routes. The in-memory hints cap at1,000, expire after30days and are lost on
+restart. They are routing hints, not independently authenticated device proof.
+Existing end-to-end authentication, route sealing, input/rate limits and account
+settings remain unchanged. Stale socket/room callbacks cannot affect a new
+pairing. No ticket/frame is logged or persisted by this mechanism.
+
+The Mac removes local state immediately, then best-effort sends on only its
+captured old socket/session. Connected phones first receive the existing
+refusal for compatibility with older relays, then the new hint, then close.
+There is no acknowledgement wait, offline queue or retry. Ordinary stop does
+not create a tombstone. The README records bounded retention, restart loss and
+unreachable-relay limits.
+
+Nine focused relay cases passed: offline/connected/shared pairing behavior,
+revoke-plus-close, unauthorized senders/foreign tickets/no ticket, stale socket,
+expiry/restart loss and cap/refresh. Final full Sidereal Node suite:318passed,
+zero failures/skips. Node26.4.0/npm11.17.0 locally; CI Node22 remains required.
+Committed dependencies installed with scripts disabled; audit0 vulnerabilities.
+Targeted Swift formatting/strict lint, JS syntax and whitespace passed.
+
+New Mac integration/wire-order and iOS fake-relay regressions remain CI-only
+and pending. The Mac fixture waits on a generated host-close marker, not
+arbitrary sleeps or process inspection. The phone test checks the revoked
+message and no new phase after the first reconnect delay; it runs in both
+existing iOS relay and native-app suites. The ticket explicitly permits this
+fake-relay acceptance route, with no new Mac AX/bundle prerequisite.
+
+No local native build/test/process enumeration, personal conversation/pairing,
+real provider call, credential/access setting change, deployment, new public
+distribution, workflow edit or extra worker. Required exact-head CI and parent
+final source/current-comment review remain before any merge.
+
+
+### REA-1220 CI677 fixture repair1 · 2026-10-25
+
+CI677 (`40163619862`) at `ba8f3ce819356ba02ff4d205c39f4f84bec56a1d`
+completed failure in15m40s. Actual checkout35ffac63662b38e08a6d35231eb475fbb4fb022a
+has expected main/head parents and matches branch tree5812096bae008df53242809aeff23c3ac3c4aa40.
+Verify passed: both new Mac tests,1372SwiftTesting/114suites,37XCTest,318Node,
+58Site,260browser/two skips, hosted gate and debug signature/smoke. iOS
+production typecheck32files passed. The real-relay test executable then failed
+to compile at RelayTests.swift:478: the new fake-host Boolean was passed to its
+existing string-only send helper. iOS runtime/native app/extensions/TextKit
+gates did not run; missing native artifact is downstream of that compile error.
+
+Repair1 sends the exact Boolean JSON control directly through the fake host's
+socket. Production, strict relay schema, string-only helper and all assertions
+remain unchanged. No local native execution, unchanged rerun or softened test.
+Native runtime result awaits corrected exact-head CI. One repair round is
+recorded; repository two-round-without-progress stop condition remains active.
+Parent final source/current-comment review remains before merge.
+
+
+## REA-1200 — Notification navigation baseline (2026-10-25)
+
+- Sole serial worker; isolated `fix/rea-1200-notification-navigation` worktree from current main `70d7923605ae3cb4e8dc512f12f655fcaf0c419d`. Fresh open PR/comments, Linear dependencies/ownership and task/CI state checked; no blocker or concurrent work. PR162/183/191/192 holds and installed official build416 remain unchanged.
+- The existing native simulator suite can capture the changed SessionScreen and retain PNG attachments in CI results; the established legacy xcresult export route reads generated artifacts without a local app build or AX/process route. REA-1200 has no dependencies or mandatory physical-device criterion.
+- Baseline regression opens a generated missing tab on a fully connected fake Mac, expects the closed-session message and no select command, and captures the actual simulator view. Production is unchanged. Execution remains CI-only; expected failure has not yet been observed.
+- Scope: buffer the latest valid pre-attach notification, keep pending navigation bound to its Mac/connection generation, resolve absence only from a complete authenticated tab list, and preserve unknown-Mac protection. No real notification credentials, provider data, physical phone, deployment or app replacement.
+- Stop for parent final exact-head source/current-comments review and passing required CI before merge. Two repair rounds without progress stop the branch.
+
+### Observed baseline and initial implementation
+
+- CI680 `40168511550` ran test-only head `c852477a962155f3a1138f8720afe9d6dd769f23`, actual checkout `6bb191ada62e437215b02edd23e16d3618a3db45`; API parents/current-main and identical tree verified. Production was unchanged. Verify, iPhone typecheck and all 88 relay checks passed. Native result data records 46 cases, 45 passed and only the new closed-target assertion failed.
+- Actual assertion observed the existing generated fixture warning “Could not save this pairing. It ends when the app closes.” instead of the requested closed-session message. The earlier anticipated nil was not observed. This does not establish a customer Keychain problem. Original 828×1792 PNG `858003512e75076340cbd860fd443b599c7e293fdec60f225d01e415eceaf26e` was exported via the existing legacy result-data route and visually inspected; the closed message is absent.
+- Initial source now buffers one bounded latest valid notification with the service-stamped Mac identity, consumes it on attach, and keeps pending navigation scoped to the actual pairing/current commandEpoch and authenticated list completeness. A cold/unavailable intent can await its first connection; once bound, it cannot cross epochs. Mac switch, forget and manual selection cancel it. Missing/partial/cache-only state is not closure proof. Unknown-Mac protection remains.
+- Known navigation waits for an owned send rather than dropping at the busy gate. A notification accepted before a later send refusal preserves that send’s uncertainty/draft warning after navigation. Existing command ownership, serialization, crypto and default perform semantics remain; no offline command is pre-created or replayed.
+- Native fixtures cover latest pre-attach target across two Macs with identical tab IDs, malformed/unattributed input, partial-to-complete state, later target appearance, epoch/Mac replacement, offline waiting, manual cancellation, busy successful/refused sends and demo behavior. CI may refuse persistence, so the cold fixture seeds only generated known pairings via the existing delegate, then uses the real connection/relay; Keychain persistence is not claimed.
+- Baseline review comment4369881795 identified immediate no-select assertion timing. The assertions remain and repeat after UI layout, busy settling and an authenticated serialized state roundtrip. A later state containing the old absent ID also cannot reopen the completed intent.
+- Static whitespace checks pass. Initial implementation/native results and accepted changed-screen PNG remain pending CI. Native execution is CI-only; no local build/test/process enumeration, actual APNs delivery, physical-phone or customer-impact claim. Installed 416 and all four PR holds are unchanged. Repair count0; no merge before parent exact-final-head review and passing required CI.
+
+### Initial candidate passed; final evidence/correction pending
+
+- CI681 `40170666250` completed success in 28m33s at `697b66493231c1d33f4b35186bb2f5f36595bcb2`. Actual logged checkout `ddea83c5dd30cb6fa7fac2b7a13169ba89626066` has the expected base/head parents and identical tree `90523ff69001b0fe3eca626a8eb25d11242b349b`. Native result metadata independently records all 55 cases Success, zero failures/skips.
+- Passed: 1,372 Swift tests/114 suites, 37 Mac XCTest, 318 Node, 58 Site, 260 browser, iPhone typecheck, 88 relay checks, app/extensions/simulator gate and seven TextKit checks. Existing two browser and four REA-1350 pointer skips remain disclosed; pointer permission is unavailable and two other sidebar fixtures passed.
+- Original changed-screen PNG 828×1792 was exported from native artifact 12590423251 and visually accepted: “That session is closed on localhost.” remains after layout/state roundtrip. SHA256 `584ebf159b4fbf7cfa85cd6bda6ca9a7ae62556ebb38e02e25879a250a7ff015`. Before/after PNGs are committed unchanged with QA/source provenance. Cold/latest/Mac/epoch/partial/offline/manual/busy/refusal and original unknown-Mac cases all passed.
+- Source review found the newly added Demo branch could reach Activity.request through reflectLiveActivity for a working fixture. Source correction 1 removes that new Demo-only call and extends the existing Demo case through a working row. This is a diagnosed change after the passing initial candidate, not a docs-only final commit. Authenticated/closed-session paths are unchanged; final exact-head CI must cover the correction and evidence before merge. No no-progress repair loop occurred.
+- Actual APNs/OS delivery, persistent Keychain restoration and physical-device behavior remain unverified. No local native build/test, process enumeration, security override, real credential setup, deployment, separate distribution, extra worker or app replacement. Installed 416 and all held PRs are unchanged. Parent final exact-head source/current-comments review remains required.
+
+
+## 2026-10-25 — REA-1192 baseline awaiting CI
+
+- Selected one independent audited ticket after PR194/main CI683/app420 upkeep completed. Fresh main f4aa59d0, held PR162/183/191/192 intent/comments and exact heads, Linear dependencies/status, sole active Sigil task and existing worktrees checked. No active/queued CI or prior local command. Isolated branch/worktree; installed420 untouched.
+- New browser regressions hold 390×844 layout, emulate 420px visualViewport resize via the actual app handler and record geometry/original screenshots for 25 generated operation lines with keys closed/open. Production CSS is unchanged.
+- Local attempt did not execute browser/assertions: sandbox listen 0.0.0.0:3099 failed EPERM. No reproduced layout/customer result or screenshot is claimed. No retry/escalation or browser/OS permission request. Existing CI browser gate is the independent supported baseline route; actual outcome pending.
+- No local native build/test/process enumeration, personal/provider data, real credentials/access changes, deployment, extra worker or app interaction. Browser emulation remains separate from physical Safari. No merge before parent exact-final-source review and passing required exact-head CI.
+
+
+### REA-1192 — observed baseline and bounded implementation pending CI
+
+- CI684 on test-only 8493914 reproduced all four new geometry failures with production unchanged: both engines/keys states output 0px and 48px terminal/card overlap; card 215px with keys closed, above the 126px visual cap. 260 existing browser cases passed; two existing skips. Later Swift/native/release gates did not run after Verify failed. Exact checkout f3542fcc parents/tree and original PNG hashes verified; Chromium/WebKit baseline PNGs inspected and committed byte-for-byte.
+- The current CSS uses the visual viewport cap, reserves 100–120px output only with a card, keeps one 44px scrollable key row in compact card layouts, and lets controls scroll at tiny heights. Original regression assertions retained/strengthened; added natural short-card/full-height cap and 200px output/input/choice reachability cases. Implementation runtime/after screenshots pending CI; no success claim.
+- Local relay listen EPERM remains held with no retry/escalation or permission request. Syntax/whitespace, original 125982-byte progress-prefix hash and scope checks pass. No local native build/tests/process enumeration, real data/credentials, app interaction/deployment or extra worker. Installed420 and all held PRs unchanged. CI repair count 0; parent final review/exact-head green required before merge.
+
+
+### REA-1192 — CI685 passed; final original evidence and landscape coverage
+
+- CI685 passed on 4328be5, actual checkout 9ffe512f with verified parents/identical tree ead9266f. 270 browser passes/two existing skips; 1,372 Swift/114 suites, 37 XCTest, 318 Node, 58 Site, 32-file typecheck, 88 relay harness checks, native app/extensions and seven TextKit checks. Sidebar 2 passed/four existing pointer-permission skips. No independent native artifact readback claimed for CSS-only work.
+- Both engines: 420px output 105px; card 110px/62px for keys closed/open; terminal/card separated and Send bottom 405px. Long keyboard-down card 253.1875px; short 244px. Portrait 200px output 100px; input/choices reachable via scrolling and Send bottom 185px. Original four after PNGs inspected and preserved byte-for-byte beside original before PNGs.
+- Final tests add explicit 844×390 landscape 200px coverage while retaining 390×844 portrait cases, first/last key-row actionability and output-stage captures. This evidence/test commit is not docs-only; production CSS remains byte-identical to CI685. Required exact-final-head CI must assess the added cases, followed by parent personal final review before merge. No CI failure repair rounds; local relay EPERM not retried.
+- Installed420 and all held PRs unchanged. No local native execution/process enumeration, real data/credentials, deployment or app interaction. Physical Safari/software keyboard remains unverified.
+
+
+## 2026-10-25 — REA-1226 release smoke gate awaiting CI
+
+- Sole selected independent audited ticket after PR195/main CI687/app424 upkeep. Fresh main b4d32fdd, all four held PR heads/intent/comments, Linear dependencies/status, sole active Sigil task and worktrees checked. No active/queued CI or local test. Isolated branch/worktree; ownership and ticket history retained.
+- Current-main reproduction: three existing artifact tests passed; three new regressions failed on the absent release smoke step/shared helper before production edits. Generated shell executables only; no local native launch/build/test or listener.
+- Extracted the existing isolated three-second check into Scripts/smoke-launch.sh, reused it for debug verification and inserted it on the exact dist/Sigil.app path between release build and zip with the existing event condition. Logs executable SHA256 and rejects changes during launch. Temporary working directory/homes, owned-child stop/reap and cleanup are covered. REA-1224 permissions/job split remains separate; release triggers/policy unchanged.
+- Final focused run: eight passes, no failures/skips; early exit blocks synthetic packaging/publication markers, invalid arguments fail and a mutated executable is rejected. Two intermediate fixture failures were normalized-path comparisons for doubled temp separators; the final comparison normalizes both sides without removing isolation/cleanup assertions. Bash syntax, shellcheck and whitespace checks passed. Native/integrated CI and actual main-push acceptance are pending; no completion claim.
+- See docs/qa/rea-1226.md for exact scope and limits. Installed424 and held PRs162/183/191/192 unchanged. No denied route retried, real data/credentials/security changes, deployment, app interaction or additional worker. Stop for parent personal exact-final-head review and passing required CI before merge.
+
+
+## 2026-10-25 — REA-1228 universal release candidate awaiting CI
+
+- Sole selected independent audited ticket after PR196/main CI689/app426 upkeep. Fresh main c4ee4a41, all four held PR heads/intent/comments, audited Backlog state/dependencies, sole active Sigil task and58 existing worktrees checked. No active/queued CI or local command. Isolated branch/worktree, ticket ownership/history retained; no blockers/comments.
+- Reused the exact current-main isolated Tart CI689 baseline rather than starting a redundant build: Xcode26.5/Swift6.3.2, working xcrun Metal preflight, then XCBuild cannot execute metal at11:34:39 and falls back to arm64. Exact official build689.1 was independently verified arm64-only for both executables. The ticket's suspected @main error was not reached/observed; no claim it caused this failure.
+- SwiftPM6.3.2 source confirms multiple architectures select XCBuild. Candidate builds each architecture through native SwiftPM in its own scratch path, verifies both products and joins/verifies slices via lipo. Partial/stale outputs fail closed. The @main entrypoint rename is byte-identical. No toolchain installation or permission change. Local thin escape hatch remains opt-in; CI no longer opts in.
+- CI release build/actual-bundle dual-architecture checks/smoke/zip now run on PRs too, retaining the existing private artifact upload. Publication remains main-push-only; existing permissions/signing/pruning policy and45-minute timeout unchanged. README/site architecture copy follows this candidate, without claiming current deployment/shipment.
+- Local generated-tool baseline: seven expected missing-helper/thin-CI failures. Final focused16/16 with no skips, including original eight smoke/artifact tests; fake compiler/lipo products only. Bash syntax, shellcheck, byte-identical MCP rename and whitespace pass. Native universal compile, bridge/MCP tests, exact ZIP architecture/signature and release smoke remain pending CI; no success or Intel runtime claim. Zero CI repair rounds.
+- See docs/qa/rea-1228.md. Installed426 and held PRs162/183/191/192 unchanged; no local native build/test/listen/process enumeration, denied UI route retry, real data/credentials/access changes, deployment/new separate distribution, app interaction or additional worker. Stop for parent exact-final-head personal review and required CI/artifact evidence before merge; actual universal main shipment remains post-review.
+
+### REA-1228 — CI690 diagnosed; repair 1 awaiting corrected CI
+
+- Initial 3e73d8e/CI690 passed Verify/native gates: 331 Node, 58 Site, 274 browser, 1,372 Swift/114 suites, 37 XCTest (including BridgeIntegration), 32-file typecheck, 88 relay and seven TextKit checks. Existing two browser/four pointer skips remained; two other sidebar cases passed. Native result bundles not independently decoded for this infrastructure scope.
+- Native arm64 release compiled/linked Sigil and sigil-mcp in77.45s, progressing past the baseline XCBuild Metal failure. Verification then failed because lipo consumed the trailing executable path as an architecture after -verify_arch. x86_64 was not reached; no universal artifact/smoke/zip/publication occurred. Initial fake CLI accepted the wrong grammar; that coverage gap is acknowledged.
+- Repair1 uses input-first lipo verification everywhere it is required, with strict Bash fakes matching the captured grammar. Removing repeated Python startup addresses independent review4370763794 without increasing10s or removing assertions. Own source review also extended existing dirty-input hardening to per-arch dependency checkouts. Targeted red fixtures proved both incorrect lipo grammar and missed nested dirty roots before producer fixes; full local17/17 then passed, zero skips, no native execution. Successful fake case about0.53s locally; no constrained-host timing guarantee.
+- Corrected final-head CI/artifact evidence still pending; no unchanged retry or architecture relaxation. One diagnosed repair made progress into native compilation; two-round-without-progress stop condition remains. Installed426/four holds unchanged. No local native build/test/listen/process/UI route, real data/credentials/access changes, installer execution, app interaction or extra worker. Parent personal final review and exact-head green remain mandatory before merge.
+
+
+## 2026-10-25 — REA-1242 reopen closed chat implementation checkpoint
+
+- Sole independent audited ticket after PR197/main CI692/app429 acceptance and upkeep completed. Main fe182aef, current open PR intents/comments, Linear scope/dependencies/unassigned status, recent terminal CI, sole active Sigil task and worktree metadata checked. Held162/183/191/192 unchanged. One isolated branch/worktree; no process enumeration or duplicate worker.
+- Current-main production has no reopen action/API/history. Test-only1bb5648/CI693 ran generated native characterization: close B from A/B/C persists/restores A/C (0.253s); cancellation keeps the tab/options (0.191s). Both cases/suite passed, as did all1,374Swift tests/115suites.332Node/58Site/274browser passed with2existing skips; sidebar2passed/4existing pointer skips. CI then failed only strict formatting of the new fixture; downstream native phone/relay/release steps skipped. This is characterization, not a deliberately red feature assertion or manual key proof.
+- Diagnosed formatting correction passes local source-formatter lint. Candidate adds File Reopen Closed Tab/Shift-Command-T, bounded10-entry in-memory LIFO of successful user closes, exact native identity/workspace and per-tab options. Shared restoration builder retains explicit empty CLI defaults. Fresh history/source checks precede a new process; unavailable folder/provider keeps retry intent. Existing-open selection cannot duplicate a process. Token/selection/new-session guards protect async refresh against a newer close/open/navigation/quit.
+- Archive/delete/quit never populate history; successful archive/delete remove prior references, failed Trash retains them, project archive excludes its chats. Generated CI-only tests cover options/order/cap/unsupported identities, saved Claude/Codex separation, exact workspace, retry, invalid history and refresh races. Final functional CI is pending; no result/count for it claimed here. See docs/qa/rea-1242.md and the PR/Linear final receipt when available.
+- No local native build/tests, denied listener/process/UI route retries, personal provider data, credentials/access/security changes, distribution/deployment, app interaction or extra worker. Source formatter only locally. Installed429/holds unchanged; no manual app/menu key/Intel runtime claim. Stop for parent personal exact-final-source review and exact-head required CI before merge. One diagnosed fixture-format repair; no two-round no-progress loop.
+
+
+### REA-1242 — source-review correction before final validation
+
+- Initial implementation449f6b9 opened normal PR198 and admitted CI694. Own source review then identified a concrete refresh-generation gap: a newer forced scan increments SessionStore.forceEpoch and can discard the scan reopen awaited while older validated rows remain visible. The action must not treat those rows as fresh authority. Automatic review on449f6b9 had no findings; that is not clearance of a corrected head.
+- Supported cancellation of my own obsolete CI694 was requested and then verified terminal-cancelled (run and job) before further edits or a replacement run. No completed functional/native/release result is claimed from it. No branch/check bypass or blind unchanged rerun.
+- Bounded correction requires a newer applied scan and finished loading before using history. Otherwise the closed reference remains for retry with the existing history-unavailable explanation. A generated regression independently holds scan2 and superseding scan3, releases2 while3 remains pending, and requires no process launch or consumed reference despite the older visible validated row. It then publishes absence and verifies no new conversation starts. Existing cases, assertions and 2s readiness/5s hold bounds are retained.
+- Strict source-formatter lint and whitespace pass locally; final corrected-head CI remains pending. No local native execution or manual UI claim. One fixture-format correction and one distinct source-reviewed concurrency correction; no repeated failure/no-progress rerun loop. Parent personal review of the corrected exact head is still required. Installed429/held PRs remain untouched.
+
+
+### REA-1242 — CI695 diagnosed; retained display rows are not source proof
+
+- Corrected1fe1546/CI695 ran all 1,388 Swift tests in 115 suites. The independently held superseding-scan regression passed (0.404s), as did the other new order/options/identity/retry/exclusion/interference paths. One malformed-Grok-summary case failed two assertions: a tab launched and no error was shown. No downstream sidebar-host/native phone/relay/release gate ran after the Swift failure.
+- Source diagnosis: SessionScanner deliberately retains a cached Grok row on failed/unrecognized summary reads; its prior isHistoryValidated flag can remain true for display. Existing coverage separately marks uncertain Grok roots and exact unrecognized directories. The new caller had not consulted that evidence. No assertion or timeout was weakened.
+- Repair 3 adds one read-only SessionStore projection of those existing Grok uncertainty facts and checks it before reopening. It uses the retained row's exact source directory, keeps retry intent, and changes no scanner/cache or other launch semantics. Tests retain the original malformed-source refusal, add source-repair retry and injected read-failure checks, and prove unrelated malformed/native-root errors do not globally block a valid Grok resume. No filesystem permissions are changed.
+- Formatter/whitespace checks pass locally; replacement exact-head CI is pending. This is a distinct diagnosed failure after demonstrated runtime progress of the earlier concurrency correction, so the two-round no-progress stop condition is not met. If this repair does not advance the failing path, diagnose and apply the stop rule rather than retrying unchanged. Source now spans AppModel, the File menu and this small SessionStore projection, generated tests and evidence docs. No local native execution, new permissions, real data, app disruption, extra worker or merge. Installed 429/four holds remain untouched.
