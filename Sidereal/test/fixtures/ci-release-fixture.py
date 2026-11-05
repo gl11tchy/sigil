@@ -118,8 +118,8 @@ class FakeGitHub:
             item.update(draft=True, published_at=None, assets=[])
             raise module.ReleaseError("generated uncertain create after draft")
         if scenario == "newer-after-create":
-            self.items.insert(0, {"tag_name": "build-12.10"})
-            self.tags["build-12.10"] = sha
+            self.items.insert(0, {"tag_name": "build-709.10"})
+            self.tags["build-709.10"] = sha
 
     def delete(self, tag):
         self.writes.append("delete:" + tag)
@@ -190,7 +190,7 @@ try:
     if scenario == "draft-collision":
         github.items[0]["draft"] = True
     if scenario == "tag-collision":
-        github.tags["build-12.1"] = "b" * 40
+        github.tags["build-709.1"] = "b" * 40
     if scenario in older_producers:
         old_env, old_manifest, old_bytes = dict(env), (root / "release.json").read_bytes(), archive.read_bytes()
         old_release = json.loads(json.dumps(github.items[0]))
@@ -203,7 +203,7 @@ try:
         module.publish(root, env, github)
         if scenario == "older-existing-rerun":
             github.items.append(old_release)
-            github.tags["build-12.1"] = old_env["GITHUB_SHA"]
+            github.tags["build-709.1"] = old_env["GITHUB_SHA"]
         env.update(old_env)
         env["GITHUB_RUN_ATTEMPT"] = "11"
         archive.write_bytes(old_bytes)
@@ -211,7 +211,9 @@ try:
         github.writes.clear()
         preserved_state = json.dumps(dict(items=github.items, tags=github.tags), sort_keys=True)
     if scenario == "prune":
-        github.items.extend({"tag_name": tag} for tag in ["build-11.1", "latest", "manual-owner-release"])
+        github.items.extend({"tag_name": tag} for tag in ["build-708.1", "latest", "manual-owner-release"])
+    if scenario == "workflow-counter-reset":
+        github.items.append({"tag_name": "build-697.1"})
     result = module.publish(root, env, github)
     tag = result["tag"]
     if scenario == "verification-rerun":

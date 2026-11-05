@@ -33,27 +33,34 @@ function run(t, scenario) {
 test('records and publishes only the generated verified ZIP', t => {
   const result = run(t, 'fresh');
   assert.equal(result.ok, true, result.error);
-  assert.equal(result.tag, 'build-12.1');
+  assert.equal(result.tag, 'build-709.1');
   assert.equal(result.created, 1);
-  assert.deepEqual(result.writes, ['create:build-12.1']);
+  assert.deepEqual(result.writes, ['create:build-709.1']);
   assert.match(result.notes, /Source ZIP SHA256: [a-f0-9]{64}/);
 });
 
 test('the real gh adapter publishes and rechecks through an offline generated CLI', t => {
   const result = run(t, 'transport');
   assert.equal(result.ok, true, result.error);
-  assert.equal(result.tag, 'build-12.1');
+  assert.equal(result.tag, 'build-709.1');
   assert.equal(result.created, 1);
-  assert.deepEqual(result.writes, ['create:build-12.1']);
+  assert.deepEqual(result.writes, ['create:build-709.1']);
   assert.ok(result.apiCalls.some(path => path.includes('/releases?per_page=100&page=1')));
-  assert.ok(result.apiCalls.some(path => path.includes('/git/matching-refs/tags/build-12.1')));
+  assert.ok(result.apiCalls.some(path => path.includes('/git/matching-refs/tags/build-709.1')));
+});
+
+test('a replacement workflow publishes after the last legacy release', t => {
+  const result = run(t, 'workflow-counter-reset');
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.tag, 'build-709.1');
+  assert.deepEqual(result.writes, ['create:build-709.1', 'delete:build-697.1']);
 });
 
 for (const scenario of ['rerun', 'release-only-rerun']) {
   test(scenario + ' verifies the existing bytes and metadata without another publication', t => {
     const result = run(t, scenario);
     assert.equal(result.ok, true, result.error);
-    assert.equal(result.tag, 'build-12.1');
+    assert.equal(result.tag, 'build-709.1');
     assert.equal(result.created, 1);
     assert.deepEqual(result.writes, []);
   });
@@ -62,9 +69,9 @@ for (const scenario of ['rerun', 'release-only-rerun']) {
 test('rerunning verification gets a new attempt artifact/tag, then release reruns stay stable', t => {
   const result = run(t, 'verification-rerun');
   assert.equal(result.ok, true, result.error);
-  assert.equal(result.tag, 'build-12.2');
+  assert.equal(result.tag, 'build-709.2');
   assert.equal(result.created, 2);
-  assert.deepEqual(result.writes, ['create:build-12.2', 'delete:build-12.1']);
+  assert.deepEqual(result.writes, ['create:build-709.2', 'delete:build-709.1']);
 });
 
 for (const scenario of ['older-producer-rerun', 'older-existing-rerun',
@@ -76,7 +83,7 @@ for (const scenario of ['older-producer-rerun', 'older-existing-rerun',
     assert.deepEqual(result.writes, []);
     assert.equal(result.preserved, true);
     if (scenario === 'older-existing-rerun') {
-      assert.deepEqual(result.remaining, ['build-12.2', 'build-12.1']);
+      assert.deepEqual(result.remaining, ['build-709.2', 'build-709.1']);
     }
   });
 }
@@ -84,8 +91,8 @@ for (const scenario of ['older-producer-rerun', 'older-existing-rerun',
 test('cleanup preserves a newer release that appears after the initial listing', t => {
   const result = run(t, 'newer-after-create');
   assert.equal(result.ok, true, result.error);
-  assert.deepEqual(result.writes, ['create:build-12.1']);
-  assert.deepEqual(result.remaining, ['build-12.10', 'build-12.1']);
+  assert.deepEqual(result.writes, ['create:build-709.1']);
+  assert.deepEqual(result.remaining, ['build-709.10', 'build-709.1']);
 });
 
 for (const scenario of [
@@ -107,7 +114,7 @@ test('an uncertain create is read back and accepted only when complete, without 
   const result = run(t, 'uncertain-complete');
   assert.equal(result.ok, true, result.error);
   assert.equal(result.created, 1);
-  assert.deepEqual(result.writes, ['create:build-12.1']);
+  assert.deepEqual(result.writes, ['create:build-709.1']);
 });
 
 test('an uncertain partial draft is preserved and fails instead of retrying or deleting it', t => {
@@ -115,12 +122,12 @@ test('an uncertain partial draft is preserved and fails instead of retrying or d
   assert.equal(result.ok, false);
   assert.match(result.error, /uncertain|draft|incomplete/i);
   assert.equal(result.created, 1);
-  assert.deepEqual(result.writes, ['create:build-12.1']);
+  assert.deepEqual(result.writes, ['create:build-709.1']);
 });
 
 test('old build cleanup happens only after the new release was verified and keeps unrelated tags', t => {
   const result = run(t, 'prune');
   assert.equal(result.ok, true, result.error);
-  assert.deepEqual(result.writes, ['create:build-12.1', 'delete:build-11.1', 'delete:latest']);
+  assert.deepEqual(result.writes, ['create:build-709.1', 'delete:build-708.1', 'delete:latest']);
   assert.ok(result.remaining.includes('manual-owner-release'));
 });

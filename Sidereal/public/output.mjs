@@ -232,7 +232,7 @@ export function commonPrefixLength(left, right) {
   let at = 0, width = 1;
   while (width <= count / 2) width *= 2;
   for (; width >= 1; width /= 2) {
-    if (at + width <= count && right.startsWith(left.slice(at, at + width), at)) at += width;
+    if (at + width <= count && left.slice(at, at + width) === right.slice(at, at + width)) at += width;
   }
   return at;
 }

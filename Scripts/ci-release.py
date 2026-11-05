@@ -12,6 +12,8 @@ import tempfile
 import time
 
 MAX_ZIP_BYTES = 200 * 1024 * 1024
+# The retired ci.yml published build-697.1 before the hosted workflow reset its counter.
+LEGACY_BUILD_NUMBER = 697
 
 
 class ReleaseError(Exception):
@@ -187,7 +189,7 @@ def publish(directory, env, github=None):
     if github.main_sha() != current["sha"]:
         raise ReleaseError("Main advanced; refusing stale publication")
     # A release-only rerun must retain the producing job's tag, not make a new one.
-    tag = "build-" + str(current["run_number"]) + "." + str(attempt)
+    tag = "build-" + str(LEGACY_BUILD_NUMBER + current["run_number"]) + "." + str(attempt)
     title = "Sigil " + current["sha"][:7]
     tick = chr(96)
     notes = ("Built from main (" + tick + current["sha"] + tick
