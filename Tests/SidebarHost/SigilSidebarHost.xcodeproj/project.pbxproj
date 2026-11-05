@@ -52,6 +52,7 @@
                 A00000000000000000000006,
                 A00000000000000000000007,
                 A00000000000000000000008,
+                A00000000000000000000050,
                 A00000000000000000000004
             );
             sourceTree = "<group>";
@@ -219,7 +220,8 @@
             isa = PBXSourcesBuildPhase;
             buildActionMask = 2147483647;
             files = (
-                A00000000000000000000028
+                A00000000000000000000028,
+                A00000000000000000000051
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
@@ -256,6 +258,16 @@
         A00000000000000000000028 = {
             isa = PBXBuildFile;
             fileRef = A00000000000000000000008;
+        };
+        A00000000000000000000050 = {
+            isa = PBXFileReference;
+            lastKnownFileType = sourcecode.swift;
+            path = ../SigilAppTests/AboutBuildIdentityHostTests.swift;
+            sourceTree = "<group>";
+        };
+        A00000000000000000000051 = {
+            isa = PBXBuildFile;
+            fileRef = A00000000000000000000050;
         };
         A00000000000000000000040 = {
             isa = XCLocalSwiftPackageReference;
