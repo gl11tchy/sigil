@@ -33,9 +33,13 @@ let sessionTabs = [], canRestart = false;
 let freshHandshake = false;
 const histories = new Map();
 let pendingEarlier = null, earlierFlight = false, searchToken = 0;
+const SAVED_PAGE_SIZE = 40, SAVED_LIMIT = 400;
+let savedChats = [], savedOffset = 0, savedMore = false, savedLoading = false;
+let savedVisible = false, savedNotice = '', savedMac = null;
 let providerChoice = '', providerProblems = new Map();
 let newOptions = null, newProjects = [], projectTarget = null, worktreeChoice = null, canUseSessionOps = false;
 let newFlight = null;
+let sessionActionTarget = null, sessionActionMode = 'menu', sessionActionFlight = null;
 let newSheetEpoch = 0;
 let findIndex = 0, findMatches = [], displayedOutput = null;
 let rawOutput = '', rawMode = false;
@@ -47,7 +51,7 @@ let incoming = Promise.resolve(), outgoing = Promise.resolve(), pending = new Ma
 const RETURN_RECONNECT_AFTER = 30_000;
 let hiddenAt = document.hidden ? Date.now() : null, pageEpoch = 0, refreshing = false, refreshFlight = null;
 // A modal sheet makes the page inert, so its errors show inside the sheet.
-const sheetErrors = { 'sessions-dialog': 'sessions-error', 'project-dialog': 'project-error' };
+const sheetErrors = { 'session-action-dialog': 'session-action-error', 'sessions-dialog': 'sessions-error', 'project-dialog': 'project-error' };
 const showError = text => {
   const open = Object.keys(sheetErrors).find(id => $(id).open);
   for (const id of ['error', ...Object.values(sheetErrors)]) { $(id).textContent = ''; $(id).hidden = true; }
@@ -144,7 +148,10 @@ function updateControls() {
   $('welcome').querySelector('p').textContent = waiting ? 'Keep Sigil open and your Mac awake.' : 'Your sessions. Your tools. Away from your desk.';
   $('welcome').querySelector('.pairing-steps').hidden = waiting;
   for (const id of ['session-list', 'saved-list']) {
-    for (const button of Array.from($(id).children || [])) button.disabled = disabled;
+    for (const button of Array.from($(id).children || [])) {
+      const controls = button.dataset.sessionRow ? button.children : [button];
+      for (const control of controls) control.disabled = disabled || (id === 'saved-list' && button.dataset.more === 'true' && savedLoading);
+    }
   }
   const standalone = isStandaloneApp();
   for (const id of ['standalone-hint', 'standalone-panel-hint']) {
@@ -152,6 +159,7 @@ function updateControls() {
     if (hint) hint.hidden = !standalone;
   }
   updateNewControls();
+  updateSessionActionControls();
 }
 function hasFinePointer() {
   return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
@@ -170,6 +178,7 @@ function offline(message = 'Disconnected') {
   connected = false;
   refreshing = false; refreshFlight = null;
   commandEpoch++;
+  clearSaved();
   $('status').textContent = $('status-live').textContent = message;
   $('status').dataset.connected = 'false';
   clearTimeout(pollTimer);
@@ -322,6 +331,17 @@ function render(state) {
     throw new Error('Invalid Mac response');
   }
   const allTabsNew = freshHandshake && sessionTabs.length > 0 && !sessionTabs.some(tab => ids.has(tab.id));
+  const nextMac = typeof state.mac === 'string' ? state.mac : null;
+  if (nextMac !== savedMac) {
+    savedMac = nextMac;
+    clearSaved();
+    if (connected && $('sessions-dialog').open) {
+      const mac = savedMac, epoch = commandEpoch;
+      void Promise.resolve().then(() => {
+        if (connected && savedMac === mac && commandEpoch === epoch && $('sessions-dialog').open) searchSaved();
+      });
+    }
+  }
   freshHandshake = false;
   const previousTab = sessionTabs.find(tab => tab.id === selected);
   sessionTabs = state.tabs;
@@ -440,10 +460,11 @@ function renderSessionList() {
   const openHeading = $('open-heading');
   if (openHeading) openHeading.hidden = matches.length === 0;
   // Preserve focus during state polls: only rebuild if the displayed entries change.
-  const signature = JSON.stringify([matches, selected]);
+  const signature = JSON.stringify([matches, selected, canUseSessionOps, generation, commandEpoch, savedMac]);
   if ($('session-list').dataset.signature === signature) return;
   $('session-list').dataset.signature = signature;
   const focusedID = document.activeElement?.dataset.tabId;
+  const focusedMore = document.activeElement?.dataset.sessionMore === 'true';
   let nextFocus;
   $('session-list').replaceChildren(...matches.map(tab => {
     const button = document.createElement('button');
@@ -451,12 +472,17 @@ function renderSessionList() {
     button.disabled = !connected || busy || refreshing;
     button.setAttribute('aria-current', String(tab.id === selected));
     button.dataset.tabId = tab.id;
-    if (tab.id === focusedID) nextFocus = button;
+    if (tab.id === focusedID && !focusedMore) nextFocus = button;
     const title = document.createElement('span');
     title.textContent = tab.title;
     const status = document.createElement('small');
     status.textContent = STATUS_LABELS[tab.status] ?? 'Status unknown';
-    button.append(title, status);
+    if (canUseSessionOps) {
+      const label = document.createElement('span'); label.className = 'session-label';
+      const metadata = document.createElement('small'); metadata.className = 'session-metadata';
+      metadata.textContent = [tab.providerName, tab.folder].filter(value => typeof value === 'string' && value).join(' · ');
+      label.append(title, metadata); button.append(label, status);
+    } else button.append(title, status);
     button.onclick = () => {
       if (!connected || busy || refreshing) return;
       void perform(async () => {
@@ -464,51 +490,251 @@ function renderSessionList() {
         if ($('sessions-dialog').open) { $('sessions-dialog').close(); $('sessions-toggle').focus(); }
       });
     };
-    return button;
+    if (!canUseSessionOps) return button;
+    const row = document.createElement('div'); row.className = 'session-row'; row.dataset.sessionRow = 'true'; row.dataset.tabId = tab.id;
+    const more = document.createElement('button'); more.type = 'button'; more.textContent = '…';
+    more.dataset.sessionMore = 'true'; more.dataset.tabId = tab.id;
+    more.setAttribute('aria-label', `More actions for ${tab.title}`); more.setAttribute('aria-haspopup', 'dialog');
+    more.disabled = !connected || busy || refreshing; more.onclick = () => openSessionActions(tab);
+    if (tab.id === focusedID && focusedMore) nextFocus = more;
+    row.append(button, more); return row;
   }));
   if (focusedID) (nextFocus || $('session-search')).focus();
 }
+// A row is a live tab in one authenticated Mac connection, never the current picker selection.
+function sessionActionTab(context) {
+  if (!context || context !== sessionActionTarget || !connected || refreshing || !canUseSessionOps
+    || context.owner !== credential || context.generation !== generation || context.epoch !== commandEpoch
+    || context.mac !== savedMac || context.page !== pageEpoch || !$('sessions-dialog').open) return null;
+  const tab = sessionTabs.find(tab => tab.id === context.id);
+  return tab && ['provider', 'sessionID', 'cwd'].every(key => tab[key] === context[key]) ? tab : null;
+}
+function sessionActionRisk(tab) {
+  if (tab.processRunning === false || ['idle', 'exited'].includes(tab.status)) return 'inactive';
+  return tab.status === 'working' ? 'working' : 'uncertain';
+}
+function currentSessionAction(context, action) {
+  const tab = sessionActionTab(context);
+  const destructive = ['close', 'archive'].includes(action);
+  if (tab && destructive && context.confirmationRisk !== undefined && context.confirmationRisk !== sessionActionRisk(tab)) context.activityChanged = true;
+  const supported = tab && (action !== 'rename' || tab.capabilities?.rename !== false)
+    && (action !== 'archive' || (tab.canArchive === true && tab.capabilities?.archive !== false));
+  if (tab && !supported && sessionActionMode === action) context.capabilityChanged = action;
+  return Boolean(tab && supported && !context.uncertain && !context.needsRefresh
+    && context.capabilityChanged !== action && (!destructive || !context.activityChanged)
+    && (action !== 'rename' || tab.title === context.title));
+}
+function sessionActionMessage(text) {
+  $('session-action-error').textContent = text; $('session-action-error').hidden = !text;
+}
+function updateSessionActionControls() {
+  if (!$('session-action-dialog').open) return;
+  const context = sessionActionTarget, tab = sessionActionTab(context);
+  const unavailable = busy || Boolean(sessionActionFlight) || !tab;
+  const dispatched = sessionActionFlight?.context === context && sessionActionFlight.dispatched;
+  $('session-action-cancel').disabled = Boolean(dispatched);
+  $('session-action-accept').textContent = dispatched
+    ? { rename: 'Saving…', archive: 'Archiving…', close: 'Closing…' }[sessionActionMode]
+    : { rename: 'Save', archive: 'Archive', close: 'Close' }[sessionActionMode] || 'Save';
+  $('session-rename').disabled = unavailable || tab?.capabilities?.rename === false;
+  $('session-rename').title = tab?.capabilities?.rename === false ? 'This provider does not support renaming.' : '';
+  $('session-archive').hidden = !tab || tab.canArchive !== true || tab.capabilities?.archive === false;
+  $('session-archive').disabled = $('session-close-action').disabled = unavailable;
+  const name = $('session-name').value.trim();
+  const invalidName = new TextEncoder().encode(name).length > 80 || /\p{Cc}/u.test(name);
+  $('session-name').readOnly = Boolean(sessionActionFlight);
+  $('session-action-accept').disabled = unavailable || !currentSessionAction(context, sessionActionMode)
+    || (sessionActionMode === 'rename' && invalidName);
+  // A successful action reply renders state before its Promise resolves. Do not
+  // label that acknowledged rename as an external edit or leak a stale error on close.
+  if (sessionActionFlight?.context === context) return;
+  if (context?.uncertain) sessionActionMessage('No confirmed result. Check this session on your Mac before trying again.');
+  else if (!tab || (sessionActionMode === 'rename' && tab.title !== context.title)) sessionActionMessage('This session changed. Cancel and reopen its actions. Your edits are kept here.');
+  else if (context.capabilityChanged === sessionActionMode) sessionActionMessage(`${sessionActionMode === 'rename' ? 'Renaming' : 'Archiving'} is no longer available for this session. Cancel and reopen its actions. Your edits are kept here.`);
+  else if (['close', 'archive'].includes(sessionActionMode) && context.activityChanged) sessionActionMessage('This session’s activity changed. Cancel and reopen its actions before confirming.');
+  else if (context.needsRefresh) sessionActionMessage('Could not refresh this session. Your edits are kept. Cancel and reopen after reconnecting.');
+  else if (sessionActionMode === 'rename' && invalidName) sessionActionMessage('Use at most 80 UTF-8 bytes and no control characters.');
+}
+function openSessionActions(tab) {
+  if (!connected || busy || refreshing || !canUseSessionOps || !$('sessions-dialog').open) return;
+  // A detached row handler cannot bind a replacement row with the same tab id.
+  const current = sessionTabs.find(item => item.id === tab.id);
+  if (!current || !['title', 'provider', 'sessionID', 'cwd'].every(key => current[key] === tab[key])) return;
+  tab = current;
+  sessionActionTarget = { id: tab.id, provider: tab.provider, sessionID: tab.sessionID, cwd: tab.cwd,
+    title: tab.title, owner: credential, generation, epoch: commandEpoch, mac: savedMac, page: pageEpoch };
+  sessionActionMode = 'menu';
+  $('session-action-heading').textContent = tab.title;
+  $('session-action-detail').textContent = [tab.providerName, tab.folder].filter(value => typeof value === 'string' && value).join(' · ');
+  $('session-action-menu').hidden = false; $('session-rename-form').hidden = true;
+  $('session-action-accept').hidden = true; $('session-action-cancel').textContent = 'Done';
+  sessionActionMessage(''); $('session-action-dialog').showModal(); updateSessionActionControls();
+}
+function chooseSessionAction(action) {
+  const context = sessionActionTarget, tab = sessionActionTab(context);
+  if (!tab || busy || sessionActionFlight || !currentSessionAction(context, action)) return;
+  sessionActionMode = action;
+  $('session-action-menu').hidden = true; $('session-rename-form').hidden = action !== 'rename';
+  $('session-action-heading').textContent = `${action === 'rename' ? 'Rename' : action === 'archive' ? 'Archive' : 'Close'} “${tab.title}”${action === 'rename' ? '' : '?'}`;
+  $('session-action-cancel').textContent = 'Cancel'; $('session-action-accept').hidden = false;
+  $('session-action-accept').textContent = action === 'rename' ? 'Save' : action === 'archive' ? 'Archive' : 'Close';
+  $('session-action-accept').className = action === 'rename' ? 'primary' : 'destructive';
+  if (action === 'rename') {
+    $('session-name').value = tab.title; $('session-name').focus();
+    $('session-action-detail').textContent = 'Leave the name empty to restore the Mac’s title.';
+  } else {
+    const verb = action === 'archive' ? 'Archiving' : 'Closing';
+    context.confirmationRisk = sessionActionRisk(tab);
+    const uncertain = context.confirmationRisk === 'uncertain';
+    $('session-action-detail').textContent = tab.status === 'working' && tab.processRunning !== false
+      ? `It is still working. ${verb} stops it.`
+      : uncertain ? `It may still be running. ${verb} stops it.` : action === 'archive' ? 'This archives the conversation and closes its open tabs on your Mac.' : 'This closes the tab on your Mac.';
+    // The host owns archive's affected set, including path aliases and tabs omitted
+    // by a capped snapshot. Always disclose its stopping effect across that set.
+    if (action === 'archive') $('session-action-detail').textContent = 'This archives the conversation and stops all its open tabs on your Mac, including any that are working or whose status is unknown.';
+    $('session-action-cancel').focus();
+  }
+  sessionActionMessage(''); updateSessionActionControls();
+}
+async function submitSessionAction() {
+  const context = sessionActionTarget, action = sessionActionMode;
+  if (!['rename', 'archive', 'close'].includes(action) || busy || refreshing || sessionActionFlight
+    || !currentSessionAction(context, action)) return;
+  const name = $('session-name').value.trim();
+  if (action === 'rename' && (new TextEncoder().encode(name).length > 80 || /\p{Cc}/u.test(name))) {
+    updateSessionActionControls(); return;
+  }
+  const flight = sessionActionFlight = { context, action };
+  await perform(async () => {
+    try {
+      const reply = await enqueue(async () => {
+        if (!currentSessionAction(context, action) || !$('session-action-dialog').open) throw new Error('This session changed. Cancel and reopen its actions.');
+        // Keep the fresh read and write in one queue slot. Other local commands
+        // cannot slip between them; the host still owns the final mutation.
+        context.needsRefresh = true;
+        const fresh = await transmit('state', undefined, context.id, false);
+        if (!fresh.state) throw new Error('Could not refresh this session. Nothing was sent.');
+        context.needsRefresh = false;
+        if (!currentSessionAction(context, action) || !$('session-action-dialog').open) throw new Error('This session changed. Cancel and reopen its actions.');
+        return transmit(action, undefined, context.id, false, action === 'rename' ? { name } : {}, undefined, context);
+      });
+      if (sessionActionTarget === context && reply.ok === true) $('session-action-dialog').close();
+    } catch (error) {
+      if (sessionActionTarget !== context) return;
+      if (!error.verifiedReply && flight.dispatched) context.uncertain = true;
+      // A rejected rename retains edits. Read current host state before enabling a retry,
+      // so a name another client supplied is never overwritten by the retained draft.
+      if (action === 'rename' && error.verifiedReply && sessionActionTab(context)) {
+        context.needsRefresh = true;
+        try { const fresh = await request('state'); if (fresh.state) context.needsRefresh = false; } catch { /* keep retry disabled */ }
+      }
+      sessionActionMessage(error.message); updateSessionActionControls();
+    } finally {
+      if (sessionActionFlight === flight) sessionActionFlight = null;
+    }
+  });
+  updateSessionActionControls();
+}
+$('session-rename').onclick = () => chooseSessionAction('rename');
+$('session-archive').onclick = () => chooseSessionAction('archive');
+$('session-close-action').onclick = () => chooseSessionAction('close');
+$('session-action-accept').onclick = () => void submitSessionAction();
+$('session-rename-form').onsubmit = event => { event.preventDefault(); void submitSessionAction(); };
+$('session-name').oninput = () => { sessionActionMessage(''); updateSessionActionControls(); };
+$('session-action-cancel').onclick = () => { if (!sessionActionFlight?.dispatched) $('session-action-dialog').close(); };
+$('session-action-dialog').addEventListener('cancel', event => {
+  if (sessionActionFlight?.dispatched) event.preventDefault();
+});
+$('session-action-dialog').addEventListener('close', () => {
+  sessionActionTarget = null;
+  if ($('sessions-dialog').open) $('session-search').focus();
+});
 function searchSaved() {
   renderSessionList();
-  const query = $('session-search').value.trim();
-  const token = ++searchToken;
-  if (!query || !$('sessions-dialog').open) { dropWaitingSearch(); renderSaved([]); return; }
-  renderSaved([], { pending: true });
-  // The Mac reads 200 characters, and text over 8 KB drops the connection.
-  request('chats', utf8Limited(takeGraphemes(query, 200), 8192)).then(reply => {
-    if (reply.stale || token !== searchToken || $('session-search').value.trim() !== query) return;
-    renderSaved(reply.chats, { truncated: reply.chatsTruncated === true });
-  }).catch(error => { if (token === searchToken) showError(error.message); });
+  $('sessions-error').textContent = ''; $('sessions-error').hidden = true;
+  searchToken++;
+  savedChats = []; savedOffset = 0; savedMore = false; savedLoading = false; savedNotice = '';
+  savedVisible = connected && !refreshing && $('sessions-dialog').open;
+  if (!savedVisible) { dropWaitingSearch(); renderSaved(); return; }
+  void loadSavedPage();
 }
-function renderSaved(chats, options = {}) {
-  const query = $('session-search').value.trim();
-  const safe = [];
-  const rows = Array.isArray(chats) ? chats : [];
-  if (query) {
-    for (const chat of rows.slice(0, 40)) {
+function clearSaved() {
+  searchToken++; dropWaitingSearch();
+  savedChats = []; savedOffset = 0; savedMore = false; savedLoading = false;
+  savedVisible = false; savedNotice = '';
+  renderSaved();
+}
+function savedContext() {
+  return { token: searchToken, query: $('session-search').value.trim(), generation, epoch: commandEpoch, owner: credential, mac: savedMac };
+}
+function currentSaved(context) {
+  return connected && !refreshing && $('sessions-dialog').open && savedVisible
+    && context.token === searchToken && context.query === $('session-search').value.trim()
+    && context.generation === generation && context.epoch === commandEpoch
+    && context.owner === credential && context.mac === savedMac;
+}
+const savedIdentity = chat => JSON.stringify([chat.provider ?? 'grokBuild', chat.folder, chat.id]);
+async function loadSavedPage(offset = 0) {
+  const context = savedContext();
+  if (!currentSaved(context) || savedLoading || (offset > 0 && (!canUseSessionOps || !savedMore || offset !== savedOffset)) || offset >= SAVED_LIMIT) return;
+  savedLoading = true; savedNotice = ''; renderSaved();
+  try {
+    // The Mac reads 200 characters, and text over 8 KB drops the connection.
+    const text = utf8Limited(takeGraphemes(context.query, 200), 8192);
+    const reply = await request('chats', text, undefined, false, offset ? { index: offset } : {});
+    if (reply.stale || !currentSaved(context)) return;
+    savedMore = false;
+    if (!Array.isArray(reply.chats)) { savedNotice = 'Saved chats are unavailable. Try searching again.'; return; }
+    const page = reply.chats.slice(0, Math.min(SAVED_PAGE_SIZE, SAVED_LIMIT - offset));
+    const rows = new Map(savedChats.map(chat => [savedIdentity(chat), chat]));
+    const before = rows.size;
+    for (const chat of page) {
       if (!chat || typeof chat.id !== 'string' || typeof chat.title !== 'string' || typeof chat.folder !== 'string') continue;
       if (!chat.id || chat.id.length > 80 || chat.title.length > 300 || chat.folder.length > 4_096) continue;
       if (/[\u0000-\u001F]/.test(chat.id) || /[\u0000-\u001F]/.test(chat.folder)) continue;
-      safe.push({ id: chat.id, title: chat.title, folder: chat.folder, provider: chat.provider });
+      if (chat.provider !== undefined && (typeof chat.provider !== 'string' || !chat.provider || chat.provider.length > 32)) continue;
+      rows.set(savedIdentity(chat), { id: chat.id, title: chat.title, folder: chat.folder, provider: chat.provider });
+    }
+    savedChats = [...rows.values()].slice(0, SAVED_LIMIT);
+    if (!savedChats.length && (page.length || reply.chatsTruncated === true)) savedNotice = 'Saved chats are unavailable. Try searching again.';
+    // Advance by consumed rows, including duplicates after a concurrent list change.
+    savedOffset = offset + page.length;
+    const continuation = page.length > 0 && (page.length === SAVED_PAGE_SIZE || reply.chatsTruncated === true);
+    // Indexed chats predate sessionOps; Macs without that contract get one bounded page.
+    // Even an index-ignoring host cannot loop: a page must add a new identity.
+    savedMore = canUseSessionOps && reply.chats.length <= SAVED_PAGE_SIZE && rows.size > before
+      && continuation && savedOffset < SAVED_LIMIT && savedChats.length < SAVED_LIMIT;
+    if (continuation && !savedMore) {
+      savedNotice = context.query ? 'Showing the first matches. Narrow the search.'
+        : savedOffset >= SAVED_LIMIT ? 'Showing the first chats. Search to narrow the list.'
+        : 'Showing the available chats. Search to narrow the list.';
+    }
+  } catch (error) {
+    if (!currentSaved(context)) return;
+    savedMore = false;
+    if (error.verifiedReply && error.message === 'Unknown action.') {
+      savedVisible = false; savedChats = [];
+    } else {
+      savedNotice = 'Could not load saved chats.';
+      showError(error.message);
+    }
+  } finally {
+    if (currentSaved(context) || (context.token === searchToken && !savedVisible)) {
+      savedLoading = false; renderSaved();
     }
   }
+}
+function renderSaved() {
+  const context = savedContext();
   const heading = $('saved-heading');
-  if (heading) heading.hidden = !query;
+  if (heading) { heading.hidden = !savedVisible; heading.textContent = context.query ? 'Saved chats' : 'Recent chats'; }
   const empty = $('saved-empty');
   if (empty) {
-    if (options.truncated === true && safe.length > 0) {
-      empty.hidden = false;
-      empty.textContent = 'Showing the first matches.';
-    } else {
-      empty.hidden = !query || safe.length > 0 || options.pending === true;
-      if (query && safe.length === 0 && !options.pending && !Array.isArray(chats)) {
-        empty.textContent = 'The list was too long. Narrow the search.';
-      } else if (empty.textContent !== 'No matching chats.') {
-        empty.textContent = 'No matching chats.';
-      }
-    }
+    empty.hidden = !savedVisible || (!savedNotice && savedChats.length > 0);
+    empty.textContent = savedLoading && !savedChats.length ? 'Loading chats…'
+      : savedNotice || (context.query ? 'No matching chats.' : 'No recent chats.');
   }
-  $('saved-list').replaceChildren(...safe.map(chat => {
+  const buttons = savedChats.map(chat => {
     const button = document.createElement('button');
     button.type = 'button';
     button.disabled = !connected || busy || refreshing;
@@ -518,15 +744,22 @@ function renderSaved(chats, options = {}) {
     folder.textContent = chat.folder;
     button.append(title, folder);
     button.onclick = () => {
-      if (!connected || busy || refreshing) return;
+      if (!currentSaved(context) || busy) return;
       const id = chat.id, folderPath = chat.folder;
       void perform(async () => {
-        if (!await changeSession('open', folderPath, undefined, { name: id, ...(chat.provider ? { provider: chat.provider } : {}) })) return;
+        if (!await changeSession('open', folderPath, undefined, { name: id, ...(chat.provider ? { provider: chat.provider } : {}) }, context)) return;
         $('sessions-dialog').close();
       });
     };
     return button;
-  }));
+  });
+  if (savedMore) {
+    const more = projectButton(savedLoading ? 'Loading…' : 'Show more', 'More saved chats', () => { if (currentSaved(context) && !busy) void loadSavedPage(savedOffset); });
+    more.dataset.more = 'true'; more.disabled = !connected || busy || refreshing || savedLoading;
+    buttons.push(more);
+  }
+  $('saved-list').replaceChildren(...buttons);
+  $('saved-list').setAttribute('aria-busy', String(savedLoading));
 }
 function projectButton(nameText, folderText, onClick) {
   const button = document.createElement('button');
@@ -1205,14 +1438,13 @@ function closeFind() {
 }
 $('sessions-toggle').onclick = () => {
   $('session-search').value = '';
-  searchToken++;
-  renderSaved([]);
   renderSessionList(); $('sessions-dialog').showModal();
+  searchSaved();
   // On a touch screen, focus would raise the keyboard over the list.
   if (hasFinePointer()) $('session-search').focus();
 };
 $('sessions-close').onclick = () => $('sessions-dialog').close();
-$('sessions-dialog').addEventListener('close', () => { dropWaitingSearch(); if (!$('sessions-toggle').hidden) $('sessions-toggle').focus(); });
+$('sessions-dialog').addEventListener('close', () => { if ($('session-action-dialog').open) $('session-action-dialog').close(); clearSaved(); if (!$('sessions-toggle').hidden) $('sessions-toggle').focus(); });
 $('session-search').oninput = searchSaved;
 $('find-toggle').onclick = () => {
   $('find-bar').hidden = false; $('find-toggle').setAttribute('aria-expanded', 'true');
@@ -1249,14 +1481,14 @@ function request(action, text, tabID = selected, pairing = false, extra = {}, re
   // behind a later command it is skipped at its turn. Its callers see a stale token.
   const waiting = waitingSearch;
   if (waiting?.tail === outgoing && waiting.generation === generation && waiting.epoch === commandEpoch) {
-    Object.assign(waiting, { text, tabID });
+    Object.assign(waiting, { text, tabID, extra });
     return waiting.reply;
   }
   if (waiting) waiting.stale = true;
-  const search = waitingSearch = { text, tabID, generation, epoch: commandEpoch };
+  const search = waitingSearch = { text, tabID, extra, generation, epoch: commandEpoch };
   search.reply = enqueue(async () => {
     if (waitingSearch === search) waitingSearch = null;
-    return search.stale ? { stale: true } : transmit(action, search.text, search.tabID, pairing, extra);
+    return search.stale ? { stale: true } : transmit(action, search.text, search.tabID, pairing, search.extra);
   });
   search.tail = outgoing;
   return search.reply;
@@ -1277,13 +1509,14 @@ async function enqueue(send) {
     return await send();
   } finally { queuedCommands--; release(); }
 }
-async function transmit(action, text, tabID, pairing, extra = {}, returnRefresh) {
+async function transmit(action, text, tabID, pairing, extra = {}, returnRefresh, sessionContext) {
   if (returnRefresh && !currentReturnRefresh(returnRefresh)) return { stale: true };
   if (!socket || socket.readyState !== WebSocket.OPEN || !challenge || (!connected && !pairing && action !== 'state')) throw new Error('Not connected.');
   const ws = socket, current = generation, epoch = commandEpoch, seq = ++sequence;
   const message = { challenge, clientNonce, sequence: seq, action, ...(tabID ? { tabID } : {}), ...(text !== undefined ? { text } : {}), ...extra };
   const data = await seal(message, pairing ? bootstrap : credential.key, 'phone');
   if (current !== generation || epoch !== commandEpoch || ws.readyState !== WebSocket.OPEN) throw new Error('Connection lost.');
+  if (sessionContext && !currentSessionAction(sessionContext, action)) throw new Error('This session changed. Cancel and reopen its actions.');
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       if (current !== generation || epoch !== commandEpoch || socket !== ws) return;
@@ -1296,6 +1529,9 @@ async function transmit(action, text, tabID, pairing, extra = {}, returnRefresh)
     pending.set(seq, { resolve, reject, timer, action, tabID, returnRefresh });
     const flight = newFlight?.attempt.action === action && ['new', 'createProject'].includes(action) ? newFlight : null;
     if (flight) flight.dispatched = true;
+    if (sessionContext && sessionActionFlight?.context === sessionContext) {
+      sessionActionFlight.dispatched = true; updateSessionActionControls();
+    }
     ws.send(JSON.stringify({ data }));
     if (flight) updateNewControls();
   });
@@ -1373,6 +1609,7 @@ function connect(isReturning = false) {
           connected = true; busy = false;
           $('status').textContent = $('status-live').textContent = 'Connected'; $('status').dataset.connected = 'true';
           showError(''); updateControls(); poll();
+          if ($('sessions-dialog').open) searchSaved();
         }).catch(error => {
           if (current !== generation || authorizationEpoch !== commandEpoch) return;
           if (replacingMemory) {
@@ -1469,13 +1706,14 @@ function connect(isReturning = false) {
 }
 // The displayed picker can change before the Mac confirms its selection. Keep
 // the old draft readable and focused, but do not accept edits for an uncertain target.
-async function changeSession(action, text, tabID, extra = {}) {
+async function changeSession(action, text, tabID, extra = {}, savedTarget) {
   const current = generation, epoch = commandEpoch;
   const selection = selectingSession = { current, epoch };
   updateControls();
   try {
-    await request(action, text, tabID, false, extra);
-    return current === generation && epoch === commandEpoch;
+    const reply = savedTarget ? await enqueue(() => currentSaved(savedTarget)
+      ? transmit(action, text, tabID, false, extra) : { stale: true }) : await request(action, text, tabID, false, extra);
+    return !reply.stale && (!savedTarget || currentSaved(savedTarget)) && current === generation && epoch === commandEpoch;
   } catch (error) {
     if (current === generation && epoch === commandEpoch) throw error;
     return false;
@@ -1835,6 +2073,7 @@ function stopScan() {
   if (scanner) scanner.hidden = true;
 }
 async function beginPair(pairing) {
+  clearSaved();
   // Pairing credentials are not replaced on disk until this Mac authenticates.
   // Contents from the previous Mac must not share an ID namespace with this one.
   if (credential && !replacingMemory) replacingMemory = {
@@ -1989,6 +2228,7 @@ function refreshReturnedState() {
     refreshing = false;
     $('status').textContent = $('status-live').textContent = 'Connected'; $('status').dataset.connected = 'true';
     updateControls(); poll();
+    if ($('sessions-dialog').open) searchSaved();
   }).catch(error => {
     if (!currentReturnRefresh(flight)) return;
     showError(error.message); connect(true);

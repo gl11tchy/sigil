@@ -8,6 +8,7 @@ struct TerminalFindBar: View {
     /// One-based index of the current hit, or `0` when there are none.
     let matchIndex: Int
     let matchCount: Int
+    let isSearching: Bool
     /// Changes when Cmd-F asks an open bar to take focus again.
     let focusToken: Int
     let findNext: () -> Void
@@ -84,11 +85,13 @@ struct TerminalFindBar: View {
     }
 
     private var counter: String {
-        matchCount == 0 ? "0" : "\(matchIndex)/\(matchCount)"
+        if isSearching { return matchCount == 0 ? "…" : "\(matchIndex)/\(matchCount)+" }
+        return matchCount == 0 ? "0" : "\(matchIndex)/\(matchCount)"
     }
 
     private var counterLabel: String {
-        matchCount == 0 ? "No matches" : "Match \(matchIndex) of \(matchCount)"
+        if isSearching { return "Searching terminal. \(matchCount) matches found so far." }
+        return matchCount == 0 ? "No matches" : "Match \(matchIndex) of \(matchCount)"
     }
 
     /// Return advances; Shift+Return goes back. `NSEvent` is how a TextField

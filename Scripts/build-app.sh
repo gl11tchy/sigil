@@ -27,6 +27,7 @@ NOTARY_PROFILE="${SIGIL_NOTARY_PROFILE:-}"
 NOTARY_TIMEOUT="${SIGIL_NOTARY_TIMEOUT:-30m}"
 NOTARY_TMP=""
 STAGING_ROOT=""
+UNIVERSAL_PRODUCTS=""
 
 cleanup() {
   if [[ -n "$NOTARY_TMP" ]]; then
@@ -34,6 +35,9 @@ cleanup() {
   fi
   if [[ -n "$STAGING_ROOT" ]]; then
     rm -rf "$STAGING_ROOT"
+  fi
+  if [[ -n "$UNIVERSAL_PRODUCTS" ]]; then
+    rm -rf "$UNIVERSAL_PRODUCTS"
   fi
 }
 trap cleanup EXIT
@@ -144,16 +148,12 @@ if [[ "$CONFIG" == "release" ]]; then
     echo "install it with: xcodebuild -downloadComponent MetalToolchain" >&2
     exit 1
   fi
-  apple_products="Release"
   config_dir="release"
-  echo "==> swift build -c release (universal)"
-  # Never let a failed build leave an older universal product eligible for packaging.
-  rm -f \
-    "$ROOT/.build/apple/Products/${apple_products}/Sigil" \
-    "$ROOT/.build/apple/Products/${apple_products}/sigil-mcp"
-  if swift build -c release --arch arm64 --arch x86_64; then
+  mkdir -p "$ROOT/.build"
+  UNIVERSAL_PRODUCTS="$(mktemp -d "$ROOT/.build/sigil-universal-products.XXXXXX")"
+  if "$SCRIPT_DIR/build-universal.sh" "$UNIVERSAL_PRODUCTS"; then
     echo "Built a universal (arm64 + x86_64) binary."
-    products_dir="$ROOT/.build/apple/Products/${apple_products}"
+    products_dir="$UNIVERSAL_PRODUCTS"
     built_universal=1
   else
     if [[ "$ALLOW_THIN" != "1" ]]; then
@@ -203,8 +203,8 @@ if [[ "$built_universal" == "1" ]]; then
     echo "error: lipo is required to verify a universal build" >&2
     exit 1
   fi
-  "$LIPO" -verify_arch arm64 x86_64 "$BINARY"
-  "$LIPO" -verify_arch arm64 x86_64 "$MCP_BINARY"
+  "$LIPO" "$BINARY" -verify_arch arm64 x86_64
+  "$LIPO" "$MCP_BINARY" -verify_arch arm64 x86_64
   "$LIPO" -info "$BINARY"
   "$LIPO" -info "$MCP_BINARY"
 elif [[ -n "$LIPO" ]]; then

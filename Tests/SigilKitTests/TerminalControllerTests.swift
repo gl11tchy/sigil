@@ -391,7 +391,7 @@ struct TerminalControllerTests {
         #expect(controller.view.accessibilityLabel() == "Shell terminal")
     }
 
-    @Test func findStartsAtTheNewestHitOnScreenNotTheOldestInScrollback() throws {
+    @Test func findStartsAtTheNewestHitOnScreenNotTheOldestInScrollback() async throws {
         let controller = TerminalController()
         let view = try #require(controller.view as? TerminalView)
         let filler = (0..<300).map { "filler \($0)" }.joined(separator: "\r\n")
@@ -399,6 +399,7 @@ struct TerminalControllerTests {
         let top = view.getTerminal().buffer.yDisp
 
         controller.setFindQuery("needle")
+        #expect(await TerminalTestSupport.waitUntil { !controller.isFinding })
 
         #expect(controller.findMatchCount == 2)
         #expect(controller.findMatchIndex == 2)

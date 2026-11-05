@@ -806,14 +806,22 @@ async function selectionFixture(entry = 'picker') {
   page.element('message').value = 'First draft';
   page.app.render(state('tab-2')); page.element('message').value = 'Second draft';
   page.app.render(state('tab-1'));
+  if (entry === 'saved') {
+    page.element('sessions-dialog').open = true; page.element('session-search').value = 'Two';
+    page.app.searchSaved(); await settle();
+    const request = socket.sent.at(-1);
+    socket.receive({ data: JSON.stringify({
+      challenge: request.challenge, clientNonce: request.clientNonce, sequence: request.sequence, ok: true,
+      chats: [{ id: 'native-two', title: 'Two', folder: '/tmp/two' }], state: state('tab-1'),
+    }) });
+    await settle();
+  }
   const select = () => {
     if (entry === 'picker') { page.element('tabs').value = 'tab-2'; page.element('tabs').onchange(); }
     else if (entry === 'browse') {
       page.element('sessions-dialog').open = true; page.app.renderSessionList();
       page.element('session-list').children[1].onclick();
     } else {
-      page.element('sessions-dialog').open = true; page.element('session-search').value = 'Two';
-      page.app.renderSaved([{ id: 'native-two', title: 'Two', folder: '/tmp/two' }]);
       page.element('saved-list').children[0].onclick();
     }
   };

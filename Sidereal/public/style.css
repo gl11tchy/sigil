@@ -288,6 +288,12 @@ mark[data-current="true"] { background: var(--accent-fill); color: var(--on-acce
 
 /* Output: machine text in JetBrains Mono on the page. */
 .output { flex: 1; min-height: 0; position: relative; }
+/* A long terminal menu gives way before the output does. Very short pages
+   scroll the controls as a whole rather than clipping the composer. */
+#controls:has(#interaction:not([hidden])) { overflow-x: hidden; overflow-y: auto; }
+#controls:has(#interaction:not([hidden])) .output {
+  min-height: clamp(100px, calc(var(--viewport-height, 100dvh) * .25), 120px);
+}
 #empty-output {
   position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
   padding: 24px; pointer-events: none; text-align: center;
@@ -396,6 +402,18 @@ dialog::backdrop { background: var(--scrim); }
   color: var(--ink2); font-size: 12px; line-height: 16px;
 }
 #saved-list small, #project-list small { font: 11.5px/16px var(--mono); letter-spacing: 0; }
+#session-list .session-row { display: flex; align-items: stretch; gap: 4px; min-width: 0; }
+#session-list .session-row > button:first-child { flex: 1; min-width: 0; padding-block: 8px; }
+#session-list .session-label { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+#session-list .session-label > span, #session-list .session-metadata { display: block; width: 100%; max-width: 100%; flex: none; }
+#session-list .session-metadata { font: 11.5px/16px var(--mono); margin-top: 3px; font-weight: 400; }
+#session-list button[data-session-more="true"] { flex: 0 0 44px; width: 44px; min-height: 44px; justify-content: center; padding: 0; font-size: 20px; }
+#session-action-heading { overflow-wrap: anywhere; }
+#session-action-detail { margin: 0 0 16px; font-size: 13px; line-height: 18px; overflow-wrap: anywhere; }
+#session-action-menu { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+#session-action-menu button { width: 100%; justify-content: flex-start; }
+#session-rename-form label { display: block; color: var(--ink2); font-size: 13px; margin-bottom: 6px; }
+#session-name { width: 100%; min-width: 0; background: var(--field); }
 #project-list button[data-more="true"] span { color: var(--accent-ink); }
 #project-list button[data-more="true"] small { font-family: var(--sans); }
 #session-no-results, #saved-empty, #project-empty { padding: 10px; color: var(--ink2); font-size: 13px; line-height: 18px; }
@@ -456,6 +474,10 @@ body[data-compact="true"] #terminal { padding-top: 8px; }
 body[data-compact="true"] textarea { max-height: 52px; padding-top: 8px; }
 body[data-compact="true"] main { margin-bottom: 6px; }
 body[data-compact="true"] #compose { padding-bottom: 6px; }
+/* With a card and keyboard, retain one reachable row of terminal keys. */
+body[data-compact="true"] #controls:has(#interaction:not([hidden])) .keys {
+  max-height: 44px; margin-bottom: 4px;
+}
 
 /* Motion: short ease-out for colour, ease-out-strong for movement. Reduced motion keeps the end state or a crossfade. */
 @media (prefers-reduced-motion: no-preference) {
@@ -491,7 +513,8 @@ body[data-compact="true"] #compose { padding-bottom: 6px; }
 @keyframes shimmer { from { -webkit-mask-position: 100% 0; mask-position: 100% 0; } to { -webkit-mask-position: 0 0; mask-position: 0 0; } }
 
 /* Operation context stays readable without covering the phone composer. */
-#interaction { flex: 0 1 auto; max-height: 32vh; overflow: auto; margin: 0 8px 8px; padding: 8px 12px;
+/* The minimum fits a 44px choice plus padding; tiny pages scroll the controls. */
+#interaction { flex: 0 1 auto; min-height: 60px; max-height: calc(var(--viewport-height, 100dvh) * .3); overflow: auto; margin: 0 8px 8px; padding: 8px 12px;
   background: var(--surface); border-radius: var(--radius-control); }
 #interaction h2 { margin: 0; font-size: 13px; }
 #interaction p { margin: 6px 0; color: var(--ink2); }

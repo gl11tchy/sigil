@@ -274,6 +274,169 @@ test('drafts, history position, and a keyboard-sized viewport stay usable', asyn
   } finally { mac.close(); }
 });
 
+function approvalViewportState(lines = 25) {
+  return {
+    tabs: [{ id: 'one', title: 'Generated layout review', status: 'working', provider: 'claudeCode',
+      processRunning: true, capabilities: { structuredApproval: false } }],
+    selectedTabID: 'one', terminal: Array.from({ length: 40 }, (_, i) => `Output line ${i + 1}: inspect the generated change.`).join('\n'),
+    prompt: { id: 'viewport-prompt', question: 'Do you want to proceed?', verified: false, style: 'menu',
+      operation: Array.from({ length: lines }, (_, i) => `Inspect generated-file-${i + 1}.txt`).join('\n'),
+      choices: [{ label: 'Yes', key: '1' }, { label: 'Yes, always', key: '2' },
+        { label: 'No, and tell the agent what to do differently', key: '3' }] },
+  };
+}
+
+async function resizeVisualViewport(page, height) {
+  // Emulate the visualViewport event the keyboard sends, preserving the full
+  // layout viewport. This is browser emulation, not a physical Safari keyboard.
+  await page.evaluate(height => {
+    Object.defineProperty(window.visualViewport, 'height', { configurable: true, value: height });
+    window.visualViewport.dispatchEvent(new Event('resize'));
+  }, height);
+  await expect(page.locator('body')).toHaveAttribute('data-compact', String(height < 600));
+  await expect.poll(() => page.evaluate(() => parseFloat(document.documentElement.style.getPropertyValue('--viewport-height')))).toBe(height);
+}
+
+async function approvalViewportGeometry(page) {
+  return page.evaluate(() => {
+    const box = selector => document.querySelector(selector).getBoundingClientRect().toJSON();
+    return { layoutHeight: innerHeight, visualHeight: visualViewport.height, body: box('body'), header: box('header'),
+      controls: box('#controls'), output: box('.output'), terminal: box('#terminal'), interaction: box('#interaction'),
+      compose: box('#compose'), send: box('#send'), keys: box('#keys') };
+  });
+}
+
+for (const keys of [false, true]) {
+  test(`approval viewport keeps output with terminal keys ${keys ? 'open' : 'closed'}`, async ({ page, baseURL }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    const mac = await pair(page, baseURL, '', { state: approvalViewportState() });
+    try {
+      await expect(page.locator('#interaction-heading')).toHaveText('Terminal controls');
+      if (keys) await page.locator('#keys-toggle').click();
+      await page.locator('#message').focus();
+      await resizeVisualViewport(page, 420);
+      await page.evaluate(() => document.fonts.ready);
+      const geometry = await approvalViewportGeometry(page);
+      await testInfo.attach('approval-viewport-geometry', { body: JSON.stringify(geometry, null, 2), contentType: 'application/json' });
+      console.log(`REA-1192 ${testInfo.project.name} keys=${keys}: ${JSON.stringify(geometry)}`);
+      await page.screenshot({ path: testInfo.outputPath(`approval-viewport-keys-${keys ? 'open' : 'closed'}.png`) });
+      expect.soft(geometry.layoutHeight).toBe(844);
+      expect.soft(geometry.visualHeight).toBe(420);
+      expect.soft(geometry.output.height).toBeGreaterThanOrEqual(100);
+      expect.soft(geometry.output.top).toBeGreaterThanOrEqual(geometry.controls.top - 1);
+      expect.soft(geometry.output.bottom).toBeLessThanOrEqual(geometry.controls.bottom + 1);
+      expect.soft(geometry.terminal.bottom).toBeLessThanOrEqual(geometry.interaction.top + 1);
+      expect.soft(geometry.interaction.height).toBeLessThanOrEqual(420 * .3 + 1);
+      expect.soft(geometry.send.bottom).toBeLessThanOrEqual(420);
+      for (const button of await page.locator('#interaction-choices button').all()) {
+        await button.click({ trial: true });
+        const card = await page.locator('#interaction').boundingBox(), choice = await button.boundingBox();
+        expect(choice.y).toBeGreaterThanOrEqual(card.y);
+        expect(choice.y + choice.height).toBeLessThanOrEqual(card.y + card.height + 1);
+      }
+      expect(mac.actions.some(action => ['answer', 'input', 'key'].includes(action.action))).toBe(false);
+      expect(mac.errors).toEqual([]);
+      expect(errors).toEqual([]);
+    } finally { mac.close(); }
+  });
+}
+
+test('approval viewport caps a long card without stretching a short operation', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const state = approvalViewportState();
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const mac = await pair(page, baseURL, '', { state });
+  try {
+    await expect(page.locator('#interaction')).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    const long = await approvalViewportGeometry(page);
+    console.log(`REA-1192 natural-long ${testInfo.project.name}: ${JSON.stringify(long)}`);
+    expect(long.layoutHeight).toBe(844);
+    expect(long.visualHeight).toBe(844);
+    expect(Math.abs(long.interaction.height - 844 * .3)).toBeLessThan(1);
+    expect(long.output.height).toBeGreaterThanOrEqual(100);
+    expect(long.terminal.bottom).toBeLessThanOrEqual(long.interaction.top + 1);
+    expect(await page.locator('#interaction').evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath('approval-viewport-keyboard-down.png') });
+
+    state.prompt.operation = 'Inspect generated-file-1.txt';
+    await expect(page.locator('#interaction-operation')).toHaveText(state.prompt.operation);
+    const short = await approvalViewportGeometry(page);
+    await testInfo.attach('approval-natural-height-geometry', { body: JSON.stringify({ long, short }, null, 2), contentType: 'application/json' });
+    console.log(`REA-1192 natural ${testInfo.project.name}: ${JSON.stringify({ long, short })}`);
+    await page.screenshot({ path: testInfo.outputPath('approval-viewport-short-operation.png') });
+    expect(short.interaction.height).toBeLessThan(long.interaction.height - 1);
+    expect(await page.locator('#interaction').evaluate(el => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
+    expect(short.terminal.bottom).toBeLessThanOrEqual(short.interaction.top + 1);
+    expect(short.send.bottom).toBeLessThanOrEqual(844);
+    expect(mac.errors).toEqual([]);
+    expect(errors).toEqual([]);
+  } finally { mac.close(); }
+});
+
+for (const size of [{ width: 390, height: 844 }, { width: 844, height: 390 }]) for (const keys of [false, true]) {
+  test(`approval viewport scrolls at tiny heights in ${size.width}x${size.height} with terminal keys ${keys ? 'open' : 'closed'}`, async ({ page, baseURL }, testInfo) => {
+    await page.setViewportSize(size);
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    const mac = await pair(page, baseURL, '', { state: approvalViewportState() });
+    try {
+      await expect(page.locator('#interaction')).toBeVisible();
+      if (keys) await page.locator('#keys-toggle').click();
+      await page.locator('#message').focus();
+      await resizeVisualViewport(page, 200);
+      await page.evaluate(() => document.fonts.ready);
+      const controls = page.locator('#controls'), terminal = page.locator('#terminal');
+      expect(await controls.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+      await page.locator('.output').scrollIntoViewIfNeeded();
+      const output = await approvalViewportGeometry(page);
+      await testInfo.attach('approval-tiny-output-geometry', { body: JSON.stringify(output, null, 2), contentType: 'application/json' });
+      console.log(`REA-1192 tiny-output ${testInfo.project.name} keys=${keys}: ${JSON.stringify({ size, ...output })}`);
+      await page.screenshot({ path: testInfo.outputPath(`approval-viewport-tiny-output-keys-${keys ? 'open' : 'closed'}.png`) });
+      expect(output.layoutHeight).toBe(size.height);
+      expect(output.body.width).toBe(size.width);
+      expect(output.visualHeight).toBe(200);
+      expect(output.terminal.height).toBeGreaterThanOrEqual(100);
+      expect(output.terminal.top).toBeGreaterThanOrEqual(output.controls.top - 1);
+      expect(output.terminal.bottom).toBeLessThanOrEqual(output.controls.bottom + 1);
+      expect(output.terminal.bottom).toBeLessThanOrEqual(output.interaction.top + 1);
+      await terminal.evaluate(el => { el.scrollTop = el.scrollHeight; });
+      expect(await terminal.evaluate(el => el.scrollTop)).toBeGreaterThan(0);
+      await expect(terminal).toContainText('Output line 40');
+
+      for (const button of await page.locator('#interaction-choices button').all()) {
+        await button.click({ trial: true });
+        const card = await page.locator('#interaction').boundingBox(), choice = await button.boundingBox();
+        const viewport = await controls.boundingBox();
+        expect(choice.y).toBeGreaterThanOrEqual(Math.max(card.y, viewport.y) - 1);
+        expect(choice.y + choice.height).toBeLessThanOrEqual(Math.min(card.y + card.height, viewport.y + viewport.height) + 1);
+      }
+      if (keys) {
+        await page.getByRole('button', { name: 'Up arrow', exact: true }).click({ trial: true });
+        await page.locator('#keys button').last().click({ trial: true });
+      }
+      await page.locator('#message').fill('Generated response to the terminal question');
+      await page.locator('#send').click({ trial: true });
+      const input = await approvalViewportGeometry(page), message = await page.locator('#message').boundingBox();
+      const scrollTop = await controls.evaluate(el => el.scrollTop);
+      await testInfo.attach('approval-tiny-viewport-geometry', { body: JSON.stringify({ output, input, scrollTop }, null, 2), contentType: 'application/json' });
+      console.log(`REA-1192 tiny ${testInfo.project.name} keys=${keys}: ${JSON.stringify({ size, output, input, scrollTop })}`);
+      await page.screenshot({ path: testInfo.outputPath(`approval-viewport-tiny-keys-${keys ? 'open' : 'closed'}.png`) });
+      expect(message.y).toBeGreaterThanOrEqual(input.controls.top - 1);
+      expect(message.y + message.height).toBeLessThanOrEqual(input.controls.bottom + 1);
+      expect(input.send.top).toBeGreaterThanOrEqual(input.controls.top - 1);
+      expect(input.send.bottom).toBeLessThanOrEqual(Math.min(200, input.controls.bottom) + 1);
+      expect(scrollTop).toBeGreaterThan(0);
+      expect(mac.actions.some(action => ['answer', 'input', 'key'].includes(action.action))).toBe(false);
+      expect(mac.errors).toEqual([]);
+      expect(errors).toEqual([]);
+    } finally { mac.close(); }
+  });
+}
+
 test('loading earlier output keeps the text the reader was on in place', async ({ page, baseURL }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   let batch = 0;
@@ -1439,4 +1602,143 @@ test('REA-1206 a pre-existing second tab cannot repeat a start after taking the 
     expect(mac.actions.filter(request => request.action === 'new')).toHaveLength(1);
     expect(mac.actions.find(request => request.action === 'new').model).toBe('');
   } finally { await second.close(); mac.close(); }
+});
+
+test('REA-1205 session metadata and guarded actions at 390x844', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const state = { tabs: [
+    { id: 'one', title: 'Review session actions', status: 'working', provider: 'grokBuild', providerName: 'Grok Build', folder: 'sigil', cwd: '/tmp/sigil', sessionID: 'native-one', canArchive: true, capabilities: { rename: true, archive: true } },
+    { id: 'two', title: 'Check reconnect behavior', status: 'unknown', provider: 'claudeCode', providerName: 'Claude Code', folder: 'companion', cwd: '/tmp/companion', sessionID: 'native-two', canArchive: true, capabilities: { rename: true, archive: true } },
+    { id: 'three', title: 'Read the release notes', status: 'idle', providerName: 'Kimi Code', folder: 'docs', canArchive: false, capabilities: { rename: false, archive: false } },
+  ], selectedTabID: 'two', terminal: 'Synthetic session output. No provider CLI is running.', mac: 'Fixture Mac', capabilities: ['sessionOps'] };
+  const mac = await pair(page, baseURL, undefined, { state, onRequest(request) {
+    if (request.action === 'rename') state.tabs.find(tab => tab.id === request.tabID).title = request.name || 'Review session actions';
+    if (['close', 'archive'].includes(request.action)) {
+      state.tabs = state.tabs.filter(tab => tab.id !== request.tabID);
+      if (state.selectedTabID === request.tabID) state.selectedTabID = state.tabs[0]?.id;
+    }
+  } });
+  const capture = async name => {
+    const path = testInfo.outputPath(`session-actions-${name}-390x844.png`);
+    await page.screenshot({ path, animations: 'disabled' }); await testInfo.attach(name, { path, contentType: 'image/png' });
+  };
+  const more = title => page.getByRole('button', { name: `More actions for ${title}`, exact: true });
+  try {
+    await page.getByRole('button', { name: 'Browse open and saved chats' }).click();
+    await expect(page.locator('.session-metadata')).toHaveText(['Grok Build · sigil', 'Claude Code · companion', 'Kimi Code · docs']);
+    for (const button of await page.locator('[data-session-more]').all()) {
+      const box = await button.boundingBox(); expect(box.width).toBeGreaterThanOrEqual(44); expect(box.height).toBeGreaterThanOrEqual(44);
+    }
+    await capture('list');
+    // An unchanged state poll must not detach the row's action handler.
+    await expect.poll(() => mac.actions.filter(r => r.action === 'state').length).toBeGreaterThanOrEqual(1);
+    await more('Review session actions').click(); await capture('menu');
+    await page.locator('#session-rename').click();
+    await page.locator('#session-name').fill('😀'.repeat(21));
+    await expect(page.locator('#session-action-accept')).toBeDisabled();
+    await page.locator('#session-name').fill('Verify remote session actions'); await capture('rename');
+    await page.locator('#session-action-accept').click();
+    await expect(more('Verify remote session actions')).toBeVisible();
+    await expect(page.locator('#sessions-error')).toBeHidden();
+    await expect(page.locator('#session-action-dialog')).toBeHidden();
+    expect(mac.actions.filter(r => r.action === 'rename').map(r => [r.tabID, r.name])).toEqual([['one', 'Verify remote session actions']]);
+    await more('Read the release notes').click();
+    await expect(page.locator('#session-archive')).toBeHidden(); await expect(page.locator('#session-rename')).toBeDisabled();
+    await page.locator('#session-action-cancel').click();
+    await more('Check reconnect behavior').click(); await page.locator('#session-archive').click();
+    await expect(page.locator('#session-action-detail')).toContainText('stops all its open tabs on your Mac, including any that are working or whose status is unknown.');
+    expect(mac.actions.filter(r => r.action === 'archive')).toHaveLength(0);
+    await page.locator('#session-action-accept').click();
+    await expect(more('Check reconnect behavior')).toHaveCount(0);
+    await expect(page.locator('#tabs')).toHaveValue('one');
+    await more('Verify remote session actions').click(); await page.locator('#session-close-action').click();
+    await expect(page.locator('#session-action-detail')).toHaveText('It is still working. Closing stops it.');
+    await capture('close'); await page.locator('#session-action-cancel').click();
+    expect(mac.actions.filter(r => r.action === 'close')).toHaveLength(0);
+    await more('Verify remote session actions').click(); await page.locator('#session-close-action').click();
+    await page.locator('#session-action-accept').click();
+    await expect(page.locator('#tabs')).toHaveValue('three');
+    expect(mac.actions.filter(r => ['archive', 'close'].includes(r.action)).map(r => [r.action, r.tabID])).toEqual([['archive', 'two'], ['close', 'one']]);
+    state.capabilities = [];
+    await expect(page.locator('[data-session-more]')).toHaveCount(0);
+    expect(mac.errors).toEqual([]);
+  } finally { mac.close(); }
+});
+
+test('REA-1205 rejected rename retains edits and cannot overwrite a newer host name', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const state = { tabs: [{ id: 'one', title: 'Original title', status: 'idle', providerName: 'Codex', folder: 'sigil', capabilities: { rename: true } }],
+    selectedTabID: 'one', terminal: 'Synthetic output.', mac: 'Fixture Mac', capabilities: ['sessionOps'] };
+  const mac = await pair(page, baseURL, undefined, { state, rejectAction: 'rename', onRequest(request) {
+    if (request.action === 'rename') state.tabs[0].title = 'Newer host name';
+  } });
+  try {
+    await page.getByRole('button', { name: 'Browse open and saved chats' }).click();
+    await page.getByRole('button', { name: 'More actions for Original title' }).click();
+    await page.locator('#session-rename').click(); await page.locator('#session-name').fill('My retained edit');
+    await page.locator('#session-action-accept').click();
+    await expect(page.locator('#session-name')).toHaveValue('My retained edit');
+    await expect(page.locator('#session-action-error')).toContainText('This session changed');
+    await expect(page.locator('#session-action-accept')).toBeDisabled();
+    expect(mac.actions.filter(r => r.action === 'rename')).toHaveLength(1);
+    expect(mac.errors).toEqual([]);
+  } finally { mac.close(); }
+});
+
+test('REA-1205 review safeguards remain truthful through dispatch and live state changes', async ({ page, baseURL }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const shared = { provider: 'grokBuild', providerName: 'Grok Build', folder: 'sigil', cwd: '/tmp/sigil', sessionID: 'shared-native', canArchive: true, capabilities: { rename: true, archive: true } };
+  const state = { tabs: [
+    { ...shared, id: 'one', title: 'Idle copy', status: 'idle' },
+    { ...shared, id: 'two', title: 'Working copy', status: 'working' },
+    { id: 'three', title: 'Reference task', status: 'idle', providerName: 'Claude Code', folder: 'docs', capabilities: { rename: true } },
+  ], selectedTabID: 'one', terminal: 'Generated review fixture.', mac: 'Fixture Mac', capabilities: ['sessionOps'] };
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const mac = await pair(page, baseURL, undefined, { state, async onRequest(request) {
+    if (request.action === 'archive') {
+      await held;
+      state.tabs = state.tabs.filter(tab => tab.sessionID !== 'shared-native');
+      state.selectedTabID = 'three';
+    }
+  } });
+  const capture = async name => {
+    const path = testInfo.outputPath(`session-actions-${name}-390x844.png`);
+    await page.screenshot({ path, animations: 'disabled' }); await testInfo.attach(name, { path, contentType: 'image/png' });
+  };
+  const more = title => page.getByRole('button', { name: `More actions for ${title}`, exact: true });
+  try {
+    await page.getByRole('button', { name: 'Browse open and saved chats' }).click();
+    await more('Idle copy').click(); await page.locator('#session-archive').click();
+    await expect(page.locator('#session-action-detail')).toContainText('stops all its open tabs');
+    await expect(page.locator('#session-action-detail')).toContainText('working or whose status is unknown');
+    expect(mac.actions.filter(r => r.action === 'archive')).toHaveLength(0);
+    await capture('archive'); await page.locator('#session-action-accept').click();
+    await expect.poll(() => mac.actions.filter(r => r.action === 'archive').length).toBe(1);
+    await expect(page.locator('#session-action-cancel')).toBeDisabled();
+    await expect(page.locator('#session-action-accept')).toHaveText('Archiving…');
+    await page.keyboard.press('Escape'); await expect(page.locator('#session-action-dialog')).toBeVisible();
+    await capture('pending'); release();
+    await expect(page.locator('#session-action-dialog')).toBeHidden();
+    await expect(more('Idle copy')).toHaveCount(0); await expect(more('Working copy')).toHaveCount(0);
+    await expect(page.locator('#tabs')).toHaveValue('three');
+    await more('Reference task').click(); await page.locator('#session-rename').click();
+    await page.locator('#session-name').fill('Retained review edit');
+    state.tabs[0].capabilities.rename = false;
+    await expect(page.locator('#session-action-error')).toContainText('Renaming is no longer available');
+    await expect(page.locator('#session-action-accept')).toBeDisabled();
+    await expect(page.locator('#session-name')).toHaveValue('Retained review edit');
+    state.tabs[0].capabilities.rename = true;
+    await expect(page.locator('#session-rename')).toBeEnabled();
+    await expect(page.locator('#session-action-accept')).toBeDisabled();
+    await page.locator('#session-action-cancel').click();
+    await more('Reference task').click(); await page.locator('#session-close-action').click();
+    state.tabs[0].status = 'working';
+    await expect(page.locator('#session-action-error')).toContainText('activity changed');
+    state.tabs[0].status = 'idle';
+    await expect(page.locator('#session-list button').filter({ hasText: 'Reference task' })).toContainText('Ready');
+    await expect(page.locator('#session-action-accept')).toBeDisabled();
+    expect(mac.actions.filter(r => r.action === 'close' || r.action === 'rename')).toHaveLength(0);
+    expect(mac.errors).toEqual([]);
+  } finally { release(); mac.close(); }
 });

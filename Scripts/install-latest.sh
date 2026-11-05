@@ -183,10 +183,12 @@ build_inputs_differ_from_head() {
   if [[ -n "$ignored" ]]; then
     return 0
   fi
-  # Dependency sources are compiled from .build/checkouts, which is ignored, so
-  # a checkout edited while debugging a dependency would ship unnoticed.
+  # Debug/local fallback and native universal slices have separate ignored
+  # checkout roots. Every dependency source the build may compile must count.
   local checkout
-  for checkout in "$ROOT"/.build/checkouts/*/; do
+  for checkout in "$ROOT"/.build/checkouts/*/ \
+    "$ROOT"/.build/universal/arm64/checkouts/*/ \
+    "$ROOT"/.build/universal/x86_64/checkouts/*/; do
     if [[ -d "$checkout/.git" ]] \
       && [[ -n "$(git -C "$checkout" status --porcelain 2>/dev/null)" ]]; then
       return 0
