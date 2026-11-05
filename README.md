@@ -2,7 +2,7 @@
 
 ![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-000000)
 ![Swift](https://img.shields.io/badge/Swift-6-F05138)
-[![CI](https://github.com/gl11tchy-team/sigil/actions/workflows/ci.yml/badge.svg)](https://github.com/gl11tchy-team/sigil/actions/workflows/ci.yml)
+[![CI](https://github.com/gl11tchy/sigil/actions/workflows/github-hosted-ci.yml/badge.svg)](https://github.com/gl11tchy/sigil/actions/workflows/github-hosted-ci.yml)
 ![License](https://img.shields.io/badge/license-MIT-6A6A6A)
 
 A native macOS app for Claude Code, Codex, Devin, Cursor, Kimi Code, and Grok Build.

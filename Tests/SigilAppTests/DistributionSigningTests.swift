@@ -44,10 +44,10 @@ struct DistributionSigningTests {
         #expect(script.contains("build-identity.py\" source \"$ROOT\""))
         #expect(script.contains("plutil -insert SigilCommit -string \"$commit\""))
         let workflow = try String(
-            contentsOf: Self.repo.appendingPathComponent(".github/workflows/ci.yml"), encoding: .utf8)
+            contentsOf: Self.repo.appendingPathComponent(".github/workflows/github-hosted-ci.yml"), encoding: .utf8)
         #expect(workflow.contains("fetch-depth: 0"))
-        #expect(workflow.contains("SIGIL_BUILD: ${{ github.run_number }}.${{ github.run_attempt }}"))
-        #expect(workflow.contains("build-identity.py publish dist/Sigil.zip"))
+        #expect(workflow.contains("python3 Scripts/ci-release.py build"))
+        #expect(workflow.contains("ci-release.py publish release"))
     }
 
     @Test(arguments: [

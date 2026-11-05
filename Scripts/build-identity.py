@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stamp source identity and publish only a matching, immutable build artifact."""
+"""Read bundle and source identity for the single CI release publisher."""
 
 import argparse
 import hashlib
@@ -10,14 +10,12 @@ import plistlib
 import re
 import subprocess
 import sys
-import tempfile
 import zipfile
 
 
 VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 BUILD = re.compile(r"[1-9][0-9]*(?:\.[0-9]+){0,2}")
 COMMIT = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
-PRUNABLE = re.compile(r"(?:latest|build-[0-9]+\.[0-9]+)")
 
 
 def git(root, *args):
@@ -34,8 +32,10 @@ def sources_dirty(root):
     ignored = git(root, "status", "--porcelain", "--ignored=matching", "--", "Sources", "Tests", "Resources")
     if any(not line.rstrip('"').endswith("/.DS_Store") for line in ignored.splitlines()):
         return True
-    checkouts = root / ".build" / "checkouts"
-    if checkouts.is_dir():
+    checkout_roots = [root / ".build" / "checkouts", *sorted((root / ".build" / "universal").glob("*/checkouts"))]
+    for checkouts in checkout_roots:
+        if not checkouts.is_dir():
+            continue
         for checkout in checkouts.iterdir():
             if checkout.is_dir() and (checkout / ".git").exists():
                 if git(checkout, "status", "--porcelain", "--untracked-files=normal"):
@@ -91,90 +91,6 @@ def archive_identity(archive):
     return identity
 
 
-def gh(*args, missing_ok=False):
-    result = subprocess.run(["gh", *args], text=True, capture_output=True, check=False)
-    if result.returncode:
-        # Authentication, permission and server failures must never become
-        # permission to create a release. Only an explicit API 404 is absent.
-        if missing_ok and "(HTTP 404)" in result.stderr:
-            return None
-        raise RuntimeError(result.stderr.strip() or "GitHub CLI failed")
-    return result.stdout
-
-
-def verify_tag(repo, tag, commit):
-    ref = gh("api", f"repos/{repo}/git/ref/tags/{tag}", missing_ok=True)
-    if ref is None:
-        return False
-    obj = json.loads(ref)["object"]
-    if obj.get("type") != "commit" or obj.get("sha") != commit:
-        raise ValueError("build tag belongs to a different source commit")
-    return True
-
-
-def verify_existing(repo, identity, release, archive):
-    if release.get("draft") or release.get("prerelease"):
-        raise ValueError("existing build release is not a published final release")
-    if release.get("tag_name") != identity["tag"] or release.get("name") != release_title(identity):
-        raise ValueError("existing build release metadata differs")
-    if (release.get("body") or "").strip() != release_notes(identity):
-        raise ValueError("existing build release provenance notes differ")
-    if not verify_tag(repo, identity["tag"], identity["commit"]):
-        raise ValueError("existing release has no source tag")
-    assets = [asset for asset in release.get("assets", []) if asset.get("name") == "Sigil.zip"]
-    if len(assets) != 1 or assets[0].get("size") != Path(archive).stat().st_size:
-        raise ValueError("existing build release has a different or missing ZIP")
-    with tempfile.TemporaryDirectory(prefix="sigil-release-identity-") as directory:
-        gh("release", "download", identity["tag"], "--repo", repo,
-           "--pattern", "Sigil.zip", "--dir", directory)
-        uploaded = archive_identity(Path(directory) / "Sigil.zip")
-        if uploaded != identity:
-            raise ValueError("build tag collision: uploaded ZIP differs; nothing overwritten")
-
-
-def release_title(identity):
-    return f"Sigil {identity['version']} ({identity['build']}, {identity['commit'][:7]})"
-
-
-def release_notes(identity):
-    return (f"Built from main (`{identity['commit']}`). Build `{identity['build']}`. "
-            f"ZIP SHA-256 `{identity['sha256']}`. Unzip and replace /Applications/Sigil.app, "
-            "or from a clone: `Scripts/install.sh`.")
-
-
-def find_release(repo, tag):
-    # The by-tag REST endpoint omits drafts. Authenticated paginated listings
-    # include them, so an interrupted upload cannot cause another create.
-    pages = json.loads(gh("api", "--paginate", "--slurp", f"repos/{repo}/releases?per_page=100"))
-    matches = [release for page in pages for release in page if release.get("tag_name") == tag]
-    if len(matches) > 1:
-        raise ValueError("multiple releases collide with this build tag")
-    return matches[0] if matches else None
-
-
-def publish(archive, env):
-    identity = archive_identity(archive)
-    repo, commit, build = env["GITHUB_REPOSITORY"], env["GITHUB_SHA"], env["SIGIL_BUILD"]
-    verify_archive(identity, commit, build)
-    # Preserve the existing build-N.attempt tag/pruning namespace.
-    if not re.fullmatch(r"[1-9][0-9]*\.[1-9][0-9]*", build):
-        raise ValueError("published builds require a numeric run.attempt identity")
-    tag = identity["tag"]
-    existing = find_release(repo, tag)
-    if existing is not None:
-        verify_existing(repo, identity, existing, archive)
-        # A rerun of an older build must not change Latest or prune newer builds.
-        return {**identity, "result": "already published; identical source and ZIP"}
-    verify_tag(repo, tag, commit)  # Reject a colliding orphan tag before creation.
-    gh("release", "create", tag, str(archive), "--repo", repo, "--target", commit,
-       "--title", release_title(identity), "--notes", release_notes(identity), "--latest")
-    # Read the uploaded ZIP and source tag before pruning anything.
-    release = json.loads(gh("api", f"repos/{repo}/releases/tags/{tag}"))
-    verify_existing(repo, identity, release, archive)
-    prune(repo, tag)
-    return {**identity, "result": "published and verified"}
-
-
 def verify_archive(identity, commit, build):
     if not COMMIT.fullmatch(identity["commit"]) or identity["commit"] != commit:
         raise ValueError("dirty, unknown or mismatched source cannot be published as an exact release")
@@ -182,31 +98,9 @@ def verify_archive(identity, commit, build):
         raise ValueError("ZIP build differs from the CI build identity")
 
 
-def prune(repo, tag):
-    # Same limit, allowlist and warning behavior as the existing workflow.
-    try:
-        releases = json.loads(gh("release", "list", "--repo", repo, "--limit", "100", "--json", "tagName"))
-    except RuntimeError:
-        print("::warning::could not list releases to prune", file=sys.stderr)
-        return
-    for release in releases:
-        old = release["tagName"]
-        if old == tag or not PRUNABLE.fullmatch(old):
-            continue
-        try:
-            gh("release", "delete", old, "--repo", repo, "--yes", "--cleanup-tag")
-        except RuntimeError:
-            # Drafts may have no tag to clean up after the release is gone.
-            try:
-                gh("release", "view", old, "--repo", repo)
-            except RuntimeError:
-                continue
-            print(f"::warning::could not delete release {old}", file=sys.stderr)
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["source", "archive", "publish"])
+    parser.add_argument("action", choices=["source", "archive"])
     parser.add_argument("path", type=Path)
     parser.add_argument("--expected-commit")
     parser.add_argument("--expected-build")
@@ -219,7 +113,7 @@ def main():
             identity = source_identity(args.path, os.environ)
             print(identity["version"], identity["build"], identity["commit"])
         else:
-            identity = archive_identity(args.path) if args.action == "archive" else publish(args.path, os.environ)
+            identity = archive_identity(args.path)
             if args.expected_commit:
                 verify_archive(identity, args.expected_commit, args.expected_build)
             print(json.dumps(identity, sort_keys=True))

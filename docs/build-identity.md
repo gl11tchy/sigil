@@ -53,3 +53,15 @@ covers native display/key-window/Close/tab behavior in the real SwiftUI app
 host. It is excluded from the unhosted CLI runner. The existing exact-six sidebar
 gate remains, and About has its own mandatory exact-one/no-skip result gate. Release publication on main remains a post-review
 validation step; the PR does not claim it has already run.
+
+## Hosted workflow integration
+
+The replacement hosted workflow continues after legacy build 697. The shared
+build command in `Scripts/ci-release.py` adds that fixed workflow offset to the
+run number and appends the producing attempt. The bundle, archive manifest,
+release tag and release title use that identity. A release-only rerun keeps the
+original producing attempt.
+
+`Scripts/build-identity.py` reads source and archive identity. It does not publish
+or prune. `Scripts/ci-release.py` is the only publisher and checks the final ZIP
+identity in both the read-only verification job and the write-scoped release job.
