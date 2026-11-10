@@ -21,7 +21,17 @@ struct RemoteRelayTests {
         defer { remote.stop() }
         remote.start(urlText: relay.origin, model: model)
         let busy = "The relay is busy. Retrying."
+        let busyWaitStarted = ContinuousClock.now
         try await waitUntil { remote.status == busy && remote.error == busy }
+        if remote.status != busy || remote.error != busy {
+            let status = String(reflecting: String(remote.status.prefix(256)))
+            let error = String(reflecting: String((remote.error ?? "<nil>").prefix(256)))
+            print(
+                "REA-1224 allocation429 failure pairedArgument=\(paired) elapsed=\(busyWaitStarted.duration(to: .now)) "
+                    + "status=\(status) error=\(error) enabled=\(remote.isEnabled) paired=\(remote.isPaired) "
+                    + "pairingURLPresent=\(remote.pairingURL != nil) \(relay.allocationDiagnostic)"
+            )
+        }
         try #require(remote.status == busy && remote.error == busy)
         #expect(remote.isEnabled && remote.isPaired == paired && remote.pairingURL == nil)
         if paired {
@@ -249,6 +259,16 @@ final class RelayFixture {
     var hostCloseCount: Int {
         let text = (try? String(contentsOf: root.appendingPathComponent("host-closed.txt"), encoding: .utf8)) ?? ""
         return text.split(separator: "\n").count
+    }
+
+    /// Failure-only observations from this owned generated fixture; no URLs, keys or tickets.
+    var allocationDiagnostic: String {
+        let running = process.isRunning
+        let exit = running ? "<running>" : String(process.terminationStatus)
+        let configured =
+            (try? String(contentsOf: root.appendingPathComponent("allocation-status"), encoding: .utf8))
+            .map { String($0.prefix(16)) } ?? "<unreadable>"
+        return "fixtureRunning=\(running) fixtureExit=\(exit) configuredStatus=\(String(reflecting: configured))"
     }
 
     init(captureAPNs: Bool = false, allocationStatus: Int? = nil, captureHostClose: Bool = false) async throws {

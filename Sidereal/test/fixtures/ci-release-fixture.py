@@ -51,6 +51,8 @@ def github_cli():
                          digest="sha256:" + hashlib.sha256(data).hexdigest())]))
         print("https://github.com/fixture/sigil/releases/tag/" + tag)
     else:
+        state["writes"].append("unexpected-mutation")
+        state_path.write_text(json.dumps(state))
         raise RuntimeError("Unexpected GitHub mutation")
     state_path.write_text(json.dumps(state))
 
@@ -80,6 +82,23 @@ def record():
                EXPECTED_VERIFY_ATTEMPT=str(metadata["attempt"]))
 
 
+def release_state(items, tags):
+    return json.loads(json.dumps(dict(items=items, tags=tags)))
+
+
+def prior_release(tag, index):
+    return dict(
+        id=1000 + index, tag_name=tag, name="Retained " + tag, body="Generated prior release " + tag,
+        draft=False, prerelease=False, published_at="2026-10-25T00:00:00Z",
+        assets=[dict(id=2000 + index, name="Sigil.zip", label="retained artifact", state="uploaded",
+                     size=42, digest="sha256:" + "b" * 64)])
+
+
+def retained_history(tags):
+    return dict(items=[prior_release(tag, index) for index, tag in enumerate(tags)],
+                tags={**{tag: "b" * 40 for tag in tags}, "manual-tag-only": "c" * 40})
+
+
 class FakeGitHub:
     def __init__(self):
         self.items = []
@@ -87,6 +106,7 @@ class FakeGitHub:
         self.writes = []
         self.created = 0
         self.last_notes = ""
+        self.concurrent_release = None
 
     def main_sha(self):
         return "b" * 40 if scenario == "stale-main" else env["GITHUB_SHA"]
@@ -118,7 +138,8 @@ class FakeGitHub:
             item.update(draft=True, published_at=None, assets=[])
             raise module.ReleaseError("generated uncertain create after draft")
         if scenario == "newer-after-create":
-            self.items.insert(0, {"tag_name": "build-709.10"})
+            self.concurrent_release = prior_release("build-709.10", 900)
+            self.items.insert(0, json.loads(json.dumps(self.concurrent_release)))
             self.tags["build-709.10"] = sha
 
     def delete(self, tag):
@@ -132,10 +153,13 @@ ok = False
 error = None
 tag = None
 preserved_state = None
+prior_state = release_state([], {})
 try:
     record()
     if scenario == "transport":
-        state = dict(items=[], tags={}, created=0, writes=[], apiCalls=[])
+        history = retained_history(["build-708.1", "build-708.9", "latest", "manual-owner-release"])
+        state = dict(**history, created=0, writes=[], apiCalls=[])
+        prior_state = release_state(state["items"], state["tags"])
         state_path = Path(os.environ["SIGIL_GH_STATE"])
         state_path.write_text(json.dumps(state))
         result = module.publish(root, env)
@@ -143,7 +167,9 @@ try:
         again = module.publish(root, env)
         assert again["tag"] == result["tag"]
         state = json.loads(state_path.read_text())
-        print(json.dumps(dict(ok=True, error=None, tag=again["tag"], **{
+        print(json.dumps(dict(ok=True, error=None, tag=again["tag"],
+                             releaseStateBefore=prior_state,
+                             releaseStateAfter=release_state(state["items"], state["tags"]), **{
             key: state[key] for key in ["created", "writes", "apiCalls"]})))
         sys.exit(0)
     older_producers = {"older-producer-rerun", "older-existing-rerun",
@@ -193,7 +219,6 @@ try:
         github.tags["build-709.1"] = "b" * 40
     if scenario in older_producers:
         old_env, old_manifest, old_bytes = dict(env), (root / "release.json").read_bytes(), archive.read_bytes()
-        old_release = json.loads(json.dumps(github.items[0]))
         env["GITHUB_RUN_ATTEMPT"] = "10" if scenario == "numeric-newer-attempt" else "2"
         if scenario == "newer-run-release":
             env.update(GITHUB_RUN_NUMBER="13", GITHUB_RUN_ID="78", GITHUB_RUN_ATTEMPT="1")
@@ -201,9 +226,10 @@ try:
         archive.write_bytes(b"generated newer ZIP bytes; no application")
         record()
         module.publish(root, env, github)
-        if scenario == "older-existing-rerun":
-            github.items.append(old_release)
-            github.tags["build-709.1"] = old_env["GITHUB_SHA"]
+        if scenario == "older-producer-rerun":
+            # Keep the distinct missing-old-release case; other scenarios retain it naturally.
+            github.items = [item for item in github.items if item["tag_name"] != "build-709.1"]
+            github.tags.pop("build-709.1")
         env.update(old_env)
         env["GITHUB_RUN_ATTEMPT"] = "11"
         archive.write_bytes(old_bytes)
@@ -211,9 +237,14 @@ try:
         github.writes.clear()
         preserved_state = json.dumps(dict(items=github.items, tags=github.tags), sort_keys=True)
     if scenario == "prune":
-        github.items.extend({"tag_name": tag} for tag in ["build-708.1", "latest", "manual-owner-release"])
+        history = retained_history(["build-708.1", "build-708.9", "latest", "manual-owner-release"])
+        github.items.extend(history["items"])
+        github.tags.update(history["tags"])
     if scenario == "workflow-counter-reset":
-        github.items.append({"tag_name": "build-697.1"})
+        history = retained_history(["build-697.1"])
+        github.items.extend(history["items"])
+        github.tags.update(history["tags"])
+    prior_state = release_state(github.items, github.tags)
     result = module.publish(root, env, github)
     tag = result["tag"]
     if scenario == "verification-rerun":
@@ -225,5 +256,8 @@ except (module.ReleaseError, ValueError, OSError) as failure:
     error = str(failure)
 print(json.dumps(dict(ok=ok, error=error, tag=tag, created=github.created, writes=github.writes,
                       notes=github.last_notes, remaining=[item["tag_name"] for item in github.items],
+                      releaseStateBefore=prior_state,
+                      releaseStateAfter=release_state(github.items, github.tags),
+                      concurrentRelease=github.concurrent_release,
                       preserved=preserved_state == json.dumps(dict(items=github.items, tags=github.tags),
                                                               sort_keys=True))))

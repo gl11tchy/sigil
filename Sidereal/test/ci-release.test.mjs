@@ -27,7 +27,17 @@ function run(t, scenario) {
   });
   assert.equal(result.error, undefined);
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  return JSON.parse(result.stdout);
+  const output = JSON.parse(result.stdout);
+  // Compare entire prior records, including assets, and every prior tag mapping.
+  assert.deepEqual(
+    output.releaseStateAfter.items.filter(item =>
+      output.releaseStateBefore.items.some(prior => prior.tag_name === item.tag_name)),
+    output.releaseStateBefore.items,
+  );
+  for (const [tag, sha] of Object.entries(output.releaseStateBefore.tags)) {
+    assert.deepEqual(output.releaseStateAfter.tags[tag], sha, 'retained tag: ' + tag);
+  }
+  return output;
 }
 
 test('records and publishes only the generated verified ZIP', t => {
@@ -53,7 +63,8 @@ test('a replacement workflow publishes after the last legacy release', t => {
   const result = run(t, 'workflow-counter-reset');
   assert.equal(result.ok, true, result.error);
   assert.equal(result.tag, 'build-709.1');
-  assert.deepEqual(result.writes, ['create:build-709.1', 'delete:build-697.1']);
+  assert.deepEqual(result.writes, ['create:build-709.1']);
+  assert.deepEqual(result.remaining, ['build-709.1', 'build-697.1']);
 });
 
 for (const scenario of ['rerun', 'release-only-rerun']) {
@@ -71,7 +82,8 @@ test('rerunning verification gets a new attempt artifact/tag, then release rerun
   assert.equal(result.ok, true, result.error);
   assert.equal(result.tag, 'build-709.2');
   assert.equal(result.created, 2);
-  assert.deepEqual(result.writes, ['create:build-709.2', 'delete:build-709.1']);
+  assert.deepEqual(result.writes, ['create:build-709.2']);
+  assert.deepEqual(result.remaining, ['build-709.2', 'build-709.1']);
 });
 
 for (const scenario of ['older-producer-rerun', 'older-existing-rerun',
@@ -88,11 +100,13 @@ for (const scenario of ['older-producer-rerun', 'older-existing-rerun',
   });
 }
 
-test('cleanup preserves a newer release that appears after the initial listing', t => {
+test('publication preserves a newer release that appears after the initial listing', t => {
   const result = run(t, 'newer-after-create');
   assert.equal(result.ok, true, result.error);
   assert.deepEqual(result.writes, ['create:build-709.1']);
   assert.deepEqual(result.remaining, ['build-709.10', 'build-709.1']);
+  assert.deepEqual(result.releaseStateAfter.items[0], result.concurrentRelease);
+  assert.equal(result.releaseStateAfter.tags['build-709.10'], 'a'.repeat(40));
 });
 
 for (const scenario of [
@@ -125,9 +139,13 @@ test('an uncertain partial draft is preserved and fails instead of retrying or d
   assert.deepEqual(result.writes, ['create:build-709.1']);
 });
 
-test('old build cleanup happens only after the new release was verified and keeps unrelated tags', t => {
+test('verified publication retains older builds, attempts, latest and manual release/tag state', t => {
   const result = run(t, 'prune');
   assert.equal(result.ok, true, result.error);
-  assert.deepEqual(result.writes, ['create:build-709.1', 'delete:build-708.1', 'delete:latest']);
+  assert.deepEqual(result.writes, ['create:build-709.1']);
+  assert.deepEqual(result.remaining, [
+    'build-709.1', 'build-708.1', 'build-708.9', 'latest', 'manual-owner-release',
+  ]);
   assert.ok(result.remaining.includes('manual-owner-release'));
+  assert.equal(result.releaseStateAfter.tags['manual-tag-only'], 'c'.repeat(40));
 });

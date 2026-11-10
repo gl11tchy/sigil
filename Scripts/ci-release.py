@@ -125,9 +125,6 @@ class GitHub:
             self.command(["release", "create", tag, str(archive), "--repo", self.repository,
                           "--target", sha, "--title", title, "--notes-file", str(note_file), "--latest"])
 
-    def delete(self, tag):
-        self.command(["release", "delete", tag, "--repo", self.repository, "--yes", "--cleanup-tag"])
-
 
 def matching_release(items, tag):
     matches = [item for item in items if item.get("tag_name") == tag]
@@ -221,15 +218,7 @@ def publish(directory, env, github=None):
             if create_error:
                 raise ReleaseError("Publication outcome uncertain; no retry attempted: " + str(error)) from create_error
             raise
-    # Prune only older builds, even if a newer release appeared after our first read.
-    for item in items[:100]:
-        old = item.get("tag_name", "")
-        old_order = build_order(old)
-        if old == "latest" or (old_order is not None and old_order < order):
-            try:
-                github.delete(old)
-            except ReleaseError:
-                print("::warning::could not prune old build " + old, file=sys.stderr)
+    # Publication is additive: retain all preexisting releases, assets and tags.
     print("Verified release " + tag + " ZIP SHA256 " + identity["sha256"], file=sys.stderr)
     return dict(tag=tag, sha256=identity["sha256"], existing=existing is not None)
 
