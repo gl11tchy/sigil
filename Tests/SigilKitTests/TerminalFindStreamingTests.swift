@@ -326,4 +326,98 @@ struct TerminalFindStreamingTests {
         #expect(view.selection.start == Position(col: 6, row: 1))
     }
 
+    @MainActor
+    private final class StreamProbe {
+        var active = true
+        var writes = 0
+        var heartbeatDelays: [Double] = []
+    }
+
+    @Test func continuousCappedOutputMakesProgressWithBoundedMainActorWork() async throws {
+        let controller = TerminalController()
+        let view = try #require(controller.view as? GrokProcessTerminalView)
+        output(view, (0..<10_000).map { "row \($0) needle 界 👩‍💻" }.joined(separator: "\r\n") + "\r\n")
+        let probe = StreamProbe()
+        let stream = Task { @MainActor in
+            for index in 0..<400 {
+                if Task.isCancelled { break }
+                view.dataReceived(slice: ArraySlice(Array("stream \(index) needle\r\n".utf8)))
+                probe.writes += 1
+                try? await Task.sleep(for: .milliseconds(5), tolerance: .zero)
+            }
+            probe.active = false
+        }
+        let heartbeat = Task { @MainActor in
+            while probe.active, !Task.isCancelled {
+                let start = ContinuousClock.now
+                try? await Task.sleep(for: .milliseconds(1), tolerance: .zero)
+                probe.heartbeatDelays.append(max(0, TerminalFindScan.milliseconds(start.duration(to: .now)) - 1))
+            }
+        }
+        defer {
+            stream.cancel()
+            heartbeat.cancel()
+            controller.clearFind()
+        }
+        let start = ContinuousClock.now
+        controller.setFindQuery("needle")
+        let progressed = await TerminalTestSupport.waitUntil(timeout: .milliseconds(1_500)) {
+            probe.active && controller.findMatchCount > 5_000
+        }
+        let firstProgress = TerminalFindScan.milliseconds(start.duration(to: .now))
+        #expect(progressed, "Continuous output must not continually restart and starve the scan")
+        #expect(controller.findDiagnostics.acceptedResults > 0)
+        #expect(controller.findDiagnostics.largestSnapshotRows <= TerminalFindSession.rowsPerPass)
+        #expect(controller.findDiagnostics.snapshotsRanOnMainThread)
+        #expect(!controller.findDiagnostics.lastScanRanOnMainThread)
+        if view.selection.active {
+            let selected = try #require(view.getTerminal().bufferLine(atRow: view.selection.start.row))
+            #expect(selected.translateToString(trimRight: true).contains("needle"))
+        }
+        let navigationStart = ContinuousClock.now
+        var navigatedDuringStream = false
+        if progressed, view.selection.active {
+            let origin = view.selection.start.row + view.getTerminal().buffer.totalLinesTrimmed
+            controller.findPrevious()
+            navigatedDuringStream = await TerminalTestSupport.waitUntil(timeout: .milliseconds(1_500)) {
+                probe.active && view.selection.active
+                    && view.selection.start.row + view.getTerminal().buffer.totalLinesTrimmed == origin - 1
+            }
+        }
+        let navigationProgress = TerminalFindScan.milliseconds(navigationStart.duration(to: .now))
+        #expect(
+            navigatedDuringStream, "A visible partial hit must support verified navigation before output becomes quiet")
+        await stream.value
+        await heartbeat.value
+        await settled(controller)
+        #expect(controller.findMatchCount > 9_000)
+        let terminal = view.getTerminal()
+        var expectedMatches = 0
+        var row = 0
+        while let line = terminal.bufferLine(atRow: row) {
+            let text = line.translateToString(trimRight: true, characterProvider: { terminal.getCharacter(for: $0) })
+            if text.contains("needle") { expectedMatches += 1 }
+            row += 1
+        }
+        #expect(controller.findMatchCount == expectedMatches)
+        #expect(probe.writes == 400)
+        let delays = probe.heartbeatDelays.sorted()
+        let receipt: [String: Any] = [
+            "fixtureRows": 10_000, "streamWrites": probe.writes,
+            "firstProgressMilliseconds": firstProgress,
+            "navigatedDuringStream": navigatedDuringStream,
+            "navigationProgressMilliseconds": navigationProgress,
+            "heartbeatDelayP95Milliseconds": delays.isEmpty
+                ? 0 : delays[min(delays.count - 1, delays.count * 95 / 100)],
+            "heartbeatDelayMaxMilliseconds": delays.last ?? 0,
+            "largestSnapshotRows": controller.findDiagnostics.largestSnapshotRows,
+            "largestSnapshotMilliseconds": controller.findDiagnostics.largestSnapshotMilliseconds,
+            "lastScanMilliseconds": controller.findDiagnostics.lastScanMilliseconds,
+            "acceptedResults": controller.findDiagnostics.acceptedResults,
+            "finalMatches": controller.findMatchCount,
+            "expectedFinalMatches": expectedMatches,
+        ]
+        let data = try JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys])
+        print("REA-1193 continuous output measurement \(String(decoding: data, as: UTF8.self))")
+    }
 }
