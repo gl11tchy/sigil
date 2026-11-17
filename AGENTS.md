@@ -20,7 +20,11 @@ That copies over `/Applications/Sigil.app`. Do not quit a running Sigil. Do not 
 mission rules every UX mission follows: at most four workers with disjoint write
 ownership, isolated homes with fake CLIs and temporary Git repositories, no paid
 inference, targeted tests while editing and one integrated gate at the end, stop
-a branch as blocked after two repair rounds without progress, and no merge,
-deployment or app replacement without existing explicit authorization. Record
-evidence in [docs/ux/PROGRESS.md](docs/ux/PROGRESS.md). The workbench harness is
-in `Scripts/workbench/`.
+a branch as blocked after two repair rounds without progress, and merge on
+green under the owner's global merge rule, then install the Mac app as above.
+Anything that spends money, deletes or rewrites existing production data,
+changes secrets, permissions, billing or sign-in, or publishes outside the
+project, such as a public release, waits for the owner's word, and so does a
+review finding you disagree with. Record evidence in
+[docs/ux/PROGRESS.md](docs/ux/PROGRESS.md). The workbench harness is in
+`Scripts/workbench/`.
