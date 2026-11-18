@@ -210,8 +210,16 @@ These rules bind every mission that follows this contract.
 6. After two repair rounds without new progress, stop that branch, mark it
    blocked in PROGRESS.md with the evidence, and continue elsewhere. Never
    loop and never declare success without proof.
-7. No merge, deployment or replacement of the running app without existing
-   explicit authorization.
+7. Get each pull request ready: every required check passed on the latest
+   commit, the review finished with no open P0 or P1 finding, the branch is up
+   to date with no conflicts, and the change stays inside the mission. Then
+   list it for the owner and do not merge it. Every merge to `main` makes CI
+   publish a public GitHub Release, and the owner's global rule makes a public
+   release wait for his word. After the owner merges a change to the Mac app,
+   install it as `AGENTS.md` says. Anything else that spends money, deletes or
+   rewrites existing production data, changes secrets, permissions, billing or
+   sign-in, or publishes outside the project also waits for the owner's word,
+   and so does a review finding you disagree with.
 8. `SigilAppTests` open windows on the owner's screen. Run them in CI, not
    locally. Real-app verification uses a renamed debug bundle, AX presses and
    window-id screenshots, never keystrokes into whatever app is in front.
