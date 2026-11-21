@@ -105,12 +105,15 @@ struct RightPanelView: View {
         }
     }
 
-    /// Notes are keyed by a Grok session, which other providers never have.
+    /// A supported provider still needs a conversation identity before notes can open.
     static func notesPlaceholder(for tab: TerminalTab?) -> String {
-        if let tab, tab.spec.provider != .grokBuild {
-            return "Notes are available for Grok Build sessions."
+        guard let provider = tab?.spec.provider else {
+            return "Open a conversation to keep notes on it."
         }
-        return "Open a conversation to keep notes on it."
+        if provider.capabilities.notes {
+            return "Notes need a verified conversation identity from \(provider.name)."
+        }
+        return "\(provider.name) does not report a conversation Sigil can keep notes on."
     }
 }
 
